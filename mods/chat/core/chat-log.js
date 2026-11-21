@@ -87,7 +87,8 @@ BEGIN { pos = base; first = base; msgs = 0 }
     # A helper (or job) launched to run on its own: its result came at once, it is not done yet.
     if (index(line, "Async agent launched") || index(line, "running in background")) ids = ids " ASYNC"
     # A shell or watcher left running in the background (or moved there mid-run): its task id.
-    if (match(line, /"(backgroundTaskId|taskId)":"[^"]+"/)) { m = substr(line, RSTART, RLENGTH); sub(/^"[A-Za-z]*":"/, "", m); sub(/"$/, "", m); ids = ids " TASK=" m }
+    # An agent launched to run on its own (#1101): its agentId, which its end note names by <task-id> alone.
+    if (match(line, /"(backgroundTaskId|taskId|agentId)":"[^"]+"/)) { m = substr(line, RSTART, RLENGTH); sub(/^"[A-Za-z]*":"/, "", m); sub(/"$/, "", m); ids = ids " TASK=" m }
     print off "\tR\t" ids
     # An answer to a question, or words that declined a request: read whole (answers()).
     if (claude && length(line) <= 262144 && ((index(line, "\"answers\":{") && index(line, "\"questions\":[")) || index(line, "wrote in the chat instead: "))) print off "\tJ\t" line
@@ -769,6 +770,8 @@ export class Conversation {
   // A background job ended (by its call id or its task id): a shell, a watcher, a helper.
   ended(id, task) {
     if (id) { const h = this.helpers.get(id); if (h) h.done = true; }
+    // #1101: a background agent's end note may name it by its task id alone.
+    if (task) for (const h of this.helpers.values()) if (h.task === task) h.done = true;
     this.bg = this.bg.filter((j) => !(id && j.id === id) && !(task && j.task === task));
   }
 
@@ -876,6 +879,7 @@ export class Conversation {
           // A helper that answered (not one launched to run on its own) is done.
           const h = this.helpers.get(id);
           if (h && !async) h.done = true;
+          if (h && task) h.task = task;
           this.done(id, r.off);
         }
         continue;

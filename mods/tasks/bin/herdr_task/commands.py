@@ -1578,7 +1578,36 @@ def cmd_accept(args):
     say(args, {**v, "accepted": how, "terminal": sent, "new_agent": started}, text)
 
 
+def withdraw_fix(s, t):
+    """#1086: a fix asked for that no longer applies (done elsewhere, its agent told to stand down): its
+    request goes, the problem it was for isn't raised again at the same commit (tick: fix_withdrawn), and
+    a Ready task the fix took back to work is Ready again. Returns the problem it was for, or None."""
+    problem = t.get("attention")
+    if not (problem or t.get("fix_requested") or (t.get("back") and not t["back"].get("auto"))):
+        return None
+    if problem:
+        t["fix_withdrawn"] = {"attention": problem, **({"head": t["attention_head"]} if t.get("attention_head") else {})}
+    for k in ("attention", "attention_at", "attention_head", "handed_at", "fix_requested"):
+        t.pop(k, None)
+    (t.get("pr") or {}).pop("news", None)
+    b = t.get("back")
+    if t["state"] == "running" and b and not b.get("auto"):
+        t["state"], t["ready_turns"] = "ready", ready_turns([detail(k) for k in live_agents(s.key(t))])
+        t.pop("back")
+        if (t.get("progress") or {}).get("by") == "herdr":
+            t.pop("progress")
+    s.dirty = True
+    return problem or "its fix"
+
+
 def cmd_fix(args):
+    if getattr(args, "withdraw", False):
+        with open_store(args) as s:
+            t = s.find(args.id)
+            was = withdraw_fix(s, t)
+            v = view(s, t)
+        say(args, {**v, "withdrawn": was}, f"{s.ref(t)}: " + (f"fix request withdrawn ({was})" if was else "no fix request to withdraw"))
+        return
     with open_store(args) as s:
         t = s.find(args.id)
         if t.get("mode") != "worktree" or not t.get("worktree"):

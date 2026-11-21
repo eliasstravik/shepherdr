@@ -21,9 +21,12 @@ test("the sidebar's other menus and a task row's", () => {
   expect(words(taskMenu({ pinned: true }))).toEqual(["Unpin"]);
   // SHEP-38: a task not started yet starts later; a scheduled one is rescheduled, started now or unscheduled
   const later = (m) => m.map((x) => x.sep ? "—" : x.heading ? `# ${x.heading}` : x.label);
-  expect(later(taskMenu({ status: "todo" }))).toEqual(["# Start later", "In 1 hour", "In 3 hours", "Tomorrow 9:00", "Monday 9:00", "Other time…", "—", "Pin"]);
-  expect(later(taskMenu({ status: "scheduled", pinned: true }))).toEqual(["# Reschedule", "In 1 hour", "In 3 hours", "Tomorrow 9:00", "Monday 9:00", "Other time…", "—", "Start now", "Unschedule", "—", "Unpin"]);
-  expect(later(taskMenu({ status: "working" }))).toEqual(["Pin"]);
+  expect(later(taskMenu({ status: "todo" }))).toEqual(["# Start later", "In 1 hour", "In 3 hours", "Tomorrow 9:00", "Monday 9:00", "Other time…", "—", "Pin", "Mark done…"]);
+  expect(later(taskMenu({ status: "scheduled", pinned: true }))).toEqual(["# Reschedule", "In 1 hour", "In 3 hours", "Tomorrow 9:00", "Monday 9:00", "Other time…", "—", "Start now", "Unschedule", "—", "Unpin", "Mark done…"]);
+  expect(later(taskMenu({ status: "working" }))).toEqual(["Pin", "Mark done…"]);
+  // #1157: done by hand on any task not done yet; the web's only (the window's menus leave it out)
+  expect(later(taskMenu({ status: "done" }))).toEqual(["Pin"]);
+  expect(taskMenu({ status: "ready" }).find((x) => x.id === "done")).toMatchObject({ web: true });
   expect(machineLabel(null)).toBe("This computer");
   expect(machineLabel("vm", "Build box")).toBe("Build box");
 });

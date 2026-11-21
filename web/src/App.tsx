@@ -496,6 +496,8 @@ function TaskPage({ task, middle, pane }: { task: Task; middle?: boolean; pane?:
       {/* its status leads its quiet line, so Back alone hangs in the gutter and the title starts where the Assistant's does */}
       {phone ? null : <Dot s={task.status} p={task.report?.progress} className="size-3" />}
       <span className="shrink-0 text-fg3">{ref}</span>
+      {/* #1176: its pull request, a link, from the moment its branch has one (its agent's, while it works) */}
+      {task.pr ? <><span aria-hidden className="text-fg3">·</span><a data-task-pr href={task.pr.url} target="_blank" rel="noreferrer" className="shrink-0 font-medium text-focus tabular-nums hover:underline">PR #{task.pr.number}</a></> : null}
       {doing ? <span className="flex min-w-0 items-center gap-1.5"><span aria-hidden className="text-fg3">·</span>{doing}</span> : task.base ? <span className="min-w-0 truncate"><span aria-hidden className="text-fg3">· </span>→ {task.base}</span> : null}
       {helper ? <span data-task-subagent className="flex min-w-0 shrink-[4] items-center gap-1.5 whitespace-nowrap"><span aria-hidden className="text-fg3">·</span><span className="truncate">{`${helper.title} ${helper.status === 'needs' ? 'needs it' : 'at work'}`}</span></span> : null}
     </span>

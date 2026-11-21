@@ -119,3 +119,14 @@ test("JOBS sees the output file a job's process holds open, stops it, and reads 
     rmSync(dir, { recursive: true });
   }
 });
+
+test("#1101: a background agent whose end note names it by its task id alone ends", async () => {
+  // launched just now (running() drops a helper silent for hours)
+  const start = [
+    call("a1", "Agent", { description: "Look around", prompt: "x", run_in_background: true }).replace(at, new Date().toISOString()),
+    result("a1", "Async agent launched successfully. agentId: ab29f (internal ID)", { isAsync: true, status: "async_launched", agentId: "ab29f" }),
+  ];
+  expect((await conv(start)).running().map((h) => h.desc)).toEqual(["Look around"]);
+  const end = "<task-notification>\n<task-id>ab29f</task-id>\n<output-file>/tmp/x/tasks/ab29f.output</output-file>\n<status>completed</status>\n<summary>Agent \"Look around\" finished</summary>\n</task-notification>";
+  expect((await conv([...start, enqueue(end)])).running()).toEqual([]);
+});

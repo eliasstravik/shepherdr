@@ -17,7 +17,7 @@ from .agents import (
 )
 from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
 from .sessions import find_lost_logs, refresh_sessions, session_of
-from .github import (already_merged, BEHIND, CHECKS_NEVER, checks_missing, checks_since, drop_branch, merge_checks, expected_checks, finish, github, merged_here, needs_approval, note_checks, pr_merged, pr_pending, pr_problem,
+from .github import (already_merged, BEHIND, CHECKS_NEVER, checks_missing, checks_since, drop_branch, merge_checks, expected_checks, finish, github, merged_here, needs_approval, note_checks, pr_for_branch, pr_merged, pr_pending, pr_problem,
                      pr_view, pr_wait, queue_dropped_why, queue_entry, queue_merge, queue_refusal, unqueue, tidy_done, tidy_due, update_main, watch_main)
 from .launch import default_space
 from .store import locate, read_list, Store, store_files
@@ -142,6 +142,7 @@ def back_in_queue(s, t, report):
 def facts(s, t, report):
     """A worktree task whose own work merged anywhere is done (once its agent is between turns, and
     a Working one once its agent is gone or says ready); a pull request's problems need the person."""
+    seen_pr(s, t)
     if t.get("pr"):
         pr = t["pr"]
         if now() - pr.get("checked", 0) < PR_EVERY:
@@ -188,8 +189,10 @@ def facts(s, t, report):
         missing = checks_missing(v, since, expect)
         t["_pr_fresh"] = not problem and not pr_pending(v) and not needs_approval(v) and not missing
         # Ready only once its checks are done and GitHub knows it can merge (SHEP-175): Working till then.
+        if (v.get("mergeable") or "").upper() == "MERGEABLE" and v.get("headRefOid"):
+            pr["mergeable_head"] = v["headRefOid"]  # #1151: its later brief UNKNOWNs are no wait
         if t["state"] == "ready":
-            wait = pr_wait(v, since, expect)
+            wait = pr_wait(v, since, expect, pr.get("mergeable_head"))
             if wait != pr.get("wait"):
                 if wait:
                     pr["wait"] = wait
@@ -205,6 +208,12 @@ def facts(s, t, report):
         # agent going quiet with the problem still there reads Needs you (on_it()).
         if problem and problem.startswith("Checks failing") and held_by_base(s, t, v):
             problem = None  # SHEP-270: its base fails the same checks: no Needs you till it is green again
+        w = t.get("fix_withdrawn")
+        if w and problem == w.get("attention") and (v.get("headRefOid") or None) == w.get("head"):
+            problem = None  # #1086: its fix was withdrawn: the same problem at the same commit isn't raised again
+        elif w:
+            t.pop("fix_withdrawn")
+            s.dirty = True
         if t["state"] in ("ready", "running") and problem != t.get("attention"):
             if problem:
                 t["attention"], t["attention_at"] = problem, now()
@@ -242,11 +251,33 @@ def facts(s, t, report):
             report["done"].append(t["id"])
 
 
+PR_OPEN_EVERY = 3 * 60000  # how often a Working task's branch is looked up for a pull request its agent opened
+
+
+def seen_pr(s, t):
+    """#1176: a Working task's pull request its agent opened before ready: kept as pr_seen ({number, url, repo}), so
+    the task page shows its number and its Pull request tab from then on (ready adopts it as the task's own pr)."""
+    if t.get("pr") or t["state"] != "running" or t.get("mode") != "worktree" or not t.get("branch"):
+        if t.pop("pr_seen", None):
+            s.dirty = True
+        return
+    if now() - t.get("pr_looked", 0) < PR_OPEN_EVERY:
+        return
+    t["pr_looked"] = now()
+    s.dirty = True
+    repo = github(s)
+    found = pr_for_branch(t, repo) if repo else None
+    if found:
+        t["pr_seen"] = {"number": found["number"], "url": found["url"], "repo": repo}
+    elif repo:
+        t.pop("pr_seen", None)
+
+
 def squash_merged(s, t):
     """A Working task's branch whose pull request (opened by its agent) merged at its tip: that
     pull request, recorded on the task, or None."""
     repo = github(s)
-    found = pr_merged(t, repo) if repo else None
+    found = pr_merged(t, repo, any_base=True) if repo else None
     if not found or found.get("headRefOid") != (t.get("own") or t.get("head")):
         return None
     t["pr"] = {"number": found["number"], "url": found["url"], "repo": repo}

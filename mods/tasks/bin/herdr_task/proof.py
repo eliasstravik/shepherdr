@@ -171,8 +171,10 @@ def evidence(s, t):
     else:
         # In the folder itself: the commits made here while it worked (other work committed here
         # meanwhile counts too, so the card says "while it worked").
-        start, end = (t.get("started") or 0) // 1000, ((t.get("ready_at") or 0) // 1000 + 60) or None
-        rng = [f"--since=@{start}"] + ([f"--until=@{end}"] if end else [])
+        # not ready yet: no end (a missing ready_at once read as "until 60 s after 1970": a flaky empty card)
+        start, end = (t.get("started") or 0) // 1000, (t["ready_at"] // 1000 + 60) if t.get("ready_at") else None
+        # git reads --since=@0 as now (nothing): no start known, no lower bound
+        rng = ([f"--since=@{start}"] if start else []) + ([f"--until=@{end}"] if end else [])
         ok, log, _ = git(main, "log", fmt, *rng)
         commits = [line.split("\t", 1) for line in log.splitlines() if "\t" in line] if ok else []
         ok, diff, _ = git(main, "log", "--numstat", "--format=", *rng)

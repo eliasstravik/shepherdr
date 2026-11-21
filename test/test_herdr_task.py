@@ -1,6 +1,7 @@
 """herdr-task: every module compiles, the add-on switch it reads, and (on CI only, where HOME is
 a throwaway) its commands start. On a person's machine herdr-task never runs with another HOME."""
 import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
+import datetime
 import json
 import os
 import re
@@ -1242,6 +1243,34 @@ class BackToWork(unittest.TestCase):
                          ("working", None, None))
         self.assertEqual(self.agents.task_status(t, [self.agent({"address": "t1", "status": "idle", "turn": 5, "role": "worker"})])[0], "ready")
 
+    def test_a_turn_nobody_asked_for_keeps_it_ready(self):
+        """#1082: a Ready task's Claude compacted (or showed a toast, or a background job's notice woke it): no message
+        from anyone, so it stays Ready (no working-again, no second ready news); a message sent to it is new work."""
+        log = os.path.join(tempfile.mkdtemp(), "s.jsonl")
+        stamp = lambda ms: datetime.datetime.fromtimestamp(ms / 1000, datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+        user = lambda ms, content, **more: json.dumps({"type": "user", "isSidechain": False, "timestamp": stamp(ms),
+                                                         "message": {"role": "user", "content": content}, **more}) + "\n"
+        ready_at = 1_800_000_000_000
+        with open(log, "w") as f:
+            f.write(user(ready_at - 600_000, "Build the login page"))
+            f.write(user(ready_at + 60_000, "This session is being continued from a previous conversation...", isCompactSummary=True))
+            f.write(user(ready_at + 90_000, "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>"))
+        t = self.ready(ready_at=ready_at, agents=[{"address": "t1", "log": log}])
+        working = [self.agent({"address": "t1", "status": "working", "turn": 5, "role": "worker"})]
+        self.assertFalse(self.agents.busy_again(t, working))
+        self.assertEqual(self.agents.task_status(t, working), ("ready", None, None))
+        # the tick leaves it Ready while that turn runs, and once it ends with nothing changed
+        report = {}
+        self.live = working
+        with self.mock.patch.object(self.tick, "mid_turn_agents", lambda live, look=None: live):
+            self.tick.back_pass(self.store, t, report)
+        self.assertEqual((t["state"], report), ("ready", {}))
+        # someone writes to it: Working again
+        with open(log, "a") as f:
+            f.write(user(ready_at + 120_000, "Also add a logout button"))
+        self.assertTrue(self.agents.busy_again(t, working))
+        self.assertEqual(self.agents.task_status(t, working), ("working", None, "Working again"))
+
     def test_a_problem_its_agent_is_on_reads_working(self):
         """SHEP-8: the cases core/tasks.test.js checks place() on (core/on-it.cases.json)."""
         with open(os.path.join(ROOT, "core", "on-it.cases.json")) as f:
@@ -1354,6 +1383,35 @@ class BackToWork(unittest.TestCase):
         self.assertEqual(t["progress"]["text"], "Fixing: Checks failing: test.")
         self.assertNotIn("ready_turns", t)
         self.assertNotIn("merge_requested", t)
+
+    def test_a_fix_withdrawn_stops_waking_it(self):
+        """#1086: a fix request that no longer applies (fixed through another task; its worker told to stand down)
+        is withdrawn: Ready again, no fix pending, and the tick doesn't raise the same problem at the same commit."""
+        t = self.ready(mode="worktree", worktree="/w", branch="b", space="sp1",
+                       pr={"number": 3, "repo": "o/r", "checked": 0, "news": {"text": "x", "at": 1, "since": 1}},
+                       attention="Checks failing: check.", attention_head="a", attention_at=1)
+        self.store.loc["folder"] = "/main"
+        with self.mock.patch.object(self.commands, "tell", lambda s, t, msg, args: ("t1", False)):
+            self.commands.cmd_fix(self.args(reason=None))
+        self.assertEqual(t["state"], "running")
+        self.live = [self.agent({"address": "t1", "status": "idle", "turn": 7, "role": "worker"})]
+        self.commands.cmd_fix(self.args(reason=None, withdraw=True))
+        self.assertEqual((t["state"], t["ready_turns"]), ("ready", {"t1": 7}))
+        for k in ("back", "attention", "fix_requested", "handed_at", "progress"):
+            self.assertNotIn(k, t)
+        self.assertNotIn("news", t["pr"])
+        self.assertEqual(self.agents.task_status(t, self.live)[0], "ready")
+        # GitHub still says the same at the same commit: not raised again
+        red = {"state": "OPEN", "mergeable": "MERGEABLE", "headRefOid": "a", "statusCheckRollup": [{"name": "check", "conclusion": "FAILURE"}]}
+        with self.mock.patch.object(self.tick, "pr_view", lambda t: red), self.mock.patch.object(self.tick, "pr_news", lambda *a: None):
+            self.tick.facts(self.store, t, {"attention": []})
+            self.assertNotIn("attention", t)
+            # a new commit that fails again is a new problem
+            red["headRefOid"] = "b"
+            t["pr"]["checked"] = 0
+            self.tick.facts(self.store, t, {"attention": []})
+        self.assertEqual(t["attention"], "Checks failing: check.")
+        self.assertNotIn("fix_withdrawn", t)
 
     def test_resume_takes_it_back_to_work(self):
         t = self.ready(space="sp1")
@@ -2273,7 +2331,7 @@ class NoFalseNeedsYou(unittest.TestCase):
         req = os.path.join(self.agents.HOME, ".config", "herdr-app", "data", "chat-asks", "req")
         os.makedirs(req, exist_ok=True)
         self.addCleanup(lambda: [os.remove(os.path.join(req, n)) for n in os.listdir(req)])
-        p = os.path.join(req, "t1.1799999000.42.json")
+        p = os.path.join(req, f"t1.1799999000.{os.getpid()}.json")  # its hook: a live process
         with open(p, "w") as f:
             json.dump({"tool_name": "AskUserQuestion", "tool_input": {"questions": [{"question": "Scope or green?"}]}}, f)
         working = [dict(self.idle[0], status={"state": "working"})]
@@ -2283,6 +2341,72 @@ class NoFalseNeedsYou(unittest.TestCase):
         self.assertEqual(self.agents.ask_reason(self.task, "t1", self.agents.held_ask("t1")), "Scope or green?")
         os.utime(p, (self.clock / 1000 - 32 * 60, self.clock / 1000 - 32 * 60))
         self.assertEqual(self.status(working), ("working", None, None))
+
+    def held(self, req, hook_pid=None, ago_s=60):
+        d = os.path.join(self.agents.HOME, ".config", "herdr-app", "data", "chat-asks", "req")
+        os.makedirs(d, exist_ok=True)
+        self.addCleanup(lambda: [os.remove(os.path.join(d, n)) for n in os.listdir(d)])
+        p = os.path.join(d, f"t1.1799999000.{hook_pid or os.getpid()}.json")
+        with open(p, "w") as f:
+            json.dump(req, f)
+        os.utime(p, (self.clock / 1000 - ago_s, self.clock / 1000 - ago_s))
+        return self.clock - ago_s * 1000
+
+    def codex_log(self, rows):
+        log = os.path.join(tempfile.mkdtemp(), "rollout.jsonl")
+        with open(log, "w") as f:
+            for at, typ, payload in rows:
+                stamp = datetime.datetime.fromtimestamp(at / 1000, datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+                f.write(json.dumps({"timestamp": stamp, "type": typ, "payload": payload}) + "\n")
+        return log
+
+    def test_a_cancelled_codex_approval_is_not_needs_you(self):
+        """#1077 #1097 #1139 #1140 #1144: a Codex approval cancelled (its hook killed, or its call's cell ended and the
+        agent went on) kept the task at Needs you, after ready too. Only a live hook its agent still waits on holds."""
+        working = [dict(self.idle[0], status={"state": "working"})]
+        ask = {"tool_name": "Bash", "tool_input": {"command": "python3 scripts/check.py"}, "turn_id": "u1"}
+        # the hook was killed with its call: its request left behind holds nothing
+        dead = subprocess.Popen(["true"])
+        dead.wait()
+        self.held(ask, hook_pid=dead.pid)
+        self.assertIsNone(self.agents.held_ask("t1"))
+        self.assertEqual(self.status(working), ("working", None, None))
+
+    def test_a_codex_approval_its_agent_went_past_is_not_needs_you(self):
+        working = [dict(self.idle[0], status={"state": "working"})]
+        at = self.clock - 60_000
+        asked = [(at - 1000, "response_item", {"type": "function_call", "name": "exec_command", "call_id": "c1"}),
+                 (at + 4000, "response_item", {"type": "function_call", "name": "exec_command", "call_id": "c2"}),  # same batch, streamed late
+                 (at + 5000, "event_msg", {"type": "token_count"})]
+        log = self.codex_log(asked)
+        self.held({"tool_name": "Bash", "tool_input": {"command": "x"}, "turn_id": "u1", "transcript_path": log})
+        # still waiting: the rest of its own batch came in after it, nothing new since
+        self.assertEqual(self.status(working)[:2], ("needs", "asks"))
+        # its model answered again (the call's cell ended without it): it went on
+        log = self.codex_log(asked + [(at + 9000, "response_item", {"type": "message", "role": "assistant", "content": []})])
+        self.held({"tool_name": "Bash", "tool_input": {"command": "x"}, "turn_id": "u1", "transcript_path": log})
+        self.assertEqual(self.status(working), ("working", None, None))
+        # its turn was interrupted
+        log = self.codex_log(asked[:1] + [(at + 9000, "event_msg", {"type": "turn_aborted", "turn_id": "u1"})])
+        self.held({"tool_name": "Bash", "tool_input": {"command": "x"}, "turn_id": "u1", "transcript_path": log})
+        self.assertIsNone(self.agents.held_ask("t1"))
+
+    def test_a_claude_permission_its_agent_went_past_is_not_held(self):
+        log = os.path.join(tempfile.mkdtemp(), "s.jsonl")
+        use = {"type": "tool_use", "id": "u1", "name": "Bash", "input": {"command": "ls"}}
+        row = lambda typ, mid, content: json.dumps({"type": typ, "isSidechain": False, "message": {"id": mid, "role": typ, "content": content}})
+        with open(log, "w") as f:
+            f.write(row("assistant", "m1", [use]) + "\n")
+        ask = {"tool_name": "Bash", "tool_input": {"command": "ls"}, "transcript_path": log}
+        self.held(ask)
+        self.assertEqual(self.agents.held_ask("t1"), ask)
+        with open(log, "a") as f:
+            f.write(row("user", None, [{"type": "tool_result", "tool_use_id": "u1", "is_error": True, "content": "interrupted"}]) + "\n")
+        self.assertIsNone(self.agents.held_ask("t1"))
+        # the same call tried again: asked anew, held
+        with open(log, "a") as f:
+            f.write(row("assistant", "m2", [dict(use, id="u2")]) + "\n")
+        self.assertEqual(self.agents.held_ask("t1"), ask)
 
     def test_a_quiet_agent_needs_you_once_the_grace_is_over(self):
         self.say(-3_000, "Done with the first part.")
@@ -3179,6 +3303,16 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         self.assertEqual(self.tick_once(), ("done", True))
         self.assertEqual(self.task["pr"]["number"], 704)
 
+    def test_a_pull_request_merged_into_another_branch_is_done_too(self):
+        """#1157: its pull request merged into a parent pull request's branch, not its base: its work merged all the
+        same, so the task is done (before, it stayed open until someone ran herdr-task done)."""
+        tip = self.change(self.task["worktree"], "reactions on the left")
+        self.tick_once()
+        self.github([{"number": 705, "url": "u", "isCrossRepository": False, "baseRefName": "feature/parent", "headRefOid": tip}])
+        self.live, self.task["gh_checked"] = [], 0
+        self.assertEqual(self.tick_once(), ("done", True))
+        self.assertEqual(self.task["pr"]["number"], 705)
+
     def test_the_tick_finds_a_ready_task_already_in_main(self):
         self.change(self.task["worktree"], "reactions on the left")
         self.tick_once()
@@ -3610,6 +3744,22 @@ class ChecksBeforeReady(PrLooks):
         self.github_says(mergeable="UNKNOWN", checks=[self.PASSED])
         self.assertEqual(self.look(t), ("working", "Waiting for GitHub", None))
 
+    def test_a_brief_unknown_after_mergeable_stays_ready(self):
+        # #1151: the base moved, GitHub works mergeable out again: the same head stays Ready
+        t = self.said_ready()
+        self.github_says(checks=[self.PASSED])
+        self.assertEqual(self.look(t), ("ready", None, "ready"))
+        self.github_says(mergeable="UNKNOWN", checks=[self.PASSED])
+        self.assertEqual(self.look(t), ("ready", None, "ready"))
+        self.assertNotIn("wait", t["pr"])
+
+    def test_unknown_for_minutes_is_ready_anyway(self):
+        # #1151: GitHub never settles on a new head: Working a few minutes at most
+        t = self.said_ready()
+        self.github_says(mergeable="UNKNOWN", checks=[self.PASSED])
+        self.assertEqual(self.look(t), ("working", "Waiting for GitHub", None))
+        self.assertEqual(self.look(t, after=5 * 60_000)[:2], ("ready", None))
+
     def test_a_failing_check_goes_back_to_its_agent_never_ready_first(self):
         t = self.said_ready()
         self.github_says(checks=[self.FAILED])
@@ -3645,6 +3795,39 @@ class ChecksBeforeReady(PrLooks):
         self.assertEqual(self.agents.task_status(t, self.live), ("working", None, "Merges once its checks pass"))
         t["merge_requested"] = 1
         self.assertEqual(self.agents.task_status(t, self.live), ("working", None, "Merging"))
+
+
+class PrWhileWorking(PrLooks):
+    """#1176: a pull request its agent opened before ready shows on the task (its number, a link, its Pull request tab)
+    while it still works: the tick looks its branch up every few minutes."""
+
+    def gh_script(self):
+        return ("#!/usr/bin/env python3\nimport json, sys\n"
+                f"open({self.gh_log!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                "if sys.argv[1:3] == ['pr', 'list']:\n"
+                f"    print(open({os.path.join(self.dir, 'list.json')!r}).read())\n")
+
+    def lists(self, rows):
+        with open(os.path.join(self.dir, "list.json"), "w") as f:
+            json.dump(rows, f)
+
+    def test_its_agents_pull_request_shows_while_it_works(self):
+        t = {"id": 9, "title": "Login", "state": "running", "agents": [], "mode": "worktree", "worktree": self.dir, "branch": "b"}
+        self.store.data["tasks"] = [t]
+        self.lists([])
+        with unittest.mock.patch.object(self.tick, "github", lambda s: "o/r"):
+            self.tick.seen_pr(self.store, t)
+            self.assertNotIn("pr_seen", t)
+            self.lists([{"number": 20, "url": "https://github.com/o/r/pull/20", "isCrossRepository": False, "baseRefName": "main"}])
+            self.tick.seen_pr(self.store, t)
+            self.assertNotIn("pr_seen", t)  # asked at most every few minutes
+            self.clock[0] += self.tick.PR_OPEN_EVERY
+            self.tick.seen_pr(self.store, t)
+            self.assertEqual(t["pr_seen"], {"number": 20, "url": "https://github.com/o/r/pull/20", "repo": "o/r"})
+            # ready records it as its own: the seen one goes
+            t["pr"] = {"number": 20, "url": "https://github.com/o/r/pull/20", "repo": "o/r"}
+            self.tick.seen_pr(self.store, t)
+            self.assertNotIn("pr_seen", t)
 
 
 class RequiredChecksOnly(PrLooks):
@@ -8182,6 +8365,16 @@ class CodexBatch278(unittest.TestCase):
         jobs, ended = self.agents.background_jobs(log)
         self.assertEqual(jobs, {})
         self.assertGreater(ended, 0)
+
+    def test_a_poll_of_a_process_codex_no_longer_knows_ends_it(self):
+        """#1143: a batch polled two jobs read back already; Codex answered "Unknown process id" for one: it ended."""
+        start = [self.call("c1", 'text(await tools.exec_command({cmd:"sleep 100"}));\ntext(await tools.exec_command({cmd:"npm test"}));\n'),
+                 self.out("c1", {"session_id": 11, "output": ""}, {"session_id": 12, "output": ""})]
+        self.assertEqual(sorted(self.agents.background_jobs(self.log(start))[0]), ["codex:11", "codex:12"])
+        gone = {"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "c2", "output":
+                [{"type": "input_text", "text": "Script failed\nError: Unknown process id 11"}]}}
+        log = self.log([*start, self.call("c2", 'text(await tools.write_stdin({session_id:11,chars:""}));\n'), gone])
+        self.assertEqual(sorted(self.agents.background_jobs(log)[0]), ["codex:12"])
 
     def test_ready_names_its_jobs_and_skips_codex_s_ended_ones(self):
         log = self.log([self.call("c1", 'text(await tools.exec_command({cmd:"python3 -m http.server 8000"}));\n'),
