@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -43,6 +44,42 @@ class HerdrTask(unittest.TestCase):
         forms = ["[#shop](space:vm-demo/sp-shop)", "space:vm-demo/sp-shop", "vm-demo/sp-shop", "sp-shop", "#shop", "[#web](space:sp-web)", "#nope"]
         out = subprocess.run([sys.executable, "-c", code, BIN, *forms], capture_output=True, text=True)
         self.assertEqual(json.loads(out.stdout), [["vm-demo/t3"]] * 5 + [["t1"], []], out.stderr)
+
+    def test_tell_always_says_whether_it_arrived(self):
+        """#1079 #1141: tell-assistant never returned, and nobody knew whether it went. It ends within its wait and
+        says delivered or not, and why: from Codex's sandbox, that Herdr can't be reached."""
+        sys.path.insert(0, BIN)
+        import argparse
+        import io
+        from contextlib import redirect_stdout
+        from unittest import mock
+        from herdr_task import machines
+        from herdr_task.base import Fail
+        args = argparse.Namespace(target="t3", text="hi", json=False)
+        sandbox = subprocess.CompletedProcess([], 1, "", '{"error":{"message":"cannot start core: Read-only file system (os error 30)"}}')
+        with mock.patch.object(machines.subprocess, "run", return_value=sandbox), \
+                mock.patch.object(machines, "tell", side_effect=AssertionError("never tried")):
+            with self.assertRaises(Fail) as e:
+                machines.cmd_tell(args)
+        self.assertIn("Not delivered to t3: a sandbox", str(e.exception))
+        ok = subprocess.CompletedProcess([], 0, "{}", "")
+        with mock.patch.object(machines.subprocess, "run", return_value=ok):
+            with mock.patch.object(machines, "tell", side_effect=lambda *a: time.sleep(5)), \
+                    mock.patch.dict(os.environ, {"HERDR_TASK_TELL_WAIT": "1"}):
+                t0 = time.time()
+                with self.assertRaises(Fail) as e:
+                    machines.cmd_tell(args)
+                self.assertLess(time.time() - t0, 3)
+            self.assertIn("Not delivered to t3: no answer from Herdr in 1 s", str(e.exception))
+            with mock.patch.object(machines, "tell", side_effect=Fail("couldn't deliver to t3")):
+                with self.assertRaises(Fail) as e:
+                    machines.cmd_tell(args)
+            self.assertEqual(str(e.exception), "Not delivered to t3: couldn't deliver to t3")
+            with mock.patch.object(machines, "tell", return_value={"to": "t3", "space": "shop", "can_reply": True, "held": False}):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    machines.cmd_tell(args)
+            self.assertEqual(out.getvalue().strip(), "Delivered to t3 (shop).")
 
     @unittest.skipUnless(CI, "runs only on CI: herdr-task never runs with a changed HOME on a person's machine")
     def test_commands_start(self):

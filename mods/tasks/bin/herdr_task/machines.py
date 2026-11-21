@@ -1011,12 +1011,12 @@ def _deliver(names, hows, address, text):
     guard(["hc"])
     env = {k: v for k, v in os.environ.items() if k != "HC_TERMINAL_ID"}
     there = lambda inner: subprocess.run(_hops(names, hows, inner), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                         universal_newlines=True, timeout=90)
-    # Not into words the person is writing to it (HERD-71): a minute for them to finish.
-    for i in range(12):
+                                         universal_newlines=True, timeout=20)
+    # Not into words the person is writing to it (HERD-71): half a minute for them to finish (all of it within TELL_WAIT).
+    for i in range(6):
         if not typing(address, there=there):
             break
-        if i == 11:
+        if i == 5:
             raise Fail("not sent: the person is writing to that Assistant right now; try again in a few minutes")
         time.sleep(5)
     if there(["hc", "send", address, text]).returncode != 0:
@@ -1062,9 +1062,56 @@ def tell(target, text, sender=None):
     return {"to": to["target"], "space": to.get("space_name"), "can_reply": attrs["can-reply"] == "yes", "from": attrs["from"], "held": held}
 
 
+# #1079 #1141: tell-assistant never returned, and nobody knew whether it went. It now ends within TELL_WAIT seconds and
+# always says delivered or not, and why (from Codex's sandbox, Herdr can't be reached at all).
+TELL_WAIT = 60
+SANDBOX_WORDS = re.compile(r"Read-only file system|Operation not permitted|os error (?:30|1)\b|Permission denied")
+
+
+def sandbox_blocks_hc():
+    """Why hc can't reach Herdr from here (a sandbox, Codex's: no socket, a read-only state folder), or None."""
+    try:
+        r = subprocess.run(["hc", "ls", "--json"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    out = f"{r.stdout}\n{r.stderr}"
+    if r.returncode != 0 and SANDBOX_WORDS.search(out):
+        return "a sandbox keeps this command from reaching Herdr; run it again outside the sandbox (Codex: with escalated permissions)"
+    return None
+
+
+def _timed(fn, seconds):
+    """fn() in a thread; Fail when it hasn't ended in `seconds` (its hc calls may still finish after)."""
+    box = {}
+
+    def go():
+        try:
+            box["r"] = fn()
+        except BaseException as e:  # noqa: BLE001 - carried to the caller
+            box["e"] = e
+    t = threading.Thread(target=go, daemon=True)
+    t.start()
+    t.join(seconds)
+    if t.is_alive():
+        raise Fail(f"no answer from Herdr in {seconds} s, so it may not have arrived; check that Assistant before sending again")
+    if "e" in box:
+        raise box["e"]
+    return box["r"]
+
+
 def cmd_tell(args):
     from .output import say
-    r = tell(args.target, args.text)
-    say(args, r, ("Held for" if r.get("held") else "Sent to") + f" {r['to']}" + (f" ({r['space']})" if r.get("space") else "") +
+    why = sandbox_blocks_hc()
+    if why:
+        raise Fail(f"Not delivered to {args.target}: {why}.")
+    try:
+        wait = int(os.environ.get("HERDR_TASK_TELL_WAIT") or TELL_WAIT)
+    except ValueError:
+        wait = TELL_WAIT
+    try:
+        r = _timed(lambda: tell(args.target, args.text), wait)
+    except Fail as e:
+        raise Fail(f"Not delivered to {args.target}: {e}") from None
+    say(args, r, ("Not delivered yet, held for" if r.get("held") else "Delivered to") + f" {r['to']}" + (f" ({r['space']})" if r.get("space") else "") +
         (": the person is writing to it; it goes once they've sent or cleared that" if r.get("held") else "") +
         ("." if r["can_reply"] else ". It can't reach this machine back, so it can't reply."))
