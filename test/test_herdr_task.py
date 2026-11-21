@@ -6830,6 +6830,68 @@ class CodexGuardianRollout(unittest.TestCase):
         self.assertTrue(self.sessions.subagent_rollout(self.helper))
 
 
+class ClaudeConfigDir(unittest.TestCase):
+    """GitHub #1120: an agent run with its own CLAUDE_CONFIG_DIR (a profile per folder, a dev container's /app/claude)
+    keeps its session file and log there; herdr-task reads the folder from the process's environment (/proc, else
+    ps -E on macOS) and finds them, never only ~/.claude."""
+    SID = "11111111-2222-3333-4444-555555555555"
+
+    def setUp(self):
+        sys.path.insert(0, BIN)
+        import herdr_task.sessions as sessions
+        self.sessions = sessions
+        sessions._table["at"] = None
+        self.addCleanup(lambda: sessions._table.update(at=None, children={}))
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.root))
+        self.cfg = os.path.join(self.root, "app_claude")
+        os.makedirs(os.path.join(self.cfg, "projects", "-w"))
+        os.makedirs(os.path.join(self.cfg, "sessions"))
+        self.log = os.path.join(self.cfg, "projects", "-w", self.SID + ".jsonl")
+        open(self.log, "w").close()
+        from unittest import mock
+        p = mock.patch.object(sessions, "HOME", os.path.join(self.root, "home"))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def name_session(self, pid):
+        with open(os.path.join(self.cfg, "sessions", f"{pid}.json"), "w") as f:
+            json.dump({"pid": pid, "sessionId": self.SID}, f)
+
+    @unittest.skipUnless(os.path.isfile("/proc/self/environ"), "reads /proc")
+    def test_the_session_in_the_processs_own_config_dir(self):
+        p = subprocess.Popen([sys.executable, "-c", "import time\nprint(1,flush=True)\ntime.sleep(30)"], stdout=subprocess.PIPE,
+                             env={**os.environ, "CLAUDE_CONFIG_DIR": self.cfg})
+        self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close()))
+        p.stdout.readline()
+        self.name_session(p.pid)
+        self.assertEqual(self.sessions.own_claude_dir(p.pid), self.cfg)
+        self.assertEqual(self.sessions.session_of(p.pid), (self.SID, self.log))
+
+    def test_through_ps_as_on_macos(self):
+        from unittest import mock
+        from types import SimpleNamespace
+        self.name_session(4242)
+        real_isdir = os.path.isdir
+        seen = []
+
+        def run(args, **kw):
+            seen.append(args)
+            return SimpleNamespace(stdout=f"claude --model x HOME=/x CLAUDE_CONFIG_DIR={self.cfg} TERM=y\n" if args[0] == "ps" else "")
+        with mock.patch.object(self.sessions.os.path, "isdir", lambda p: False if p.startswith("/proc") else real_isdir(p)), \
+                mock.patch.object(self.sessions.shutil, "which", lambda n: "/bin/" + n), \
+                mock.patch.object(self.sessions, "run", run):
+            self.assertEqual(self.sessions.session_of(4242), (self.SID, self.log))
+        self.assertIn(["ps", "-wwE", "-o", "command=", "-p", "4242"], seen)
+
+    def test_a_log_by_session_in_herdr_tasks_own_config_dir(self):
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}):
+            self.assertEqual(self.sessions.log_by_session("claude", self.SID), self.log)
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": ""}):
+            self.assertIsNone(self.sessions.log_by_session("claude", self.SID))
+
+
 class ProcessTable(unittest.TestCase):
     """GitHub #1013: finding an agent's session walked its process tree with a `pgrep -P` per process (each one
     reading every process), per agent, per task, from every tracker and list. One read of the process table now

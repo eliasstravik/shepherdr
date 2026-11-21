@@ -60,8 +60,14 @@ screen="$dir/$old-$(date +%s).txt"
 hc read "$old" --lines 400 >"$screen" 2>/dev/null
 log=""
 if [ "$app" = claude-code ] && [ -n "$pid" ]; then
-  sid=$(jq -r '.sessionId // empty' "$HOME/.claude/sessions/$pid.json" 2>/dev/null)
-  [ -n "$sid" ] && log=$(find "$HOME/.claude/projects" -name "$sid.jsonl" 2>/dev/null | head -1)
+  # Its config folder: ~/.claude, or the CLAUDE_CONFIG_DIR it ran with (#1120: a profile, a dev container's).
+  cfg="$HOME/.claude"
+  if [ ! -f "$cfg/sessions/$pid.json" ]; then
+    own=$({ if [ -r "/proc/$pid/environ" ]; then tr '\000' '\n' < "/proc/$pid/environ"; elif [ ! -d /proc/self ]; then ps -wwE -o command= -p "$pid" | tr ' ' '\n'; fi; } 2>/dev/null | sed -n 's/^CLAUDE_CONFIG_DIR=//p' | head -n 1)
+    [ -n "$own" ] && cfg=$own
+  fi
+  sid=$(jq -r '.sessionId // empty' "$cfg/sessions/$pid.json" 2>/dev/null)
+  [ -n "$sid" ] && log=$(find "$cfg/projects" -name "$sid.jsonl" 2>/dev/null | head -1)
 fi
 if [ -z "$log" ] && [ -n "$created" ]; then
   log=$(find "$HOME/.claude/projects" "$HOME/.codex/sessions" "$HOME/.pi/agent/sessions" "$HOME/.local/share/opencode" \
