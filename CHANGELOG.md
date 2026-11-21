@@ -1,5 +1,53 @@
 # Changelog
 
+## 3.1.46
+
+The rest of the 21 November triage: steadier task status, a smoother ready and pull request flow, fewer Codex hangs,
+and many fixes.
+
+### Tasks
+
+- A task's status stops flapping: a Ready task stays Ready through a turn nobody asked for, or a brief wait on GitHub,
+  and a cancelled approval no longer keeps it at Needs you.
+- Mark done is in the web app's task menu, and a working task's pull request shows as a link.
+- A task whose pull request merged into another branch, or after ready, is done and frees its slot.
+- Task lists never hang on a busy list; a done task's worktree removal also stops its dev servers.
+- A task started in another worktree's folder says so instead of running in the wrong place.
+- Take back a fix that no longer applies.
+
+### Ready and pull requests
+
+- Ready can set the pull request's title and description, or open it as a draft; Accept takes it out of draft first.
+- Ready keeps what people added to the pull request description, and refuses when the task is on another branch.
+- A task built on an open pull request's branch goes on that pull request, never a second one.
+- Accept on a closed pull request just closes the task, without merging.
+- A review that's needed names what changed since the last reviewed commit.
+
+### Codex and Claude
+
+- A Codex question no card shows goes back to Codex's own prompt in seconds, instead of hanging for half an hour.
+- A Codex worker's own tools stop asking for permission; finished helpers end.
+- Telling the Assistant something ends within a minute and always says whether it got through.
+- A Claude worker never starts in don't-ask mode by default; it asks on its card.
+- The Claude reviewer runs with the worker's own profile and can no longer get stuck on a start screen.
+- Claude sessions are found under a custom config folder, and a task a restart left in a plain shell says it needs a
+  resume.
+
+### Assistants and other machines
+
+- A task's news goes only to its own space's Assistant; the home overview keeps only what needs you.
+- Autopilot takes a space by name, and Shepherdr says when Other machines or Autopilot is switched off.
+- Helpers find their tools on a bare PATH, Windows machines say they're unsupported, and the web app works with
+  macOS 15.
+
+### Browser, artifacts and chat
+
+- The task browser stays while a Done task's agent still uses it, says when Herdr closed it, and gives up on a page that
+  never loads.
+- Line charts put their labels where they belong.
+- A Mark up note sent while the agent asks a question waits and goes once it's answered.
+- On Linux, attaching a file works without extra Python packages; on macOS, a dragged screenshot no longer vanishes.
+
 ## 3.1.45
 
 A big catch-up: more control over how tasks start and finish, a smarter merge queue, steadier Codex, and many fixes.
