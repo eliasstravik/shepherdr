@@ -17,6 +17,7 @@ import json
 import os
 import secrets
 import subprocess
+import sys
 import time
 
 from .base import run
@@ -204,3 +205,56 @@ def again(machine, argv, call):
         step = min(step * 1.5, STEP_MAX)
         r = call()
     return r
+
+
+# ---- the same for an action here (#1211) -----------------------------------------------------------------------
+# The window stops any command at 30 s, and an Accept that waits on GitHub's squash merge takes longer: the window
+# asks `herdr-task --detach <action>`, which runs it as its own process here (the RUN script, its own session, so the
+# window stopping this one doesn't end it) and answers within WAIT; still running then, PENDING with machine "", and
+# `herdr-task _job <job>` waits for it again (core/pending.js). A person's own terminal runs actions as always.
+
+def local_start(job, argv, entry):
+    try:
+        subprocess.Popen(["sh", "-c", RUN, "sh", job, entry, *argv], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+    except OSError as e:
+        return _say(argv, 1, {"error": f"Couldn't start it: {e}"})
+    return None
+
+
+def local_poll(job):
+    r = run([sys.executable, "-c", POLL, job])
+    head, _, rest = (r.stdout or "").partition("\n")
+    if r.returncode == 0 and head.strip() == "done":
+        try:
+            return "done", json.loads(rest)
+        except ValueError:
+            pass
+    return (head.strip() if r.returncode == 0 else "none"), None
+
+
+def local_follow(job, argv, deadline, started=True):
+    step, nones = 0.1, 0
+    while True:
+        state, got = local_poll(job)
+        if state == "done":
+            return _done(argv, got.get("rc", 1), got.get("out", ""), got.get("err", ""))
+        if state == "none":
+            nones += 1
+            # just started, its shell may not have begun yet; followed later, it had begun (it was pending), so its
+            # files are gone (an old job id, another TMPDIR)
+            if not started or nones >= 40:
+                return _say(argv, 1, {"error": f"No action {job} here."})
+        if time.monotonic() + step >= deadline:
+            break
+        time.sleep(step)
+        step = min(step * 1.5, STEP_MAX)
+    msg = f"Still running here (it's slow to finish): it carries on. `herdr-task _job {job}` gives its result."
+    return _say(argv, PENDING, {"error": msg, "pending": job, "machine": ""})
+
+
+def local_action(argv, entry):
+    deadline = time.monotonic() + wait_s()
+    job = secrets.token_hex(6)
+    failed = local_start(job, argv, entry)
+    return failed or local_follow(job, argv, deadline)

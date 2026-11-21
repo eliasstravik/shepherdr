@@ -6679,6 +6679,60 @@ class CodexSandbox(unittest.TestCase):
         self.assertFalse(sb(None))
 
 
+class DetachedActions(unittest.TestCase):
+    """#1211: the window stops a command at 30 s, and an Accept waiting on GitHub's squash merge took 72 s, so it was
+    killed half done. From the window an action here runs as its own job (`herdr-task --detach`) answering within the
+    wait; still running, PENDING with machine "", followed with `herdr-task _job` (core/pending.js). Real processes,
+    a throwaway TMPDIR for the jobs' files and a slow stand-in for herdr-task."""
+
+    def setUp(self):
+        import shutil
+        self.dir = tempfile.mkdtemp(prefix="shepherdr-detach-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+        self.env = dict(os.environ, TMPDIR=self.dir, HERDR_TASK_ACTION_WAIT="0.5", PYTHONDONTWRITEBYTECODE="1")
+        self.slow = os.path.join(self.dir, "slow-herdr-task")
+        with open(self.slow, "w") as f:
+            f.write('#!/bin/sh\nsleep 2\necho "{\\"id\\": 1, \\"state\\": \\"done\\", \\"args\\": \\"$*\\"}"\n')
+        os.chmod(self.slow, 0o755)
+
+    def py(self, code, *argv):
+        return subprocess.run([sys.executable, "-c", f"import sys; sys.path.insert(0, {BIN!r}); {code}", *argv],
+                              env=self.env, capture_output=True, text=True, timeout=30)
+
+    def test_a_slow_action_is_pending_then_followed_to_its_result(self):
+        r = self.py("from herdr_task import link; r = link.local_action(['accept', '1', '--json'], sys.argv[1]); "
+                    "print(r.returncode); print(r.stdout, end='')", self.slow)
+        code, _, out = r.stdout.partition("\n")
+        self.assertEqual(int(code), 75, r.stderr)
+        job = json.loads(out)
+        self.assertEqual(job["machine"], "")
+        self.assertIn(f"herdr-task _job {job['pending']}", job["error"])
+        # the caller is gone (the window stopped it): the action carries on, and _job gives its real result
+        self.env["HERDR_TASK_ACTION_WAIT"] = "10"
+        r = subprocess.run([sys.executable, os.path.join(BIN, "herdr-task"), "_job", job["pending"], "--json"],
+                           env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout), {"id": 1, "state": "done", "args": "accept 1 --json"})
+
+    def test_a_quick_action_answers_as_itself(self):
+        folder = os.path.join(self.dir, "folder")
+        os.makedirs(folder)
+        self.env["HERDR_TASK_ACTION_WAIT"] = "20"
+        self.env["HERDR_TASK_STORE"] = os.path.join(self.dir, "store")
+        r = subprocess.run([sys.executable, os.path.join(BIN, "herdr-task"), "--detach", "star", "99", "--json", "--folder", folder],
+                           env=self.env, capture_output=True, text=True, timeout=30)
+        plain = subprocess.run([sys.executable, os.path.join(BIN, "herdr-task"), "star", "99", "--json", "--folder", folder],
+                               env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual((r.returncode, r.stdout), (plain.returncode, plain.stdout))
+        self.assertNotEqual(r.returncode, 0)
+
+    def test_an_unknown_job_says_so(self):
+        r = subprocess.run([sys.executable, os.path.join(BIN, "herdr-task"), "_job", "nope", "--json"],
+                           env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("No action nope here", json.loads(r.stdout)["error"])
+
+
 class LinkActions(unittest.TestCase):
     """SHEP-227 (#1055, #1016): the person's action on another machine runs there as its own hc terminal (a dropped
     link doesn't end it) and its result is read back across a reconnect; still running, it's "pending" with a job to
