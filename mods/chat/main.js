@@ -2160,15 +2160,18 @@ export default class Chat extends View {
   restartAssistant(cx) {
     const mine = this.myPane() ?? this.lastPane;
     if (this.restarting || !mine || !this.addr) return;
+    // what it restarts, read now (#1108): "Start a new one" pressed while hc answers empties the chat, and that wins
+    const addr = this.addr, kind = this.kind, path = this.path;
     this.restarting = true;
     cx.notify();
     cx.spawn(async (cx) => {
       try {
-        const r = await hc(["get", this.addr, "--json"]);
+        const r = await hc(["get", addr, "--json"]);
+        if (this.addr !== addr || this.phase === "fresh") { this.restarting = false; cx.notify(); return; }
         let t = null;
         try { t = JSON.parse(r.stdout || "null"); } catch {}
         if (!t || t.error) throw new Error("Its old terminal is gone. Start a new Assistant instead.");
-        const argv = agent.resumeArgv(this.kind, this.argv ?? t.argv ?? [this.kind], agent.sessionOf(this.kind, this.path));
+        const argv = agent.resumeArgv(kind, this.argv ?? t.argv ?? [kind], agent.sessionOf(kind, path));
         this.swapping = true;
         const next = await agent.restart(t, { argv, resume: true, base: argv }, mine);
         this.endedAssistant = false;
