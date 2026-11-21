@@ -175,3 +175,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Codex sandbox repros without an agent: `codex sandbox -c sandbox_mode='"workspace-write"' [-c sandbox_workspace_write.writable_roots=[...]] -- <cmd>` runs a command in the same bwrap+seccomp a worker gets (unix socket connect is refused there). (from SHEP-285)
 
 - Never pkill -f a pattern that appears in your own command line (e.g. a unittest name): it kills your shell; use TaskStop or kill by pid. (from SHEP-288)
+
+- Window-mod methods that read terminals()/subagentsOf can be tested like chat's refocus(): extract the method from mods/chat/main.js and stub those two (see test/test_chat_jobs.py). (from SHEP-284)
