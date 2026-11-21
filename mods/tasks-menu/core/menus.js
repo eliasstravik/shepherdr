@@ -46,7 +46,7 @@ export const sectionMenu = () => [
 
 // A task row's menu (the Tasks panel): its pin; a task not started yet (status: todo, queued or scheduled, SHEP-38) also
 // starts by itself later: a few times to pick (herdr-task edit's --in or --at words), Other time… (typed: the web's), and
-// a scheduled one Start now and Unschedule. A heading item has no id.
+// a scheduled one Start now and Unschedule; any task not done, Mark done… (web: the web's only). A heading item has no id.
 export const SCHEDULE_PICKS = [
   { label: "In 1 hour", in: "1h" }, { label: "In 3 hours", in: "3h" },
   { label: "Tomorrow 9:00", at: "tomorrow 9:00" }, { label: "Monday 9:00", at: "mon 9:00" },
@@ -60,6 +60,8 @@ export const taskMenu = ({ pinned = false, status = null } = {}) => {
     ...(status === "scheduled" ? [sep, { id: "start-now", label: "Start now", icon: "play" }, { id: "unschedule", label: "Unschedule", icon: "x" }] : []),
     ...(later ? [sep] : []),
     pinned ? { id: "unpin", label: "Unpin", icon: "pin-off" } : { id: "pin", label: "Pin", icon: "pin" },
+    // #1157: done by hand, nothing merged, after a confirm (the web's; the window's Assistant does it there)
+    ...(status && status !== "done" ? [{ id: "done", label: "Mark done…", icon: "check", web: true }] : []),
   ];
 };
 // What Other time… asks (the web's field under the picks): its words, an example, the button's.

@@ -143,7 +143,10 @@ def pr_open(s, task, repo, summary=None):
         raise Fail(f"Pull request #{done['number']} for {br} is already merged, and {br} has commits since. "
                    f"Put them on a new branch (a new task) rather than a second pull request.")
     ok, out, err = gh("pr", "create", "--repo", repo, "--head", br, "--base", task.get("base") or "main",
-                      "--title", pr_title(s, task), "--body", pr_body(s, task, summary))
+                      "--title", pr_title(s, task), "--body", pr_body(s, task, summary),
+                      *(["--draft"] if task.get("pr_draft") else []))
+    task.pop("pr_title_new", None)
+    task.pop("pr_body_new", None)
     if not ok or not out:
         raise Fail(f"Couldn't open a pull request: {err}")
     url = out.split()[-1]
@@ -183,22 +186,55 @@ def pr_note(task, repo, summary):
         task["pr_note"] = {"number": number, "id": int(m.group(1)) if m else None, "said": summary}
 
 
+# #1208: Shepherdr's part of a pull request's description, between these marks: a later ready rewrites only that part,
+# and keeps what a person or an agent added around it (gh pr edit).
+MARK_START, MARK_END = "<!-- shepherdr -->", "<!-- /shepherdr -->"
+OWN_SECTIONS = {"Summary", "Details", "Proof"}
+
+
+def described(s, task, body, want):
+    """The description a ready makes of the one there now (body), or None to leave it as it is: Shepherdr's marked part
+    replaced; an older unmarked one of Herdr's ("Task: SHEP-n" first) only while it holds nothing but its own sections;
+    anything else is a person's or an agent's."""
+    body = body or ""
+    a, b = body.find(MARK_START), body.find(MARK_END)
+    if a >= 0 and b > a:
+        new = body[:a] + want + body[b + len(MARK_END):]
+    elif body.strip().splitlines()[:1] == [f"Task: {s.ref(task)}"] and \
+            all(h in OWN_SECTIONS for h in re.findall(r"^## (.+?)\s*$", body, flags=re.M)):
+        new = want
+    else:
+        return None
+    return new if new.strip() != body.strip() else None
+
+
 def pr_describe(s, task, summary=None):
-    """#1004: an open pull request whose description Herdr wrote (pr_body(), "Task: SHEP-n" first)
-    gets the one this ready says (its summary, details and proof); one written by a person or an
-    agent, or another branch's it continues (#828), is left as it is."""
+    """#1004: an open pull request whose description Herdr wrote (pr_body()) gets the one this ready says (its summary,
+    details and proof), only its own part (#1208); one written by a person or an agent, or another branch's it continues
+    (#828), is left as it is. #1087: a title or description its agent gave (ready --pr-title/--pr-body) replaces the
+    open one's, once per time it is given."""
     pr = task.get("pr") or {}
-    if not pr.get("number") or pr.get("branch"):
+    if not pr.get("number"):
         return
-    ok, body, _ = gh("pr", "view", str(pr["number"]), "--repo", pr["repo"], "--json", "body", "-q", ".body")
-    want = pr_body(s, task, summary)
-    if ok and body.strip().splitlines()[:1] == [f"Task: {s.ref(task)}"] and body.strip() != want.strip():
-        gh("pr", "edit", str(pr["number"]), "--repo", pr["repo"], "--body", want)
+    n, repo = str(pr["number"]), pr["repo"]
+    if task.pop("pr_title_new", None) and task.get("pr_title"):
+        gh("pr", "edit", n, "--repo", repo, "--title", task["pr_title"])
+    if task.pop("pr_body_new", None) and task.get("pr_body"):
+        gh("pr", "edit", n, "--repo", repo, "--body", task["pr_body"])
+        return
+    if pr.get("branch") or task.get("pr_body"):
+        return
+    ok, body, _ = gh("pr", "view", n, "--repo", repo, "--json", "body", "-q", ".body")
+    new = described(s, task, body, pr_body(s, task, summary)) if ok else None
+    if new is not None:
+        gh("pr", "edit", n, "--repo", repo, "--body", new)
 
 
 def pr_title(s, task):
     """The repo's commit titles read "SHEP-198: the task's title" (a squash merge adds "(#945)"): the
-    task's ref first, so the pull request stays findable by it."""
+    task's ref first, so the pull request stays findable by it. Its agent's own (--pr-title, #1087) when given."""
+    if task.get("pr_title"):
+        return task["pr_title"]
     ref = s.ref(task)
     title = " ".join(str(task.get("title") or "").split())
     rest = re.sub(rf"^{re.escape(ref)}\b[:\s-]*", "", title, flags=re.I)
@@ -207,8 +243,11 @@ def pr_title(s, task):
 
 def pr_body(s, task, summary=None):
     """Short: the task's ref, what ready said (summary), the details and its proof's title. Never the
-    brief: that stays with the task in Shepherdr."""
-    lines = [f"Task: {s.ref(task)}"]
+    brief: that stays with the task in Shepherdr. Between its marks (#1208), so a later ready keeps what was added around
+    it. Its agent's own (--pr-body, #1087) instead, as written, when given."""
+    if task.get("pr_body"):
+        return task["pr_body"]
+    lines = [MARK_START, f"Task: {s.ref(task)}"]
     if summary and summary.strip():
         lines += ["", "## Summary", "", summary.strip()]
     if (task.get("details") or "").strip():
@@ -216,7 +255,7 @@ def pr_body(s, task, summary=None):
     proof = (task.get("proof") or {}).get("title")
     if proof:
         lines += ["", "## Proof", "", f"Shepherdr's proof artifact: {proof}"]
-    return "\n".join(lines)
+    return "\n".join(lines + [MARK_END])
 
 
 def pr_adopt(task, repo):
@@ -268,16 +307,18 @@ def pr_at_tip(task, repo):
     return task.get("pr") if found else None
 
 
-def pr_merged(task, repo):
-    """The merged pull request for the task's branch (from this repo, into its base), or None
-    (SHEP-59: a squash merge leaves the branch's commits out of the base)."""
+def pr_merged(task, repo, any_base=False):
+    """The merged pull request for the task's branch (from this repo, into its base), or None (SHEP-59: a squash
+    merge leaves the branch's commits out of the base). any_base: else one into another branch (#1157: a parent
+    pull request's branch), its work merged all the same (the callers then check it merged at its tip)."""
     ok, out, _ = gh("pr", "list", "--repo", repo, "--head", task["branch"], "--state", "merged",
                     "--json", "number,url,isCrossRepository,baseRefName,headRefOid,mergeCommit")
     try:
-        return next((p for p in json.loads(out) if not p.get("isCrossRepository")
-                     and p.get("baseRefName") == (task.get("base") or "main")), None) if ok and out else None
+        mine = [p for p in json.loads(out) if not p.get("isCrossRepository")] if ok and out else []
     except (ValueError, TypeError, AttributeError):
         return None
+    return next((p for p in mine if p.get("baseRefName") == (task.get("base") or "main")), None) \
+        or (mine[0] if mine and any_base else None)
 
 
 def landed(s, task):
@@ -313,7 +354,7 @@ def already_merged(s, task):
             v = pr_view(task)
             if v and v.get("state") == "MERGED" and v.get("headRefOid") == tip:
                 return {**task["pr"], "mergeCommit": v.get("mergeCommit")}
-        found = pr_merged(task, repo)
+        found = pr_merged(task, repo, any_base=True)
         if found and found.get("headRefOid") == tip:
             task["pr"] = {"number": found["number"], "url": found["url"], "repo": repo}
             return {**task["pr"], "mergeCommit": found.get("mergeCommit")}
@@ -436,10 +477,14 @@ def latest_checks(rows):
 BEHIND = "It is behind its base branch, which must be up to date to merge."
 
 
+# #1106: closed on GitHub (often on purpose): the person's Accept then closes the task, nothing merged.
+PR_CLOSED = "The pull request was closed. Accept closes the task without merging, or reopen it on GitHub."
+
+
 def pr_problem(v):
     """What keeps a pull request from merging, for the person; None when nothing does."""
     if v.get("state") == "CLOSED":
-        return "The pull request was closed."
+        return PR_CLOSED
     if v.get("mergeable") == "CONFLICTING":
         return "It conflicts with the base branch."
     checks = v.get("statusCheckRollup") or []
@@ -710,19 +755,27 @@ def checks_missing(v, since, expect=None):
     return "waiting" if gone < (MAYBE_CHECKS_MS if expect == "maybe" else NO_CHECKS_MS) else None
 
 
-def pr_wait(v, since, expect=None):
+# #1151: GitHub says mergeable UNKNOWN for a moment each time the base branch moves: a head it already called
+# MERGEABLE stays Ready through it, and a fresh one waits this long at most.
+UNKNOWN_MERGEABLE_MS = 5 * 60000
+
+
+def pr_wait(v, since, expect=None, mergeable_head=None):
     """SHEP-175: what a Ready task's pull request (v: pr_view's answer) still waits on before the
     person has anything to do, in a few words, or None once its checks are done and GitHub knows it
     can merge. A problem (pr_problem()) goes back to its agent: Working still, never Ready first.
-    expect: expected_checks(); since: checks_since()."""
+    expect: expected_checks(); since: checks_since(); mergeable_head: the head GitHub last called MERGEABLE."""
     if v.get("state") != "OPEN":
         return None
     if pr_problem(v):
         return BACK_TO_AGENT
     if pr_pending(v):
         return CHECKS_RUNNING
-    if (v.get("mergeable") or "").upper() not in ("MERGEABLE",):
-        return GITHUB_LOOKS
+    mergeable = (v.get("mergeable") or "").upper()
+    if mergeable != "MERGEABLE":
+        seen = mergeable_head and mergeable_head == v.get("headRefOid")
+        if not (mergeable == "UNKNOWN" and (seen or now() - (since or 0) >= UNKNOWN_MERGEABLE_MS)):
+            return GITHUB_LOOKS
     if checks_missing(v, since, expect) == "waiting":
         return CHECKS_RUNNING
     if v.get("checks_unknown") and v.get("mergeStateStatus") == "BLOCKED" and not needs_approval(v) \
@@ -815,17 +868,154 @@ def finish(s, task, even_if_busy=False):
 
 def remove_worktree(s, task):
     """A finished task's worktree removed when nothing is uncommitted there, then its branch. True
-    once the worktree is gone."""
+    once the worktree is gone. #1127: what still runs there (a dev server outliving its task) is stopped
+    first, and the folder must really be gone: a server writing on made git drop its record while files
+    stayed. A folder left over that way is removed on a later try; one that won't go is noted
+    (worktree_left) for the health check to say why."""
+    from .launch import registered_worktree
     wt, br, main = task.get("worktree"), task.get("branch"), s.loc["folder"]
     if os.path.isdir(wt):
         if os.path.realpath(wt) == os.path.realpath(main):
             return False
-        ok, out, _ = git(wt, "status", "--porcelain", "--untracked-files=no")
-        if not ok or out or not git(main, "worktree", "remove", "--force", wt)[0]:
+        reg = registered_worktree(main, wt)
+        if reg:
+            ok, out, _ = git(wt, "status", "--porcelain", "--untracked-files=no")
+            if not ok or out:
+                return False
+        elif not (task.get("worktree_removing") or removal_leftover(wt)):
+            return False  # a folder git doesn't list, not one of our own removals: never ours to delete
+        task["worktree_removing"] = True
+        s.dirty = True
+        stopped = stop_in(wt)
+        if reg:
+            git(main, "worktree", "remove", "--force", wt)
+        for _ in range(2):
+            if not os.path.isdir(wt):
+                break
+            shutil.rmtree(wt, ignore_errors=True)
+            if os.path.isdir(wt):
+                stopped += stop_in(wt)
+        git(main, "worktree", "prune")
+        if os.path.isdir(wt):
+            left = procs_in(wt)
+            task["worktree_left"] = {"at": now(), "running": [f"{n} (pid {p})" for p, n in left][:5],
+                                     "stopped": stopped[:5]}
             return False
+        task.pop("worktree_removing", None)
+        task.pop("worktree_left", None)
+        if stopped:
+            task["worktree_stopped"] = stopped[:5]
     if br:
         git(main, "branch", "-D", br)
     return True
+
+
+def removal_leftover(wt):
+    """Whether wt looks like what a removal left (#1127): no .git there, or one naming a worktree git has dropped."""
+    dot = os.path.join(wt, ".git")
+    if not os.path.lexists(dot):
+        return True
+    if os.path.isfile(dot):
+        try:
+            with open(dot) as f:
+                m = re.match(r"gitdir:\s*(.+)", f.read().strip())
+        except OSError:
+            return False
+        return bool(m) and not os.path.isdir(m.group(1))
+    return False
+
+
+# ---- what still runs in a worktree (#1127) ---------------------------------------------------
+# A task's dev server (next dev, vite) outlives its agent and keeps writing into the worktree, so its removal
+# left part of the folder behind, and the server holding GBs ran on for hours. Before a removal everything whose
+# folder is inside it is stopped, but never a terminal's own program (its shell or agent: a child of
+# herdr-core), an agent CLI, herdr-task itself or what started it.
+KEEP_NAMES = re.compile(r"(?:herdr|hc$|claude$|codex$|pi$|opencode$)")
+STOP_WAIT = 5.0
+
+
+def _cwds():
+    """[(pid, parent pid, name, folder)] of every process whose folder can be read: /proc on Linux, else lsof
+    and ps (macOS)."""
+    out = []
+    if os.path.isdir("/proc/self"):
+        for n in os.listdir("/proc"):
+            if not n.isdigit():
+                continue
+            try:
+                cwd = os.readlink(f"/proc/{n}/cwd")
+                with open(f"/proc/{n}/stat") as f:
+                    st = f.read()
+            except OSError:
+                continue
+            name = st[st.index("(") + 1:st.rindex(")")]
+            out.append((int(n), int(st[st.rindex(")") + 2:].split()[1]), name, cwd))
+        return out
+    if not shutil.which("lsof"):
+        return out
+    parent = {}
+    for line in run(["ps", "-axo", "pid=,ppid=,comm="]).stdout.splitlines():
+        w = line.split(None, 2)
+        if len(w) == 3 and w[0].isdigit() and w[1].isdigit():
+            parent[int(w[0])] = (int(w[1]), os.path.basename(w[2]))
+    pid = None
+    for line in run(["lsof", "-w", "-d", "cwd", "-Fpn"]).stdout.splitlines():
+        if line.startswith("p") and line[1:].isdigit():
+            pid = int(line[1:])
+        elif line.startswith("n") and pid in parent:
+            out.append((pid, parent[pid][0], parent[pid][1], line[1:]))
+    return out
+
+
+def procs_in(folder, table=None):
+    """[(pid, name)] of what runs with its folder inside `folder` and may be stopped (see KEEP_NAMES)."""
+    table = _cwds() if table is None else table
+    real = os.path.realpath(folder) + os.sep
+    by = {p: (pp, n) for p, pp, n, _ in table}
+    mine, p = set(), os.getpid()
+    while p and p not in mine:
+        mine.add(p)
+        p = by.get(p, (0,))[0]
+    out = []
+    for pid, ppid, name, cwd in table:
+        if not (os.path.realpath(cwd) + os.sep).startswith(real) or pid in mine:
+            continue
+        if KEEP_NAMES.match(name) or by.get(ppid, (0, ""))[1].startswith("herdr-core"):
+            continue
+        out.append((pid, name))
+    return out
+
+
+def stop_in(folder):
+    """Stops what runs in folder (procs_in): a TERM, then a KILL for what is still there after STOP_WAIT. The
+    stopped as ["name (pid N)"]."""
+    import signal
+    import time
+    found = procs_in(folder)
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for pid, _ in found:
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+        end = time.time() + (STOP_WAIT if sig == signal.SIGTERM else 2)
+        while time.time() < end and any(_alive(p) for p, _ in found):
+            time.sleep(0.1)
+        if not any(_alive(p) for p, _ in found):
+            break
+    return [f"{n} (pid {p})" for p, n in found]
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().rsplit(")", 1)[1].split()[0] != "Z"  # a zombie is gone, only not yet reaped
+    except OSError:
+        return True
 
 
 # A Done task's worktree left on disk (its agent was still open when it finished, SHEP-161): removed

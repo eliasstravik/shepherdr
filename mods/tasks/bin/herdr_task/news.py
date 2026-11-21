@@ -1,6 +1,7 @@
 """News: what changed in a space's tasks, told to its Assistant."""
 
 import fcntl
+import html
 import json
 import os
 import re
@@ -161,6 +162,14 @@ def news_pass(report, folder=None):
                         t["held_ask"] = held
                     else:
                         t.pop("held_ask", None)
+                    s.dirty = True
+                # #1082: Ready through a turn nobody asked for (a compaction, a toast): Ready in the Tasks panel too.
+                unasked = v["status"] == "ready" and any(status_word(k) == "working" for k in live)
+                if s.write and bool(t.get("unasked_turn")) != unasked:
+                    if unasked:
+                        t["unasked_turn"] = True
+                    else:
+                        t.pop("unasked_turn", None)
                     s.dirty = True
                 # Quiet on its own background work (SHEP-53): Working in the Tasks panel too.
                 if s.write and bool(t.get("own_work")) != bool(v.get("own_work")):
@@ -486,7 +495,36 @@ def typing(address, k=None, there=None):
         at = 0
     if at and now() - at < TYPING_KEEP_MS:
         return "chat"
-    return "input" if typed_input(screen_raw(address, there)) else None
+    typed = typed_input(screen_raw(address, there))
+    if not typed:
+        return None
+    # #1207: the agent's own suggested next message (<hc suggest="…"/>) sitting in its input is no one typing: held
+    # for it, review-more's message (and any news) waited for good, the agent idle till a person pressed Enter.
+    return None if not there and same_words(typed, suggested(k)) else "input"
+
+
+SUGGEST = re.compile(r"<hc\s+suggest=\"([^\"]*)\"\s*/?>")
+
+
+def same_words(a, b):
+    return bool(a and b) and " ".join(a.split()).casefold() == " ".join(b.split()).casefold()
+
+
+def suggested(k):
+    """The next message this agent's newest reply suggests (its last <hc suggest="…"/>), or None: none, or the person
+    wrote since. k: its hc get (its session log from its herdr.resume label)."""
+    try:
+        log = json.loads(((k or {}).get("labels") or {}).get("herdr.resume") or "{}").get("log")
+    except (ValueError, AttributeError):
+        return None
+    for d in reversed(log_tail(log, 65536)):
+        if from_person(d) is not None:
+            return None
+        text = said(d)
+        if text:
+            found = SUGGEST.findall(text)
+            return html.unescape(found[-1]) if found else None
+    return None
 
 
 @contextmanager

@@ -16,7 +16,7 @@ import sys
 import time
 
 from .base import ASK_HOME, ENTRY, Fail, git, hc_json, now, run, WORKTREES
-from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, codex_too_old, codex_update_words, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for
+from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, CLAUDE_PROFILE, REVIEW_TOOLS, codex_too_old, codex_update_words, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
 from .github import finish, remote_of
@@ -31,7 +31,7 @@ from .browsers import browser_line, browser_path
 
 # How long Codex waits on the permission hook: as the chat's card waits (ask-hook.sh).
 ASK_TIMEOUT = 1800
-OWN = ["ready", "reviewed", "status", "alert", "feedback", "show", "list", "where"]
+OWN = ["ready", "reviewed", "status", "alert", "feedback", "show", "list", "where", "tell-assistant"]
 # herdr-secret's agent commands (~/.config/herdr-app/bin/herdr-secret): asking for a secret and
 # using one by name never ask either, as Shepherdr's secret commands. Written by its full path or
 # its bare name. Reviewers get none (launch() skips own_argv for them; herdr-secret refuses them).
@@ -92,6 +92,8 @@ def own_argv(argv, folder=None):
     path, out = own_path(), list(argv)
     k = agent_key(out)
     if k == "claude":
+        if dont_ask_default(out, folder):
+            out = out[:1] + ["--permission-mode", "default"] + out[1:]
         rules = own_rules(path)
         hook = {"hooks": [{"type": "command", "command": ask_command(path), "timeout": ASK_TIMEOUT}]}
         cur, i = {}, None
@@ -205,12 +207,14 @@ def own_command(path, text, sandboxed=False):
     if sandboxed and re.fullmatch(r"[\w#.@-]+", task):
         # the reviewer's label as the brief writes it, its one variable: this worker's own task
         text = text.replace('"herdr.task=$HERDR_BROWSER_TASK"', f'"herdr.task={task}"')
-    if sandboxed and "$PATH" in text:
-        # #1228: the reviewer's PATH as the brief writes it (its CLI's own folders, then $PATH), only exactly that
+    if sandboxed and "$" in text:
+        # #1228: the reviewer's PATH as the brief writes it (its CLI's own folders, then $PATH), only exactly that;
+        # #1131: a Claude reviewer's the worker's own CLAUDE_CONFIG_DIR too (CLAUDE_PROFILE)
         for who in REVIEWERS:
             pre = cli_env(who)
-            if pre and f"-- {pre}{who} " in text:
-                text = text.replace(f"-- {pre}{who} ", f"-- env PATH=@herdr-reviewer {who} ", 1)
+            for env in ((pre or "env ") + CLAUDE_PROFILE,) if who == "claude" else (pre,):
+                if env and f"-- {env}{who} " in text:
+                    text = text.replace(f"-- {env}{who} ", f"-- env PATH=@herdr-reviewer {who} ", 1)
     words, at, text = [], 0, text.strip()
     while at < len(text):
         if text[at] in " \t":
@@ -221,20 +225,38 @@ def own_command(path, text, sandboxed=False):
             return False
         words.append(UNQUOTE.sub(lambda g: g.group(1) if g.group(1) is not None else re.sub(r"\\(.)", r"\1", g.group(2)), m.group(0)))
         at = m.end()
-    if len(words) >= 2 and words[0] == path and words[1] in OWN:
+    if words:
+        # #1098: a tool written by its full path (or the bare name of the one on PATH) is the same tool
+        words[0] = tool_name(words[0], path)
+    if len(words) >= 2 and words[0] == "@herdr-task" and words[1] in OWN:
         return True
-    bp = browser_path()
-    if bp and len(words) >= 2 and words[0] in (bp, "herdr-browser"):
+    if len(words) >= 2 and words[0] == "@herdr-browser" and browser_path():
         return True
-    ap = artifact_path()
-    if sandboxed and len(words) >= 2 and words[0] in (ap, "herdr-artifact") and words[1] in ARTIFACT and "--custom" not in words:
+    if sandboxed and len(words) >= 2 and words[0] == "@herdr-artifact" and words[1] in ARTIFACT and "--custom" not in words:
         return True
     if sandboxed and len(words) >= 2 and words[0] == "git" and words[1] in GIT:
         return True
-    if sandboxed and words and words[0] == "hc" and helper_hc(words):
+    if sandboxed and words and words[0] == "@hc" and helper_hc(words):
         return True
-    sp = secret_path()
-    return bool(sp) and len(words) >= 2 and words[0] in (sp, "herdr-secret") and words[1] in SECRET
+    return bool(secret_path()) and len(words) >= 2 and words[0] == "@herdr-secret" and words[1] in SECRET
+
+
+def tool_name(word, path):
+    """The tool a command's first word runs, as "@<name>" when it is one own_command knows: this herdr-task (its path, or the bare
+    name when PATH's is this one), herdr-browser, herdr-artifact, herdr-secret or hc by their path on PATH or their
+    bare name (#1098: a Codex worker's full-path `/…/hc read` asked and hung, the bare one didn't); else the word."""
+    real = lambda p: os.path.realpath(os.path.expanduser(p)) if p else None  # noqa: E731
+    if word == path or (word == "herdr-task" and real(shutil.which("herdr-task")) == real(path)):
+        return "@herdr-task"
+    if word in ("herdr-browser", "herdr-artifact", "herdr-secret", "hc"):
+        return "@" + word
+    if os.sep not in word:
+        return word
+    for name, at in (("herdr-browser", browser_path()), ("herdr-artifact", artifact_path()),
+                     ("herdr-secret", secret_path()), ("hc", shutil.which("hc"))):
+        if at and (word == at or real(word) == real(at)):
+            return "@" + name
+    return word
 
 
 # A Codex worker's review (#866): its sandbox can't reach hc, so starting, waiting on, reading and
@@ -243,14 +265,18 @@ def own_command(path, text, sandboxed=False):
 REVIEWERS = {"codex": (["codex", "--no-daemon", "--sandbox", "read-only", "--ask-for-approval", "never"],
                        {"--disable": re.compile(r"hooks"), "-m": re.compile(r"[\w.:-]+"),
                         "-c": re.compile(r'projects=\{.*\}|model_reasoning_effort="?\w+"?', re.S)}),
-             "claude": (["claude", "--permission-mode", "plan"], {"--model": re.compile(r"[\w.:\[\]-]+"), "--effort": re.compile(r"\w+")})}
+             "claude": (["claude", "--permission-mode", "dontAsk", "--tools=" + REVIEW_TOOLS],
+                        {"--model": re.compile(r"[\w.:\[\]-]+"), "--effort": re.compile(r"\w+")})}
 HELPER = re.compile(r"[\w.-]+-(?:review|helper)(?:-[\w.-]+)?")
 
 
 def helper_hc(words):
-    """Whether `hc ...` is a worker's own reviewer: run as the brief says, or waited on, read, ended."""
-    if len(words) >= 3 and words[1] in ("wait", "read", "kill"):
+    """Whether `hc ...` is a worker's own reviewer: run as the brief says, or waited on, read, looked up (#1136), ended."""
+    if len(words) >= 3 and words[1] in ("wait", "read", "kill", "get"):
         return bool(HELPER.fullmatch(words[2])) and all(w.startswith("--") or re.fullmatch(r"\d+", w) for w in words[3:])
+    if len(words) >= 4 and words[1] == "keys":
+        # #1191: answering its startup dialog (enter, down enter, 1): plain key names only, never typed text
+        return bool(HELPER.fullmatch(words[2])) and all(re.fullmatch(r"[a-z0-9]{1,9}", w) for w in words[3:])
     if len(words) < 4 or words[1] != "run" or "--" not in words:
         return False
     i = words.index("--")
@@ -341,7 +367,9 @@ def cmd_allow(args):
 def claude_mode(argv, folder=None):
     """The permission mode a new Claude Code session would start in (#1056): argv's own flag, else the defaultMode of
     its --settings, the folder's .claude/settings.local.json and .claude/settings.json, then the person's
-    (CLAUDE_CONFIG_DIR or ~/.claude), as Claude Code ranks them; "default" when none says."""
+    (CLAUDE_CONFIG_DIR or ~/.claude), as Claude Code ranks them; "default" when none says. A task worker never takes
+    a settings default of dontAsk (#1110: refused every edit and command, its question card too, with nobody to
+    answer): "default" instead, which asks on the chat's card."""
     for i, a in enumerate(argv):
         if a == "--dangerously-skip-permissions":
             return None
@@ -349,6 +377,25 @@ def claude_mode(argv, folder=None):
             return argv[i + 1]
         if a.startswith("--permission-mode="):
             return a.split("=", 1)[1]
+    mode = settings_mode(argv, folder)
+    return "default" if mode == DONT_ASK else mode
+
+
+DONT_ASK = "dontAsk"
+
+
+def dont_ask_default(argv, folder=None):
+    """Whether this Claude worker would start in don't-ask mode from the person's settings alone (#1110), argv saying
+    no mode of its own: own_argv then starts it in the default mode, and its start says so."""
+    if agent_key(argv) != "claude":
+        return False
+    if any(a in ("--dangerously-skip-permissions", "--permission-mode") or str(a).startswith("--permission-mode=") for a in argv):
+        return False
+    return settings_mode(argv, folder) == DONT_ASK
+
+
+def settings_mode(argv, folder=None):
+    """The defaultMode Claude Code takes from its settings (claude_mode's order), "default" when none says."""
     found = []
     for i, a in enumerate(argv[:-1]):
         if a == "--settings":
@@ -423,11 +470,12 @@ def in_shell(argv):
 # first, never herdr-core's holder or an Assistant. Where systemd's user manager runs, each worker
 # also gets its own scope (with the optional per-worker memory cap as MemoryHigh), so oomd, which
 # ends whole cgroups, ends that worker rather than the holder that keeps every terminal. On a Mac:
-# nice 10 and the utility QoS clamp (taskpolicy). Anything missing is skipped, never fatal.
+# nice 10 alone. #1109: never the utility QoS clamp (taskpolicy -c utility): on a busy Mac it made a
+# worker's lane echo keys 20 to 100 times slower for the person typing in it. Anything missing is
+# skipped, never fatal.
 
 LOW = ('{ echo 500 > /proc/self/oom_score_adj; } 2>/dev/null; '
        'command -v ionice >/dev/null 2>&1 && ionice -c2 -n7 -p $$ >/dev/null 2>&1; '
-       'command -v taskpolicy >/dev/null 2>&1 && exec nice -n 10 taskpolicy -c utility "$@"; '
        'exec nice -n 10 "$@"')
 _scope = {}
 
@@ -496,6 +544,28 @@ def default_space():
         if sp and "/" not in sp:
             return sp
     raise Fail("Which space? Pass --space <space id>.")
+
+
+def _inside(path, top):
+    p, t = os.path.realpath(os.path.expanduser(path)), os.path.realpath(os.path.expanduser(top))
+    return p == t or p.startswith(t.rstrip("/") + "/")
+
+
+def space_for_folder(folder, caller=None):
+    """The space a task in `folder` (its repo) belongs to when no --space says (GitHub #1209): the caller's when its
+    folder is in that repo, else the one space on this machine whose folder is, so its news goes to that space's
+    Assistant, not to the Assistant that happened to start it. None: the window can't say, or no single space."""
+    if not folder or not shutil.which("herdr-app"):
+        return None
+    try:
+        spaces = [x for x in json.loads(run(["herdr-app", "ls"]).stdout).get("spaces") or []
+                  if x.get("id") and "/" not in x["id"] and not x.get("machine") and x.get("folder")]
+    except (Fail, ValueError, OSError, AttributeError):
+        return None
+    if caller and any(x["id"] == bare(caller) and _inside(x["folder"], folder) for x in spaces):
+        return bare(caller)
+    own = [x["id"] for x in spaces if _inside(x["folder"], folder)]
+    return own[0] if len(own) == 1 else None
 
 
 def tab_title(s, task):
@@ -579,8 +649,10 @@ def closing_line(s, task, parent=None, argv=None):
         text += (" Secrets (keys, tokens, passwords) are used by name, never seen: `herdr-secret ask NAME --why \"…\"` "
                  "(then end your turn), `herdr-secret run NAME -- <command>`, `herdr-secret list`; these run without asking too.")
     if argv and agent_key(argv) == "codex":
-        text += (" Codex's sandbox can't reach Herdr nor write git's data, so give those commands, herdr-artifact's (your proof), "
-                 "`git add`/`git commit` and your review's `hc run`/`hc wait`/`hc read`/`hc kill` (its prompt in single quotes) "
+        # #1136 #1142: run in the sandbox, hc can't open Herdr's core and the browser's socket folder is read-only
+        text += (" Codex's sandbox can't reach Herdr nor write git's data, so give those commands, herdr-browser's (your task's "
+                 "browser), herdr-artifact's (your proof), `git add`/`git commit` and your review's `hc run`/`hc wait`/`hc read`/"
+                 "`hc get`/`hc kill` (its prompt in single quotes) "
                  "sandbox_permissions \"require_escalated\" from the first try, each as one plain command (no && chains, no $(…), "
                  "no git options before the verb): then they run without asking.")
     # No "report to your coordinator": Herdr tells the Assistant itself (news_pass).

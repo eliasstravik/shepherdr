@@ -50,7 +50,7 @@ import { taskDot, ownProgress } from "./dot.js";
 import * as attach from "./attach.js";
 import * as slash from "./slash.js";
 import * as mentions from "./core/mentions.js";
-import { SH } from "./core/paths.js";
+import { SH, TEMPLATES_SH } from "./core/paths.js";
 import { settle } from "./core/pending.js";
 import { dirsReady } from "./dirs.js";
 import * as agent from "./agent.js";
@@ -79,8 +79,9 @@ const KEEP = 2000;
 const COLUMN = 760;
 const KINDS = { "claude-code": "claude", claude: "claude", codex: "codex" };
 const norm = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
-// The role templates' folder on the machine a command runs on (sh -c prefix: $dir).
-const TEMPLATE = 'dir="$HOME/.config/herdr-core/templates"; ';
+// The role templates' folder on the machine a command runs on (sh -c prefix: $dir), where herdr-core reads them
+// there ($XDG_CONFIG_HOME's when set: #1182).
+const TEMPLATE = TEMPLATES_SH + 'dir="$SHEP_TEMPLATES"; ';
 // Whether a machine's layout is here now (it's connected); this computer always is.
 const online = (machine) => !machine || machines().find((m) => m.name === machine)?.layout === "ready";
 const same = (a, b) => norm(a) === norm(b);
@@ -1086,7 +1087,7 @@ export default class Chat extends View {
     const named = /^([a-z][a-z0-9]*)-(\d+)(?:-|$)/.exec(t.name ?? "");
     const ref = this.workerTasks().get(t.address)?.ref ?? (t.labels?.["herdr.task"] && named ? `${named[1].toUpperCase()}-${named[2]}` : null);
     // An Assistant's role is in its first message (its template): it gets that again.
-    const template = assistant(t) && !t.address.includes("/") ? await readTextFile(`${home()}/.config/herdr-core/templates/assistant.md`).catch(() => null) : null;
+    const template = assistant(t) && !t.address.includes("/") ? await readTextFile(`${(await dirsReady()).templates}/assistant.md`).catch(() => null) : null;
     const msg = lostMessage({ ref, template });
     const mine = t.address === this.addr;
     if (mine) { this.note = { id: `note-${Date.now()}`, text: WORDS.sessionGone }; cx.notify(); }
@@ -3703,7 +3704,9 @@ export default class Chat extends View {
     const jobs = this.bgJobs;
     if (jobs.due(this.kind, this.conv) && await jobs.look((s, a) => this.runThere(s, a), this.kind, pid, this.conv)) cx.notify();
     const open = this.jobs().find((j) => j.id === this.jobOpen);
-    if (this.jobOpen && !open) { this.jobOpen = null; cx.notify(); }
+    // #1103: an open subagent row (c:<address>) is no job: it stays open while its subagent is listed.
+    const kid = String(this.jobOpen ?? "").startsWith("c:") && subagentsOf(terminals(), this.addr, Date.now()).some((k) => `c:${k.address}` === this.jobOpen);
+    if (this.jobOpen && !open && !kid) { this.jobOpen = null; cx.notify(); }
     if (open?.path) {
       const text = await jobs.output((s, a) => this.runThere(s, a), open);
       if (text !== null && text !== this.jobOut.get(open.id)) { this.jobOut.set(open.id, text); cx.notify(); }

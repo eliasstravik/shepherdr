@@ -110,6 +110,13 @@ const back = JSON.parse(readFileSync(new URL("./back-to-work.cases.json", import
 
 describe("a Ready task back at work (as herdr-task's busy_again)", () => {
   for (const c of back.cases) test(c.name, () => expect(busyAgain(c.task, c.live, back.now)).toBe(c.expect));
+  test("#1082: a turn nobody asked for (herdr-task's unasked_turn) keeps it Ready", () => {
+    const task = { state: "ready", ready_at: back.now - 60000, ready_turns: { t1: 5 }, unasked_turn: true };
+    const live = [{ address: "t1", status: "working", turn: 5, role: "worker" }];
+    expect(busyAgain(task, live, back.now)).toBe(false);
+    expect(busyAgain({ ...task, unasked_turn: undefined }, live, back.now)).toBe(true);
+    expect(place(list([{ id: 7, ...task }]), { id: 7, ...task }, { live, now: back.now }).section).toBe("ready");
+  });
   test("it shows Working, saying so, with no Ready line", () => {
     const task = { id: 7, state: "ready", ready_at: back.now - 600_000, ready_turns: { t1: 5 } };
     const p = place(list([task]), task, { live: [{ address: "t1", status: "working", turn: 5 }], now: back.now });

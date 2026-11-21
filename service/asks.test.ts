@@ -18,6 +18,8 @@ test("a permission becomes a card, and Allow answers the hook as the window's ca
   const asks = new Asks();
   asks.start();
   expect(asks.of("t5").length).toBe(1);
+  // #1078: marked seen, so a Codex hook knows a card shows it (else Codex asks in its terminal in seconds)
+  expect(existsSync(join(dir, "seen", "t5.100.1"))).toBe(true);
   const q = new Compat().question(asks.of("t5")[0], "p:sp1");
   expect(q).toMatchObject({ title: "Run: npm test", kind: "Question", choices: [{ label: "Allow" }, { label: "Deny" }] });
   asks.answer("t5.100.1", { choice: 0 });
@@ -102,6 +104,8 @@ test("another machine's ask: a card here, answered there", async () => {
   const [a] = asks.of("m3/t12");
   expect(a).toMatchObject({ id: "m3/t12.1700000000.7", machine: "m3", local: "t12.1700000000.7" });
   expect(a.req.tool_input.command).toBe("npm\ttest");
+  // #1078: marked seen there, so a Codex hook knows a card shows it and keeps waiting
+  expect(existsSync(join(td, "seen", "t12.1700000000.7"))).toBe(true);
   expect(calls[0]).toMatchObject({ method: "machine.exec", on: "m3" });
   // what is open here stays across a read of this machine's own
   (asks as any).read();

@@ -44,11 +44,11 @@ class AskHook(unittest.TestCase):
             json.dump(t, f)
         os.replace(self.state + ".tmp", self.state)
 
-    def start(self, **env):
+    def start(self, req=None, **env):
         e = {"PATH": f"{self.bin}:{os.environ['PATH']}", "HOME": self.tmp, "HERDR_APP_HOME": self.app,
              "HC_TERMINAL_ID": "t9", "FAKE_HC_STATE": self.state, **env}
         p = subprocess.Popen(["sh", HOOK], stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=e)
-        p.stdin.write(json.dumps(REQ).encode())
+        p.stdin.write(json.dumps(req or REQ).encode())
         p.stdin.close()
         return p
 
@@ -147,6 +147,43 @@ class AskHook(unittest.TestCase):
         out = self.out(self.start(**env))
         self.assertEqual(out, b"")
         self.assertIsNone(self.waiting(0.2))
+
+    # #1078 #1137 #1141 #1145 #1146: Codex shows nothing while its hook waits (only "Running hook", the task Working),
+    # so a card no window or web page picked up (seen/<id>) goes back to Codex's own prompt in seconds, not 30 minutes.
+    CODEX_REQ = {**REQ, "turn_id": "turn-1", "session_id": "s-1"}
+
+    def test_codex_ask_nobody_shows_goes_back_to_its_terminal_fast(self):
+        t0 = time.time()
+        p = self.start(req=self.CODEX_REQ, HERDR_ASK_SEEN_WAIT="1")
+        ask = self.waiting()
+        self.assertIsNotNone(ask, "it still asks the chat first")
+        self.assertEqual(self.out(p, timeout=10), b"", "no decision: Codex asks in its terminal")
+        self.assertLess(time.time() - t0, 8)
+        with open(os.path.join(self.asks, "end", ask)) as f:
+            self.assertIn("Codex asks in its terminal", f.read())
+        self.assertFalse(os.path.exists(os.path.join(self.asks, "req", ask + ".json")), "its card closes")
+
+    def test_codex_ask_a_card_shows_waits_for_its_answer(self):
+        p = self.start(req=self.CODEX_REQ, HERDR_ASK_SEEN_WAIT="1")
+        ask = self.waiting()
+        os.makedirs(os.path.join(self.asks, "seen"), exist_ok=True)
+        open(os.path.join(self.asks, "seen", ask), "w").close()
+        time.sleep(2)
+        self.assertIsNone(p.poll(), "a card shows it: still waiting for the person")
+        with open(os.path.join(self.asks, "ans", ask + ".json"), "w") as f:
+            f.write(ALLOW)
+        self.assertEqual(json.loads(self.out(p)), json.loads(ALLOW))
+        self.assertFalse(os.path.exists(os.path.join(self.asks, "seen", ask)), "its mark goes with it")
+
+    def test_claude_ask_nobody_shows_keeps_waiting(self):
+        # Claude shows its own prompt meanwhile: its card stays for a person who opens the chat later
+        p = self.start(HERDR_ASK_SEEN_WAIT="1")
+        self.assertIsNotNone(self.waiting())
+        time.sleep(2)
+        self.assertIsNone(p.poll())
+        p.kill()
+        p.wait()
+        p.stdout.close()
 
 
 if __name__ == "__main__":

@@ -6,9 +6,10 @@
 // the window's too); the Assistant does the rest. Done tasks archive themselves: the Archived row at the bottom opens them.
 import clsx from 'clsx'
 import { openAccept, useAccepting } from '@client/screens/Accept.tsx'
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react'
 import {
   archivedIn,
+  closeTask,
   definePlugin,
   DONE_OPEN,
   keepTasks,
@@ -65,6 +66,7 @@ import {
   NextIcon,
   PinTaskIcon,
   PlayIcon,
+  Primary,
   RoundButton,
   rowClass,
   ServerIcon,
@@ -76,7 +78,8 @@ import {
 import { needsYou, type Waiting } from '@shared/needs-you.ts'
 import { doneNewestFirst, machineName, type Automation, type Machine, type Place, type Snapshot, type Task } from '@shared/types.ts'
 import { useFlip } from '@client/motion.ts'
-import { RowMenu, useRowMenu, type RowMenuState } from '@client/rowmenu.tsx'
+import { Dialog, RowMenu, useRowMenu, type RowMenuState } from '@client/rowmenu.tsx'
+import * as CF from '@core/confirm.js'
 import * as MN from '@core/menus.js'
 import * as TK from '@core/tasks.js'
 import * as ND from '@core/needs.js'
@@ -257,6 +260,7 @@ function TaskActions({ task: t, close }: { task: Task; close: () => void }) {
           )
         if (it.id === 'start-now') return <MenuItem key="now" disabled={busy} icon={<PlayIcon className={ic} />} onClick={() => void go({ now: true })}>{it.label}</MenuItem>
         if (it.id === 'unschedule') return <MenuItem key="off" disabled={busy} icon={<XIcon className={ic} />} onClick={() => void go({ off: true })}>{it.label}</MenuItem>
+        if (it.id === 'done') return <MenuItem key="done" icon={<CheckIcon className={ic} />} onClick={() => { close(); setMarking(t) }}>{it.label}</MenuItem>
         return (
           <MenuItem key={it.label} icon={t.pinned ? <UnpinIcon className={ic} /> : <PinTaskIcon className={ic} />} onClick={() => { close(); void pinTask(t, !t.pinned).catch(() => undefined) }}>
             {it.label}
@@ -265,6 +269,54 @@ function TaskActions({ task: t, close }: { task: Task; close: () => void }) {
       })}
       {error && !typing ? <p role="alert" className="w-0 min-w-full px-2 pt-1 pb-1.5 text-[0.75rem]/4 text-need-fg phone:px-3 phone:text-[0.8125rem]/5">{error}</p> : null}
     </>
+  )
+}
+
+/** #1157: Mark done…, asked first (its words core/confirm.js MARK_DONE): done as it is, nothing merged */
+let marking: Task | null = null
+const markListeners = new Set<() => void>()
+function setMarking(t: Task | null) {
+  marking = t
+  for (const l of markListeners) l()
+}
+
+function ConfirmDone() {
+  const t = useSyncExternalStore(
+    (l) => {
+      markListeners.add(l)
+      return () => void markListeners.delete(l)
+    },
+    () => marking,
+  )
+  return t ? <DoneBox key={`${t.place}:${t.id}`} t={t} /> : null
+}
+
+function DoneBox({ t }: { t: Task }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const go = async () => {
+    setBusy(true)
+    setError(null)
+    const r = await closeTask(t).catch((e: Error) => ({ ok: false, error: e.message }))
+    setBusy(false)
+    if (r?.ok === false) return setError(r.error || "Couldn't mark it done.")
+    setMarking(null)
+  }
+  return (
+    <Dialog
+      title={CF.MARK_DONE.title(t.id)}
+      safe
+      onCancel={() => setMarking(null)}
+      buttons={
+        <Primary disabled={busy} onClick={go}>
+          {CF.MARK_DONE.verb}
+        </Primary>
+      }
+    >
+      <p>{CF.MARK_DONE.detail}</p>
+      {t.branch ? <p className="mt-1.5">{CF.MARK_DONE.branch(t.branch)}</p> : null}
+      {error ? <p role="alert" className="mt-1.5 text-need-fg">{error}</p> : null}
+    </Dialog>
   )
 }
 
@@ -723,6 +775,7 @@ export default definePlugin({
     reg.views.tasks = TaskList
     reg.views.tasksMenu = TasksMenu
     reg.views.taskActions = TaskActions
+    reg.overlays.push(ConfirmDone)
     // the window's Automations group is the list's own (last, before Archived): only the Archived row is a footer
     reg.tasksFooter.push(ArchivedLink)
   },

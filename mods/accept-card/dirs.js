@@ -26,7 +26,7 @@ export function dirsReady(again = false) {
   asking ??= exec("sh", ["-c", SH_PRINT]).then((r) => {
     const j = JSON.parse(String(r?.stdout ?? "").trim().split("\n").pop() || "null");
     at = Date.now();
-    if (j?.home && j.data) known = pathsFrom(j.home, { config: j.config, data: j.data, state: j.state }, !!j.on);
+    if (j?.home && j.data) known = pathsFrom(j.home, { config: j.config, data: j.data, state: j.state, templates: j.templates || undefined }, !!j.on);
     return dirs();
   }).catch(() => dirs());
   return asking;

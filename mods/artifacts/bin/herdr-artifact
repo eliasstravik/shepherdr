@@ -37,6 +37,13 @@ import zlib
 
 VERSION = "1"
 HOME = os.path.expanduser("~")
+# GitHub #1117: a herdr-core started by launchd or systemd hands what it runs (hc exec --on from another machine) a bare
+# PATH (/usr/bin:/bin), so hc, gh and the agents' CLIs wouldn't be found. When hc isn't on it, their usual folders go
+# at the end: the person's own order still wins.
+if not __import__("shutil").which("hc"):
+    os.environ["PATH"] = os.pathsep.join([p for p in os.environ.get("PATH", "").split(os.pathsep) if p] + [
+        d for d in (os.path.join(HOME, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin")
+        if d not in os.environ.get("PATH", "").split(os.pathsep)])
 # ---- SHEP: Shepherdr's own folders (a copy of herdr_task/layout.py's PY; test/test_layout.py checks it) ----
 def SHEP(rel, _t={'.herdr/shepherdr.json': ('config', 'settings.json'), '.herdr/model-picks.json': ('config', 'model-picks.json'), '.herdr/tasks': ('data', 'tasks'), '.herdr/artifacts': ('data', 'artifacts'), '.herdr/vault.json': ('data', 'secrets/vault.json'), '.herdr/secret-remote': ('data', 'secrets/remote'), '.herdr/tools.json': ('data', 'tools.json'), '.herdr/shepherdr': ('state', 'service'), '.herdr/browser': ('state', 'browser'), '.herdr/secret-drop': ('state', 'secret-drop'), '.herdr/secret-served': ('state', 'secret-served'), '.herdr/cli-check.json': ('state', 'cli-check.json'), '.herdr/machine-hold.json': ('state', 'machine-hold.json')}):
     H, E = os.path.expanduser("~"), os.environ
@@ -652,7 +659,7 @@ def stage_theme(stage, light):
 
 # How long one `herdr-app check` may take, and the waits before trying again when Herdr's checker couldn't start: its
 # checker has its own short deadline to connect, which a busy machine misses (#987), so it is tried three times, waiting
-# longer each time. A check that ran out of time is tried once more.
+# longer each time. A check that ran out of time isn't tried again (#1130: twice made a publish wait three minutes).
 CHECK_TIMEOUT = 90
 RETRY_WAITS = (3, 10)
 # herdr-app's own trouble drawing it (its isolated checker didn't connect, after Herdr restarted), not the artifact's
@@ -688,7 +695,7 @@ def check_tries(stage):
             why = (r[2] or "").strip().splitlines()[-1]
         else:
             return r
-        if not waits or timeouts > 1:
+        if not waits or timeouts:
             return None, "", why
         time.sleep(waits.pop(0))
 
