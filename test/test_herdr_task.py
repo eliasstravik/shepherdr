@@ -6279,6 +6279,21 @@ class CodexSandbox(unittest.TestCase):
         except OSError:
             return []
 
+    def test_a_probe_that_did_not_answer_is_not_kept(self):
+        """#1108: a probe that timed out (a busy machine) or couldn't start says nothing now and is asked again next
+        time, never kept as "it starts" for a week."""
+        self.fake("sleep 5")
+        saved = self.sandbox.PROBE_TIMEOUT
+        self.sandbox.PROBE_TIMEOUT = 0.2
+        self.addCleanup(setattr, self.sandbox, "PROBE_TIMEOUT", saved)
+        if os.uname().sysname != "Linux":
+            self.skipTest("Linux only")
+        self.assertIsNone(self.sandbox.check())
+        self.assertFalse(os.path.exists(self.sandbox.CACHE))
+        self.fake("echo 'bwrap: loopback: Failed RTM_NEWADDR: Operation not permitted' >&2; exit 1")
+        self.assertIn("RTM_NEWADDR", self.sandbox.check()["error"])
+        self.assertEqual(len(self.probes()), 2)
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "bwrap is Linux's")
     def test_found_once_and_said_with_the_fix(self):
         b = self.sandbox.check()

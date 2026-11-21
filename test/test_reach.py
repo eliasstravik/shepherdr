@@ -111,6 +111,20 @@ class Reach(unittest.TestCase):
         machines.probe(depth=machines.REACH_DEPTH, timeout=20)
         self.assertEqual(len(self.calls("ssh")), 3)
 
+    def test_find_reads_the_wait_again_once_it_holds_the_lock(self):
+        """#1108: two Finds at once: the second read the wait before the first saved its run, and took the lock after
+        the first let go. It reads the wait again under the lock: refused, nobody contacted twice."""
+        machines._save_found({"at": machines.now(), "hosts": []})   # the first one's run, just saved
+        real, reads = machines._found, []
+
+        def found():   # its first read, before the lock, missed that run
+            reads.append(1)
+            return None if len(reads) == 1 else real()
+        with mock.patch.object(machines, "_found", found):
+            with self.assertRaisesRegex(base.Fail, "again in"):
+                machines.find(go=True)
+        self.assertEqual(self.calls("ssh"), [])
+
     def test_find_refused_with_the_add_on_off(self):
         self.off = ["machines"]
         with self.assertRaisesRegex(base.Fail, "Other machines"):
