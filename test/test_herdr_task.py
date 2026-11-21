@@ -8546,6 +8546,49 @@ class ExtraFlags(unittest.TestCase):
         self.assertEqual(json.loads(out.getvalue())["flags"], ["--advisor=opus"])
 
 
+class HeldWhileOnAQuestion(unittest.TestCase):
+    """#1213: a Mark up note held for an agent on a question card (herdr-task _hold) waits while it stays blocked, then
+    goes once, the notes in order. A throwaway held file; hc is never run."""
+
+    def setUp(self):
+        import shutil
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.news as news
+        self.news = news
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.state = {"state": "live", "status": {"app": "claude", "state": "blocked"}, "labels": {}}
+        self.sent = []
+        for name, value in (("HELD", os.path.join(self.tmp, "held.json")), ("hc_json", lambda *a: self.state),
+                            ("typing", lambda *a, **k: None),
+                            ("plain_send", lambda to, text: self.sent.append((to, text)) or True)):
+            p = mock.patch.object(news, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_held_until_answered_then_sent_once_in_order(self):
+        self.news.hold("t7", "first note")
+        self.news.hold("t7", "second note")
+        self.news.held_pass({})
+        self.assertEqual(self.sent, [], "never typed into its question")
+        self.state["status"]["state"] = "idle"
+        report = {}
+        self.news.held_pass(report)
+        self.assertEqual(self.sent, [("t7", "first note\n\nsecond note")])
+        self.assertEqual(report["held"], [{"to": "t7", "messages": 2}])
+        self.news.held_pass({})
+        self.assertEqual(len(self.sent), 1)
+
+    def test_the_cli_keeps_it(self):
+        held = os.path.join(self.tmp, "store")
+        r = subprocess.run([sys.executable, os.path.join(BIN, "herdr-task"), "_hold", "t7"], input="a note",
+                           env={**os.environ, "HERDR_TASK_STORE": held}, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(os.path.join(held, ".held.json")) as f:
+            self.assertEqual([x["text"] for x in json.load(f)["t7"]], ["a note"])
+
+
 class WorktreeRemovalStopsItsServers(unittest.TestCase):
     """#1127: a done task's dev server still running in its worktree kept writing there, so the removal left part of
     the folder behind (git's record gone) and the server ran on. Now it is stopped first, the folder is really gone,

@@ -100,7 +100,22 @@ install_mine() {
   _url="${HERDR_BROWSER_URL:-https://github.com/vercel-labs/agent-browser/releases/download/v$PIN}/agent-browser-$_plat"
   mkdir -p "$abdir/$PIN" 2>/dev/null || { why="can't write to $abdir"; return 1; }
   _tmp="$abdir/.part.$$"
-  if ! _err=$(curl -fsSL --retry 2 --connect-timeout 15 --max-time 600 -o "$_tmp" "$_url" 2>&1); then
+  # Said as it goes (GitHub #1173): a slow network took minutes with no word, which looked like a hang.
+  curl -fsSL --retry 2 --connect-timeout 15 --max-time 600 -o "$_tmp" "$_url" 2>"$_tmp.err" &
+  _pid=$!
+  _t=0
+  while kill -0 "$_pid" 2>/dev/null; do
+    sleep 1; _t=$((_t + 1))
+    if [ $((_t % ${HERDR_BROWSER_PROGRESS_EVERY:-10})) = 0 ]; then
+      _sz=$(wc -c < "$_tmp" 2>/dev/null | tr -d ' ')
+      _slow=
+      [ "$_t" -ge 60 ] && _slow=" (a slow network: it may take up to 10 minutes)"
+      echo "herdr-browser: downloading agent-browser $PIN: $(awk -v b="${_sz:-0}" 'BEGIN { printf "%.1f", b / 1048576 }') MB after ${_t} s$_slow…" >&2
+    fi
+  done
+  wait "$_pid"; _rc=$?
+  _err=$(cat "$_tmp.err" 2>/dev/null); rm -f "$_tmp.err"
+  if [ "$_rc" != 0 ]; then
     rm -f "$_tmp"
     why="couldn't download it (${_err:-no answer}; offline?)"; return 1
   fi
@@ -135,6 +150,7 @@ ensure() {
   mkdir -p "$abdir" 2>/dev/null || { why="can't write to $abdir"; return 1; }
   _n=0
   until mkdir "$abdir/.lock" 2>/dev/null; do
+    [ "$_n" = 0 ] && echo "herdr-browser: another herdr-browser is installing agent-browser $PIN; waiting for it…" >&2
     # another one is installing: wait for it (a lock left by one that died goes after 10 minutes)
     if [ -n "$(find "$abdir/.lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then rmdir "$abdir/.lock" 2>/dev/null; continue; fi
     _n=$((_n + 1)); [ "$_n" -gt 600 ] && { why="another install is still running"; return 1; }
@@ -261,7 +277,23 @@ EOF
   return 1
 }
 
+# herdr-browser's own help, and agent-browser's when it's here. Never installs anything (GitHub #1173: --help waited on
+# a download).
+own_help() {
+  cat <<EOF
+herdr-browser: this task's own browser: agent-browser $PIN on the task's session and profile.
+  herdr-browser <agent-browser command>   e.g. open <url>, snapshot -i, click @e2, screenshot /abs/shot.png
+  herdr-browser --install                 install agent-browser $PIN and Chrome, saying what it found
+  herdr-browser --status                  what's here, as JSON
+EOF
+  pick
+  if usable; then echo; "$bin" --help 2>&1; return 0; fi
+  echo
+  echo "agent-browser $PIN isn't here yet (${ver:+this machine has $ver; }the first browser command installs it, or run: $fix)."
+}
+
 case "${1-}" in
+  --help|-h|help) own_help; exit 0 ;;
   --install)
     if ensure; then
       libs_check >&2 || exit 1
@@ -343,6 +375,8 @@ done
 mkdir -p "$root" 2>/dev/null && chmod 700 "$root" 2>/dev/null
 pick
 if ! usable; then
+  [ "${1-}" = help ] && { own_help; exit 0; }
+  for a in "$@"; do case "$a" in --help|-h) own_help; exit 0 ;; esac; done
   why=
   [ -n "$(find "$abdir/.failed" -mmin -10 2>/dev/null)" ] && why=$(cat "$abdir/.failed")
   if [ -z "$own" ] && [ -z "$why" ] && [ -z "${HERDR_BROWSER_BIN:-}" ]; then
@@ -370,6 +404,12 @@ if [ -z "$own" ]; then
     esac
   fi
   touch "$root/$name.used" 2>/dev/null
+  # Herdr closed it (idle, or the task is Done): said once, so a blank page and a desktop-sized viewport aren't a
+  # mystery (GitHub #1147, #1138).
+  if [ -f "$root/$name.closed" ]; then
+    echo "herdr-browser: note: this task's browser had been closed ($(cat "$root/$name.closed" 2>/dev/null)); it starts again on a blank page at its default size: open your page and set the viewport again." >&2
+    rm -f "$root/$name.closed"
+  fi
 fi
 [ -f "$root/$name.task" ] || printf '%s\n' "$task" > "$root/$name.task"
 # A browser opened before names were cut (a name of 33-64 characters still fit agent-browser's socket path) holds the
@@ -451,4 +491,45 @@ export AGENT_BROWSER_ARGS="${AGENT_BROWSER_ARGS:---force-prefers-reduced-motion}
 # so the stream's own are kept small and cheap.
 export AGENT_BROWSER_STREAM_MAX_WIDTH="${AGENT_BROWSER_STREAM_MAX_WIDTH:-320}"
 export AGENT_BROWSER_STREAM_QUALITY="${AGENT_BROWSER_STREAM_QUALITY:-40}"
-exec "$bin" --session "$session" --profile "$profile" "$@"
+# open that never comes back (#1154): a watchdog ends the wait after HERDR_BROWSER_OPEN_WAIT seconds (default 90) and
+# says so. A reply the daemon dropped ("Invalid response: EOF", #1081) on a command that only looks or sets is tried
+# once more, and said plainly if it fails again. Everything else runs as agent-browser itself.
+case "$verb" in
+  open|goto|navigate|set|get|snapshot|screenshot|is|reload) ;;
+  *) exec "$bin" --session "$session" --profile "$profile" "$@" ;;
+esac
+errf=$(mktemp "${TMPDIR:-/tmp}/herdr-browser.XXXXXX") || exec "$bin" --session "$session" --profile "$profile" "$@"
+trap 'rm -f "$errf" "$errf.late"' EXIT
+wait_s=${HERDR_BROWSER_OPEN_WAIT:-90}
+tries=0
+while :; do
+  tries=$((tries + 1))
+  case "$verb" in
+    open|goto|navigate|reload)
+      "$bin" --session "$session" --profile "$profile" "$@" 2>"$errf" &
+      pid=$!
+      ( w=0; while [ "$w" -lt "$wait_s" ] && kill -0 "$pid" 2>/dev/null; do sleep 1; w=$((w + 1)); done
+        kill -0 "$pid" 2>/dev/null && : > "$errf.late" && kill "$pid" 2>/dev/null ) &
+      dog=$!
+      wait "$pid"; rc=$?
+      kill "$dog" 2>/dev/null; wait "$dog" 2>/dev/null
+      if [ -f "$errf.late" ]; then
+        cat "$errf" >&2
+        echo "herdr-browser: $verb didn't finish within $wait_s s, so herdr-browser stopped waiting. The page may still be loading: get url and snapshot say where it is. If the next command hangs too, run: herdr-browser close, then open it again." >&2
+        exit 124
+      fi ;;
+    *) "$bin" --session "$session" --profile "$profile" "$@" 2>"$errf"; rc=$? ;;
+  esac
+  if [ "$rc" != 0 ] && grep -qiE 'invalid response|EOF' "$errf" 2>/dev/null; then
+    if [ "$tries" = 1 ]; then
+      echo "herdr-browser: the browser dropped its answer to $verb; trying once more…" >&2
+      sleep 1; continue
+    fi
+    cat "$errf" >&2
+    echo "herdr-browser: the browser dropped its answer to $verb twice, so whether it ran is unknown. Check with get url or snapshot; if it keeps happening, run herdr-browser close and start again." >&2
+    exit "$rc"
+  fi
+  break
+done
+cat "$errf" >&2
+exit "$rc"

@@ -77,16 +77,37 @@ export const MAC_PICK = [
 ];
 
 // The desktop's own file picker, for the attach button: xdg-desktop-portal's on Linux (pick-files.py), macOS's own.
-// Resolves { code, paths }.
+// Resolves { code, paths, why }: why, when it couldn't open, is the picker's own one line (#1225: no portal, no
+// session bus...).
 export async function pick(title = "Attach files", os = window()?.platform) {
   const r = os === "macos"
     ? await exec("osascript", [...MAC_PICK.flatMap((l) => ["-e", l]), title]).catch(() => null)
     : await exec("sh", ["-c", 'P=/usr/bin/python3; [ -x "$P" ] || P=python3; exec "$P" -I "$1" "$2"', "x", `${appHome()}/mods/chat/pick-files.py`, title]).catch(() => null);
-  return { code: r ? r.code : 1, paths: (r?.stdout ?? "").split("\n").map((l) => l.replace(/\r$/, "")).filter(Boolean) };
+  const why = r ? (r.stderr ?? "").trim().split("\n").filter(Boolean).pop() ?? "" : "it didn't start";
+  return { code: r ? r.code : 1, paths: (r?.stdout ?? "").split("\n").map((l) => l.replace(/\r$/, "")).filter(Boolean), why };
 }
 
 // Dropped or pasted file paths as attachments.
 export const paths = (list) => list.filter(Boolean).map((p) => ({ path: p, name: base(p), image: isImage(p), temp: false }));
+
+// macOS hands a screenshot's floating thumbnail, dragged or pasted in, over as a file in a TemporaryItems folder
+// (…/TemporaryItems/NSIRD_screencaptureui_…/Screenshot….png) that it deletes moments later, so the agent got a path
+// to nothing (GitHub #1095). Such a file is copied into data/chat-attach first, as a pasted image is.
+export const fleeting = (f) => /\/TemporaryItems\//.test(f?.path ?? "") && !f.temp;
+export async function keep(list) {
+  const dir = `${appHome()}/data/chat-attach`;
+  const out = [];
+  for (const f of list) {
+    if (!fleeting(f)) { out.push(f); continue; }
+    const name = `pasted-${Date.now().toString(36)}-${f.name}`;
+    const r = await exec("sh", ["-c", 'mkdir -p "$1" && cp "$2" "$1/$3"', "x", dir, f.path, name]).catch(() => null);
+    out.push(r && r.code === 0 ? { ...f, path: `${dir}/${name}`, temp: true } : f);
+  }
+  return out;
+}
+
+// A pasted line that is such a file's own path (macOS pastes the thumbnail's path as text): the file it names.
+export const fleetingPath = (line) => /^\/\S.*\/TemporaryItems\/.+\.\w+$/.test(line.trim());
 
 // The message's file lines: each file's path where the agent is. For another machine, a copy
 // lands beside the agent's terminal.

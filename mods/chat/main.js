@@ -327,12 +327,13 @@ export default class Chat extends View {
         cx.spawn(async (cx) => { const f = await attach.textFile(pasted); if (f) { this.addFiles([f]); this.saveSoon(cx); cx.notify(); } });
         return;
       }
-      // Copied files pasted as text (file:// lines) become attachments.
+      // Copied files pasted as text (file:// lines) become attachments, as does a macOS screenshot's fleeting path (#1095).
       const v = this.box.value();
-      if (/^file:\/\/\S/m.test(v)) {
-        const found = v.split("\n").filter((l) => /^file:\/\/\S+$/.test(l.trim())).map((l) => decodeURIComponent(l.trim().slice(7)));
-        this.addFiles(attach.paths(found));
-        this.box.set_value(v.split("\n").filter((l) => !/^file:\/\/\S+$/.test(l.trim())).join("\n"));
+      if (/^file:\/\/\S/m.test(v) || v.split("\n").some(attach.fleetingPath)) {
+        const isFile = (l) => /^file:\/\/\S+$/.test(l.trim()) || attach.fleetingPath(l);
+        const found = v.split("\n").filter(isFile).map((l) => l.trim().startsWith("file://") ? decodeURIComponent(l.trim().slice(7)) : l.trim());
+        this.attachFiles(attach.paths(found), cx);
+        this.box.set_value(v.split("\n").filter((l) => !isFile(l)).join("\n"));
       }
       this.slashSel = 0;
       // Editing a recalled message makes it a new one: arrows move in it again.
@@ -344,7 +345,7 @@ export default class Chat extends View {
     // A paste with no text: the clipboard's image or copied files become attachments.
     this.box.on("paste_other", (_e, cx) => cx.spawn(async (cx) => {
       const got = await attach.fromClipboard().catch((e) => { this.error = String(e?.message ?? e); cx.notify(); return []; });
-      if (got.length) { this.error = null; this.addFiles(got); this.saveSoon(cx); cx.notify(); }
+      if (got.length) { this.error = null; this.attachFiles(got, cx); this.saveSoon(cx); cx.notify(); }
     }));
     this.wasFocused = false;
     // Up/Down/Tab/Escape reach the textarea first, which keeps them. While the "/" list shows
@@ -659,6 +660,12 @@ export default class Chat extends View {
     this.typing = on && addr ? { addr, at } : null;
     if (was && was.addr && was.addr !== this.typing?.addr) hc(["label", was.addr, "herdr.typing="]).catch(() => {});
     if (this.typing) hc(["label", addr, `herdr.typing=${at}`]).catch(() => {});
+  }
+
+  // Files from a drop, a paste or the picker: macOS's fleeting TemporaryItems ones copied first (attach.keep, #1095).
+  attachFiles(list, cx) {
+    if (!list.some(attach.fleeting)) { this.addFiles(list); return; }
+    cx.spawn(async (cx) => { this.addFiles(await attach.keep(list)); this.saveSoon(cx); cx.notify(); });
   }
 
   addFiles(list) {
@@ -1404,6 +1411,7 @@ export default class Chat extends View {
   // Enter: now (while the agent works, it takes it mid-turn). Ctrl+Enter while it
   // works: held, and sent by itself once it is free.
   send(cx, hold = false) {
+    this.pickError = null;
     // A picked "#space" goes as its mention, which names its target (core/mentions.js).
     const text = mentions.expandTasks(mentions.expand(this.box.value().trim(), this.picked), this.pickedTasks);
     this.picked = [];
@@ -4081,10 +4089,11 @@ export default class Chat extends View {
   // the message as tiles, as a drop or a paste makes them.
   pickFiles(cx) {
     cx.spawn(async (cx) => {
-      const { code, paths: list } = await attach.pick();
-      if (code !== 0) this.error = "Couldn't open the file picker.";
+      const { code, paths: list, why } = await attach.pick();
+      // said beside the + button (#1225), not at the pane's edge
+      this.pickError = code !== 0 ? `Couldn't open the file picker${why ? `: ${why}` : "."}` : null;
       if (!list.length) { cx.notify(); return; }
-      this.addFiles(attach.paths(list));
+      this.attachFiles(attach.paths(list), cx);
       this.saveSoon(cx);
       this.box.focus();
       cx.notify();
@@ -4260,7 +4269,7 @@ export default class Chat extends View {
         cx.stop_propagation();
         this.enter(cx, Boolean(m.control || m.platform));
       })
-      .on_drop((e, cx) => { this.addFiles(attach.paths(e.paths ?? [])); this.saveSoon(cx); this.box.focus(); cx.notify(); })
+      .on_drop((e, cx) => { this.attachFiles(attach.paths(e.paths ?? []), cx); this.saveSoon(cx); this.box.focus(); cx.notify(); })
       // Where the box is in the window, for a typed /model's picker (modelCommand()).
       .on_mouse_move((e) => { if (e.bounds) this.composerAt = e.bounds; })
       .border_color(this.focused ? t.accent : t.input).bg(t.background)
@@ -4288,7 +4297,7 @@ export default class Chat extends View {
       .when(rec === "idle", (el) => el.child(h_flex().h(36).pl(6).pr(6).gap(4).items_center()
         // Attach on the left, as ChatGPT and Claude have it: the desktop's file picker.
         .child(this.round("chat-attach", "mods/chat/plus.svg", t, "ghost", (cx) => this.pickFiles(cx)))
-        .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.blocked).child(rec === "idle" ? this.dict.error ?? "" : ""))
+        .child(div().flex_1().min_w(0).truncate().text_size(12).text_color(t.blocked).child(rec === "idle" ? this.dict.error ?? this.pickError ?? "" : ""))
         .when(Boolean(this.addr), (el) => el.children(this.pickParts(t, true)))
         .when(!this.addr && this.phase === "fresh" && Boolean(this.choice?.sel) && Boolean(cx), (el) => el.child(this.freshPick(t, cx)))
         .when(addonOn("voice"), (el) => el.child(this.round("chat-mic", "mods/chat/mic.svg", t, "ghost", (cx) => this.toggleDictation(cx))))
@@ -4520,7 +4529,7 @@ export default class Chat extends View {
       .on_mouse_down("left", (e) => { this.notePress(e); holdKeys(this.areaKey()); this.pressWin = e.position; this.keepIcons = null; this.pressing = true; this.pressMoved = false; if (e.bounds) this.noteArea(e.bounds); })
       .on_mouse_up("left", () => { this.pressing = false; })
       // Files dropped anywhere on the chat go with the next message.
-      .on_drop((e, cx) => { this.addFiles(attach.paths(e.paths ?? [])); this.saveSoon(cx); this.box.focus(); cx.notify(); });
+      .on_drop((e, cx) => { this.attachFiles(attach.paths(e.paths ?? []), cx); this.saveSoon(cx); this.box.focus(); cx.notify(); });
 
     // Starting (or the new agent's log not there yet): the person's message shows at once.
     const starting = (this.phase === "starting" || (this.phase === "finding" && this.role && !this.path)) && this.pending.length > 0;

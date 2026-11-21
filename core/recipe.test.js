@@ -1,6 +1,6 @@
 // SHEP-79: a button may carry a plain https link (href), alone or with a reply; buttons sit side by side
 import { expect, test } from "bun:test";
-import { problems, blockName, preview, mediaKind, mdParts, cellMd, fieldStart, formReply } from "./recipe.js";
+import { problems, blockName, preview, mediaKind, mdParts, cellMd, fieldStart, formReply, chartLabels } from "./recipe.js";
 import { marked } from "marked";
 
 const one = (b) => problems({ recipe: 1, blocks: [b] });
@@ -128,4 +128,11 @@ test("a form field's value: its start and its untouched reply", () => {
   // a value that doesn't fit is refused
   expect(one({ type: "form", fields: [{ name: "a", kind: "select", options: ["x"], value: "z" }] })[0]).toContain("one of its options");
   expect(one({ type: "form", fields: [{ name: "b", kind: "checkbox", value: "yes" }] })[0]).toContain("true or false");
+});
+
+test("a line chart's labels sit under their points; the ends anchor inward so they aren't cut off (GitHub #1148)", () => {
+  const l = chartLabels({ kind: "line", labels: ["09:00", "10:00", "11:00"], series: [{ values: [1, 2, 3] }] });
+  expect(l.map((x) => [x.x, x.anchor])).toEqual([[0, "start"], [0.5, "middle"], [1, "end"]]);
+  expect(chartLabels({ kind: "line", labels: ["only"] })).toEqual([{ text: "only", x: 0.5, anchor: "middle" }]);
+  expect(chartLabels({ kind: "bar", labels: ["a", "b"] }).map((x) => [x.x, x.anchor])).toEqual([[0.25, "middle"], [0.75, "middle"]]);
 });

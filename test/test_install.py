@@ -947,6 +947,33 @@ class AgentBrowser(unittest.TestCase):
         p = self.hbr("--task", "a#1", "snapshot")
         self.assertNotIn("installing", p.stderr)
 
+    def test_help_answers_at_once_without_installing(self):
+        # GitHub #1173: --help with an off-pin agent-browser waited on a download, saying nothing
+        old = self.on_path("0.31.1")
+        for args in (("--help",), ("-h",), ("help",), ("--task", "a#1", "--help")):
+            p = self.hbr(*args, path=old)
+            self.assertEqual(p.returncode, 0, (args, p.stderr))
+            self.assertIn("this task's own browser", p.stdout)
+            self.assertIn("this machine has 0.31.1", p.stdout)
+            self.assertNotIn("installing", p.stderr)
+            self.assertFalse(os.path.exists(self.mine), args)
+        # with a usable one, agent-browser's own help follows
+        p = self.hbr("--help", path=self.on_path("0.41.1"))
+        self.assertIn("path --help", p.stdout)
+
+    def test_a_slow_download_says_how_far_it_got(self):
+        # GitHub #1173: a slow network took minutes with no word; now it says the MB so far as it goes
+        slow = os.path.join(self.tmp, "slowbin")
+        os.makedirs(slow)
+        with open(os.path.join(slow, "curl"), "w") as f:
+            f.write('#!/bin/sh\nout=; while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done\n'
+                    'head -c 2097152 /dev/zero > "$out"; sleep 3; cp "%s" "$out"\n' % os.path.join(self.rel, "agent-browser-linux-x64"))
+        os.chmod(os.path.join(slow, "curl"), 0o755)
+        p = self.hbr("--install", path=slow, HERDR_BROWSER_PROGRESS_EVERY="1")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("downloading agent-browser 0.41.1: 2.0 MB after", p.stderr)
+        self.assertIn("is ready", p.stdout)
+
     def test_herdrs_own_views_never_install(self):
         p = self.hbr("--own", "--task", "a#1", "session", "list")
         self.assertEqual(p.returncode, 127)

@@ -29,12 +29,12 @@ describe("attach and paste on macOS (GitHub #774)", () => {
     expect(calls[0][0]).toBe("osascript");
     expect(calls[0].join(" ")).toContain("with multiple selections allowed");
     expect(calls[0].at(-1)).toBe("Attach files");
-    expect(r).toEqual({ code: 0, paths: ["/tmp/demo/a.png", "/tmp/demo/notes.txt"] });
+    expect(r).toEqual({ code: 0, paths: ["/tmp/demo/a.png", "/tmp/demo/notes.txt"], why: "" });
   });
 
   test("cancelling the picker attaches nothing", async () => {
     answer = () => ({ code: 0, stdout: "\n" });
-    expect(await attach.pick()).toEqual({ code: 0, paths: [] });
+    expect(await attach.pick()).toEqual({ code: 0, paths: [], why: "" });
   });
 
   test("Linux keeps the desktop portal's picker", async () => {
@@ -43,6 +43,25 @@ describe("attach and paste on macOS (GitHub #774)", () => {
     const r = await attach.pick();
     expect(calls[0].join(" ")).toContain("pick-files.py");
     expect(r.paths).toEqual(["/tmp/demo/a.png"]);
+  });
+
+  test("a picker that can't open says why, for the chat to show beside + (#1225)", async () => {
+    os = "linux";
+    answer = () => ({ code: 1, stdout: "", stderr: "xdg-desktop-portal isn't running\n" } as any);
+    expect(await attach.pick()).toEqual({ code: 1, paths: [], why: "xdg-desktop-portal isn't running" });
+  });
+
+  test("a screenshot thumbnail from macOS's TemporaryItems is copied before macOS deletes it (#1095)", async () => {
+    answer = () => ({ code: 0, stdout: "" });
+    const shot = "/var/folders/xy/T/TemporaryItems/NSIRD_screencaptureui_Ab12/Screenshot 2026-11-21 at 10.00.00.png";
+    const got = await attach.keep(attach.paths([shot, "/tmp/demo/notes.txt"]));
+    expect(calls).toHaveLength(1);
+    expect(calls[0].slice(-3, -1)).toEqual(["/app/data/chat-attach", shot]);
+    expect(got[0]).toMatchObject({ name: "Screenshot 2026-11-21 at 10.00.00.png", image: true, temp: true });
+    expect(got[0].path).toStartWith("/app/data/chat-attach/pasted-");
+    expect(got[1]).toEqual({ path: "/tmp/demo/notes.txt", name: "notes.txt", image: false, temp: false });
+    expect(attach.fleetingPath(shot)).toBe(true);
+    expect(attach.fleetingPath("see /tmp/x.png")).toBe(false);
   });
 
   test("a pasted screenshot becomes an image attachment", async () => {
