@@ -90,6 +90,25 @@ export async function pick(title = "Attach files", os = window()?.platform) {
 // Dropped or pasted file paths as attachments.
 export const paths = (list) => list.filter(Boolean).map((p) => ({ path: p, name: base(p), image: isImage(p), temp: false }));
 
+// macOS hands a screenshot's floating thumbnail, dragged or pasted in, over as a file in a TemporaryItems folder
+// (…/TemporaryItems/NSIRD_screencaptureui_…/Screenshot….png) that it deletes moments later, so the agent got a path
+// to nothing (GitHub #1095). Such a file is copied into data/chat-attach first, as a pasted image is.
+export const fleeting = (f) => /\/TemporaryItems\//.test(f?.path ?? "") && !f.temp;
+export async function keep(list) {
+  const dir = `${appHome()}/data/chat-attach`;
+  const out = [];
+  for (const f of list) {
+    if (!fleeting(f)) { out.push(f); continue; }
+    const name = `pasted-${Date.now().toString(36)}-${f.name}`;
+    const r = await exec("sh", ["-c", 'mkdir -p "$1" && cp "$2" "$1/$3"', "x", dir, f.path, name]).catch(() => null);
+    out.push(r && r.code === 0 ? { ...f, path: `${dir}/${name}`, temp: true } : f);
+  }
+  return out;
+}
+
+// A pasted line that is such a file's own path (macOS pastes the thumbnail's path as text): the file it names.
+export const fleetingPath = (line) => /^\/\S.*\/TemporaryItems\/.+\.\w+$/.test(line.trim());
+
 // The message's file lines: each file's path where the agent is. For another machine, a copy
 // lands beside the agent's terminal.
 export async function deliver(files, addr, machine) {
