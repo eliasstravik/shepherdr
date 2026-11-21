@@ -3,9 +3,12 @@
 the profile folder <name> (sign-ins), <name>.task (its herdr.task key), <name>.used (the agent's or
 the person's last use), <name>.you (the person drives it), <name>.view (the panel's live viewer,
 bin/herdr-browser-view, is wanted: it ends by itself once this goes stale). A tick (browser_pass) closes:
-- a Done or removed task's browser, and forgets its sign-ins (the profile goes);
+- a Done or removed task's browser, and forgets its sign-ins (the profile goes), once its agent has stopped using
+  it (GitHub #1138: an auto-merged task's agent still checking its proof got a blank page between two commands);
 - one idle longer than the machine's browser_idle_close minutes (Settings > Machines; 10 when not
-  set; 0 or "off": never), sign-ins kept. The agent's next command opens it again."""
+  set; 0 or "off": never), sign-ins kept. The agent's next command opens it again.
+Either way it leaves <name>.closed saying why: herdr-browser tells the agent once that its page and viewport start
+fresh, instead of a silent about:blank (#1147)."""
 
 import hashlib
 import json
@@ -106,6 +109,15 @@ def _live_sessions(bp):
         return set()
 
 
+def _closed_note(name, why):
+    """<name>.closed: why Herdr closed it, for herdr-browser to say once on the next command."""
+    try:
+        with open(os.path.join(ROOT, name + ".closed"), "w") as f:
+            f.write(why + "\n")
+    except OSError:
+        pass
+
+
 def browser_pass(report):
     """Closes Done/removed tasks' browsers (forgetting sign-ins) and idle ones (keeping them)."""
     try:
@@ -126,13 +138,17 @@ def browser_pass(report):
         if not found:
             continue
         if t is None or t.get("state") == "done":
+            used = _age_ms(os.path.join(ROOT, name + ".used"))
+            if used is not None and used < (idle or IDLE_MIN * 60000):
+                continue  # its agent is still at work in it (checking a proof after merge): later
             _close(bp, key)
             shutil.rmtree(os.path.join(ROOT, name), ignore_errors=True)
-            for ext in (".used", ".you", ".view", ".new", ".session", ".task"):
+            for ext in (".used", ".you", ".view", ".new", ".session", ".task", ".closed"):
                 try:
                     os.remove(os.path.join(ROOT, name + ext))
                 except OSError:
                     pass
+            _closed_note(name, "the task is Done, so its browser was closed and its sign-ins forgotten")
             report.setdefault("browsers_forgotten", []).append(key)
             continue
         if idle is None:
@@ -147,4 +163,5 @@ def browser_pass(report):
         used = _age_ms(os.path.join(ROOT, name + ".used"))
         if used is None or used >= idle:
             _close(bp, key)
+            _closed_note(name, "it was closed after %g minutes unused (Settings > Machines: browser idle close)" % (idle / 60000))
             report.setdefault("browsers_closed", []).append(key)

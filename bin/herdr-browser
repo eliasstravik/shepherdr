@@ -404,6 +404,12 @@ if [ -z "$own" ]; then
     esac
   fi
   touch "$root/$name.used" 2>/dev/null
+  # Herdr closed it (idle, or the task is Done): said once, so a blank page and a desktop-sized viewport aren't a
+  # mystery (GitHub #1147, #1138).
+  if [ -f "$root/$name.closed" ]; then
+    echo "herdr-browser: note: this task's browser had been closed ($(cat "$root/$name.closed" 2>/dev/null)); it starts again on a blank page at its default size: open your page and set the viewport again." >&2
+    rm -f "$root/$name.closed"
+  fi
 fi
 [ -f "$root/$name.task" ] || printf '%s\n' "$task" > "$root/$name.task"
 # A browser opened before names were cut (a name of 33-64 characters still fit agent-browser's socket path) holds the
@@ -485,4 +491,45 @@ export AGENT_BROWSER_ARGS="${AGENT_BROWSER_ARGS:---force-prefers-reduced-motion}
 # so the stream's own are kept small and cheap.
 export AGENT_BROWSER_STREAM_MAX_WIDTH="${AGENT_BROWSER_STREAM_MAX_WIDTH:-320}"
 export AGENT_BROWSER_STREAM_QUALITY="${AGENT_BROWSER_STREAM_QUALITY:-40}"
-exec "$bin" --session "$session" --profile "$profile" "$@"
+# open that never comes back (#1154): a watchdog ends the wait after HERDR_BROWSER_OPEN_WAIT seconds (default 90) and
+# says so. A reply the daemon dropped ("Invalid response: EOF", #1081) on a command that only looks or sets is tried
+# once more, and said plainly if it fails again. Everything else runs as agent-browser itself.
+case "$verb" in
+  open|goto|navigate|set|get|snapshot|screenshot|is|reload) ;;
+  *) exec "$bin" --session "$session" --profile "$profile" "$@" ;;
+esac
+errf=$(mktemp "${TMPDIR:-/tmp}/herdr-browser.XXXXXX") || exec "$bin" --session "$session" --profile "$profile" "$@"
+trap 'rm -f "$errf" "$errf.late"' EXIT
+wait_s=${HERDR_BROWSER_OPEN_WAIT:-90}
+tries=0
+while :; do
+  tries=$((tries + 1))
+  case "$verb" in
+    open|goto|navigate|reload)
+      "$bin" --session "$session" --profile "$profile" "$@" 2>"$errf" &
+      pid=$!
+      ( w=0; while [ "$w" -lt "$wait_s" ] && kill -0 "$pid" 2>/dev/null; do sleep 1; w=$((w + 1)); done
+        kill -0 "$pid" 2>/dev/null && : > "$errf.late" && kill "$pid" 2>/dev/null ) &
+      dog=$!
+      wait "$pid"; rc=$?
+      kill "$dog" 2>/dev/null; wait "$dog" 2>/dev/null
+      if [ -f "$errf.late" ]; then
+        cat "$errf" >&2
+        echo "herdr-browser: $verb didn't finish within $wait_s s, so herdr-browser stopped waiting. The page may still be loading: get url and snapshot say where it is. If the next command hangs too, run: herdr-browser close, then open it again." >&2
+        exit 124
+      fi ;;
+    *) "$bin" --session "$session" --profile "$profile" "$@" 2>"$errf"; rc=$? ;;
+  esac
+  if [ "$rc" != 0 ] && grep -qiE 'invalid response|EOF' "$errf" 2>/dev/null; then
+    if [ "$tries" = 1 ]; then
+      echo "herdr-browser: the browser dropped its answer to $verb; trying once more…" >&2
+      sleep 1; continue
+    fi
+    cat "$errf" >&2
+    echo "herdr-browser: the browser dropped its answer to $verb twice, so whether it ran is unknown. Check with get url or snapshot; if it keeps happening, run herdr-browser close and start again." >&2
+    exit "$rc"
+  fi
+  break
+done
+cat "$errf" >&2
+exit "$rc"

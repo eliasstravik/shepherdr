@@ -88,3 +88,66 @@ class BrowserArgs(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BrowserAnswers(unittest.TestCase):
+    """What herdr-browser says when agent-browser doesn't answer as it should: a dropped reply is tried once more
+    (#1081), an open that never comes back is cut off with why (#1154), and a browser Herdr closed says so once (#1147)."""
+
+    def setUp(self):
+        self.home = tempfile.mkdtemp(prefix="shep-browser-ans-")
+        self.addCleanup(shutil.rmtree, self.home, True)
+        self.bin = os.path.join(self.home, "agent-browser")
+        self.count = os.path.join(self.home, "count")
+
+    def fake(self, body):
+        with open(self.bin, "w") as f:
+            f.write('#!/bin/sh\n[ "$1" = --version ] && { echo "agent-browser 0.41.1"; exit 0; }\n'
+                    'echo x >> %s\nn=$(wc -l < %s | tr -d " ")\n%s\n' % (self.count, self.count, body))
+        os.chmod(self.bin, 0o755)
+
+    def run_it(self, *args, **env):
+        e = {"HOME": self.home, "PATH": os.environ["PATH"], "HERDR_BROWSER_BIN": self.bin, **env}
+        return subprocess.run(["sh", HB, "--task", "dev-shop#2", *args], env=e, capture_output=True, text=True, timeout=60)
+
+    def calls(self):
+        with open(self.count) as f:
+            return len(f.read().splitlines())
+
+    def test_a_dropped_reply_is_tried_once_more(self):
+        self.fake('[ "$n" = 1 ] && { echo "Invalid response: EOF" >&2; exit 1; }; echo "viewport set"')
+        p = self.run_it("set", "viewport", "390", "844")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("viewport set", p.stdout)
+        self.assertIn("trying once more", p.stderr)
+        self.assertEqual(self.calls(), 2)
+
+    def test_dropped_twice_says_so_plainly(self):
+        self.fake('echo "Invalid response: EOF" >&2; exit 1')
+        p = self.run_it("set", "viewport", "390", "844")
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("dropped its answer to set twice", p.stderr)
+        self.assertEqual(self.calls(), 2)
+
+    def test_an_acting_command_is_never_repeated(self):
+        self.fake('echo "Invalid response: EOF" >&2; exit 1')
+        p = self.run_it("click", "@e2")
+        self.assertEqual(p.returncode, 1)
+        self.assertEqual(self.calls(), 1)
+
+    def test_an_open_that_never_comes_back_is_cut_off_with_why(self):
+        self.fake('exec sleep 30')
+        p = self.run_it("open", "about:blank", HERDR_BROWSER_OPEN_WAIT="2")
+        self.assertEqual(p.returncode, 124)
+        self.assertIn("didn't finish within 2 s", p.stderr)
+
+    def test_a_browser_herdr_closed_says_so_once(self):
+        self.fake('echo ok')
+        root = os.path.join(self.home, ".herdr", "browser")
+        os.makedirs(root, exist_ok=True)
+        with open(os.path.join(root, "dev-shop-2.closed"), "w") as f:
+            f.write("it was closed after 10 minutes unused\n")
+        p = self.run_it("snapshot")
+        self.assertIn("had been closed (it was closed after 10 minutes unused)", p.stderr)
+        self.assertIn("set the viewport again", p.stderr)
+        self.assertNotIn("had been closed", self.run_it("snapshot").stderr)
