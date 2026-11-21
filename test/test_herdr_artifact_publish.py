@@ -235,7 +235,8 @@ class Publish(unittest.TestCase):
         self.assertIn("Waiting for another herdr-artifact", err.getvalue())
 
     def lock_path(self):
-        with A.Store(A.locate(self.folder)) as s:
+        # write=False: finding the path must not take the lock under test (#1108: it waited out a lock a regression held)
+        with A.Store(A.locate(self.folder), write=False) as s:
             return os.path.join(A.STORE, "." + os.path.basename(s.path) + ".lock")
 
     def test_a_read_never_waits_on_the_lock(self):
@@ -283,6 +284,48 @@ class Publish(unittest.TestCase):
         self.assertEqual(sorted(json.loads(l)["version"] for l in out.getvalue().splitlines()), [2, 3])
         with A.Store(A.locate(self.folder), write=False) as s:
             self.assertEqual([x["v"] for x in s.find(aid)["versions"]], [1, 2, 3])
+
+    def test_a_new_publish_in_a_read_only_store_says_so(self):
+        """#1108: a new artifact's folder couldn't be made in a read-only store (a sandbox): a traceback, not words."""
+        if os.geteuid() == 0:
+            self.skipTest("root writes anywhere")
+        self.publish(self.recipe())   # the store and its files' folder are there
+        os.chmod(A.FILES, 0o555)
+        with self.assertRaises(A.Fail) as no:
+            self.publish(self.recipe("second"), title="Second")
+        self.assertIn("read-only", str(no.exception))
+
+    def test_check_without_herdr_app_says_so(self):
+        """#1108: `check` with no herdr-app here said it was drawn in light and dark with nothing to fix."""
+        aid = self.publish(self.recipe())["id"]
+        with mock.patch.dict(os.environ, {"PATH": "/nonexistent"}):
+            with self.assertRaises(A.Fail) as no:
+                A.cmd_check(types.SimpleNamespace(id=aid, version=None, json=True))
+        self.assertIn("herdr-app isn't here", str(no.exception))
+
+    def test_check_takes_a_kept_version_as_it_was_kept(self):
+        """#1108: a kept version its publish grew (a poster, an mp4 copy) past what a publish takes in is still checked,
+        never refused as too big."""
+        aid = self.publish(self.recipe())["id"]
+        with open(os.path.join(A.FILES, aid, "v1", "poster.png"), "wb") as f:
+            f.write(b"\x89PNG")
+        with mock.patch.object(A, "MAX_FILES", 1), mock.patch("sys.stdout", io.StringIO()):
+            self.assertEqual(A.cmd_check(types.SimpleNamespace(id=aid, version=None, json=True)), 0)
+
+    def test_an_update_keeps_a_newer_title_and_task(self):
+        """#1108: an update without --title, checked while another update renamed the artifact and gave it a task,
+        saved the title it had read before: the newer title and task are kept."""
+        aid = self.publish(self.recipe())["id"]
+        real, calls = A.check, []
+
+        def check(*a):
+            calls.append(1)
+            if len(calls) == 1:   # meanwhile, another update saves a new title and task
+                self.publish(self.recipe("other"), id=aid, title="Renamed", task="SHEP-9")
+            return real(*a)
+        with mock.patch.object(A, "check", check):
+            out = self.publish(self.recipe("mine"), id=aid, title=None)
+        self.assertEqual((out["version"], out["title"], out["task"]), (3, "SHEP-9: Renamed", "SHEP-9"))
 
     def test_a_refused_new_artifact_leaves_nothing(self):
         os.environ["FAKE_CHECK"] = "broken"

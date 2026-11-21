@@ -800,13 +800,7 @@ def _codex_polled(call):
     Keep command slots too: an exec_command result must never end a neighbouring poll.
     Unknown JavaScript stays unresolved; never execute an agent's script to read its log.
     """
-    loop = re.compile(r"for\s*\(const\s+(\w+)\s+of\s+\[([\d,\s]+)\]\s*\)\s*\{(.*?)\}\s*\}", re.S)
-    def expand(m):
-        body = m.group(3) + "}"
-        return "\n".join(re.sub(r"session_id\s*:\s*" + re.escape(m.group(1)) + r"\b",
-                                    "session_id:" + sid.strip(), body)
-                         for sid in m.group(2).split(",") if sid.strip())
-    call = loop.sub(expand, call)
+    call = _expand_loops(call)
     slots = []
     for m in re.finditer(r"tools\.(exec_command|write_stdin)\s*\(\s*\{([^{}]*)\}", call):
         sid = CODEX_SESSION_ARG.search(m.group(2) + "}") if m.group(1) == "write_stdin" else None
@@ -818,6 +812,42 @@ def _codex_polled(call):
         return [str(sid)] if isinstance(sid, (int, str)) and str(sid).isdigit() else []
     except (ValueError, AttributeError):
         return []
+
+
+LOOP_HEAD = re.compile(r"for\s*\(\s*(?:const|let|var)\s+(\w+)\s+of\s+\[([\d,\s]+)\]\s*\)\s*\{")
+
+
+def _expand_loops(call):
+    """Each `for (const id of [7, 8]) { … }` written out once per id, whatever its body holds (a try block, one
+    results.push(…) call: #1108), its end found by counting braces outside strings. A loop whose end isn't found
+    stays as it was."""
+    out, i = [], 0
+    while True:
+        m = LOOP_HEAD.search(call, i)
+        if not m:
+            return "".join(out) + call[i:]
+        depth, j, quote = 1, m.end(), None
+        while j < len(call) and depth:
+            c = call[j]
+            if quote:
+                if c == "\\":
+                    j += 1
+                elif c == quote:
+                    quote = None
+            elif c in "'\"`":
+                quote = c
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+            j += 1
+        if depth:
+            return "".join(out) + call[i:]
+        body = call[m.end():j - 1]
+        name = re.compile(r"session_id\s*:\s*" + re.escape(m.group(1)) + r"\b")
+        out.append(call[i:m.start()])
+        out.append("\n".join(name.sub("session_id:" + sid.strip(), body) for sid in m.group(2).split(",") if sid.strip()))
+        i = j
 
 
 def _codex_results(output):

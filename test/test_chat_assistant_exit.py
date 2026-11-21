@@ -65,8 +65,38 @@ class AssistantExitKeepsItsTab(unittest.TestCase):
 
     def test_restart_resumes_the_same_session(self):
         body = SRC[SRC.index("  restartAssistant(cx) {"):SRC.index("  closeSelf() {")]
-        self.assertIn("agent.resumeArgv(this.kind", body)
+        self.assertIn("agent.resumeArgv(kind", body)
+        self.assertIn("agent.sessionOf(kind, path)", body)
         self.assertIn("resume: true", body)
+
+    def test_start_a_new_one_while_restarting_wins(self):
+        """#1108: "Start a new one" pressed while Restart Assistant waits on hc emptied the chat (path null), and the
+        restart went on with a null session: it stops there now, the chat left fresh, nothing restarted."""
+        restart = re.search(r"\n  restartAssistant\(cx\) \{\n.*?\n  \}\n", SRC, re.S).group(0).strip()
+        fresh = re.search(r"\n  startFresh\(\) \{\n.*?\n  \}\n", SRC, re.S).group(0).strip()
+        script = r"""
+let answer; const hcCalls = [], resumed = [], restarted = [];
+const hc = (args) => { hcCalls.push(args); return new Promise((r) => { answer = r; }); };
+const agent = { sessionOf: (k, p) => (p ? "s1" : null), resumeArgv: (k, a, s) => { resumed.push(s); return a; },
+  restart: async () => { restarted.push(1); return "t9"; } };
+const toast = () => {}, plainError = (e) => String(e);
+const obj = { %s, %s };
+const self = Object.assign(obj, { addr: "t7", kind: "claude", path: "/x/s1.jsonl", phase: "ended", endedAssistant: true,
+  myPane: () => "p1", lastPane: "p1", reset() {}, follow_to() {}, follow: async () => {} });
+let job;
+const cx = { notify() {}, spawn: (f) => { job = f(cx); }, timer: { after() {} } };
+self.restartAssistant(cx);
+self.startFresh();
+answer({ stdout: JSON.stringify({ argv: ["claude"] }) });
+await job;
+console.log(JSON.stringify({ resumed, restarted, phase: self.phase, restarting: self.restarting }));
+""" % (restart, fresh)
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "restart.mjs")
+            with open(path, "w") as f:
+                f.write(script)
+            out = json.loads(subprocess.run(["node", path], capture_output=True, text=True, check=True).stdout)
+        self.assertEqual(out, {"resumed": [], "restarted": [], "phase": "fresh", "restarting": False})
 
 
 if __name__ == "__main__":

@@ -884,6 +884,10 @@ def find(go=False):
         lock.close()
         raise Fail("Find machines is already running")
     try:
+        # #1108: another Find may have run and let go of the lock since the wait was read: read it again, held
+        wait = max(0, FIND_EVERY_MS - (now() - (_found() or {}).get("at", 0)))
+        if wait:
+            raise Fail(f"Find machines ran {(FIND_EVERY_MS - wait) // 60000} min ago; try again in {-(-wait // 60000)} min")
         _save_found({"at": now(), "hosts": [], "running": True})  # counts for the wait even if this run dies
         out, todo = [None] * len(hosts), list(enumerate(hosts))
         mu = threading.Lock()

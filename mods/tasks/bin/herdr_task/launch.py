@@ -153,6 +153,8 @@ def codex_hook_hash(ident):
     return hashlib.sha256(json.dumps(ident, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
 
+# Shepherdr's own chat hooks as the installer writes them in Codex's hooks.json (bin/shepherdr).
+OWN_HOOK = re.compile(r"sh '[^'\n]*/mods/chat/(session-note|ask-hook)\.sh'")
 # Codex's event names in hooks.state keys, from hooks.json's.
 CODEX_EVENTS = {"SessionStart": "session_start", "PermissionRequest": "permission_request"}
 
@@ -176,7 +178,8 @@ def own_codex_hooks():
                 continue
             h = entries[0]
             cmd = h.get("command") if isinstance(h, dict) else None
-            if (not isinstance(cmd, str) or not re.search(r"/mods/chat/(session-note|ask-hook)\.sh'?$", cmd)
+            # exactly the installer's `sh '<app>/mods/chat/<hook>.sh'` (#1108): never a longer command that ends so
+            if (not isinstance(cmd, str) or not OWN_HOOK.fullmatch(cmd)
                     or set(h) - {"type", "command", "timeout", "async"} or not isinstance(h.get("timeout"), int)):
                 continue
             ident = {"event_name": name, "hooks": [{"async": bool(h.get("async", False)), "command": cmd,
@@ -750,6 +753,11 @@ def folder_for(s, task):
     # a task that has one keeps it wherever it is (git keeps its absolute path).
     root = os.path.expanduser(str(settings_for(s, task.get("space"))["tasks"].get("worktree_root") or "").strip()) or WORKTREES
     path = os.path.join(root, os.path.basename(main), re.sub(r"[^A-Za-z0-9._-]+", "-", branch).strip("-"))
+    # #1108: branches such as feature/a and feature-a make the same folder name: one another task has is never taken
+    # over (#1023's reuse is for this task's own), this one gets its own beside it.
+    if any(o is not task and o.get("worktree") and os.path.realpath(o["worktree"]) == os.path.realpath(path)
+           for o in s.data.get("tasks") or []):
+        path = f"{path}-{task['id']}"
     # Its own base (--base) branches from that branch; else from what the folder has checked out.
     own = task.get("base") if task.get("base_set") else None
     base = base_ref(main, own) if own else current_base(main)
