@@ -26,14 +26,39 @@ export const webOrigin = (dns: string, hp = DEFAULT_HTTPS) => (hp === DEFAULT_HT
 /** The web app's link: <origin>/shepherdr/. */
 export const webLink = (dns: string, hp = DEFAULT_HTTPS) => `${webOrigin(dns, hp)}${MOUNT}/`;
 
-async function run(args: string[]): Promise<{ ok: boolean; out: string; err: string }> {
+/** How long `tailscale serve` may take before it is ended: it answers in a second or two when it can share. */
+export const SERVE_WAIT = Number(process.env.SHEPHERDR_TEST_SERVE_WAIT) || 20_000;
+
+export type Ran = { ok: boolean; out: string; err: string; timedOut?: boolean };
+
+/** Runs cmd, ended after ms when given (GitHub #1229: on a tailnet without Serve, `tailscale serve` waits forever on its
+ *  consent link). What it printed before then is kept, so the link can be read. */
+export async function runCmd(cmd: string[], ms?: number): Promise<Ran> {
   try {
-    const p = Bun.spawn(["tailscale", ...args], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+    const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+    let timedOut = false;
+    const timer = ms ? setTimeout(() => { timedOut = true; try { p.kill("SIGKILL"); } catch {} }, ms) : null;
     const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
-    return { ok: (await p.exited) === 0, out, err };
+    const code = await p.exited;
+    if (timer) clearTimeout(timer);
+    return { ok: code === 0 && !timedOut, out, err, ...(timedOut ? { timedOut } : {}) };
   } catch (e) {
     return { ok: false, out: "", err: (e as Error).message };
   }
+}
+// every tailscale call is ended in time: one that waits never holds up the service
+const run = (args: string[], ms = SERVE_WAIT) => runCmd(["tailscale", ...args], ms);
+
+
+/** Where an admin turns Serve on when tailscale gave no link of its own. */
+export const SERVE_ADMIN = "https://login.tailscale.com/admin";
+
+/** Plain words when tailscale serve refused because Serve isn't turned on for the tailnet (GitHub #1229, #1114), with
+ *  the link it gave to turn it on; null when that isn't what it said. */
+export function serveNotEnabled(said: string): string | null {
+  if (!/serve is not enabled|serve isn.t enabled|serve.{0,30}not.{0,10}enabled/i.test(said)) return null;
+  const link = said.match(/https:\/\/\S+/)?.[0]?.replace(/[.,)]+$/, "") ?? SERVE_ADMIN;
+  return `Tailscale Serve isn't turned on for your tailnet. An admin can turn it on here: ${link}`;
 }
 
 async function serveStatus(): Promise<any> {
@@ -119,7 +144,10 @@ export function freePort(status: any, hp: number): number {
 }
 
 /** What to say when sharing on hp can't work or failed: tailscale's own words when it gave some, and another port. */
-export function shareProblem(status: any, hp: number, err = ""): string {
+export function shareProblem(status: any, hp: number, err = "", timedOut = false): string {
+  const off = serveNotEnabled(err);
+  if (off) return off;
+  if (timedOut) return `tailscale serve didn't answer in ${SERVE_WAIT / 1000} seconds${err.trim() ? `: ${err.trim().split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 2).join(" ")}` : ""}`;
   const other = freePort(status, hp);
   const fix = `Pick another port: \`shepherdr web https-port ${other}\`.`;
   const held = heldBy(status, hp);
@@ -132,7 +160,13 @@ export function shareProblem(status: any, hp: number, err = ""): string {
 /** Shares 127.0.0.1:<port> at https://<machine>[:<hp>]/shepherdr. Refuses to replace /shepherdr when it points
  *  elsewhere. Ours on another HTTPS port (the setting changed) moves to hp: the old share goes once the new one is up.
  *  Returns null, or why it isn't shared (tailscale's own words, and another port when hp is taken). */
-export async function share(dns: string, port: number, hp = DEFAULT_HTTPS): Promise<string | null> {
+export function share(dns: string, port: number, hp = DEFAULT_HTTPS): Promise<string | null> {
+  // never a second `tailscale serve` while one still waits (GitHub #1229): a look meanwhile gets the same answer
+  return (sharing ??= shareOnce(dns, port, hp).finally(() => { sharing = null; }));
+}
+let sharing: Promise<string | null> | null = null;
+
+async function shareOnce(dns: string, port: number, hp: number): Promise<string | null> {
   const status = await serveStatus();
   const now = await served(dns, status);
   const ours = `http://127.0.0.1:${port}`;
@@ -141,7 +175,7 @@ export async function share(dns: string, port: number, hp = DEFAULT_HTTPS): Prom
   if (now.proxy && now.proxy !== ours) return `${MOUNT} is already shared to ${now.proxy}`;
   if (heldBy(status, hp)) return shareProblem(status, hp);
   const r = await run(["serve", "--bg", `--https=${hp}`, "--set-path", MOUNT, String(port)]);
-  if (!r.ok) return shareProblem(status, hp, r.err || r.out);
+  if (!r.ok) return shareProblem(status, hp, [r.err, r.out].filter((x) => x.trim()).join("\n"), r.timedOut);
   if (now.proxy === ours && now.port) await run(["serve", `--https=${now.port}`, "--set-path", MOUNT, "off"]);
   return null;
 }
