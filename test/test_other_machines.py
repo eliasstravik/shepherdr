@@ -157,5 +157,41 @@ class TemplatesFollowXdg(unittest.TestCase):
         self.assertEqual(sh.tpl_rel(home), ".config/herdr-core/templates")
 
 
+class BarePath(unittest.TestCase):
+    """#1117: a launchd-started herdr-core runs helpers with PATH=/usr/bin:/bin; they still find hc in ~/.local/bin."""
+
+    def fake_home(self):
+        home = scratch(self)
+        os.makedirs(os.path.join(home, ".local", "bin"))
+        hc = os.path.join(home, ".local", "bin", "hc")
+        with open(hc, "w") as f:
+            f.write('#!/bin/sh\necho \'{"core":{"name":"vm-test"}}\'\n')
+        os.chmod(hc, 0o755)
+        return home
+
+    def test_herdr_task_finds_hc(self):
+        home = self.fake_home()
+        code = ("import sys, subprocess; sys.path.insert(0, sys.argv[1]); import herdr_task.base as b, os;"
+                "print(os.environ['PATH']); print(subprocess.run(['hc', 'server', 'status'], stdout=subprocess.PIPE, text=True).stdout.strip())")
+        r = subprocess.run([sys.executable, "-c", code, BIN], env={"HOME": home, "PATH": "/usr/bin:/bin"}, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        path, out = r.stdout.splitlines()
+        self.assertTrue(path.startswith("/usr/bin:/bin:"), path)  # the person's order first
+        self.assertEqual(json.loads(out)["core"]["name"], "vm-test")
+        # run once more from that PATH: nothing doubles
+        r = subprocess.run([sys.executable, "-c", code, BIN], env={"HOME": home, "PATH": path}, capture_output=True, text=True)
+        self.assertEqual(r.stdout.splitlines()[0], path)
+
+    def test_single_file_helpers_widen_path_too(self):
+        home = self.fake_home()
+        for helper in (os.path.join(ROOT, "bin", "herdr-secret"), os.path.join(ROOT, "mods", "artifacts", "bin", "herdr-artifact")):
+            with open(helper) as f:
+                text = f.read()
+            head = text[:text.index("# ---- SHEP:")]  # imports, HOME and the PATH fix
+            code = head + "\nimport shutil\nprint(shutil.which('hc'))\n"
+            r = subprocess.run([sys.executable, "-c", code], env={"HOME": home, "PATH": "/usr/bin:/bin"}, capture_output=True, text=True)
+            self.assertEqual(r.stdout.strip(), os.path.join(home, ".local", "bin", "hc"), helper + r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
