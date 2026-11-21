@@ -189,3 +189,14 @@ test("a space's choice before the first message: kept whole (Ultrafast too), com
   expect(choiceOf(all, "sp1")).toBeNull();
   expect(withChoice({ a: { agent: "claude", at: 1 } }, "a", null)).toEqual({});
 });
+
+test("#1219: a switch carries the old agent's permission in the new CLI's words", () => {
+  // the window's restart passes the Claude agent's mode when the person picked none: Codex gets full access, never its sandbox
+  const codex = argvFor({ agent: "codex", perm: "bypassPermissions" }, { agent: "claude", argv: ["claude", "--dangerously-skip-permissions"] }).argv;
+  expect(codex).toContain("--dangerously-bypass-approvals-and-sandbox");
+  expect(codex).not.toContain("workspace-write");
+  expect(argvFor({ agent: "codex", perm: "plan" }, { agent: "claude", argv: [] }).argv.join(" ")).toContain("-s read-only");
+  const claude = argvFor({ agent: "claude", perm: "full" }, { agent: "codex", argv: [] }).argv;
+  expect(claude).toContain("--dangerously-skip-permissions");
+  expect(argvFor({ agent: "claude", perm: "acceptEdits" }, { agent: "claude", argv: [] }).argv.join(" ")).toContain("--permission-mode acceptEdits");
+});

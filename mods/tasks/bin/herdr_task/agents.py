@@ -655,7 +655,7 @@ FG_MAX_MS = 15 * 60000
 BG_HINTS = ("<task-notification>", "task_id", "backgroundTaskId", "timeoutMs", "isAsync", "in background with ID",
             "Monitor started", "Async agent launched", "session_id", "session ID",
             # Codex (SHEP-207): a poll's result without its session id, a wait on a code-mode cell
-            "exit_code", "Process exited", "cell_id", "cell ID",
+            "exit_code", "Process exited", "cell_id", "cell ID", "exec_command",
             # Codex 0.163+: its own word that a command ended (#1093)
             '"item_completed"')
 BG_MAX_MS = 3 * 3600_000  # a background job started longer ago than this no longer counts
@@ -803,12 +803,15 @@ def _bg_scan(lines, seen):
                 before = set(running)
                 if _codex_output(p.get("output"), polled, cells, running, at, seen.get("done")):
                     ended = max(ended, at)
-                new = [k for k in running if k not in before]
-                if new:  # what each started job runs, for ready to name it (#1093)
-                    what = seen.setdefault("what", {})
-                    cmds = [c for c in _codex_cmds(call) if c]
-                    for i, k in enumerate(new):
-                        what[k] = cmds[i] if len(cmds) == len(new) else cmds[0] if len(cmds) == 1 else None
+                if any(k not in before for k in running):  # what each started job runs, for ready to name it (#1093)
+                    what, cmds = seen.setdefault("what", {}), _codex_cmds(call)
+                    results = _codex_results(p.get("output"))
+                    for i, r in enumerate(results if len(results) == len(cmds) else []):
+                        if r.get("session_id") is not None and cmds[i] and "codex:" + str(r["session_id"]) not in before:
+                            what["codex:" + str(r["session_id"])] = cmds[i]
+                    for k in running:
+                        if k not in before and k not in what and len([c for c in cmds if c]) == 1:
+                            what[k] = next(c for c in cmds if c)  # the legacy call: its one command
     seen["ended"] = ended
 
 
@@ -869,12 +872,13 @@ def _expand_loops(call):
 
 
 def _codex_cmds(call):
-    """The commands a Codex call starts, in order: its exec_command cmd strings (code mode's script, or the
-    legacy call's JSON arguments)."""
+    """What each tool call in a Codex call runs, in order: an exec_command's cmd string, None for a write_stdin
+    (code mode's script); a legacy exec_command's JSON arguments: its one cmd."""
     out = []
-    for m in re.finditer(r'tools\.exec_command\s*\(\s*\{\s*"?cmd"?\s*:\s*"((?:[^"\\]|\\.)*)"', call):
+    for m in re.finditer(r'tools\.(exec_command|write_stdin)\s*\(', call):
+        c = re.match(r'\s*\{\s*"?cmd"?\s*:\s*"((?:[^"\\]|\\.)*)"', call[m.end():]) if m.group(1) == "exec_command" else None
         try:
-            out.append(json.loads('"' + m.group(1) + '"'))
+            out.append(json.loads('"' + c.group(1) + '"') if c else None)
         except ValueError:
             out.append(None)
     if out:
