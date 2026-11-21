@@ -1024,7 +1024,7 @@ def home_world(mini_links_laptop=True):
     well); the mini links back unless told not to. Each has one task's news and a full disk."""
     disk = {"cpu": 5, "load": 0.1, "cores": 8, "memory": 20, "disk": 97, "disks": []}
     news = lambda task: [{"to": "t9", "space": "sp-shop", "folder": "~/shop",
-                          "lines": [f'<herdr-news task="{task}" event="ready">{task} is ready</herdr-news>']}]
+                          "lines": [f'<herdr-news task="{task}" event="needs-you">{task} needs you</herdr-news>']}]
     return {"mini": {"core": "c-mini", "window": True, "links": ["laptop"] if mini_links_laptop else [], "linked_by": 2,
                      "space": "sp1", "assistant": "t1", "news": news("SHOP-1"), "health": disk},
             "laptop": {"core": "c-laptop", "window": True, "links": ["mini"], "linked_by": 1 if mini_links_laptop else 0,
@@ -1061,7 +1061,7 @@ class HomeLead(unittest.TestCase):
         ov = self.overview(mini)
         self.assertEqual({to for to, _ in ov}, {"t1"})
         self.assertEqual(sorted(l.split(">", 1)[1].split("<")[0] for _, l in ov),
-                         ["Machine laptop: Disk crossed its alert limit (Disk 97%)", "laptop · ~/shop: SHOP-2 is ready", "~/shop: SHOP-1 is ready"])
+                         ["Machine laptop: Disk crossed its alert limit (Disk 97%)", "laptop · ~/shop: SHOP-2 needs you", "~/shop: SHOP-1 needs you"])
         self.assertEqual(self.overview(laptop), [], "the laptop sent the overview too")
         # Health: each window tells its own home Assistant, never the other's.
         health = lambda sent: [to for to, l in sent if l.startswith("<herdr-health")]
@@ -1074,10 +1074,10 @@ class HomeLead(unittest.TestCase):
         (it could only sum up items it can't check); the laptop's own home Assistant keeps them."""
         world = home_world(mini_links_laptop=False)
         mini, laptop = self.round(world, "mini"), self.round(world, "laptop")
-        self.assertEqual([l.split(">", 1)[1].split("<")[0] for _, l in self.overview(mini)], ["~/shop: SHOP-1 is ready"])
+        self.assertEqual([l.split(">", 1)[1].split("<")[0] for _, l in self.overview(mini)], ["~/shop: SHOP-1 needs you"])
         self.assertEqual(self.lead("laptop"), "mini")
         self.assertNotIn("mini/t1", {to for to, _ in laptop}, "the laptop sent its news to a home Assistant that can't reach it")
-        self.assertEqual([(to, l.split(">", 1)[1].split("<")[0]) for to, l in self.overview(laptop)], [("t2", "~/shop: SHOP-2 is ready")])
+        self.assertEqual([(to, l.split(">", 1)[1].split("<")[0]) for to, l in self.overview(laptop)], [("t2", "~/shop: SHOP-2 needs you")])
 
     def test_stale_overview_lines_are_dropped(self):
         """#1188: overview lines queued for another machine's home Assistant (an older version's way),
@@ -1098,8 +1098,21 @@ class HomeLead(unittest.TestCase):
     def test_a_lone_window_leads(self):
         world = {"mini": dict(home_world()["mini"], links=[], linked_by=0)}
         sent = self.round(world, "mini")
-        self.assertEqual([l.split(">", 1)[1].split("<")[0] for _, l in self.overview(sent)], ["~/shop: SHOP-1 is ready"])
+        self.assertEqual([l.split(">", 1)[1].split("<")[0] for _, l in self.overview(sent)], ["~/shop: SHOP-1 needs you"])
         self.assertEqual({to for to, _ in sent}, {"t1"})
+
+    def test_only_what_needs_the_person_from_a_space_with_its_own_assistant(self):
+        """GitHub #1126: a space's own live Assistant got its news and acts on it; the overview keeps only what needs
+        the person (needs-you, failed), not every ready, done or working-again line."""
+        world = {"mini": dict(home_world()["mini"], links=[], linked_by=0)}
+        line = lambda task, ev, words: f'<herdr-news task="{task}" event="{ev}">{words}</herdr-news>'
+        world["mini"]["news"] = [{"to": "t9", "space": "sp-shop", "folder": "~/shop", "lines": [
+            line("SHOP-1", "ready", "SHOP-1 is ready"), line("SHOP-2", "done", "SHOP-2 is done"),
+            line("SHOP-3", "working-again", "SHOP-3 is working again"), line("SHOP-4", "stalled", "SHOP-4 looks stuck"),
+            line("SHOP-5", "needs-you", "SHOP-5 needs you"), line("SHOP-6", "failed", "SHOP-6 stopped")]}]
+        sent = self.round(world, "mini")
+        self.assertEqual([l.split(">", 1)[1].split("<")[0] for _, l in self.overview(sent)],
+                         ["~/shop: SHOP-5 needs you", "~/shop: SHOP-6 stopped"])
 
     def test_two_way_ties_agree(self):
         """Both link to each other and as many machines link to each: the lower core id leads, seen from either."""

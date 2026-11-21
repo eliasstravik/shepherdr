@@ -498,6 +498,28 @@ def default_space():
     raise Fail("Which space? Pass --space <space id>.")
 
 
+def _inside(path, top):
+    p, t = os.path.realpath(os.path.expanduser(path)), os.path.realpath(os.path.expanduser(top))
+    return p == t or p.startswith(t.rstrip("/") + "/")
+
+
+def space_for_folder(folder, caller=None):
+    """The space a task in `folder` (its repo) belongs to when no --space says (GitHub #1209): the caller's when its
+    folder is in that repo, else the one space on this machine whose folder is, so its news goes to that space's
+    Assistant, not to the Assistant that happened to start it. None: the window can't say, or no single space."""
+    if not folder or not shutil.which("herdr-app"):
+        return None
+    try:
+        spaces = [x for x in json.loads(run(["herdr-app", "ls"]).stdout).get("spaces") or []
+                  if x.get("id") and "/" not in x["id"] and not x.get("machine") and x.get("folder")]
+    except (Fail, ValueError, OSError, AttributeError):
+        return None
+    if caller and any(x["id"] == bare(caller) and _inside(x["folder"], folder) for x in spaces):
+        return bare(caller)
+    own = [x["id"] for x in spaces if _inside(x["folder"], folder)]
+    return own[0] if len(own) == 1 else None
+
+
 def tab_title(s, task):
     return f"{s.ref(task)} {task['title']}"
 

@@ -26,7 +26,7 @@ from .github import (already_merged, checks_missing, github_unreachable, pr_for_
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
-    own_path, parent_for, resume_argv, retag_tabs, set_branch, setup_for, tab_title, task_tabs,
+    own_path, parent_for, resume_argv, retag_tabs, set_branch, setup_for, space_for_folder, tab_title, task_tabs,
 )
 from .store import bare_by_mistake, is_task_list, locate, open_store, prefixes_in_use, read_list, Store, store_files
 from .queues import after_refs, parse_after, queue_reason, set_after
@@ -108,7 +108,7 @@ def cmd_add(args):
         # The person's setting wins: worktrees off for this repo means in the folder, --worktree or not.
         mode = "here" if args.here or not worktrees_on(s) else "worktree"
         t = s.new(args.title.strip(), prompt, mode)
-        space = bare(args.space) if args.space else caller_space()
+        space = bare(args.space) if args.space else (space_for_folder(s.loc["folder"], caller_space()) or caller_space())
         set_opts(t, args, s, space)
         set_base(s, t, args.base, space, new=True)
         set_branch(s, t, getattr(args, "branch", None))
@@ -409,7 +409,8 @@ def cmd_start(args):
         set_branch(s, t, getattr(args, "branch", None))
         take_pr(s, t, getattr(args, "pr", None))
         q = t.get("queue") or {}
-        space = bare(args.space) if args.space else (q.get("space") or default_space())
+        # --space, the one it was queued with, its repo's own space (#1209: its news go to that space's Assistant), the caller's
+        space = bare(args.space) if args.space else (q.get("space") or space_for_folder(s.loc["folder"], caller_space()) or default_space())
         argv = agent_argv(None, args.argv) if args.argv else worker_argv(s, t, space, args.agent) if args.agent else \
             (q.get("argv") or worker_argv(s, t, space))
         parent = args.parent or q.get("parent")

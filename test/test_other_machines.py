@@ -271,5 +271,44 @@ class AddonOffSays(unittest.TestCase):
         self.assertIn("Other machines is off", notes[0])
 
 
+class TaskSpaceByRepo(unittest.TestCase):
+    """#1209: a task started without --space by another space's Assistant belongs to its repo's own space, so its news
+    go to that space's Assistant and no other."""
+
+    def spaces(self, rows):
+        from unittest import mock
+        from herdr_task import launch
+        out = mock.Mock(stdout=json.dumps({"spaces": rows}), returncode=0)
+        for p in (mock.patch.object(launch, "run", lambda argv, **k: out),
+                  mock.patch.object(launch.shutil, "which", lambda n: "/x/herdr-app" if n == "herdr-app" else None)):
+            p.start()
+            self.addCleanup(p.stop)
+        return launch
+
+    def test_the_repos_space_not_the_callers(self):
+        root = scratch(self)
+        drama, folio = os.path.join(root, "dramabias"), os.path.join(root, "portfolio")
+        os.makedirs(drama), os.makedirs(folio)
+        launch = self.spaces([{"id": "sp1", "name": "portfolio", "folder": folio}, {"id": "sp2", "name": "dramabias", "folder": drama},
+                              {"id": "vm/sp9", "name": "dramabias", "folder": drama, "machine": "vm"}])
+        self.assertEqual(launch.space_for_folder(drama, "sp1"), "sp2")       # the portfolio Assistant starts a dramabias task
+        self.assertEqual(launch.space_for_folder(drama, "sp2"), "sp2")
+        self.assertEqual(launch.space_for_folder(os.path.join(root, "other"), "sp1"), None)  # no space of its own: the caller's
+
+    def test_the_callers_space_when_it_is_in_that_repo(self):
+        root = scratch(self)
+        sub = os.path.join(root, "repo", "web")
+        os.makedirs(sub)
+        launch = self.spaces([{"id": "sp1", "folder": os.path.join(root, "repo")}, {"id": "sp2", "folder": sub}])
+        self.assertEqual(launch.space_for_folder(os.path.join(root, "repo"), "sp2"), "sp2")
+        self.assertIsNone(launch.space_for_folder(os.path.join(root, "repo"), None))  # two spaces in it: can't say
+
+    def test_no_window(self):
+        from unittest import mock
+        from herdr_task import launch
+        with mock.patch.object(launch.shutil, "which", lambda n: None):
+            self.assertIsNone(launch.space_for_folder("/x", "sp1"))
+
+
 if __name__ == "__main__":
     unittest.main()
