@@ -171,3 +171,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - herdr-task's typing() reads a worker's session log from its hc herdr.resume label (log key): fake it with a temp JSONL and patch news.screen_raw (see ReadyAndPrFlow). (from SHEP-283)
 
 - The dev VM has a real hc in /usr/local/bin: a test whose fake hc cannot exec (no shebang) falls through to it if that folder is on PATH (Python's subprocess tries later PATH entries on ENOEXEC). (from SHEP-286)
+
+- Codex sandbox repros without an agent: `codex sandbox -c sandbox_mode='"workspace-write"' [-c sandbox_workspace_write.writable_roots=[...]] -- <cmd>` runs a command in the same bwrap+seccomp a worker gets (unix socket connect is refused there). (from SHEP-285)
