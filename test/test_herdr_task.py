@@ -2538,12 +2538,13 @@ class SetupBeforeTheAgent(unittest.TestCase):
 
     def test_setup_failed_says_why(self):
         import herdr_task.commands as commands
+        import herdr_task.base as base
         from herdr_task.agents import task_status
         from unittest import mock
         log = os.path.join(self.root, "f-1.log")
         with open(log, "w") as f:
             f.write("resolving\n\x1b[31merror: lockfile had changes\x1b[0m\n\n")
-        t = self.task(state="running", agents=[], attention_at=1)
+        t = self.task(state="running", agents=[{"address": "t1", "at": base.now()}], attention_at=1)
         args = __import__("argparse").Namespace(id="SHEP-1", folder=self.main, code=1, log=log)
         with mock.patch.object(commands, "open_store", lambda a: self.store):
             commands.cmd_setup_failed(args)
@@ -2551,6 +2552,8 @@ class SetupBeforeTheAgent(unittest.TestCase):
         self.assertIn("setup before the agent failed (exit 1): error: lockfile had changes. The agent didn't start.", t["attention"])
         self.assertIn(log, t["attention"])
         self.assertEqual(task_status(t, [])[:2], ("needs", "attention"))
+        # started again at once: not "already running"
+        self.assertIsNone(commands.just_started(t))
 
     def test_the_wrapper_goes_before_the_agent_in_its_command(self):
         cmd = self.launch.setup_argv(self.store, {"id": 4}, "bun install", ["claude", "brief"])

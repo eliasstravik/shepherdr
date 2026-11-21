@@ -283,6 +283,11 @@ def begin(s, t, argv, space, parent=None):
     return launch(s, t, argv, space, brief(s, t, parent, space, argv), parent=parent, setup=setup)
 
 
+def tilde(p):
+    home = os.path.expanduser("~")
+    return "~" + p[len(home):] if p.startswith(home + os.sep) else p
+
+
 def cmd_setup_failed(args):
     """A task's setup command (Settings > Tasks > Before the agent starts) failed in its terminal, so its agent
     didn't start (launch.SETUP_SH): the task waits for the person with why, its output's last line and where
@@ -297,8 +302,11 @@ def cmd_setup_failed(args):
     with open_store(args) as s:
         t = s.find(args.id)
         t["setup_failed"] = {"code": args.code, "log": args.log, "at": now()}
+        # Its agent never started: never "already running" (just_started) when it's started again at once.
+        for ag in (t.get("agents") or [])[-1:]:
+            ag.setdefault("ended", now())
         t["attention"] = (f"Its setup before the agent failed (exit {args.code})" + (f": {tail}" if tail else "") +
-                          f". The agent didn't start. Full output: {args.log}. Fix the setup in Settings › Tasks "
+                          f". The agent didn't start. Full output: {tilde(args.log)}. Fix the setup in Settings › Tasks "
                           f"› Before the agent starts (or the worktree), then start it again.")
         t.pop("attention_at", None)
         s.dirty = True
@@ -311,7 +319,7 @@ STARTING_MS = 120000
 
 def just_started(t):
     """The agent its queue or a start launched moments ago, while it is Working: its record, or None."""
-    fresh = [a for a in t.get("agents") or [] if now() - (a.get("at") or 0) < STARTING_MS]
+    fresh = [a for a in t.get("agents") or [] if now() - (a.get("at") or 0) < STARTING_MS and not a.get("ended")]
     return fresh[-1] if t.get("state") == "running" and fresh else None
 
 
