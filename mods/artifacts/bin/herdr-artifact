@@ -1517,9 +1517,9 @@ def cmd_note(o):
         except (ValueError, IndexError):
             raise Fail(r.stderr.strip() or f"Couldn't reach {o.machine}.")
         if out.get("error"):
-            raise Fail(out["error"])
+            raise Fail(plain_error(out["error"])[1])
         out["to"] = f"{o.machine}/{out['to']}"
-        print(json.dumps(out) if o.json else f"Sent to {out['to']}.")
+        print(json.dumps(out) if o.json else out.get("said") or f"Sent to {out['to']}.")
         return 0
     loc = find_anywhere(o.id)
     with Store(loc, write=False) as s:
@@ -1535,10 +1535,53 @@ def cmd_note(o):
     body = f'<hc from="artifact" id="{attr(a["id"])}" version="{v}" title="{attr(a["title"])}"{on}>\n' + "\n\n".join(lines) + "\n</hc>"
     r = run(["hc", "send", to, body])
     if r.returncode != 0:
-        raise Fail(r.stderr.strip() or r.stdout.strip() or f"Couldn't send it to {to}.")
+        kind, msg = plain_error(r.stderr.strip() or r.stdout.strip())
+        if kind != "blocked":
+            raise Fail(msg or f"Couldn't send it to {to}.")
+        # On a question card (#1213): typing would answer it. Held as tell-assistant holds, herdr-task's tick sends it
+        # once the question is answered, in order with any other held note.
+        if not hold_note(to, body):
+            raise Fail("It's waiting on a question, and the note couldn't be kept for later: send it again once that's answered.")
+        out = {"to": to, "why": why, "version": v, "image": image, "held": True, "said": HELD_NOTE}
+        print(json.dumps(out) if o.json else f"Held for {to}: {HELD_NOTE}")
+        return 0
     out = {"to": to, "why": why, "version": v, "image": image}
     print(json.dumps(out) if o.json else f"Sent to {to} ({why}).")
     return 0
+
+
+HELD_NOTE = "It's waiting on a question: your note goes to it once that's answered."
+
+
+def plain_error(text):
+    """(kind, message) of hc's or herdr-artifact's error, whatever JSON it came wrapped in (#1213: the page showed
+    {"error": "{\"error\":{...}}"}): hc's {"error": {"kind", "message"}}, a {"error": "..."} or plain words."""
+    kind, s = None, text
+    for _ in range(4):
+        if not isinstance(s, str):
+            break
+        t = s.strip()
+        if not t.startswith("{"):
+            break
+        try:
+            s = json.loads(t)
+        except ValueError:
+            break
+        while isinstance(s, dict):
+            kind = s.get("kind") or kind
+            s = s.get("error") if "error" in s else s.get("message", "")
+    msg = s if isinstance(s, str) else ""
+    return kind, msg.strip()
+
+
+def hold_note(to, body):
+    """Kept by herdr-task (its held messages) for the agent at `to`; True when kept."""
+    ht = shutil.which("herdr-task") or os.path.expanduser("~/.local/bin/herdr-task")
+    try:
+        return subprocess.run([ht, "_hold", to], input=body, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                              universal_newlines=True, timeout=30).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 # ---- a custom artifact's picture (the web app shows it in its place) -------------------------------

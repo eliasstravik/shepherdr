@@ -211,7 +211,8 @@ function send(m, cx) {
     m.sending = false;
     if (err) { m.said = err; m.failed = true; }
     else {
-      m.said = `Sent to ${keeperName(out.to)}. A new version shows here when it's in.`;
+      // held for an agent on a question (#1213): herdr-artifact's own plain line
+      m.said = out.said || `Sent to ${keeperName(out.to)}. A new version shows here when it's in.`;
       m.input.set_value("");
       m.spot = null;
       m.shot = null;

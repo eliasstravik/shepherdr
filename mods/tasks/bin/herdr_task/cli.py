@@ -161,6 +161,14 @@ def main():
             sys.stdout.write(r.stdout or "")
             sys.stderr.write(r.stderr or "")
             return r.returncode
+    if argv[:1] == ["_hold"] and len(argv) == 2:
+        # herdr-artifact's note to an agent on a question (#1213): kept, held_pass sends it once that's answered
+        from .news import hold
+        text = sys.stdin.read()
+        if not text.strip():
+            return 2
+        hold(argv[1], text, "send")
+        return 0
     if argv[:1] == ["_job"]:
         # an action here that was still running (link.PENDING, machine ""): its result, waiting again
         r = link.local_follow(argv[1] if len(argv) > 1 else "", argv, time.monotonic() + link.wait_s(), started=False)

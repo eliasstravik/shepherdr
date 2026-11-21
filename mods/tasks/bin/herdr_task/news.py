@@ -508,8 +508,9 @@ def held_messages():
 
 
 def hold(address, text, how="send"):
-    """Keeps a message for an agent the person is writing to; held_pass sends it once they've
-    stopped. how: "send" (a plain hc send, as an agent's message) or "news" (news_send)."""
+    """Keeps a message for an agent the person is writing to, or one waiting on a question (a Mark up note, #1213);
+    held_pass sends it once they've stopped, or it's answered. how: "send" (a plain hc send, as an agent's message)
+    or "news" (news_send)."""
     with held_messages() as held:
         held.setdefault(address, []).append({"text": text, "how": how, "at": now()})
 
@@ -537,8 +538,8 @@ def held_pass(report):
             if not k or k.get("state") != "live":
                 held.pop(addr)
                 continue
-            if typing(addr, k) or codex_busy(k):
-                continue
+            if typing(addr, k) or codex_busy(k) or status_word(k) == "blocked":
+                continue  # blocked: on a question card (#1213), and hc send would answer its dialog
             for how in ("news", "send"):
                 batch = [x for x in items if x.get("how", "send") == how]
                 if not batch:

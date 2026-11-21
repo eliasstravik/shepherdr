@@ -4,6 +4,7 @@ a throwaway store; herdr-app's check is skipped (not found), and nothing is inst
 import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import importlib.machinery
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -82,6 +83,39 @@ class Artifacts(unittest.TestCase):
         a = self.only()[0]
         self.assertEqual(a["files"], ["recipe.json"])
         self.assertEqual(a["versions"][-1]["kind"], "recipe")
+
+    def note_to_blocked(self, err):
+        d = os.path.join(self.dir, "report")
+        with mock.patch("sys.stdout"):
+            A.cmd_new(types.SimpleNamespace(dir=d, custom=False))
+        self.publish(d, title="Coverage")
+        aid = self.only()[0]["id"]
+        held = []
+        refused = types.SimpleNamespace(returncode=1, stdout="", stderr=err)
+        with mock.patch.object(A, "keeper", return_value=("t7", "made it")), mock.patch.object(A, "run", return_value=refused), \
+                mock.patch.object(A, "hold_note", side_effect=lambda to, body: held.append((to, body)) or True), \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            A.cmd_note(types.SimpleNamespace(id=aid, text="Bigger title", version=None, spot=None, image=None, shot=None,
+                                             machine=None, json=True, panel=None, area=None))
+        return json.loads(out.getvalue()), held
+
+    def test_a_note_to_an_agent_on_a_question_is_held_in_plain_words(self):
+        # GitHub #1213: hc send refuses to type into a question card; the note waits for it, said in one plain line
+        err = json.dumps({"error": {"hint": "typing would answer its dialog", "kind": "blocked", "message": "t7 is blocked (question)"}})
+        out, held = self.note_to_blocked(err)
+        self.assertTrue(out["held"])
+        self.assertEqual(out["said"], "It's waiting on a question: your note goes to it once that's answered.")
+        self.assertEqual(held[0][0], "t7")
+        self.assertIn("Bigger title", held[0][1])
+        self.assertIn('<hc from="artifact"', held[0][1])
+
+    def test_another_refusal_is_its_plain_message_never_json(self):
+        err = json.dumps({"error": {"kind": "gone", "message": "t7 has ended"}})
+        with self.assertRaises(A.Fail) as e:
+            self.note_to_blocked(err)
+        self.assertEqual(str(e.exception), "t7 has ended")
+        nested = json.dumps({"error": err})
+        self.assertEqual(A.plain_error(nested), ("gone", "t7 has ended"))
 
     def test_a_custom_panel_needs_custom(self):
         d = self.panel()

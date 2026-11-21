@@ -26,6 +26,22 @@ const TYPES: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg
 /** what a file a recipe shows is served with: sandboxed, sniffed as nothing else, a clip or sound played from this origin */
 const SHOWN = "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'";
 
+/** herdr-artifact --json's error as plain words (#1213: the page showed {"error": "{\"error\":{...}}"}): its last line's
+ *  "error", unwrapped from any JSON it came in (hc's {"error": {"message"}} too); "" when there's none. */
+export function plainError(out: string): string {
+  let s: unknown = out.trim().split("\n").pop() ?? "";
+  for (let i = 0; i < 6; i++) {
+    if (typeof s === "string") {
+      if (!s.trim().startsWith("{")) break;
+      try { s = JSON.parse(s); } catch { break; }
+    } else if (s && typeof s === "object") {
+      const o = s as Record<string, unknown>;
+      s = "error" in o ? o.error : o.message ?? "";
+    } else break;
+  }
+  return typeof s === "string" ? s.trim() : "";
+}
+
 export type Art = { id: string; title: string; version: number; folder: string; publisher?: string; task?: string | null; at: number; files: string[]; versions: { v: number; at: number; publisher?: string; note?: string }[]; machine?: string; folderName?: string };
 
 async function run(args: string[]) {
@@ -143,7 +159,7 @@ export class Artifacts {
     if (machine && !MACHINE.test(machine)) throw new Error("Not a machine.");
     const args = [...(machine ? ["--on", machine] : []), "note", id, "--text", text, "--version", String(v), "--json", ...(spot ? ["--spot", spot] : [])];
     const r = await run(args);
-    if (r.code !== 0) throw new Error((r.err || r.out).trim().split("\n").pop() || "It didn't go through.");
+    if (r.code !== 0) throw new Error(plainError(r.out) || r.err.trim().split("\n").pop() || "It didn't go through.");
     try { return JSON.parse(r.out.trim().split("\n").pop() ?? "{}"); } catch { return {}; }
   }
 }
