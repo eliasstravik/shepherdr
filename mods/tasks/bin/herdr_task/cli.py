@@ -417,7 +417,7 @@ def main():
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=lambda a: cmd_sync_auto(a.machine) if a.auto else cmd_machines(a))
     c = ma.add_parser("reach", help="the reach map: the machines this one links to over herdr-core, and through each, what that one links to (contacts nothing else)")
-    c.add_argument("--refresh", action="store_true", help="check every link now (default: the scheduler's map, at most 10 minutes old)")
+    c.add_argument("--refresh", action="store_true", help="check every link now, and make each unreachable one try to connect again first (default: the scheduler's map, at most 10 minutes old)")
     c.add_argument("--quiet", action="store_true", help=argparse.SUPPRESS)
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_machines)
