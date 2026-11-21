@@ -173,3 +173,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - The dev VM has a real hc in /usr/local/bin: a test whose fake hc cannot exec (no shebang) falls through to it if that folder is on PATH (Python's subprocess tries later PATH entries on ENOEXEC). (from SHEP-286)
 
 - Codex sandbox repros without an agent: `codex sandbox -c sandbox_mode='"workspace-write"' [-c sandbox_workspace_write.writable_roots=[...]] -- <cmd>` runs a command in the same bwrap+seccomp a worker gets (unix socket connect is refused there). (from SHEP-285)
+
+- Never pkill -f a pattern that appears in your own command line (e.g. a unittest name): it kills your shell; use TaskStop or kill by pid. (from SHEP-288)
