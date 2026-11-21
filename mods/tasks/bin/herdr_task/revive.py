@@ -20,7 +20,7 @@ import shlex
 from .base import HOME, hc_json, now, run, SHELLS
 from .agents import agent_running, status_word
 from .sessions import session_of
-from .settings import ASSISTANT_TEMPLATES
+from .settings import ASSISTANT_TEMPLATES, TEMPLATES
 from .launch import CLEAN_ENV
 
 LABEL = "herdr.resume"
@@ -215,7 +215,7 @@ def task_record(k, t):
 def template_of(name="assistant"):
     """(command, text) of a herdr-core template on this machine."""
     try:
-        with open(os.path.join(HOME, ".config", "herdr-core", "templates", f"{name}.md")) as f:
+        with open(os.path.join(TEMPLATES, f"{name}.md")) as f:
             text = f.read()
     except OSError:
         return None, None

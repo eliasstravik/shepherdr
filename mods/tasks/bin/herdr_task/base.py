@@ -14,6 +14,13 @@ from . import layout
 
 VERSION = "1"
 HOME = os.path.expanduser("~")
+# GitHub #1117: a herdr-core started by launchd or systemd hands what it runs (hc exec --on from another machine) a bare
+# PATH (/usr/bin:/bin), so hc, gh and the agents' CLIs wouldn't be found. When hc isn't on it, their usual folders go
+# at the end: the person's own order still wins.
+if not __import__("shutil").which("hc"):
+    os.environ["PATH"] = os.pathsep.join([p for p in os.environ.get("PATH", "").split(os.pathsep) if p] + [
+        d for d in (os.path.join(HOME, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin")
+        if d not in os.environ.get("PATH", "").split(os.pathsep)])
 # Shepherdr's own folders (layout.py): ~/.local/share/shepherdr/tasks once this machine's data moved
 # there, else the old ~/.herdr/tasks (the entry moves it first, so a run sees one or the other).
 WHERE = layout.Where()

@@ -27,6 +27,8 @@ import time
 
 from .base import addon_off, APP_HOME, ASK_HOME, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, layout, now, PACKAGE, run, STORE, WHERE
 from .news import news_send, send_or_hold, typing
+from .settings import TEMPLATES
+from .addons import off_note
 
 
 # ---- sync: the same task tools on every machine ---------------------------------------------
@@ -148,8 +150,8 @@ def manifest():
         if p:
             add(f"{ASK_HOME}/{name}", _read(p), mode, [p])
     for role in ROLES:
-        rel = f".config/herdr-core/templates/{role}.md"
-        p = os.path.join(HOME, rel)
+        rel = f".config/herdr-core/templates/{role}.md"   # its place there: INSTALL's P follows XDG_CONFIG_HOME (#1182)
+        p = os.path.join(TEMPLATES, f"{role}.md")
         if os.path.isfile(p):
             add(rel, _read(p), 0o644, [p], protect=True)
     h = hashlib.sha256()
@@ -164,10 +166,20 @@ def manifest():
 # what it found. Each file: written beside its place, tried (its --version), the old one kept as
 # <file>.bak, then swapped in one step (os.replace): a herdr-task running there keeps its old file (SHEP-259).
 INSTALL = r'''
-import base64, hashlib, json, os, shutil, subprocess, sys, time
+import base64, hashlib, json, os, platform, shutil, subprocess, sys, time
 x = json.loads(sys.stdin.read())
 H = os.path.expanduser("~")
-P = lambda r: os.path.join(H, r)
+# #1203: native Windows can't run the helpers (no fcntl): say so in one line, never a traceback.
+if platform.system() == "Windows":
+    print(json.dumps({"unsupported": "native Windows isn't supported: run Herdr in WSL there", "os": "Windows",
+                      "python": sys.version.split()[0], "files": {}, "links": {}}))
+    sys.exit(0)
+X = os.environ.get("XDG_CONFIG_HOME") or ""
+def P(r):
+    # herdr-core's own config there (the role templates) where herdr-core reads it: $XDG_CONFIG_HOME's when set (#1182)
+    if r.startswith(".config/herdr-core/") and X.startswith("/"):
+        return os.path.join(X, r[len(".config/"):])
+    return os.path.join(H, r)
 ''' + layout.PY + r'''
 # Shepherdr's own files (the stamp, the secrets' marks) where they are on that machine: its own
 # folders once its data moved there, else ~/.herdr (SHEP: herdr_task/layout.py).
@@ -187,7 +199,7 @@ rec = stamp.get("files") or {}
 # where copies come from: never written to.
 source = os.path.isdir(P(".config/herdr-app/mods/tasks/bin/herdr_task"))
 out = {"source": source, "files": {}, "links": {}, "stamp": {k: stamp.get(k) for k in ("version", "from", "at")},
-       "python": sys.version.split()[0], "os": os.uname().sysname, "home": H}
+       "python": sys.version.split()[0], "os": platform.system(), "home": H}
 for f in x["files"]:
     p, r = P(f["path"]), rec.get(f["path"]) or {}
     cur = sha(p)
@@ -286,7 +298,7 @@ print(json.dumps(out))
 def core_name():
     """This machine's herdr-core name (what other machines' cores call it by default)."""
     d = hc_json("server", "status") or {}
-    return (d.get("core") or {}).get("name") or os.uname().nodename
+    return (d.get("core") or {}).get("name") or socket.gethostname()
 
 
 def connected_machines():
@@ -314,6 +326,8 @@ OK = ("current", "installed", "own copy")
 
 
 def _verdict(res):
+    if res.get("unsupported"):
+        return "unsupported", [res["unsupported"]]
     if res.get("source"):
         return "source", ["holds herdr-task's source: copies come from there, it's never written to"]
     bad = {p: s for p, s in {**res["files"], **res["links"]}.items() if s not in OK}
@@ -406,7 +420,7 @@ def sync(names=None, op="install", force=False):
         for r in rows:
             e = d.setdefault("machines", {}).setdefault(r["machine"], {})
             e.update({"state": r["state"], "checked": now(), "details": r["details"]})
-            if r["state"] in ("current", "source"):
+            if r["state"] in ("current", "source", "unsupported"):
                 e["synced"] = m["version"]
             elif e.get("synced") == m["version"]:
                 e.pop("synced")
@@ -427,9 +441,12 @@ def cmd_machines(args):
         else:
             print(f"Tools here: version {r['version']}." if r["machines"] else "No other machines connected here.")
             for x in r["machines"]:
-                word = {"current": "current", "source": "holds the source (left alone)", "drift": "out of date", "failed": "failed", "unreachable": "can't reach", "held": "held"}.get(x["state"], x["state"])
+                word = {"current": "current", "source": "holds the source (left alone)", "drift": "out of date", "failed": "failed", "unreachable": "can't reach", "held": "held", "unsupported": "not supported"}.get(x["state"], x["state"])
                 more = f" (updated {len(x['changed'])} file(s))" if x.get("changed") else ""
                 print(f"  {x['machine']}: {word}{more}" + "".join(f"\n      {d}" for d in x["details"]))
+            note = off_note("machines")
+            if note:
+                print(note.replace("is off on this machine:", "is off on this machine, so nothing syncs by itself:"))
         if args.check and any(x["state"] not in ("current", "source") for x in r["machines"]):
             raise SystemExit(1)
 
@@ -543,7 +560,7 @@ def cmd_sync_auto(names):
 # opens a connection of its own: no ssh, no Tailscale, only herdr-core's links (#967).
 
 PROBE = r'''
-import json, os, shutil, socket, subprocess, sys, threading
+import json, os, platform, shutil, socket, subprocess, sys, threading
 o = json.loads(sys.argv[1])
 H = os.path.expanduser("~")
 ''' + layout.PY + r'''
@@ -559,7 +576,7 @@ def js(text):
     except Exception:
         return None
 hc = shutil.which("hc") or (os.path.join(H, ".local/bin/hc") if os.path.isfile(os.path.join(H, ".local/bin/hc")) else None)
-me = {"host": socket.gethostname(), "user": os.environ.get("USER") or os.path.basename(H), "os": os.uname().sysname, "hc": bool(hc), "links": []}
+me = {"host": socket.gethostname(), "user": os.environ.get("USER") or os.path.basename(H), "os": platform.system(), "hc": bool(hc), "links": []}
 me["home"] = H  # where Herdr names a space "Home" (a space with no name of its own)
 core = (js(sh([hc, "server", "status", "--json"])[1]) or {}).get("core") if hc else None
 me["core"] = core
@@ -955,9 +972,14 @@ def directory(refresh=False, max_age=30000):
 
 def cmd_assistants(args):
     _, rows = directory(refresh=args.refresh)
+    note = off_note("machines")  # #1091: only this machine's then, and it says why
     if args.json:
         print(json.dumps(rows))
+        if note:
+            print(note, file=sys.stderr)
         return
+    if note:
+        print(note.replace("is off on this machine:", "is off on this machine, so only its own Assistants show:"))
     if not rows:
         print("No live Assistants on any machine reachable from here.")
     for a in rows:
@@ -1036,7 +1058,8 @@ def tell(target, text, sender=None):
         d, rows = directory(refresh=True)
         hits = _find(rows, target)
     if not hits:
-        raise Fail(f"no live Assistant {target!r} reachable from here (herdr-task assistants lists them)")
+        note = off_note("machines")
+        raise Fail(f"no live Assistant {target!r} reachable from here (herdr-task assistants lists them)" + (f". {note}" if note else ""))
     if len(hits) > 1:
         raise Fail(f"{target!r} is more than one Assistant: " + ", ".join(a["target"] for a in hits))
     to = hits[0]
