@@ -20,7 +20,10 @@
 # leaves what happened in data/chat-asks/end/<id> ("Answered in the terminal", from Claude's log
 # when it can tell) for the chat's card, then goes, so every copy (the card, Needs you, the
 # counts) closes at once. Codex shows its prompt only once the hook is done: the card's "Answer
-# in terminal" (or the window showing the terminal) hands it back.
+# in terminal" (or the window showing the terminal) hands it back. Codex shows nothing while it waits
+# (just "Running hook", its task Working): so a Codex ask nothing picked up within a few seconds (the
+# window's inbox and the web service mark each one they read in seen/<id>) goes back to Codex's own
+# prompt at once (#1078, #1137, #1141, #1145, #1146), never a silent 30-minute wait.
 
 t="${HC_TERMINAL_ID:-}"
 [ -n "$t" ] || exit 0
@@ -52,14 +55,22 @@ id="$t.$(date +%s).$$"
 req="$d/req/$id.json"
 ans="$d/ans/$id.json"
 end="$d/end/$id"
-done_() { rm -f "$req" "$req.tmp" "$ans"; exit 0; }
+seen="$d/seen/$id"
+done_() { rm -f "$req" "$req.tmp" "$ans" "$seen"; exit 0; }
 # Over without a decision from here: why, for the card's quiet line, then go.
 ended() { printf '%s\n' "$1" > "$end.tmp" 2>/dev/null && mv "$end.tmp" "$end" 2>/dev/null; done_; }
 # Claude stops the hook itself when its prompt is refused or interrupted in the terminal.
 trap 'ended "$(how declined)"' TERM INT HUP
 mkdir -p "$d/req" "$d/ans" "$d/end" 2>/dev/null || exit 0
-find "$d/end" -type f -mmin +1440 -delete 2>/dev/null
+find "$d/end" "$d/seen" -type f -mmin +1440 -delete 2>/dev/null
 cat > "$req.tmp" 2>/dev/null && mv "$req.tmp" "$req" 2>/dev/null || done_
+# Codex's request (its turn_id): how long a card may go unread before Codex asks in its terminal.
+unseen=-1
+if grep -q '"turn_id"' "$req" 2>/dev/null; then
+  w="${HERDR_ASK_SEEN_WAIT:-20}"
+  case "$w" in ''|*[!0-9]*) w=20 ;; esac
+  unseen=$((w * 10 / 3))
+fi
 
 # Claude's own status now: blocked, working, idle, done; "gone" once the terminal ended.
 status() {
@@ -84,6 +95,9 @@ while [ "$i" -lt 6000 ]; do
   if [ -f "$ans" ]; then
     cat "$ans" 2>/dev/null
     done_
+  fi
+  if [ "$unseen" -ge 0 ] && [ ! -f "$seen" ] && [ "$i" -ge "$unseen" ]; then
+    ended "No Shepherdr window or web page showed this card, so Codex asks in its terminal"
   fi
   if [ "$watch" = 1 ]; then
     case "$(status)" in

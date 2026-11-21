@@ -31,7 +31,7 @@ from .takeover import cant_go_on, takeover
 from .ghnews import held_by_base, main_pass, pr_deliver, pr_news
 from .systemic import dropped, systemic_pass
 from .scheduler import SCHEDULER
-from .revive import revive_pass
+from .revive import NEEDS_RESUME, revive_pass
 
 
 PR_WAIT_EVERY = 20000  # how often a pull request whose checks still run is read again (ms)
@@ -330,10 +330,26 @@ def due_pass(s, report):
             report.setdefault("due", []).append(s.ref(t))
 
 
+def revive_attention(s, t, needed):
+    """#1080: a Working task whose agent a restart left a plain shell says it needs a resume (revive.needs_resume);
+    that word goes once its agent runs again (a resume, a switch) or the task is no longer Working."""
+    why = needed.get(s.key(t)) if t["state"] == "running" else None
+    has = (t.get("attention") or "").startswith(NEEDS_RESUME)
+    if why and not t.get("attention"):
+        t["attention"], t["attention_at"] = why + ".", now()
+        s.dirty = True
+    elif has and not why and (t["state"] != "running" or any(agent_running(k) for k in live_agents(s.key(t)))):
+        t.pop("attention", None)
+        t.pop("attention_at", None)
+        s.dirty = True
+
+
 def tick_store(s, report):
     """One folder's turn: Ready tasks back at work are Working again, merged tasks become done,
     auto-merges go when they can, and queued tasks start while there's room."""
+    needed = {x["task"]: x["why"] for x in report.get("revive_needed") or []}
     for t in s.data["tasks"]:
+        revive_attention(s, t, needed)
         if t["state"] == "ready":
             back_pass(s, t, report)
         elif t["state"] == "running" and (t.get("back") or {}).get("auto"):

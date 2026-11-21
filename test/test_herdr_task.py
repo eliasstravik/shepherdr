@@ -7,6 +7,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import types
+import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -43,6 +45,42 @@ class HerdrTask(unittest.TestCase):
         forms = ["[#shop](space:vm-demo/sp-shop)", "space:vm-demo/sp-shop", "vm-demo/sp-shop", "sp-shop", "#shop", "[#web](space:sp-web)", "#nope"]
         out = subprocess.run([sys.executable, "-c", code, BIN, *forms], capture_output=True, text=True)
         self.assertEqual(json.loads(out.stdout), [["vm-demo/t3"]] * 5 + [["t1"], []], out.stderr)
+
+    def test_tell_always_says_whether_it_arrived(self):
+        """#1079 #1141: tell-assistant never returned, and nobody knew whether it went. It ends within its wait and
+        says delivered or not, and why: from Codex's sandbox, that Herdr can't be reached."""
+        sys.path.insert(0, BIN)
+        import argparse
+        import io
+        from contextlib import redirect_stdout
+        from unittest import mock
+        from herdr_task import machines
+        from herdr_task.base import Fail
+        args = argparse.Namespace(target="t3", text="hi", json=False)
+        sandbox = subprocess.CompletedProcess([], 1, "", '{"error":{"message":"cannot start core: Read-only file system (os error 30)"}}')
+        with mock.patch.object(machines.subprocess, "run", return_value=sandbox), \
+                mock.patch.object(machines, "tell", side_effect=AssertionError("never tried")):
+            with self.assertRaises(Fail) as e:
+                machines.cmd_tell(args)
+        self.assertIn("Not delivered to t3: a sandbox", str(e.exception))
+        ok = subprocess.CompletedProcess([], 0, "{}", "")
+        with mock.patch.object(machines.subprocess, "run", return_value=ok):
+            with mock.patch.object(machines, "tell", side_effect=lambda *a: time.sleep(5)), \
+                    mock.patch.dict(os.environ, {"HERDR_TASK_TELL_WAIT": "1"}):
+                t0 = time.time()
+                with self.assertRaises(Fail) as e:
+                    machines.cmd_tell(args)
+                self.assertLess(time.time() - t0, 3)
+            self.assertIn("Not delivered to t3: no answer from Herdr in 1 s", str(e.exception))
+            with mock.patch.object(machines, "tell", side_effect=Fail("couldn't deliver to t3")):
+                with self.assertRaises(Fail) as e:
+                    machines.cmd_tell(args)
+            self.assertEqual(str(e.exception), "Not delivered to t3: couldn't deliver to t3")
+            with mock.patch.object(machines, "tell", return_value={"to": "t3", "space": "shop", "can_reply": True, "held": False}):
+                out = io.StringIO()
+                with redirect_stdout(out):
+                    machines.cmd_tell(args)
+            self.assertEqual(out.getvalue().strip(), "Delivered to t3 (shop).")
 
     @unittest.skipUnless(CI, "runs only on CI: herdr-task never runs with a changed HOME on a person's machine")
     def test_commands_start(self):
@@ -4421,6 +4459,68 @@ class Revive(unittest.TestCase):
         self.assertIn("You are the Assistant.", line)
         self.assertNotIn("--resume", line)
 
+    def worker(self, addr="t5", pid=300, agent_pid=301, record=True):
+        self.terms[addr] = {"address": addr, "state": "live", "pid": pid, "cwd": "/home/me/app", "name": "dev-6-fix",
+                            "argv": ["sh", "-c", "x", "codex", "--no-daemon", "-s", "workspace-write", "Your task..."],
+                            "status": {"state": "working"},
+                            "foreground": {"pid": agent_pid, "name": "codex", "argv": ["codex"], "cwd": "/home/me/app"},
+                            "labels": {"herdr.task": "dev#6"}}
+        if record:
+            self.sessions[agent_pid] = ("S1", self.log)
+
+    def test_a_worker_nothing_brings_back_says_it_needs_a_resume(self):
+        """#1080: a Codex worker came back as a plain shell after a restart, its task still Working; the Assistant had
+        to notice and switch it. Its task now says it needs a resume."""
+        self.worker(record=False)
+        self.tick()
+        self.crash("t5")
+        # a shell with something in it (not a bare one) and no record: nothing to type, so its task is told
+        self.terms["t5"]["argv"] = ["/bin/bash", "-l"]
+        report = self.tick()
+        self.assertEqual(self.sent, [])
+        self.assertEqual(report["revive_needed"], [{"task": "dev#6", "terminal": "t5", "why": self.r.NEEDS_RESUME}])
+        # a task no longer Working, or a reviewer: never
+        self.tasks["dev#6"]["state"] = "ready"
+        self.assertNotIn("revive_needed", self.tick())
+
+    def test_a_typed_resume_that_never_starts_says_so_later(self):
+        self.worker()
+        self.tick()
+        self.crash("t5")
+        report = self.tick()
+        self.assertEqual(report["revived"][0]["how"], "resume")
+        self.assertNotIn("revive_needed", self.tick(), "it may still be starting")
+        rec = json.loads(self.terms["t5"]["labels"]["herdr.resume"])
+        rec["sent"] -= self.r.START_MS + 1000
+        self.terms["t5"]["labels"]["herdr.resume"] = json.dumps(rec)
+        self.assertEqual(self.tick()["revive_needed"][0]["task"], "dev#6")
+
+    def test_a_worker_that_quit_at_its_shell_needs_no_resume(self):
+        self.worker()
+        self.tick()
+        self.terms["t5"]["foreground"] = {"pid": 300, "name": "bash", "argv": ["/bin/bash"]}
+        self.assertNotIn("revive_needed", self.tick())
+
+    def test_its_task_says_so_until_its_agent_runs_again(self):
+        """#1080: the tick puts the word on a Working task, never over another, and takes it off once its agent runs."""
+        from herdr_task import tick
+        s = types.SimpleNamespace(key=lambda t: "dev#6", dirty=False)
+        t = {"id": 6, "state": "running"}
+        why = self.r.NEEDS_RESUME
+        tick.revive_attention(s, t, {"dev#6": why})
+        self.assertTrue(t["attention"].startswith(why))
+        with self.mock.patch.object(tick, "live_agents", lambda key: [{"x": 1}]), \
+                self.mock.patch.object(tick, "agent_running", lambda k: False):
+            tick.revive_attention(s, t, {})
+        self.assertIn("attention", t, "still a shell")
+        with self.mock.patch.object(tick, "live_agents", lambda key: [{"x": 1}]), \
+                self.mock.patch.object(tick, "agent_running", lambda k: True):
+            tick.revive_attention(s, t, {})
+        self.assertNotIn("attention", t)
+        other = {"id": 6, "state": "running", "attention": "Couldn't start: x"}
+        tick.revive_attention(s, other, {"dev#6": why})
+        self.assertEqual(other["attention"], "Couldn't start: x")
+
     def test_a_resume_the_cli_refuses_starts_anew_once(self):
         self.assistant()
         self.tick()
@@ -5602,6 +5702,31 @@ class CodexAsksOnTheCard(unittest.TestCase):
         claude = json.loads(launch.own_argv(["claude", "go"])[2])["hooks"]["PermissionRequest"][0]["hooks"][0]["command"]
         self.assertNotIn("--sandboxed", claude)
 
+    def test_a_tool_by_its_full_path_is_the_same_tool(self):
+        """#1098: a Codex worker's `/…/hc read <its reviewer>` asked (and hung on the card) where the bare `hc read`
+        ran at once. A tool written by its full path, or herdr-task by its bare name when PATH's is this one, matches."""
+        sys.path.insert(0, BIN)
+        from unittest import mock
+        from herdr_task import launch
+        d = tempfile.mkdtemp()
+        tools = {}
+        for name in ("hc", "herdr-artifact", "herdr-task"):
+            tools[name] = os.path.join(d, name)
+            open(tools[name], "w").close()
+        os.symlink(tools["hc"], os.path.join(d, "hc-link"))
+        with mock.patch.object(launch.shutil, "which", lambda n: tools.get(n)), \
+                mock.patch.dict(os.environ, {"HERDR_BROWSER_TASK": "demo#1"}):
+            own = lambda c, sb=True: launch.own_command(tools["herdr-task"], c, sb)  # noqa: E731
+            for c in (f"{d}/hc read demo-1-review --lines 400", f"{d}/hc-link wait demo-1-review --timeout 600",
+                      "hc get demo-1-review --json", f"{d}/herdr-artifact publish /tmp/p", "herdr-task status SHEP-1 hi",
+                      f"{d}/herdr-task ready SHEP-1 --summary hi"):
+                self.assertTrue(own(c), c)
+            for c in ("/tmp/evil/hc read demo-1-review", f"{d}/hc send demo-1-review hi", "/tmp/evil/herdr-task status x",
+                      f"{d}/hc read t15q", "/tmp/x/git commit -m x"):
+                self.assertFalse(own(c), c)
+            # herdr-task on PATH that isn't this one: its bare name isn't this launch's
+            self.assertFalse(launch.own_command("/elsewhere/herdr-task", "herdr-task status SHEP-1 hi", True))
+
     def test_a_codex_worker_never_stops_on_trust_this_folder(self):
         """#866: a Codex worker in a folder Codex hasn't seen sat at "Trust this folder?", nobody at the keys."""
         sys.path.insert(0, BIN)
@@ -5792,6 +5917,34 @@ class TaskFlow(unittest.TestCase):
                 self.assertEqual(launch.resume_argv(argv, "S1", folder), argv + ["--resume", "S1"])
         # Codex's sandbox is in its argv already
         self.assertEqual(launch.resume_argv(["codex", "-s", "read-only"], "S1"), ["codex", "resume", "-s", "read-only", "S1"])
+
+    def test_a_dont_ask_default_never_starts_a_worker(self):
+        """#1110: the person's defaultMode dontAsk started every worker (a switch's too) refusing each edit, command and
+        question card. A worker starts in the default mode instead (it asks on its card), and its start says so; a mode
+        its own argv says stays."""
+        from herdr_task import launch
+        from unittest import mock
+        d = tempfile.mkdtemp()
+        home, folder = os.path.join(d, "claude"), os.path.join(d, "repo")
+        os.makedirs(home)
+        os.makedirs(folder)
+        with open(os.path.join(home, "settings.json"), "w") as f:
+            json.dump({"permissions": {"defaultMode": "dontAsk"}}, f)
+        with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": home}):
+            self.assertTrue(launch.dont_ask_default(["claude"], folder))
+            argv = launch.own_argv(["claude", "go"], folder)
+            self.assertEqual(argv[argv.index("--permission-mode") + 1], "default")
+            # once: its argv given again (revive, a resume) adds no second flag
+            self.assertEqual(launch.own_argv(argv, folder).count("--permission-mode"), 1)
+            self.assertEqual(launch.resume_argv(["claude"], "S1", folder), ["claude", "--permission-mode", "default", "--resume", "S1"])
+            for argv in (["claude", "--permission-mode", "dontAsk"], ["claude", "--dangerously-skip-permissions"], ["codex"]):
+                self.assertFalse(launch.dont_ask_default(argv, folder), argv)
+            a = launch.own_argv(["claude", "--permission-mode", "auto"], folder)
+            self.assertEqual(a[a.index("--permission-mode") + 1], "auto")
+            with open(os.path.join(home, "settings.json"), "w") as f:
+                json.dump({"permissions": {"defaultMode": "auto"}}, f)
+            self.assertFalse(launch.dont_ask_default(["claude"], folder))
+            self.assertNotIn("--permission-mode", launch.own_argv(["claude", "go"], folder))
 
     def test_an_agent_switching_itself_ends_after_the_new_one_starts(self):
         """SHEP-211: ending the caller first would end the switch command with it."""
