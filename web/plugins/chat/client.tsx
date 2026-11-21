@@ -1735,13 +1735,17 @@ export function SecretCard({ ask, chat, source }: { ask: SecretAsk; chat: Chat; 
   const [level, setLevel] = useState(ask.levels[0]?.id ?? 'all')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
-  const save = async () => {
-    if (!value || busy) return
+  const [declined, setDeclined] = useState(false)
+  // Save sends the value; Decline sends none (GitHub #1226): the agent hears it was declined and carries on, and a
+  // secret already kept under that name stays (service/secrets.ts keep with a card)
+  const answer = async (v: string | null) => {
+    if ((v !== null && !v) || busy) return
     setBusy(true)
     setErr('')
     try {
-      const r = (await act({ type: 'secret', level, name: ask.name, value, card: { chat: chat.key, id: ask.id } })) as { ok?: boolean; error?: string }
+      const r = (await act({ type: 'secret', level, name: ask.name, value: v, card: { chat: chat.key, id: ask.id } })) as { ok?: boolean; error?: string }
       if (r?.ok === false) setErr(r.error ?? "That didn't go through.")
+      else if (v === null) setDeclined(true)
       else setValue('')
     } catch {
       setErr("That didn't go through: Shepherdr can't be reached.")
@@ -1749,6 +1753,7 @@ export function SecretCard({ ask, chat, source }: { ask: SecretAsk; chat: Chat; 
       setBusy(false)
     }
   }
+  const save = () => answer(value)
   return (
     <CardShell title={`Secret: ${ask.name}`} icon={KeyIcon} source={source}>
       {ask.why ? <p className="text-pretty break-words">{ask.why}</p> : null}
@@ -1756,6 +1761,10 @@ export function SecretCard({ ask, chat, source }: { ask: SecretAsk; chat: Chat; 
         <Sent>
           <CheckIcon className={ic} />
           <span className="min-w-0 truncate">Saved for {ask.saved}</span>
+        </Sent>
+      ) : declined ? (
+        <Sent>
+          <span className="min-w-0 truncate">Declined</span>
         </Sent>
       ) : (
         <>
@@ -1776,6 +1785,9 @@ export function SecretCard({ ask, chat, source }: { ask: SecretAsk; chat: Chat; 
             <span role="status" className={clsx('mr-auto text-[0.75rem] text-pretty phone:text-[0.8125rem]', err ? 'text-need' : 'text-fg3')}>
               {err || 'Agents use it by name, never seeing it.'}
             </span>
+            <button type="button" disabled={busy} onClick={() => answer(null)}>
+              Decline
+            </button>
             <Primary soft disabled={busy || !value} onClick={save}>
               Save
             </Primary>
