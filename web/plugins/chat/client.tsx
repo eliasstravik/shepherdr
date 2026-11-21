@@ -1763,9 +1763,7 @@ export function SecretCard({ ask, chat, source }: { ask: SecretAsk; chat: Chat; 
           <span className="min-w-0 truncate">Saved for {ask.saved}</span>
         </Sent>
       ) : declined ? (
-        <Sent>
-          <span className="min-w-0 truncate">Declined</span>
-        </Sent>
+        <p className="text-[0.8125rem] text-fg3 phone:text-[0.9375rem]">Declined</p>
       ) : (
         <>
           <SecretField label={ask.name} value={value} onChange={setValue} onEnter={save} />
