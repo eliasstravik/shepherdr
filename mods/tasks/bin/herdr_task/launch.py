@@ -580,7 +580,14 @@ def where_line(task):
     if not task.get("worktree"):
         return ""
     base = f", from {task['base']}, which it merges into" if task.get("base") else ""
-    return f"You work in {task['worktree']} on branch {task['branch']}{base}."
+    line = f"You work in {task['worktree']} on branch {task['branch']}{base}."
+    pr = task.get("pr") or {}
+    if pr.get("taken"):
+        # --pr (#1155): never a second pull request; its agent should know where its work goes.
+        on = f" (branch {pr['branch']})" if pr.get("branch") else ""
+        line += (f" This task took pull request #{pr['number']}{on}, {pr.get('url') or ''}: ready pushes your commits there "
+                 "and its checks and review come to you; don't open another.")
+    return line
 
 
 def brief(s, task, parent=None, space=None, argv=None):
@@ -758,8 +765,16 @@ def folder_for(s, task):
         return path
     exists = git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")[0]
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    taken = (task.get("pr") or {}).get("branch") if (task.get("pr") or {}).get("taken") else None
     if exists:
         add = ["worktree", "add", path, branch]
+    elif taken:
+        # --pr (#1155): a pull request already open: its worktree starts from that pull request's branch.
+        remote = remote_of(main)
+        ok, _, err = git(main, "fetch", "--quiet", "--no-tags", remote, f"+refs/heads/{taken}:refs/remotes/{remote}/{taken}")
+        if not ok:
+            raise Fail(f"Couldn't fetch {taken}, pull request #{task['pr']['number']}'s branch: {err}")
+        add = ["worktree", "add", "--no-track", "-b", branch, path, f"refs/remotes/{remote}/{taken}"]
     else:
         # From the base's latest (fetched first); a detached folder (base is a commit) from HEAD.
         branchy = git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{base}")[0]
@@ -769,6 +784,9 @@ def folder_for(s, task):
         raise Fail(err or "git worktree add failed")
     # Where the branch starts: work past it that turns up in the base branch means merged.
     start = git(path, "rev-parse", "HEAD")[1] if not exists else task.get("start")
+    if taken and not exists:
+        # Its pull request's commits are its own work (ready, Accept): it starts where they leave its base.
+        start = git(main, "merge-base", fresh_start(main, base), start)[1] or start
     task.update(worktree=path, branch=branch, base=task.get("base") or base, start=start)
     return path
 

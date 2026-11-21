@@ -112,6 +112,10 @@ def pr_open(s, task, repo, summary=None):
             if summary:
                 pr_note(task, repo, summary)
             return pr
+        if ok and pr.get("taken"):
+            # --pr (#1155): the pull request it took is closed: said, never a new one of its own instead.
+            raise Fail(f"Pull request #{pr['number']}, which this task took, is {out.lower() or 'not open'}. Reopen it, take "
+                       f"another (ready --pr <n>), or let it go (ready --pr \"\") for a pull request of its own.")
         if pr.get("branch"):
             # The other branch's pull request it continued was closed or merged: its own branch from here.
             task.pop("pr")
