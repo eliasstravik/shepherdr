@@ -3172,12 +3172,16 @@ class ReviewAsAHelperAgent(unittest.TestCase):
             self.assertIn("--label herdr.role=reviewer", words)
             self.assertIn("herdr.task=$HERDR_BROWSER_TASK", words)
             self.assertIn("codex --no-daemon --sandbox read-only", words)
-            self.assertIn("claude --permission-mode plan", words)
+            self.assertIn("claude --permission-mode dontAsk", words)
+            self.assertNotIn("permission-mode plan", words)  # #1181
+            self.assertIn("still at turn 0 after one, `hc read <its name>` to see why", words)  # #1191
+            self.assertIn("`hc keys <its name> enter`", words)
             self.assertIn("exactly as the Reviewer line gives it", words)
             self.assertIn("hc wait <its name>", words)
             self.assertNotIn("< /dev/null", words)
         self.assertIn(templates.WORKER_MD_BEFORE_SUBAGENTS, templates.OLD_WORKERS)
         self.assertIn(templates.WORKER_MD_BEFORE_COMMAND, templates.OLD_WORKERS)
+        self.assertIn(templates.WORKER_MD_BEFORE_WAIT, templates.OLD_WORKERS)
         with open(os.path.join(ROOT, "templates", "reviewer.md")) as f:
             self.assertIn(templates.REVIEWER_MD.strip(), f.read())
 
@@ -3247,7 +3251,7 @@ class ReviewerLine(unittest.TestCase):
     def test_signed_out_codex_never_reviews(self):
         r = self.line("signed-out")
         self.assertEqual(r["value"]["agent"], "claude")
-        self.assertTrue(r["value"]["command"].startswith("claude --permission-mode plan"))
+        self.assertIn("claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash", r["value"]["command"])
         self.assertIn("Codex isn't signed in here", r["text"])
         self.assertIn("`codex login`", r["text"])
 
@@ -5535,18 +5539,23 @@ class CodexAsksOnTheCard(unittest.TestCase):
             own = lambda c, sb=True: launch.own_command("/x/herdr-task", c, sb)  # noqa: E731
             yes = [f"hc run --bg --name demo-1-review --label \"herdr.task=$HERDR_BROWSER_TASK\" --label herdr.role=reviewer "
                    f"--label herdr.agent=codex -- {rv} 'Review it: \"ok\" & $x'",
-                   "hc run --bg --name demo-1-review -- claude --permission-mode plan --model opus 'review'",
-                   "hc wait demo-1-review --timeout 600", "hc read demo-1-review --lines 400", "hc kill demo-1-review"]
-            no = ["hc run --bg --name demo-1-review -- claude --permission-mode plan --dangerously-skip-permissions x",
+                   "hc run --bg --name demo-1-review -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --model opus 'review'",
+                   f"hc run --bg --name demo-1-review -- {reviewer_command('claude', 'opus', 'high')} 'review'",
+                   "hc wait demo-1-review --timeout 600", "hc read demo-1-review --lines 400", "hc kill demo-1-review",
+                   "hc keys demo-1-review enter", "hc keys demo-1-review down enter"]
+            no = ["hc run --bg --name demo-1-review -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --dangerously-skip-permissions x",
+                  "hc run --bg --name demo-1-review -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash,Edit x",
+                  "hc run --bg --name demo-1-review -- claude --permission-mode plan x",
+                  "hc run --bg --name demo-1-review -- env \"CLAUDE_CONFIG_DIR=$HOME\" claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash x",
                   "hc run --bg --name demo-1-review -- codex --no-daemon --sandbox read-only --ask-for-approval never "
                   "-c sandbox_mode=\"danger-full-access\" x",
-                  "hc run --bg --name demo-1-review -- sh -c 'rm -rf /'", "hc run --bg --name x -- claude --permission-mode plan x",
-                  "hc kill t15q", "hc send demo-1-review hi"]
+                  "hc run --bg --name demo-1-review -- sh -c 'rm -rf /'", "hc run --bg --name x -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash x",
+                  "hc kill t15q", "hc send demo-1-review hi", "hc keys t15q enter", "hc keys demo-1-review --text 'rm -rf /'"]
             for c in yes:
                 self.assertTrue(own(c), c)
             for c in no:
                 self.assertFalse(own(c), c)
-            self.assertFalse(own(yes[2], False))
+            self.assertFalse(own(yes[3], False))
         argv = launch.own_argv(["codex", "-s", "workspace-write"])
         self.assertIn(" _allow --command ", argv[2])
         self.assertIn(" --sandboxed", argv[2])
@@ -7785,7 +7794,24 @@ class CodexBatch278(unittest.TestCase):
 
     def test_claude_in_the_system_folders_needs_nothing(self):
         self.patch(self.settings.shutil, "which", lambda name: f"/usr/bin/{name}")
-        self.assertEqual(self.settings.reviewer_command("claude"), "claude --permission-mode plan")
+        self.assertEqual(self.settings.reviewer_command("claude"),
+                         'env ${CLAUDE_CONFIG_DIR:+"CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR"} claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash')
+
+    # ---- #1131 #1181 -----------------------------------------------------------------------------
+    def test_a_claude_reviewer_gets_the_workers_profile_never_plan_mode(self):
+        """#1131: hc run gives the reviewer hc's environment, so the brief's command carries the worker's own
+        CLAUDE_CONFIG_DIR, expanded by the worker's shell; none when the worker has none (an empty one is not ~/.claude).
+        #1181: read-only without plan mode, the prompt after its tools never taken as one."""
+        bin_dir = os.path.join(self.dir, "claudebin")
+        self.script(os.path.join(bin_dir, "claude"), '#!/bin/sh\necho "dir=${CLAUDE_CONFIG_DIR-unset}"; for a in "$@"; do echo "arg=$a"; done\n')
+        self.patch(self.settings.shutil, "which", lambda name: os.path.join(bin_dir, name))
+        cmd = self.settings.reviewer_command("claude", "opus", "high") + ' "review it"'
+        self.assertNotIn("plan", cmd)
+        for given, want in (({"CLAUDE_CONFIG_DIR": "/app/my claude"}, "dir=/app/my claude"), ({}, "dir=unset")):
+            out = subprocess.run(["sh", "-c", cmd], env={"PATH": "/usr/bin:/bin", "HOME": self.dir, **given}, capture_output=True, text=True).stdout
+            self.assertEqual(out.splitlines()[0], want, out)
+            self.assertIn("arg=--tools=Read,Grep,Glob,Bash", out)
+            self.assertEqual(out.splitlines()[-1], "arg=review it")
 
     def test_a_codex_worker_s_review_run_is_still_its_own(self):
         bin_dir = self.nvm()

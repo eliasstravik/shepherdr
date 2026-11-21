@@ -600,13 +600,24 @@ def reviewer_command(who, model=None, effort=None, folder=None):
         a += ["-m", model] if model else []
         a += ["-c", f'model_reasoning_effort="{effort}"'] if effort else []
     elif who == "claude":
-        a = ["claude", "--permission-mode", "plan"]
+        # #1181: never plan mode (it wrote its report into a plan to approve): don't-ask mode with only the reading tools,
+        # so a write or a command that isn't read-only is refused, never asked. --tools=… as one word: its list would
+        # take the prompt after it as a tool.
+        a = ["claude", "--permission-mode", "dontAsk", "--tools=" + REVIEW_TOOLS]
         a += ["--model", model] if model else []
         a += ["--effort", effort] if effort else []
+        # #1131: hc run gives it hc's environment, not the worker's: the worker's own Claude profile, when it has one
+        return (cli_env(who) or "env ") + CLAUDE_PROFILE + shlex.join(a)
     else:
         return None
     # #1228: hc run starts it with a bare PATH; its folders (nvm's, with node) go first, the worker's PATH after
     return cli_env(who) + shlex.join(a)
+
+
+REVIEW_TOOLS = "Read,Grep,Glob,Bash"
+# The worker's shell expands it: CLAUDE_CONFIG_DIR=<its folder> when the worker has one, nothing when it hasn't (an empty
+# one would not be ~/.claude).
+CLAUDE_PROFILE = '${CLAUDE_CONFIG_DIR:+"CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR"} '
 
 
 def task_settings(s, t, space=None, argv=None, live=False):
