@@ -165,3 +165,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Web viewer before/after on the dev VM: `bunx vite build --config web/vite.viewer.config.ts` writes a single-file web/dist/artifact-viewer.html; serve it with a tiny Bun stub answering /api/artifacts/<id> and /recipe. (from SHEP-274)
 
 - herdr-task --detach/_job (window actions as local jobs): test with TMPDIR=<scratch> and HERDR_TASK_ACTION_WAIT to keep job files and waits throwaway (see DetachedActions). (from SHEP-277)
+
+- Real Codex versions for repros: `npm i --prefix <scratch> @openai/codex@<ver>`, then hc run it with env PATH=<scratch>/node_modules/.bin:<node dir>:$PATH (hc run children get a bare PATH and do not inherit the caller's). (from SHEP-278)
