@@ -196,6 +196,8 @@ def main():
                                       "setting, else the folder's current branch)")
         c.add_argument("--branch", help="its branch's exact name, e.g. a ticket's ABC-2137 (default: the folder's Branch names "
                                         "setting, else task/<n>-<title words>); refused when that branch exists already (\"\": the pattern's)")
+        c.add_argument("--pr", help="take a pull request already open, by its number (#1155): its review, checks and Accept go there "
+                                "instead of a new one, and ready pushes to its branch (\"\" lets go)")
 
     def agent_opts(c):
         c.add_argument("--agent", help="agent key (claude, codex, ...)")
@@ -233,6 +235,8 @@ def main():
     c.add_argument("--parent", help="a coordinator's terminal: the agent's hc parent (default: the space's coordinator)")
     c.add_argument("--now", action="store_true", help="skip the queue (a scheduled task: start it now)")
     c.add_argument("--branch", help="its branch's exact name (as add --branch), before its worktree is made")
+    c.add_argument("--pr", help="take a pull request already open, by its number (#1155): its review, checks and Accept go there "
+                                "instead of a new one, and ready pushes to its branch (\"\" lets go)")
     g = c.add_mutually_exclusive_group()
     g.add_argument("--here", action="store_true")
     g.add_argument("--worktree", action="store_true")
@@ -246,6 +250,8 @@ def main():
     c.add_argument("--proof", help="its proof artifact's id (herdr-artifact publish prints it); default: its newest artifact titled \"... · Proof\"")
     c.add_argument("--agents-md", help="\"For AGENTS.md\": one line about setting up or testing this repo that the next agent "
                                        "would need and AGENTS.md lacks; the Assistant decides whether to add it")
+    c.add_argument("--pr", help="take a pull request already open, by its number (#1155): its review, checks and Accept go there "
+                                "instead of a new one, and ready pushes to its branch (\"\" lets go)")
     c = cmd("reviewed", cmd_reviewed, "a task's agent records one review round of its current commit (Review: on): ready then "
                                       "accepts that commit; uses one of its Review rounds")
     c.add_argument("--report", help="the round's findings in a line (levels, what was fixed)")

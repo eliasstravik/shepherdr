@@ -5583,6 +5583,126 @@ class TaskFlow(unittest.TestCase):
         self.assertEqual(github.pr_open(self.store, self.task, "o/r")["number"], 2918)
         self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "feature"), tip)
 
+    def taking(self, prs):
+        """A GitHub remote (a bare repo) and gh answering `pr view` from prs ({number: fields}); what gh was asked."""
+        import herdr_task.github as github
+        remote = os.path.join(self.root, "remote.git")
+        self.git(self.root, "init", "-q", "--bare", remote)
+        self.git(self.main, "remote", "add", "origin", remote)
+        self.git(self.main, "push", "-q", "origin", "main")
+        asked = []
+
+        def gh(*a, **k):
+            asked.append(a)
+            if a[:2] == ("pr", "view"):
+                v = prs.get(int(a[2]))
+                if not v:
+                    return False, "", "no pull requests found"
+                return True, (v["state"] if "-q" in a else json.dumps({"number": int(a[2]), "url": f"https://github.com/o/r/pull/{a[2]}",
+                                                                       "isCrossRepository": False, "baseRefName": "main", **v})), ""
+            return (True, "https://github.com/o/r/pull/99", "") if a[:2] == ("pr", "create") else (True, "[]", "")
+        self.patch(github, "gh", gh)
+        self.patch(self.commands, "gh", gh)
+        self.patch(self.commands, "github", lambda s: "o/r")
+        return remote, asked
+
+    def test_ready_takes_a_pull_request_on_another_branch(self):
+        """#1155: its agent pushed to fix/thing and opened a pull request there, then closed the one on the task branch.
+        ready --pr takes the open one: no second pull request, and later commits go to its branch."""
+        import herdr_task.github as github
+        wt = self.task["worktree"]
+        tip = self.commit(wt, "the fix", "a.txt")
+        remote, asked = self.taking({31: {"state": "OPEN", "headRefName": "fix/thing", "headRefOid": tip}, 30: {"state": "CLOSED"}})
+        self.git(wt, "push", "-q", "origin", "task/1:refs/heads/fix/thing")
+        self.task["pr"] = {"number": 30, "url": "https://github.com/o/r/pull/30", "repo": "o/r"}  # the closed one
+        self.commands.take_pr(self.store, self.task, "#31")
+        self.assertEqual(self.task["pr"], {"number": 31, "url": "https://github.com/o/r/pull/31", "repo": "o/r", "taken": True,
+                                           "branch": "fix/thing"})
+        self.assertEqual(github.pr_open(self.store, self.task, "o/r", "Fixed")["number"], 31)
+        self.assertNotIn(("pr", "create"), [a[:2] for a in asked])
+        self.assertNotIn(("pr", "edit"), [a[:2] for a in asked])  # its description is its author's
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "branch", "--list", "task/1"), "")
+        tip = self.commit(wt, "a later fix", "a.txt")
+        github.pr_open(self.store, self.task, "o/r")
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "fix/thing"), tip)
+        # Taken again: nothing changes. "" lets go of it.
+        self.commands.take_pr(self.store, self.task, "31")
+        self.assertEqual(self.task["pr"]["number"], 31)
+        self.commands.take_pr(self.store, self.task, "")
+        self.assertNotIn("pr", self.task)
+
+    def test_a_pull_request_that_cant_be_taken_is_refused(self):
+        """--pr: closed, from a fork, merging elsewhere, another task's, or ahead of the task's branch: refused, nothing kept."""
+        wt = self.task["worktree"]
+        tip = self.commit(wt, "work", "a.txt")
+        remote, _ = self.taking({1: {"state": "CLOSED", "headRefName": "x"}, 2: {"state": "OPEN", "headRefName": "x", "isCrossRepository": True},
+                                 3: {"state": "OPEN", "headRefName": "x", "baseRefName": "dev", "headRefOid": tip},
+                                 4: {"state": "OPEN", "headRefName": "ahead", "headRefOid": "0" * 40}})
+        self.git(wt, "push", "-q", "origin", "task/1:refs/heads/ahead")
+        other = self.commit(wt, "theirs only", "b.txt")
+        self.git(wt, "push", "-q", "-f", "origin", "task/1:refs/heads/ahead")
+        self.git(wt, "reset", "-q", "--hard", "HEAD~1")
+        for n, said in ((1, "is closed"), (2, "from a fork"), (3, "merges into dev"), (77, "Couldn't find"), ("x", "number")):
+            with self.assertRaises(Exception) as e:
+                self.commands.take_pr(self.store, self.task, str(n))
+            self.assertIn(said, str(e.exception))
+        import herdr_task.github as github
+        prs = {4: {"state": "OPEN", "headRefName": "ahead", "headRefOid": other}}
+        self.patch(self.commands, "gh", lambda *a, **k: (True, json.dumps({"number": 4, "url": "u", "baseRefName": "main", **prs[4]}), ""))
+        with self.assertRaises(Exception) as e:
+            self.commands.take_pr(self.store, self.task, "4")
+        self.assertIn("doesn't hold pull request #4's latest commit", str(e.exception))
+        self.assertNotIn("pr", self.task)
+        self.store.data["tasks"].append({"id": 2, "title": "Other", "state": "ready", "pr": {"number": 4, "repo": "o/r"}})
+        self.git(wt, "merge", "-q", "--ff-only", other)
+        with self.assertRaises(Exception) as e:
+            self.commands.take_pr(self.store, self.task, "4")
+        self.assertIn("already", str(e.exception))
+
+    def test_a_new_task_works_on_the_pull_request_it_took(self):
+        """#1195 idea 6: add --pr <a bot's pull request>: its worktree starts on that branch, the bot's commits are its work
+        (nothing-to-merge never), its brief says so, and ready pushes on top of the bot's branch."""
+        import herdr_task.github as github
+        import herdr_task.launch as launch
+        prs = {}
+        remote, asked = self.taking(prs)
+        bot = os.path.join(self.root, "bot")
+        self.git(self.root, "clone", "-q", "-b", "main", remote, bot)
+        for k, v in (("user.name", "B"), ("user.email", "b@example.com"), ("commit.gpgsign", "false")):
+            self.git(bot, "config", k, v)
+        self.git(bot, "checkout", "-q", "-b", "deps/bump-x")
+        bump = self.commit(bot, "bump x", "deps.txt")
+        self.git(bot, "push", "-q", "origin", "deps/bump-x")
+        self.store.data["tasks"].append({"id": 2, "title": "Land the bump", "state": "todo", "mode": "worktree", "agents": []})
+        t = self.store.data["tasks"][-1]
+        prs[12] = {"state": "OPEN", "headRefName": "deps/bump-x", "headRefOid": bump}
+        self.patch(launch, "WORKTREES", os.path.join(self.root, "trees"))
+        self.patch(launch, "settings_for", lambda s, space: {"tasks": {}})
+        self.commands.take_pr(self.store, t, "12")
+        self.assertEqual(t["pr"]["branch"], "deps/bump-x")
+        wt = launch.folder_for(self.store, t)
+        self.assertEqual(self.git(wt, "rev-parse", "HEAD"), bump)
+        self.assertEqual(t["start"], self.git(self.main, "rev-parse", "main"))
+        self.assertFalse(self.commands.in_base(self.store, t))
+        self.assertIn("took pull request #12 (branch deps/bump-x)", launch.where_line(t))
+        mine = self.commit(wt, "fix the build after the bump", "a.txt")
+        self.assertEqual(github.pr_open(self.store, t, "o/r", "The bump lands")["number"], 12)
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "deps/bump-x"), mine)
+        self.assertNotIn(("pr", "create"), [a[:2] for a in asked])
+
+    def test_a_taken_pull_request_that_closed_is_said(self):
+        """A taken pull request closed meanwhile: ready says so, never a new pull request of the task's own instead."""
+        import herdr_task.github as github
+        wt = self.task["worktree"]
+        tip = self.commit(wt, "work", "a.txt")
+        remote, asked = self.taking({5: {"state": "CLOSED"}})
+        self.git(wt, "push", "-q", "origin", "task/1:refs/heads/theirs")
+        self.task["pr"] = {"number": 5, "url": "u", "repo": "o/r", "taken": True, "branch": "theirs"}
+        with self.assertRaises(Exception) as e:
+            github.pr_open(self.store, self.task, "o/r")
+        self.assertIn("which this task took, is closed", str(e.exception))
+        self.assertNotIn(("pr", "create"), [a[:2] for a in asked])
+
     def test_the_same_red_checks_are_told_once(self):
         """#796: after ready again, the same failing checks of the same commit aren't news again."""
         from herdr_task import ghnews, base
