@@ -161,3 +161,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - A real herdr-task start in worktree mode without touching people's tasks: env -i with HERDR_TASK_STORE, HERDR_TASK_SETTINGS (tasks.worktree_root to scratch), SHEPHERDR_NO_MIGRATE=1 and a fake hc exporting HC_SESSION; start --argv '["sh","-c","..."]' stands in for the agent. (from SHEP-272)
 
 - Fake a dropped herdr-core link: hc machine add --via <script> --session b on a throwaway core, make the script fail while a flag file exists, kill the core's `herdr-core connect` child; hc machine login only retries with a terminal (give it a pty). (from SHEP-276)
+
+- Web viewer before/after on the dev VM: `bunx vite build --config web/vite.viewer.config.ts` writes a single-file web/dist/artifact-viewer.html; serve it with a tiny Bun stub answering /api/artifacts/<id> and /recipe. (from SHEP-274)
