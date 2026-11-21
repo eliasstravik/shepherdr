@@ -5623,6 +5623,58 @@ class TaskFlow(unittest.TestCase):
         self.git(wt, "commit", "-q", "-a", "--no-edit")
         self.assertIn("isn't reviewed", self.refusal())
 
+    def lines_file(self, cwd, name, lines, words):
+        with open(os.path.join(cwd, name), "w") as f:
+            f.write("".join(f"{x}\n" for x in lines))
+        self.git(cwd, "add", name)
+        self.git(cwd, "commit", "-q", "-m", words)
+        return self.git(cwd, "rev-parse", "HEAD")
+
+    def test_the_same_own_changes_on_a_newer_base_need_no_round(self):
+        """#1178: a reviewed branch moved onto a newer base (here a rebase, which no merge walk sees) changes
+        what it changed before: its review holds. Something of its own since still needs a round."""
+        wt = self.reviewed_task()
+        self.commit(self.main, "another task", "b.txt")
+        self.git(wt, "rebase", "-q", "main")
+        self.assertIsNone(self.refusal())
+        self.commit(wt, "a fix of its own", "a.txt")
+        self.assertIn("isn't reviewed", self.refusal())
+
+    def test_a_conflict_resolved_keeping_both_sides_needs_no_round(self):
+        """#1178: merging main hit a conflict next to the task's lines; resolved by keeping both, the task adds and
+        takes away the same lines as reviewed. Dropping main's line instead is a change of its own."""
+        wt = self.task["worktree"]
+        self.settings({"everywhere": {"tasks": {"review_rounds": 3}}})
+        self.task["review_gate"] = True
+        self.lines_file(self.main, "a.txt", ["one", "two", "three", "four"], "lines")
+        self.git(wt, "merge", "-q", "--no-edit", "main")
+        head = self.lines_file(wt, "a.txt", ["one", "TWO", "three", "four"], "the task's line")
+        self.task["reviews"] = [{"round": 1, "result": "report", "at": 2, "head": head}]
+        self.lines_file(self.main, "a.txt", ["one", "two", "THREE", "four"], "main's line")
+        self.assertNotEqual(subprocess.run(["git", "-C", wt, "merge", "-q", "--no-edit", "main"], capture_output=True).returncode, 0)
+        self.lines_file(wt, "a.txt", ["one", "TWO", "THREE", "four"], "merged main, both kept")
+        self.assertIsNone(self.refusal())
+        self.git(wt, "reset", "-q", "--hard", head)
+        subprocess.run(["git", "-C", wt, "merge", "-q", "--no-edit", "main"], capture_output=True)
+        self.lines_file(wt, "a.txt", ["one", "TWO", "three", "four"], "merged main, its line dropped")
+        self.assertIn("isn't reviewed", self.refusal())
+
+    def test_reviewed_spends_no_round_on_a_clean_merge(self):
+        """#1178: out of rounds, an agent that merged main ran `reviewed` again, was refused and waited for its
+        Assistant's review-more. A commit that only adds the base to a reviewed one is said so, with no round used."""
+        import argparse
+        wt = self.reviewed_task()
+        self.task["reviews"] += [{"round": 2, "result": "report", "at": 3, "head": self.task["reviews"][0]["head"]},
+                                 {"round": 3, "result": "report", "at": 4, "head": self.task["reviews"][0]["head"]}]
+        self.commit(self.main, "another task", "b.txt")
+        self.git(wt, "merge", "-q", "--no-edit", "main")
+        self.commands.cmd_reviewed(argparse.Namespace(id="SHEP-1", json=True, folder=None, report="", commit=None))
+        self.assertEqual(len(self.task["reviews"]), 3)
+        self.assertIn("its review holds, no round used", self.said[-1])
+        self.commit(wt, "a fix of its own", "a.txt")
+        with self.assertRaises(self.commands.Fail):
+            self.commands.cmd_reviewed(argparse.Namespace(id="SHEP-1", json=True, folder=None, report="", commit=None))
+
     def test_a_fix_after_the_last_round_asks_for_one_more(self):
         """#951: the fix of the last round's findings was refused, and the Assistant had told the worker to just
         say ready. The refusal and the Assistant's guide both say that fix needs a round of its own (review-more)."""

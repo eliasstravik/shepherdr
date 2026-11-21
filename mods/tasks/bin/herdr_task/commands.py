@@ -579,11 +579,11 @@ def review_refusal(s, t, wt):
         return None  # no commits of its own: nothing to review (nothing to merge)
     if not wt and t.get("folder_start") and unchanged_folder(s, t):
         return None  # in the folder itself, and it changed nothing (#744: a run that only reads)
-    revs = [r for r in t.get("reviews") or [] if r.get("result") in REVIEWED and (r.get("at") or 0) >= (t.get("started") or 0)]
+    revs = rounds_this_run(t)
     head = t.get("head") if wt else None
     if (any(r.get("head") == head for r in revs) if wt else bool(revs)):
         return None
-    if wt and head and base_merges_only(s, t, wt, {r.get("head") for r in revs if r.get("head")}, head):
+    if wt and head and carried_over(s, t, wt, {r.get("head") for r in revs if r.get("head")}, head):
         return None
     ref, ht, folder = s.ref(t), own_path(), shlex.quote(s.loc["folder"])
     what = f"your final commit {head[:7]}" if head else "this task's work"
@@ -606,6 +606,47 @@ def unchanged_folder(s, t):
     ok, head, _ = git(folder, "rev-parse", "HEAD")
     clean, changed, _ = git(folder, "status", "--porcelain", "--untracked-files=no")
     return ok and head == t["folder_start"] and clean and not changed
+
+
+def rounds_this_run(t):
+    return [r for r in t.get("reviews") or [] if r.get("result") in REVIEWED and (r.get("at") or 0) >= (t.get("started") or 0)]
+
+
+def carried_over(s, t, wt, reviewed, head):
+    """A reviewed commit's review still holds for head: only clean merges of the base since (#741), or the same
+    changes of its own against the base as a reviewed commit (#1178: a merge or rebase on a newer base that left the
+    task's own diff as it was reviewed, whatever git's merge machinery made of it)."""
+    return base_merges_only(s, t, wt, reviewed, head) or same_own_changes(s, t, wt, reviewed, head)
+
+
+def own_diff(wt, base, commit):
+    """The commit's own changes against base (from where they part): each file's header and the lines it adds and
+    takes away, without line numbers or the unchanged lines around them (a newer base moves those); None when
+    unknown."""
+    ok, fork, _ = git(wt, "merge-base", base, commit)
+    if not ok or not fork:
+        return None
+    ok, out, _ = git(wt, "diff", "--no-color", "--no-ext-diff", "--no-renames", "--binary", "--full-index", fork, commit)
+    if not ok:
+        return None
+    return "\n".join(ln for ln in out.split("\n") if not ln.startswith(("index ", "@@ ", " ")) and ln != "")
+
+
+def same_own_changes(s, t, wt, reviewed, head):
+    """#1178: head adds and takes away exactly the lines a reviewed commit did, each against the base (here or on its
+    remote): the review covers it, also after a merge whose conflicts were resolved keeping both sides. A resolution
+    that changed the task's own lines or dropped the base's, or anything of its own since, differs."""
+    main, base = s.loc["folder"], t.get("base") or "main"
+    for b in (f"refs/remotes/{remote_of(main)}/{base}", base):
+        if not git(wt, "rev-parse", "--verify", "--quiet", f"{b}^{{commit}}")[0]:
+            continue
+        mine = own_diff(wt, b, head)
+        if mine is None:
+            continue
+        for r in list(reviewed)[-10:]:
+            if own_diff(wt, b, r) == mine:
+                return True
+    return False
 
 
 def base_merges_only(s, t, wt, reviewed, head):
@@ -645,9 +686,6 @@ def cmd_reviewed(args):
         if not on:
             raise Fail(f"Review is off for {s.ref(t)}: there is no round to record.")
         used = rounds_used(t)
-        if used >= rounds:
-            raise Fail(f"All {rounds} review rounds of {s.ref(t)} are used. Say why in your chat and end your turn: only your "
-                       f"Assistant can add a round (herdr-task review-more {s.ref(t)}).")
         wt = t.get("worktree") if t.get("mode") == "worktree" else None
         head = None
         where = wt if wt and os.path.isdir(wt) else (s.loc["folder"] if s.loc["kind"] == "repo" else None)
@@ -666,6 +704,17 @@ def cmd_reviewed(args):
             head = git(wt, "rev-parse", "HEAD")[1]
         elif s.loc["kind"] == "repo":
             head = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None
+        heads = {r.get("head") for r in rounds_this_run(t) if r.get("head")}
+        if wt and head and head not in heads and os.path.isdir(wt) and carried_over(s, t, wt, heads, head):
+            # #1178: a clean merge of the base (or the same changes on a newer base) after a reviewed commit: the review
+            # holds, and no round is spent on it (agents out of rounds waited for review-more on every merge of main)
+            say(args, {**view(s, t), "round": used, "rounds": rounds, "carried": True},
+                f"{s.ref(t)}: commit {head[:7]} only adds the base branch to a reviewed commit: its review holds, no round "
+                "used. Say ready.")
+            return
+        if used >= rounds:
+            raise Fail(f"All {rounds} review rounds of {s.ref(t)} are used. Say why in your chat and end your turn: only your "
+                       f"Assistant can add a round (herdr-task review-more {s.ref(t)}).")
         text = " ".join(str(args.report or "").split())[:2000]
         t.setdefault("reviews", []).append({"round": used + 1, "result": "report", "text": text, "at": now(), "head": head,
                                             "by": os.environ.get("HC_TERMINAL_ID")})
