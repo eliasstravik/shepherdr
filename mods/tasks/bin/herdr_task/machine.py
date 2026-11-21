@@ -99,6 +99,41 @@ def sample():
             "disk": max([d["pct"] for d in disks] or [0]), "disks": disks}
 
 
+def biggest(path, n=3, timeout=120):
+    """What fills `path`'s disk under it: its n biggest folders, biggest first, each [folder, bytes,
+    its biggest folder or None when none holds most of it]. du on that disk only (-x), two levels
+    deep; None when du fails or takes longer than timeout seconds (a slow disk: no detail)."""
+    try:
+        r = subprocess.run(["du", "-x", "-k", "-d", "2", path], capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    root = os.path.normpath(path)
+    sizes = {}
+    for ln in r.stdout.splitlines():
+        size, _, p = ln.partition("\t")
+        if size.strip().isdigit() and p:
+            sizes[os.path.normpath(p)] = int(size) * 1024
+    if not sizes:
+        return None
+    top = sorted((p for p in sizes if os.path.dirname(p) == root), key=lambda p: -sizes[p])[:n]
+    top = [p for p in top if sizes[p] * 20 >= sizes[top[0]]]  # a folder far smaller than the biggest says nothing
+    out = []
+    for p in top:
+        kids = sorted((k for k in sizes if os.path.dirname(k) == p), key=lambda k: -sizes[k])
+        out.append([p, sizes[p], kids[0] if kids and sizes[kids[0]] * 2 > sizes[p] else None])
+    return out
+
+
+def size_words(n):
+    return f"{n / 2 ** 30:.0f} GB" if n >= 10 * 2 ** 30 else f"{n / 2 ** 30:.1f} GB" if n >= 2 ** 30 else f"{n // 2 ** 20} MB"
+
+
+def biggest_words(top):
+    """[[folder, bytes, child]] in a few words: "~/dev 120 GB (mostly ~/dev/app), ~/.cache 20 GB"."""
+    home = lambda p: "~" + p[len(HOME):] if p == HOME or p.startswith(HOME + os.sep) else p
+    return ", ".join(f"{home(p)} {size_words(n)}" + (f" (mostly {home(k)})" if k else "") for p, n, k in top or [])
+
+
 def hold_limits(given=None):
     """The start limits, from `given` (Settings' for this machine) over Shepherdr's defaults. A
     limit set to None is off."""

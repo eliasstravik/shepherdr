@@ -7016,3 +7016,208 @@ class Systemic(unittest.TestCase):
         self.tick.systemic_pass(self.store, {})
         self.assertEqual(self.merges, [])
         self.assertTrue(self.task["attention"].startswith("GitHub's merge queue removed it"))
+
+
+class AcceptCommand(unittest.TestCase):
+    """#1102, SHEP-275: a space's "When a task is accepted" command (tasks.accept_command) runs once a
+    task is done, in the background, in its repo, with the task named in env vars; a failure is kept on
+    the task and told to its Assistant, and the task stays done. A throwaway repo and settings file;
+    hc is never run."""
+
+    def setUp(self):
+        import shutil
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.after_accept as aa
+        import herdr_task.github as github
+        import herdr_task.settings as settings
+        self.aa, self.github, self.mock = aa, github, mock
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.main = os.path.join(self.tmp, "repo")
+        os.makedirs(self.main)
+        self.settings = os.path.join(self.tmp, "shepherdr.json")
+        self.store = Store([{"id": 4, "title": "Test databases", "state": "ready", "mode": "worktree", "space": "sp1",
+                             "worktree": os.path.join(self.tmp, "wt"), "branch": "task/4-test-databases", "base": "main"}])
+        self.store.loc["folder"] = self.main
+        self.task = self.store.data["tasks"][0]
+        self.spawned = []
+        for mod, name, value in ((settings, "SETTINGS", self.settings), (aa, "LOGS", os.path.join(self.tmp, "logs")),
+                                 (aa, "spawn", lambda folder, i: self.spawned.append((folder, i))),
+                                 (github, "mid_turn", lambda s, t: False), (github, "live_agents", lambda key: []),
+                                 (github, "remove_worktree", lambda s, t: True)):
+            p = mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def set_command(self, cmd, space=None, folder=None):
+        layer = {"tasks": {"accept_command": cmd}, "folder": folder or self.main}
+        with open(self.settings, "w") as f:
+            json.dump({"spaces": {space: layer}} if space else {"everywhere": layer}, f)
+
+    def run_it(self):
+        """What `herdr-task _after-accept` does in the background, on this test's store."""
+        import herdr_task.store as store
+        with self.mock.patch.object(store, "Store", lambda loc: self.store), self.mock.patch.object(store, "locate", lambda f: self.store.loc):
+            self.aa.cmd_after_accept(type("A", (), {"id": "4", "folder": self.main})())
+        return self.task["after_accept"]
+
+    def test_nothing_runs_without_a_command(self):
+        self.github.finish(self.store, self.task)
+        self.assertEqual(self.task["state"], "done")
+        self.assertNotIn("after_accept", self.task)
+        self.assertEqual(self.spawned, [])
+
+    def test_a_spaces_command_starts_once_as_the_task_is_done(self):
+        self.set_command("echo hi", space="sp1")
+        self.github.finish(self.store, self.task)
+        self.assertEqual(self.task["state"], "done")
+        self.assertEqual(self.task["after_accept"]["state"], "running")
+        self.assertEqual(self.spawned, [(self.main, 4)])
+        self.github.finish(self.store, self.task)        # done again (a second merge pass): never twice
+        self.assertEqual(len(self.spawned), 1)
+
+    def test_another_spaces_command_isnt_this_ones(self):
+        self.set_command("echo hi", space="sp2", folder=os.path.join(self.tmp, "other"))
+        self.github.finish(self.store, self.task)
+        self.assertEqual(self.spawned, [])
+
+    def test_it_runs_in_the_repo_with_the_task_named(self):
+        self.set_command('printf "%s|%s|%s|%s|%s" "$HERDR_TASK_ID" "$HERDR_TASK_NUMBER" "$HERDR_TASK_BRANCH" "$HERDR_TASK_WORKTREE" "$(pwd -P)" > out.txt')
+        self.github.finish(self.store, self.task)
+        r = self.run_it()
+        self.assertEqual((r["state"], r["code"]), ("ok", 0))
+        with open(os.path.join(self.main, "out.txt")) as f:
+            self.assertEqual(f.read(), f"SHEP-4|4|task/4-test-databases|{self.task['worktree']}|{os.path.realpath(self.main)}")
+        self.assertEqual(self.task["state"], "done")
+
+    def test_a_failure_is_kept_and_the_task_stays_done(self):
+        self.set_command("echo dropping test_SHEP_4; echo 'dropdb: database is in use' >&2; exit 3")
+        self.github.finish(self.store, self.task)
+        r = self.run_it()
+        self.assertEqual((self.task["state"], r["state"], r["code"]), ("done", "failed", 3))
+        self.assertEqual(r["tail"], "dropping test_SHEP_4\ndropdb: database is in use")
+        with open(r["log"]) as f:
+            self.assertIn("dropdb: database is in use", f.read())
+        self.assertEqual(self.aa.failure_words(r), "it ended with exit code 3: dropdb: database is in use")
+        self.assertTrue(self.aa.describe(r).startswith("failed, it ended with exit code 3: dropdb: database is in use (all its output: "))
+
+    def test_one_still_running_after_its_time_is_stopped(self):
+        self.set_command("echo started; sleep 30")
+        self.github.finish(self.store, self.task)
+        with self.mock.patch.object(self.aa, "TIMEOUT_S", 1):
+            r = self.run_it()
+        with open(r["log"]) as f:
+            self.assertIn("Stopped: still running", f.read())
+        self.assertEqual((r["state"], r["code"]), ("failed", None))
+        self.assertEqual(self.aa.failure_words(r), "it was still running after 10 min: started")
+
+    def test_the_done_row_says_it_failed(self):
+        """core/tasks.js secondLine(): a Done row's line, in the window and on the web."""
+        r = subprocess.run(["node", "--input-type=module", "-e",
+                            "import { secondLine } from './core/tasks.js';"
+                            "const t = (aa) => secondLine({ section: 'done', task: { state: 'done', after_accept: aa } }, null);"
+                            "console.log(JSON.stringify([t(undefined), t({ state: 'ok', code: 0 }),"
+                            " t({ state: 'failed', code: 3, tail: 'dropping\\ndropdb: in use' }), t({ state: 'failed', code: null })]));"],
+                           cwd=ROOT, capture_output=True, text=True)
+        self.assertEqual(json.loads(r.stdout), [None, None, "Cleanup failed (exit 3): dropdb: in use",
+                                                "Cleanup failed: still running after 10 min"], r.stderr)
+
+
+class AcceptCommandNews(unittest.TestCase):
+    """SHEP-275: a failed "When a task is accepted" command is told to its space's Assistant once, as its
+    own line (news.py). A throwaway news file; hc is never run."""
+
+    def setUp(self):
+        import shutil
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.assistant_settings as assistant_settings
+        import herdr_task.news as news
+        import herdr_task.reactions as reactions
+        self.news = news
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.store = Store([{"id": 4, "title": "Test databases", "state": "done", "space": "sp1", "merged": True}])
+        self.store.loc["folder"] = self.tmp
+        self.task = self.store.data["tasks"][0]
+        self.sent = []
+        for mod, name, value in ((news, "NEWS", os.path.join(self.tmp, "news.json")), (news, "HELD", os.path.join(self.tmp, "held.json")),
+                                 (news, "NEWS_SETTLE_MS", -1), (news, "store_files", lambda folder=None: ["/f.json"]),
+                                 (news, "read_list", lambda p: {"folder": self.tmp, "tasks": self.store.data["tasks"]}),
+                                 (news, "locate", lambda f: self.store.loc), (news, "Store", lambda loc, write=True: self.store),
+                                 (news, "coordinator_in", lambda space: "asst-1"), (news, "hc_json", lambda *a: {}),
+                                 (news, "news_send", lambda to, text, **k: self.sent.append((to, text)) or True),
+                                 (assistant_settings, "settings_pass", lambda *a: None), (reactions, "reactions_pass", lambda *a: None)):
+            p = mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_told_once(self):
+        self.news.news_pass({})                     # a first look: old news isn't news
+        self.task["after_accept"] = {"state": "failed", "code": 3, "tail": "dropdb: database is in use", "log": "/logs/f-4.log"}
+        self.news.news_pass({})
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn('event="accept-failed"', self.sent[0][1])
+        self.assertIn('SHEP-4 is done, but its "When a task is accepted" command failed: it ended with exit code 3: '
+                      'dropdb: database is in use. All its output: /logs/f-4.log (Test databases)', self.sent[0][1].replace("&quot;", '"'))
+        self.assertTrue(self.task["after_accept"]["told"])
+        self.news.news_pass({})
+        self.assertEqual(len(self.sent), 1)
+
+
+class DiskHoldSaysWhatFillsIt(unittest.TestCase):
+    """SHEP-275: a hold for a full disk names its biggest folders, found by du in the background and
+    kept a while (queues.disk_top); never du in the hold itself. Throwaway files."""
+
+    def setUp(self):
+        import shutil
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.machine as machine
+        import herdr_task.queues as queues
+        import herdr_task.settings as settings
+        self.queues, self.machine, self.mock = queues, machine, mock
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.spawned = []
+        full = {"memory": 40, "load": 0.1, "cores": 4, "cpu": 3, "disk": 96,
+                "disks": [{"path": "home", "pct": 96, "free_gb": 4}, {"path": "/tmp", "pct": 20, "free_gb": 80}]}
+        for mod, name, value in ((settings, "SETTINGS", os.path.join(self.tmp, "shepherdr.json")),
+                                 (queues, "HOLD_FILE", os.path.join(self.tmp, "machine-hold.json")),
+                                 (queues, "DISK_TOP", os.path.join(self.tmp, "disk-top.json")), (queues, "HOME", "/home/demo"),
+                                 (machine, "sample", lambda: full), (queues, "_hold", {})):
+            p = mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        self.queues.set_hold("vm-demo", {"start_disk": 90})
+
+    def hold(self):
+        self.queues._hold.clear()
+        self.queues._hold.update(machine="vm-demo", limits={"start_disk": 90})
+        return self.queues.machine_hold()
+
+    def test_first_a_look_in_the_background_then_what_it_found(self):
+        p = self.mock.patch.object(self.queues.subprocess, "Popen", lambda argv, **k: self.spawned.append(argv[2:]))
+        p.start()
+        self.addCleanup(p.stop)
+        self.assertEqual(self.hold(), "vm-demo's disk is 96% full")
+        self.assertEqual(self.spawned, [["_disk-top", "/home/demo"]])
+        self.assertEqual(self.hold(), "vm-demo's disk is 96% full")   # still looking: not started again
+        self.assertEqual(len(self.spawned), 1)
+        top = [["/home/demo/dev", 120 * 2 ** 30, "/home/demo/dev/app"], ["/home/demo/.cache", 3 * 2 ** 29, None]]
+        with self.mock.patch.object(self.machine, "biggest", lambda path: top), self.mock.patch.object(self.machine, "HOME", "/home/demo"):
+            self.queues.cmd_disk_top(type("A", (), {"path": "/home/demo"})())
+        self.assertEqual(self.hold(), "vm-demo's disk is 96% full (biggest: ~/dev 120 GB (mostly ~/dev/app), ~/.cache 1.5 GB)")
+        self.assertEqual(len(self.spawned), 1)
+
+    def test_biggest_reads_du(self):
+        root = os.path.join(self.tmp, "home")
+        for d, mb in (("dev/app", 3), ("dev/b", 1), ("cache", 1)):
+            os.makedirs(os.path.join(root, d))
+            with open(os.path.join(root, d, "f"), "wb") as f:
+                f.write(os.urandom(mb * 2 ** 20))
+        top = self.machine.biggest(root)
+        self.assertEqual([(os.path.relpath(p, root), os.path.relpath(k, root) if k else None) for p, n, k in top],
+                         [("dev", "dev/app"), ("cache", None)])
+        self.assertGreaterEqual(top[0][1], 4 * 2 ** 20)

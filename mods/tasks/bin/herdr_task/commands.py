@@ -320,6 +320,9 @@ def cmd_show(args):
         text.append(f"needs the person: {v['why']}")
     if v.get("proof"):
         text.append(f"proof: {v['proof']['title']} ({v['proof']['id']})")
+    if v.get("after_accept"):
+        from .after_accept import describe
+        text.append(f"when accepted: {describe(v['after_accept'])}")
     if v.get("archived"):
         text.append(f"archived: {time.strftime('%Y-%m-%d %H:%M', time.localtime(v['archived'] / 1000))} (still kept; writing to it brings it back)")
     for k in v["live"]:
