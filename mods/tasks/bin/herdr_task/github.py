@@ -307,16 +307,18 @@ def pr_at_tip(task, repo):
     return task.get("pr") if found else None
 
 
-def pr_merged(task, repo):
-    """The merged pull request for the task's branch (from this repo, into its base), or None
-    (SHEP-59: a squash merge leaves the branch's commits out of the base)."""
+def pr_merged(task, repo, any_base=False):
+    """The merged pull request for the task's branch (from this repo, into its base), or None (SHEP-59: a squash
+    merge leaves the branch's commits out of the base). any_base: else one into another branch (#1157: a parent
+    pull request's branch), its work merged all the same (the callers then check it merged at its tip)."""
     ok, out, _ = gh("pr", "list", "--repo", repo, "--head", task["branch"], "--state", "merged",
                     "--json", "number,url,isCrossRepository,baseRefName,headRefOid,mergeCommit")
     try:
-        return next((p for p in json.loads(out) if not p.get("isCrossRepository")
-                     and p.get("baseRefName") == (task.get("base") or "main")), None) if ok and out else None
+        mine = [p for p in json.loads(out) if not p.get("isCrossRepository")] if ok and out else []
     except (ValueError, TypeError, AttributeError):
         return None
+    return next((p for p in mine if p.get("baseRefName") == (task.get("base") or "main")), None) \
+        or (mine[0] if mine and any_base else None)
 
 
 def landed(s, task):
@@ -352,7 +354,7 @@ def already_merged(s, task):
             v = pr_view(task)
             if v and v.get("state") == "MERGED" and v.get("headRefOid") == tip:
                 return {**task["pr"], "mergeCommit": v.get("mergeCommit")}
-        found = pr_merged(task, repo)
+        found = pr_merged(task, repo, any_base=True)
         if found and found.get("headRefOid") == tip:
             task["pr"] = {"number": found["number"], "url": found["url"], "repo": repo}
             return {**task["pr"], "mergeCommit": found.get("mergeCommit")}

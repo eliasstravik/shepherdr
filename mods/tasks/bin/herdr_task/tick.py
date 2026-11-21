@@ -254,7 +254,7 @@ def squash_merged(s, t):
     """A Working task's branch whose pull request (opened by its agent) merged at its tip: that
     pull request, recorded on the task, or None."""
     repo = github(s)
-    found = pr_merged(t, repo) if repo else None
+    found = pr_merged(t, repo, any_base=True) if repo else None
     if not found or found.get("headRefOid") != (t.get("own") or t.get("head")):
         return None
     t["pr"] = {"number": found["number"], "url": found["url"], "repo": repo}

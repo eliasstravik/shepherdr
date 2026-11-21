@@ -3217,6 +3217,16 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         self.assertEqual(self.tick_once(), ("done", True))
         self.assertEqual(self.task["pr"]["number"], 704)
 
+    def test_a_pull_request_merged_into_another_branch_is_done_too(self):
+        """#1157: its pull request merged into a parent pull request's branch, not its base: its work merged all the
+        same, so the task is done (before, it stayed open until someone ran herdr-task done)."""
+        tip = self.change(self.task["worktree"], "reactions on the left")
+        self.tick_once()
+        self.github([{"number": 705, "url": "u", "isCrossRepository": False, "baseRefName": "feature/parent", "headRefOid": tip}])
+        self.live, self.task["gh_checked"] = [], 0
+        self.assertEqual(self.tick_once(), ("done", True))
+        self.assertEqual(self.task["pr"]["number"], 705)
+
     def test_the_tick_finds_a_ready_task_already_in_main(self):
         self.change(self.task["worktree"], "reactions on the left")
         self.tick_once()
