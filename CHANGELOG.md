@@ -1,5 +1,70 @@
 # Changelog
 
+## 3.1.45
+
+A big catch-up: more control over how tasks start and finish, a smarter merge queue, steadier Codex, and many fixes.
+
+### Tasks
+
+- Give a task, or a whole space, extra Claude Code or Codex flags (like `--advisor opus`). Only real flags are taken;
+  they show on the chat's model button and survive restarts.
+- A space can run a setup command in each new worktree before its agent starts (Settings → Tasks). If it fails, the
+  task waits and says why.
+- A space can run a command when a task is accepted, for cleanup. If it fails, the task stays Done and says Cleanup
+  failed.
+- A task can take over a pull request that's already open instead of opening a second one.
+- When the disk is full, the hold names the biggest folders.
+- Worktrees get a plain package.json at their root, so tools there stop tripping.
+
+### Review and Accept
+
+- The Accept card shows the task's Markdown documents, in the window and the web app.
+- Accept no longer gives up after 30 seconds on a slow merge.
+- A reviewed task that only took in a newer main keeps its review and spends no extra round.
+- Merge after checks waits only on the checks main requires.
+
+### Merge queue
+
+- When main or one check breaks many pull requests, you get one alert, not one per task, and the innocent ones go back
+  in once.
+- A pull request in the queue is taken out to push new work and goes back once its checks pass. One that conflicts, or
+  just failed its group, is never queued again as it is.
+
+### Assistants and Autopilot
+
+- On the web, a new Assistant shows its model before your first message, and you can change it there.
+- Autopilot's wakes are shorter, don't repeat task news, and wait while you're typing in the chat.
+- Autopilot no longer lists tasks that merge themselves as waiting on you.
+- A machine's news no longer goes to a home Assistant that can't reach it.
+- The Assistant chains tasks that touch the same files, so they don't trip over each other.
+
+### Codex
+
+- Codex chats no longer get mixed up with Codex's own helper agents, or lost behind its start screens.
+- Switching to Codex keeps the permission mode; the reviewer finds Codex installed with nvm; a busy Codex is waited for.
+
+### Artifacts
+
+- Table cells take links, bold and code.
+- Form fields can start on a chosen value.
+- Artifact preview works on every machine and is locked with a token.
+
+### Machines
+
+- After the network changes (like Tailscale coming back), machines reconnect right away instead of waiting.
+- Serve stops on time and says plainly when it's off.
+
+### Web and phone
+
+- Voice on a locked phone can do everything it can unlocked, with the same spoken yes.
+- Decline on the web app's secret card.
+- Big task lists load faster in the panels.
+
+### Fixes
+
+- 24 smaller fixes from an audit: link actions, artifact checks, Find machines' cooldown, Autopilot marks, Restart
+  Assistant and more.
+
 ## 3.1.44
 
 A small release: Codex's newest models, and a crash fix for updates.
