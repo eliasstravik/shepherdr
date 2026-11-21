@@ -128,6 +128,18 @@ export function formReply(b, values) {
   return [b.title ?? b.submit ?? "Form", ...lines].join("\n");
 }
 
+// A table cell as inline Markdown, the same on both sides: links, **bold**, *italic* and `code` show as such, but a cell
+// never turns into a block (a heading, a list, a quote, a rule or a code block): its lines join into one, and a mark
+// at its start that would open a block is escaped ("1. Fix" stays "1. Fix"). Raw HTML shows as the text it is: each
+// "<" is escaped (but in `code`). A number or null is its plain text.
+export function cellMd(c) {
+  const s = String(c ?? "").replace(/\s*\n\s*/g, " ").trim()
+    .replace(/(`+)[\s\S]*?\1|(\\*)</g, (m, tick, bs) => (tick ? m : bs.length % 2 ? m : `${bs}\\<`));   // in `code`: its own
+  if (/^([-*_])( *\1){2,} *$/.test(s)) return `\\${s}`;   // --- *** ___ : a rule
+  if (/^([-+*]|#{1,6})( |$)/.test(s) || /^(>|`{3}|~{3})/.test(s)) return `\\${s}`;
+  return s.replace(/^(\d{1,9})([.)])( |$)/, "$1\\$2$3");
+}
+
 // Markdown cut at its fenced code blocks (``` or ~~~, indented too, as in a list item), in order: { md } for the
 // words between, { code, lang } for each block, its lines without the fence's indent. The window draws each block in
 // its own box with a Copy button (recipe-view.js), so a command in a text, list item or callout copies whole. An

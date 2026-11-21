@@ -9,7 +9,7 @@ import { image } from "gpui-kit";
 import { theme } from "herdr";
 import { asset, reply } from "./artifact.js";
 import data from "./recipe-data.js";
-import { chartShapes, choiceReply, formReply, isLink, mdParts, mediaKind, withIds } from "./recipe.js";
+import { cellMd, chartShapes, choiceReply, formReply, isLink, mdParts, mediaKind, withIds } from "./recipe.js";
 
 const TONE = { info: "surface", good: "done", warn: "working", bad: "blocked" };
 
@@ -40,6 +40,13 @@ export default class RecipeView extends View {
     const parts = mdParts(text);
     if (!parts.some((x) => "code" in x)) return words(`md-${id}`, String(text ?? " "));
     return v_flex().w_full().min_w(0).gap(8).children(parts.map((x, i) => "code" in x ? this.code(`${id}-c${i}`, x.code, t) : words(`md-${id}-${i}`, x.md)));
+  }
+
+  // A table cell: inline Markdown (core/recipe.js cellMd) as a TextView only when it has marks to draw (a link, bold,
+  // code), else plain words, so a right-aligned number stays right-aligned.
+  cell(key, md) {
+    if (!/[*_`[\]\\~]|https?:\/\//.test(md)) return md;
+    return TextView.markdown(`md-${key}`, md).selectable(true);
   }
 
   // A code box: its text, and a Copy button at its top right that puts all of it on the clipboard (the
@@ -129,7 +136,8 @@ export default class RecipeView extends View {
         .child(h_flex().w_full().px(10).py(6).bg(t.surface).children(b.columns.map((c, i) => div().flex_1().min_w(0).text_size(12).font_medium().text_color(t.muted)
           .when((c.align ?? "") === "right", (e) => e.text_right()).child(String(c.label ?? c)))))
         .children(b.rows.map((r, ri) => h_flex().w_full().px(10).py(6).border_t_1().border_color(t.border)
-          .children(r.map((c, i) => div().flex_1().min_w(0).text_size(13).whitespace_normal().when(b.columns[i]?.align === "right", (e) => e.text_right()).child(String(c ?? ""))))));
+          .children(r.map((c, i) => div().flex_1().min_w(0).text_size(13).text_color(t.foreground).whitespace_normal().when(b.columns[i]?.align === "right", (e) => e.text_right())
+            .child(this.cell(`${b.id}-r${ri}-c${i}`, cellMd(c)))))));
       case "chart": return this.chart(b, t);
       case "stats": return h_flex().flex_wrap().gap(8).children(b.items.map((x) => v_flex().min_w(120).flex_1().p(10).gap(2).rounded(8).bg(t.surface)
         .child(div().text_size(12).text_color(t.muted).child(String(x.label)))
