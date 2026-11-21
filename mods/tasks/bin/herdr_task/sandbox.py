@@ -12,6 +12,7 @@ fix. The answer is kept until Codex, bwrap, the AppArmor switch or its profiles 
 
 import json
 import os
+import platform
 import shutil
 import subprocess
 import time
@@ -89,7 +90,7 @@ def check(fresh=False):
     """None when Codex's sandbox starts here (or isn't used here: not Linux, no codex), else
     {"error": what bwrap said, "bwrap": its path, "userns": whether AppArmor's switch is on, "at"}.
     Asked once and kept (CACHE) until what it depends on changes."""
-    if os.uname().sysname != "Linux":
+    if platform.system() != "Linux":
         return None
     codex = shutil.which("codex")
     if not codex:
@@ -156,7 +157,7 @@ def cmd_sandbox(args):
     from .output import say
     b = check(fresh=bool(args.check))
     if not b:
-        say(args, {"ok": True}, "Codex's sandbox starts on this machine." if shutil.which("codex") and os.uname().sysname == "Linux"
+        say(args, {"ok": True}, "Codex's sandbox starts on this machine." if shutil.which("codex") and platform.system() == "Linux"
             else "Nothing to check: no Codex sandbox on this machine.")
         return 0
     say(args, {"ok": False, **b, "notice": notice(b)}, notice(b))
