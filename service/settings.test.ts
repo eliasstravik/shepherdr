@@ -244,3 +244,22 @@ test("Feedback offers and its repo", () => {
   s.set("agents.feedback_repo", "", "all");
   expect(JSON.parse(readFileSync(file, "utf8")).everywhere?.agents).toBeUndefined();
 });
+
+test("Extra flags (#1222): a box per CLI, Everywhere's or a space's own, kept as herdr-task's list", () => {
+  const s = new Settings();
+  s.start();
+  const scope = { id: "sp7", name: "api", machine: null, folder: "/api" };
+  const row = (level: string, cli: string) => s.sections(null, [scope]).find((x) => x.name === "Tasks" && x.level === level)!.rows.find((r) => r.key === `tasks.${cli}_flags`)!;
+  expect(row("all", "claude")).toMatchObject({ label: "Claude Code flags", text: true, value: "", placeholder: "--advisor opus" });
+  expect(row("all", "codex")).toMatchObject({ label: "Codex flags", text: true, value: "" });
+  s.set("tasks.claude_flags", JSON.stringify(["--advisor=opus", "--name=a b"]), "all");
+  s.set("tasks.claude_flags", "[]", "sp7", scope);
+  const f = JSON.parse(readFileSync(file, "utf8"));
+  expect(f.everywhere.tasks.claude_flags).toEqual(["--advisor=opus", "--name=a b"]);
+  expect(f.spaces.sp7.tasks.claude_flags).toEqual([]);
+  expect(row("all", "claude").value).toBe("--advisor=opus '--name=a b'");
+  expect(row("sp7", "claude")).toMatchObject({ value: "none", inherits: { value: "--advisor=opus '--name=a b'", from: "Everywhere" } });
+  expect(() => s.set("tasks.codex_flags", JSON.stringify(["a prompt"]), "all")).toThrow("Not a list of flags.");
+  s.set("tasks.claude_flags", null, "sp7", scope);
+  expect(JSON.parse(readFileSync(file, "utf8")).spaces.sp7.tasks).toBeUndefined();
+});

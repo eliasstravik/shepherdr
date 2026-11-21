@@ -6268,3 +6268,160 @@ class LinkActions(unittest.TestCase):
         r = self.link.again("vmb", ["list"], lambda: subprocess.CompletedProcess([], *answers.pop(0)))
         self.assertEqual((r.returncode, r.stdout), (0, "[]"))
         self.assertFalse(self.link.lost(subprocess.CompletedProcess([], 1, "", "herdr-task: no such task")))
+
+
+class ExtraFlags(unittest.TestCase):
+    """#1222: a task (and a space) carries extra launch flags for its agent's CLI, such as --advisor opus: only real
+    Claude Code or Codex flags, none Shepherdr sets itself; kept one word each so launch, resume, switch and restart
+    keep them whole. A real task list on disk, a throwaway git repo and settings file; nothing is started."""
+
+    def setUp(self):
+        import argparse
+        import contextlib
+        import io
+        import shutil
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.commands as commands
+        import herdr_task.flags as flags
+        import herdr_task.settings as settings
+        import herdr_task.store as store
+        from herdr_task.base import Fail
+        self.commands, self.flags, self.settings, self.store_mod, self.Fail = commands, flags, settings, store, Fail
+        self.argparse, self.io, self.redirect = argparse, io, contextlib.redirect_stdout
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.folder = os.path.join(self.tmp, "app")
+        os.makedirs(self.folder)
+        subprocess.run(["git", "init", "-q", "-b", "main", self.folder], check=True)
+        subprocess.run(["git", "-C", self.folder, "-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q",
+                        "--allow-empty", "-m", "base"], check=True)
+        self.settings_file = os.path.join(self.tmp, "settings.json")
+        # the installed CLIs' --help is never asked unless a test says so
+        for p in (mock.patch.object(store, "STORE", os.path.join(self.tmp, "tasks")),
+                  mock.patch.object(settings, "SETTINGS", self.settings_file),
+                  mock.patch.object(commands, "caller_space", lambda: "sp1"),
+                  mock.patch.object(commands, "default_space", lambda: "sp1"),
+                  mock.patch.object(commands, "live_agents", lambda key: []),
+                  mock.patch.dict(flags._help, {"claude": {}, "codex": {}}, clear=True)):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def run_cmd(self, fn, **kw):
+        base = dict(folder=self.folder, json=True, id=None, title=None, prompt=None, prompt_file=None, here=False,
+                    worktree=False, after=None, space=None, at=None, in_=None, agent=None, model=None, effort=None,
+                    flags=None, argv=None, parent=None, now=False, base=None, start_notes=None, finish_notes=None, set=None)
+        out = self.io.StringIO()
+        with self.redirect(out):
+            fn(self.argparse.Namespace(**{**base, **kw}))
+        return json.loads(out.getvalue())
+
+    def space_settings(self, **tasks):
+        with open(self.settings_file, "w") as f:
+            json.dump({"spaces": {"sp1": {"folder": self.folder, "tasks": tasks}}}, f)
+
+    def with_task(self, n, fn):
+        with self.store_mod.Store(self.store_mod.locate(self.folder), write=False) as s:
+            return fn(s, s.find(n))
+
+    def argv(self, n, agent=None):
+        return self.with_task(n, lambda s, t: self.settings.worker_argv(s, t, "sp1", agent))
+
+    def test_only_real_flags_none_of_shepherdrs_own(self):
+        P = self.flags.parse
+        self.assertEqual(P("claude", "--advisor opus"), ["--advisor=opus"])
+        self.assertEqual(P("claude", ["-n", "my task", "--add-dir", "/a", "/b c", "--debug", "--verbose"]),
+                         ["--name=my task", "--add-dir=/a", "--add-dir=/b c", "--debug", "--verbose"])
+        self.assertEqual(P("codex", "-c model_verbosity=high -i a.png --search"),
+                         ["--config=model_verbosity=high", "--image=a.png", "--search"])
+        refused = {("claude", "--model opus"): "--model can't be an extra flag", ("claude", "--resume"): "resumes the task's own session",
+                   ("claude", "-p"): "--print can't", ("claude", "--permission-mode plan"): "permission mode",
+                   ("claude", "--settings {}"): "own --settings", ("claude", "--output-format json"): "only works with --print",
+                   ("claude", "--worktree"): "its own worktree", ("claude", "--advisor"): "--advisor needs a value",
+                   ("claude", "--verbose=1"): "takes no value", ("claude", "--no-such-flag"): "Claude Code has no --no-such-flag flag",
+                   ("claude", "hello"): "isn't a flag", ("codex", "-m o3"): "--model can't", ("codex", "-c model_reasoning_effort=high"): "-c model_reasoning_effort",
+                   ("codex", "--full-auto"): "sandbox and approvals", ("codex", "--advisor opus"): "Codex has no --advisor flag",
+                   ("codex", "--no-daemon"): "passes it already", ("codex", "-C /x"): "task's folder"}
+        for (agent, words), why in refused.items():
+            with self.assertRaises(self.Fail, msg=words) as e:
+                P(agent, words)
+            self.assertIn(why, str(e.exception), words)
+
+    def test_a_newer_cli_flag_from_its_own_help(self):
+        """A flag newer than the tables passes when the installed CLI's --help lists it."""
+        from unittest import mock
+        bin_dir = os.path.join(self.tmp, "bin")
+        os.makedirs(bin_dir)
+        with open(os.path.join(bin_dir, "claude"), "w") as f:
+            f.write("#!/bin/sh\ncat <<'X'\nOptions:\n  --brand-new <thing>      Something new\n  -z, --zap                Zap\nX\n")
+        os.chmod(os.path.join(bin_dir, "claude"), 0o755)
+        self.flags._help.pop("claude")
+        with mock.patch.dict(os.environ, {"PATH": bin_dir + os.pathsep + os.environ["PATH"]}):
+            self.assertEqual(self.flags.parse("claude", "--brand-new x --zap"), ["--brand-new=x", "--zap"])
+
+    def test_task_flags_reach_the_agent_and_stay_through_resume(self):
+        from herdr_task import launch, revive
+        self.run_cmd(self.commands.cmd_add, title="Advised", model="sonnet", flags="--advisor opus")
+        argv = self.argv(1)
+        self.assertEqual(argv[:2], ["claude", "--advisor=opus"])
+        self.assertIn("--model", argv)
+        # resume (switch, a crash's recovery) keeps the one word, and the session id stays the session id
+        self.assertEqual(launch.resume_argv(argv, "abc", self.folder)[-2:], ["--resume", "abc"])
+        self.assertIn("--advisor=opus", launch.resume_argv(argv, "abc", self.folder))
+        kind, base = revive.base_argv(argv + ["--resume", "abc", "the first message"])
+        self.assertEqual(base, argv)
+        # the brief's Settings block says them where model and effort show
+        block = self.with_task(1, lambda s, t: self.settings.settings_block(s, t, "sp1"))
+        self.assertIn("- Agent: claude, model sonnet, extra flags --advisor=opus (set by the assistant for this task)", block)
+
+    def test_refused_on_add_and_edit_with_the_reason(self):
+        with self.assertRaises(self.Fail) as e:
+            self.run_cmd(self.commands.cmd_add, title="Bad", flags="--model opus")
+        self.assertIn("use --model", str(e.exception))
+        self.run_cmd(self.commands.cmd_add, title="Fine")
+        with self.assertRaises(self.Fail):
+            self.run_cmd(self.commands.cmd_edit, id="1", set=["flags=--print"])
+        self.run_cmd(self.commands.cmd_edit, id="1", set=["flags=--advisor sonnet --verbose"])
+        self.assertEqual(self.argv(1)[1:3], ["--advisor=sonnet", "--verbose"])
+        self.run_cmd(self.commands.cmd_edit, id="1", set=["flags="])
+        self.assertNotIn("--advisor=sonnet", self.argv(1))
+
+    def test_a_space_default_per_cli_and_the_tasks_own_wins(self):
+        self.space_settings(claude_flags=["--advisor=opus"], codex_flags=["--search"])
+        self.run_cmd(self.commands.cmd_add, title="Plain")
+        self.assertEqual(self.argv(1)[:2], ["claude", "--advisor=opus"])
+        # the other CLI gets its own space default, never Claude Code's flags
+        codex = self.argv(1, "codex")
+        self.assertEqual(codex[:3], ["codex", "--no-daemon", "--search"])
+        self.assertNotIn("--advisor=opus", codex)
+        self.run_cmd(self.commands.cmd_edit, id="1", flags="--verbose")
+        self.assertEqual(self.argv(1)[1:2], ["--verbose"])
+        self.assertNotIn("--advisor=opus", self.argv(1))
+        self.run_cmd(self.commands.cmd_edit, id="1", set=["flags=none"])
+        self.assertEqual(self.argv(1)[1], "--settings")
+        # a codex task checks its flags against Codex
+        self.run_cmd(self.commands.cmd_add, title="Codex one", agent="codex", flags="--search")
+        with self.assertRaises(self.Fail):
+            self.run_cmd(self.commands.cmd_add, title="Wrong CLI", agent="codex", flags="--advisor opus")
+
+    def test_a_bad_setting_never_breaks_the_launch(self):
+        """A settings file edited by hand: what no longer passes is left out, the agent still starts."""
+        self.space_settings(claude_flags=["--model=opus", "--advisor=opus", "a prompt"])
+        self.run_cmd(self.commands.cmd_add, title="Plain")
+        argv = self.argv(1)
+        self.assertEqual(argv[:2], ["claude", "--advisor=opus"])
+        self.assertEqual(argv.count("--model"), 0)
+        self.assertNotIn("a prompt", argv)
+
+    def test_edit_starts_the_next_agent_on_the_new_flags(self):
+        self.run_cmd(self.commands.cmd_add, title="Plain")
+        before = self.with_task(1, lambda s, t: t.get("pick_at"))
+        self.run_cmd(self.commands.cmd_edit, id="1", flags="--verbose")
+        self.assertTrue(self.with_task(1, lambda s, t: t.get("pick_at")) and self.with_task(1, lambda s, t: t.get("pick_at")) != before)
+
+    def test_the_check_command(self):
+        import argparse
+        out = self.io.StringIO()
+        with self.redirect(out):
+            self.flags.cmd_flags(argparse.Namespace(agent="claude", json=True, words=["--", "--advisor opus"]))
+        self.assertEqual(json.loads(out.getvalue())["flags"], ["--advisor=opus"])

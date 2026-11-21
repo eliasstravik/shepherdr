@@ -9,6 +9,7 @@ import shutil
 import subprocess
 
 from .base import Fail, git, HOME, MAX_RUNNING, WHERE
+from . import flags as FLAGS
 
 
 # What each agent key starts by default. Unknown keys run as themselves; --argv overrides.
@@ -25,7 +26,7 @@ OLD_INSTRUCTIONS = os.path.join(HOME, ".herdr", "instructions")
 ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants started before the rename
 DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": "",
-                      "worktree_root": ""},
+                      "worktree_root": "", "claude_flags": [], "codex_flags": []},
             "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {},
             "agents": {"reactions": True, "suggestions": True, "feedback": True, "feedback_repo": "eliasstravik/shepherdr"}}
 LEVELS = ["blocker", "major", "minor"]
@@ -164,11 +165,14 @@ def argv_for(pick):
     argv), as the chat's agent picker builds it (mods/chat/agent.js argvFor). None: no setting."""
     if not pick:
         return None
+    extra = [str(x) for x in pick.get("flags") or []]
     if pick.get("argv"):
-        return [str(x) for x in pick["argv"]]
+        a = [str(x) for x in pick["argv"]]
+        return a[:1] + extra + a[1:]
     agent = pick.get("agent")
     if agent == "claude":
-        a = ["claude"]
+        # #1222: the extra flags first, each one word (flags.py), so what Shepherdr adds after them ends them
+        a = ["claude", *extra]
         if pick.get("model"):
             a += ["--model", pick["model"]]
         if pick.get("effort"):
@@ -181,7 +185,7 @@ def argv_for(pick):
             a += ["--permission-mode", "default" if perm == "manual" else perm]
         return a
     if agent == "codex":
-        a = ["codex", "--no-daemon"]
+        a = ["codex", "--no-daemon", *extra]
         if pick.get("model"):
             a += ["-m", pick["model"]]
         if pick.get("effort"):
@@ -213,6 +217,12 @@ def worker_pick(s, task, space=None, agent=None):
     for k in ("model", "effort"):
         if task.get(k):
             pick[k] = task[k]
+    # #1222: its CLI's extra flags, the task's own else its space's (Settings › Tasks), those that still pass
+    kind = pick.get("agent") or agent_key(pick.get("argv") or ["claude"])
+    own = (task.get("flags") or {}).get(kind) if isinstance(task.get("flags"), dict) else None
+    extra = FLAGS.clean(kind, own if own is not None else settings_for(s, space)["tasks"].get(f"{kind}_flags") or [])
+    if extra:
+        pick["flags"] = extra
     return pick
 
 
@@ -261,7 +271,8 @@ SET_KEYS = {"review": "review", "brief.review": "review", "merge": "merge", "bri
             "reviewer": "reviewer", "reviewer.agent": "reviewer", "reviewer.model": "reviewer_model", "reviewer.effort": "reviewer_effort",
             "reviewer_model": "reviewer_model", "reviewer-model": "reviewer_model",
             "reviewer_effort": "reviewer_effort", "reviewer-effort": "reviewer_effort",
-            "proof": "proof", "brief.proof": "proof"}
+            "proof": "proof", "brief.proof": "proof",
+            "flags": "flags", "task.flags": "flags", "extra-flags": "flags", "extra_flags": "flags"}
 # The Proof line (as Shepherdr's skill asks of its task agents), on and off.
 PROOF_WORDS = {"on": "show verifiable proof in one recipe artifact: each proof with a one-line caption, real and from this work now, "
                      "plus a \"Not proven\" list; then say ready with --proof <its id>",
@@ -275,11 +286,15 @@ EFFORTS = {"none", "minimal", "lowest", "low", "medium", "high", "xhigh", "max",
 ONOFF = {"on": "on", "yes": "on", "true": "on", "1": "on", "off": "off", "no": "off", "false": "off", "0": "off"}
 
 
-def set_task(t, key, value):
-    """One --set key=value (or flag) on task t; an empty value or "default" goes back to Settings'."""
+def set_task(t, key, value, agent=None):
+    """One --set key=value (or flag) on task t; an empty value or "default" goes back to Settings'. agent: the CLI
+    the task's agent runs, whose extra flags `flags` sets (#1222; default: the task's own --agent, else claude)."""
     field = SET_KEYS.get(key.strip().lower())
     if not field:
-        raise Fail(f"--set takes review, review.rounds, review.mustFix, merge, proof, agent, model, effort or reviewer settings, not {key!r}.")
+        raise Fail(f"--set takes review, review.rounds, review.mustFix, merge, proof, agent, model, effort, flags or reviewer settings, not {key!r}.")
+    if field == "flags":
+        set_flags(t, agent or t.get("agent") or "claude", value)
+        return
     v = value.strip().strip("\"'").strip()
     sets = t.setdefault("set", {})
     if not v or v.lower() == "default":
@@ -316,18 +331,36 @@ def set_task(t, key, value):
         t.pop("set", None)
 
 
-def set_opts(t, args):
-    """add/edit's --set pairs and --agent, --model, --effort, --reviewer, --reviewer-model,
-    --reviewer-effort, in that order (a --set pair wins over its flag)."""
-    for flag in ("agent", "model", "effort", "reviewer", "reviewer_model", "reviewer_effort"):
+def set_flags(t, agent, value):
+    """A task's own extra flags for agent's CLI (#1222), kept per CLI: a task switched to the other CLI gets that one's
+    (its own, else its space's). "" or "default": its space's again; "none": none, whatever its space says."""
+    v = (value if isinstance(value, str) else FLAGS.words(value)).strip()
+    own = dict(t.get("flags") or {}) if isinstance(t.get("flags"), dict) else {}
+    if not v or v.lower() == "default":
+        own.pop(agent, None)
+    else:
+        own[agent] = [] if v.lower() in ("none", "off") else FLAGS.parse(agent, v)
+    if own:
+        t["flags"] = own
+    else:
+        t.pop("flags", None)
+
+
+def set_opts(t, args, s=None, space=None):
+    """add/edit's --set pairs and --agent, --model, --effort, --flags, --reviewer, --reviewer-model,
+    --reviewer-effort, in that order (a --set pair wins over its flag). s: the task's store, so its flags are
+    checked against the CLI it will run (its own --agent, else its space's Task agent)."""
+    def cli():
+        return (worker_pick(s, t, space or t.get("space")).get("agent") if s else None) or t.get("agent") or "claude"
+    for flag in ("agent", "model", "effort", "flags", "reviewer", "reviewer_model", "reviewer_effort"):
         v = getattr(args, flag, None)
         if v is not None:
-            set_task(t, flag, v)
+            set_task(t, flag, v, cli() if flag == "flags" else None)
     for pair in getattr(args, "set", None) or []:
         if "=" not in pair:
             raise Fail(f"--set takes key=value, not {pair!r}.")
         k, v = pair.split("=", 1)
-        set_task(t, k, v)
+        set_task(t, k, v, cli() if SET_KEYS.get(k.strip().lower()) == "flags" else None)
     if getattr(args, "reviewer_model", None) or getattr(args, "reviewer", None) or any(
             SET_KEYS.get(p.split("=", 1)[0].strip().lower()) in ("reviewer", "reviewer_model") for p in getattr(args, "set", None) or []):
         check_reviewer_model(t)
@@ -534,10 +567,14 @@ def task_settings(s, t, space=None, argv=None, live=False):
     add("Proof", PROOF_WORDS["on" if proof else "off"], proof,
         "task" if "proof" in sets else by_layer(s, space, "tasks", "proof", proof, True))
     model, effort = argv_model(argv)
-    text = agent + (f", model {model}" if model else "") + (f", effort {effort}" if effort else "")
-    a_by = "task" if any(t.get(f) for f in ("agent", "model", "effort")) else \
-        by_layer(s, space, "worker", None, bool(cfg.get("worker")), False)
-    add("Agent", text, {"agent": agent, "model": model, "effort": effort}, a_by)
+    extra = FLAGS.extra(agent, argv)
+    text = agent + (f", model {model}" if model else "") + (f", effort {effort}" if effort else "") + \
+        (f", extra flags {FLAGS.words(extra)}" if extra else "")
+    own_flags = agent in (t.get("flags") or {}) if isinstance(t.get("flags"), dict) else False
+    a_by = "task" if any(t.get(f) for f in ("agent", "model", "effort")) or own_flags else \
+        by_layer(s, space, "worker", None, bool(cfg.get("worker")), False) or \
+        (by_layer(s, space, "tasks", f"{agent}_flags", extra, []) if extra else None)
+    add("Agent", text, {"agent": agent, "model": model, "effort": effort, "flags": extra}, a_by)
     # Suggested next message (SHEP-186): the reply ends with the words the person would likely send next (templates/worker.md)
     sug = (cfg.get("agents") or {}).get("suggestions") is not False
     add("Suggested next message", "on (your reply ends with the message you'd likely send next, shown greyed out in the box)" if sug

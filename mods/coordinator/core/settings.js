@@ -217,6 +217,19 @@ export const BRANCH = {
   about: "New tasks' branches. {n} is its number, {key} its id (SHEP-4), {slug} its title.",
   pattern: "task/{n}-{slug}",
 };
+// Extra flags (tasks.claude_flags, tasks.codex_flags, #1222): a CLI's own launch flags for a space's task agents, such
+// as --advisor opus. herdr-task checks them (`herdr-task flags`, flags.py: real flags only, none Shepherdr sets) and
+// keeps them one word each (--advisor=opus); a task's own (--flags, --set flags=) replace them.
+export const FLAGS = {
+  rows: [["claude", "Claude Code flags"], ["codex", "Codex flags"]],
+  about: (cli) => `Extra flags for ${cli} when it runs a task, as you'd type them. A task can set its own. Empty: the level above's; none: none.`,
+  example: { claude: "--advisor opus", codex: "--search" },
+  none: "none",
+};
+// Flags as one line, quoted only where a shell needs it: ["--advisor=opus", "--name=a b"] -> --advisor=opus '--name=a b'.
+export function flagWords(list) {
+  return (Array.isArray(list) ? list : []).map((w) => (/^[\w@%+=:,./-]+$/.test(String(w)) ? String(w) : `'${String(w).replace(/'/g, `'"'"'`)}'`)).join(" ");
+}
 // Why a Branch names pattern can't be used, or "" (herdr-task's branch_pattern_problem says the same).
 export function branchPattern(pattern) {
   const p = String(pattern ?? "").trim();

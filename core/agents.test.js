@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import * as AGall from "./agents.js";
-import { argvFor, current, forkArgv, FORK_LIVE, line, liveTaskAgent, menuFor, modelSections, parseDefaults, parsePicks, pickKey, resumeArgv, rowFor, withPin, withRecent, speedFor, speedOf, codexTier, speedName, speedWordOf } from "./agents.js";
+import { argvFor, current, extraFlags, forkArgv, FORK_LIVE, line, liveTaskAgent, menuFor, modelSections, parseDefaults, parsePicks, pickKey, resumeArgv, rowFor, withPin, withRecent, speedFor, speedOf, codexTier, speedName, speedWordOf } from "./agents.js";
 
 const codex = { models: Array.from({ length: 250 }, (_, i) => ({ id: `gpt-${i}`, label: `GPT ${i}`, efforts: ["low", "high"] })) };
 const menus = { claude: menuFor("claude", {}), codex: menuFor("codex", codex) };
@@ -188,4 +188,19 @@ test("a space's choice before the first message: kept whole (Ultrafast too), com
   expect(Object.keys(all).length).toBe(40);
   expect(choiceOf(all, "sp1")).toBeNull();
   expect(withChoice({ a: { agent: "claude", at: 1 } }, "a", null)).toEqual({});
+});
+
+test("#1222: a task's extra flags show under the box and stay through a restart, a resume and a fork", () => {
+  const argv = ["claude", "--advisor=opus", "--verbose", "--settings", '{"fastMode":false}', "--model", "sonnet", "--effort", "high",
+    "--dangerously-skip-permissions", "--add-dir", "/x", "--resume", "11111111-2222-3333-4444-555555555555", "the brief"];
+  expect(extraFlags("claude", argv)).toEqual(["--advisor=opus", "--verbose"]);
+  expect(extraFlags("claude", ["sh", "-ic", "claude --x", "claude", "--advisor=opus"])).toEqual(["--advisor=opus"]);
+  const codex = ["codex", "-c", "hooks.x=1", "--no-daemon", "--search", "--config=model_verbosity=high", "-m", "gpt-x", "-c", 'service_tier="fast"', "--dangerously-bypass-approvals-and-sandbox"];
+  expect(extraFlags("codex", codex)).toEqual(["--search", "--config=model_verbosity=high"]);
+  // the web's restart on the same CLI keeps them; another CLI drops them
+  expect(argvFor({ agent: "claude", model: "opus" }, { agent: "claude", argv }).argv).toContain("--advisor=opus");
+  expect(argvFor({ agent: "codex" }, { agent: "claude", argv }).argv).not.toContain("--advisor=opus");
+  expect(resumeArgv("claude", argv, "s1")).toContain("--advisor=opus");
+  expect(resumeArgv("claude", argv, "s1").slice(-2)).toEqual(["--resume", "s1"]);
+  expect(forkArgv("claude", argv, "s1")).toContain("--advisor=opus");
 });

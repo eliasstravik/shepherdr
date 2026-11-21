@@ -28,7 +28,7 @@ import { HOME, appHome } from "./paths.ts";
 const { spaceName } = SPc as any;
 import type { Where } from "./worktree.ts";
 import * as AGc from "../core/agents.js";
-const { current, rowFor, menuFor, modelName, levelName, NAMES } = AGc as any;
+const { current, extraFlags, rowFor, menuFor, modelName, levelName, NAMES } = AGc as any;
 import * as NF from "../core/notify.js";
 const { NOTIFY, everywhereOf, spaceLevel, machineLevel, machineOfSpace, spaceOwn, machineOwn } = NF as any;
 // Settings › Notify's words, the window's own (core/settings.js)
@@ -703,7 +703,9 @@ export class Compat {
       const row = rowFor(kind, c), label = menuFor(kind, {}).models.find((m: any) => m.id === row)?.name ?? modelName(c.model);
       // the window's model button (mods/chat pickParts): model, level, Fast
       const words = [c.label ?? modelName(c.model), levelName(c.effort), c.fast === "ultrafast" ? "Ultrafast" : c.fast ? "Fast" : null].filter(Boolean).join(" · ") || NAMES[kind] || "Agent";
-      agent = { kind, words, ...(c.model ? { model: c.model, modelLabel: label } : {}), ...(c.effort ? { effort: c.effort } : {}), ...(c.model ? { runtime: { model: c.model, modelLabel: label, ...(c.effort ? { effort: c.effort } : {}), speed: c.fast === "ultrafast" ? "ultrafast" : c.fast ? "fast" : "normal", source: "session", at: Date.now() } } : {}) };
+      // #1222: the extra flags it was started with, beside its model and effort
+      const extra = extraFlags(kind, t?.foreground?.argv ?? t?.argv ?? []);
+      agent = { kind, words, ...(extra.length ? { flags: extra } : {}), ...(c.model ? { model: c.model, modelLabel: label } : {}), ...(c.effort ? { effort: c.effort } : {}), ...(c.model ? { runtime: { model: c.model, modelLabel: label, ...(c.effort ? { effort: c.effort } : {}), speed: c.fast === "ultrafast" ? "ultrafast" : c.fast ? "fast" : "normal", source: "session", at: Date.now() } } : {}) };
     } catch {}
     // the first row: the log's very start, or earlier pages to load as it scrolls up
     const head = reader.start === 0 ? { top: true } : reader.start ? { earlier: true } : {};

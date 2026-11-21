@@ -108,8 +108,8 @@ def cmd_add(args):
         # The person's setting wins: worktrees off for this repo means in the folder, --worktree or not.
         mode = "here" if args.here or not worktrees_on(s) else "worktree"
         t = s.new(args.title.strip(), prompt, mode)
-        set_opts(t, args)
         space = bare(args.space) if args.space else caller_space()
+        set_opts(t, args, s, space)
         set_base(s, t, args.base, space, new=True)
         set_branch(s, t, getattr(args, "branch", None))
         set_notes(t, args)
@@ -846,9 +846,9 @@ def cmd_edit(args):
         if args.prompt_file:
             with open(args.prompt_file) as f:
                 t["prompt"] = f.read()
-        pick = [t.get(k) for k in ("agent", "model", "effort")]
-        set_opts(t, args)
-        if [t.get(k) for k in ("agent", "model", "effort")] != pick:
+        pick = [t.get(k) for k in ("agent", "model", "effort", "flags")]
+        set_opts(t, args, s)
+        if [t.get(k) for k in ("agent", "model", "effort", "flags")] != pick:
             # The next agent started for it runs on the new choice (start_again), a queued one too.
             t["pick_at"] = now()
             q = t.get("queue") or {}
@@ -926,7 +926,7 @@ def start_again(s, t, space, key=None, argv_json=None, message=None, parent=None
     unarchive(s, t)
     prev = last_agent(t)
     parent = parent_for(parent or (prev or {}).get("parent"), space)
-    # The last agent's argv again, unless the task's agent, model or effort changed since (edit).
+    # The last agent's argv again, unless the task's agent, model, effort or flags changed since (edit).
     keep = prev and prev.get("argv") and (t.get("pick_at") or 0) <= (prev.get("at") or 0)
     argv = agent_argv(None, argv_json) if argv_json else worker_argv(s, t, space, key) if key else \
         (prev["argv"] if keep else worker_argv(s, t, space))

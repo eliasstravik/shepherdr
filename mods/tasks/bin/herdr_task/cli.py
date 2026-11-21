@@ -23,6 +23,7 @@ from .backups import cmd_backup, cmd_restore_spaces
 from .automations import auto_list, cmd_auto, cmd_scheduler, cmd_track, EVENTS, HOW
 from .machines import cmd_assistants, cmd_machines, cmd_sync_auto, cmd_tell
 from .autopilot import cmd_autopilot, cmd_complete, cmd_progress
+from .flags import cmd_flags
 from .home import cmd_home
 from .assistant_settings import cmd_session_note
 from .feedback import cmd_feedback
@@ -186,12 +187,14 @@ def main():
         c.add_argument("--agent", help="the CLI its agent runs (claude, codex, ...; default: Settings' Workers)")
         c.add_argument("--model", help="its agent's model, an id or alias (default: Settings'; \"default\": the CLI's own)")
         c.add_argument("--effort", help="its agent's effort: low, medium, high, xhigh, max... (default: Settings')")
+        c.add_argument("--flags", help="extra flags for its agent's CLI, as you'd type them, e.g. --flags=\"--advisor opus\": only real Claude Code or "
+                                       "Codex flags, none Shepherdr sets itself (default: its space's Settings › Tasks; \"none\": none; \"default\": the space's again)")
         c.add_argument("--reviewer", help="the CLI its agent's review uses (default: Settings' Reviewer, else the other CLI)")
         c.add_argument("--reviewer-model", help="the reviewer's model")
         c.add_argument("--reviewer-effort", help="the reviewer's effort")
         c.add_argument("--set", action="append", metavar="KEY=VALUE",
                        help="one task's setting, a line of its brief's Settings block: review=on|off, review.rounds=1..10, "
-                            "review.mustFix=blocker|major|minor, proof=on|off, merge=\"on its own\"|\"after checks\"|\"ask me first\" (\"\": Settings' again)")
+                            "review.mustFix=blocker|major|minor, proof=on|off, flags=\"--advisor opus\", merge=\"on its own\"|\"after checks\"|\"ask me first\" (\"\": Settings' again)")
         c.add_argument("--base", help="the branch its worktree branches from and merges into (default: its space's Base branch "
                                       "setting, else the folder's current branch)")
         c.add_argument("--branch", help="its branch's exact name, e.g. a ticket's ABC-2137 (default: the folder's Branch names "
@@ -356,6 +359,12 @@ def main():
     auto_cmd("feed", "this folder's tasks as events read them, as JSON (asked by another machine's --from)", id=False)
     auto_cmd("pause", "stop it firing")
     auto_cmd("resume", "let it fire again")
+    c = sub.add_parser("flags", help="check extra flags for a task's agent (#1222) and print them as Shepherdr keeps them: "
+                       "only real Claude Code or Codex flags, none Shepherdr sets itself")
+    c.add_argument("--agent", default="claude", choices=["claude", "codex"], help="the CLI they're for (default: claude)")
+    c.add_argument("--json", action="store_true")
+    c.add_argument("words", nargs=argparse.REMAINDER, help="the flags, after -- (e.g. -- --advisor opus), or as one quoted line")
+    c.set_defaults(fn=cmd_flags)
     ap = sub.add_parser("autopilot", help="a space's Assistant woken on a schedule or by events, with the heartbeat "
                         "(Everywhere's schedule, events and heartbeat, unless a space sets its own; each space switches it on)").add_subparsers(dest="autopilot")
 
