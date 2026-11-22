@@ -115,6 +115,7 @@ Bun.serve<{ mode: 'normal' | 'empty' | 'down'; watch: string[] }, never>({
     const url = new URL(req.url)
     const path = url.pathname.replace(/^\/[\w-]+(?=\/api\/)/, '')
     if (path === '/api/screen') return server.upgrade(req, { data: { mode: 'normal', watch: [], screen: url.searchParams.get('key') ?? '' } as any }) ? undefined : new Response('no', { status: 400 })
+    if (path === '/api/terminal') return server.upgrade(req, { data: { mode: 'normal', watch: [], term: url.searchParams.get('chat') ?? '' } as any }) ? undefined : new Response('no', { status: 400 })
     if (path === '/api/ws') {
       const ref = new URL(req.headers.get('referer') ?? url).searchParams.get('case') ?? url.searchParams.get('case')
       return server.upgrade(req, { data: { mode: ref === 'empty' || ref === 'down' ? ref : 'normal', watch: [] } }) ? undefined : new Response('no', { status: 400 })
@@ -148,6 +149,16 @@ Bun.serve<{ mode: 'normal' | 'empty' | 'down'; watch: string[] }, never>({
     },
     message(ws, raw) {
       if ((ws.data as any).screen !== undefined) return
+      if ((ws.data as any).term !== undefined) {
+        // a stand-in terminal: it shows a prompt and echoes what is typed; nothing runs
+        const m = JSON.parse(String(raw)) as { type: string; id: number; text?: string; keys?: string[] }
+        const say = (t: string) => ws.send(new TextEncoder().encode(t))
+        if (m.type === 'open') { ws.send(JSON.stringify({ type: 'size', cols: 100, rows: 12 })); say('sam@mac-mini shop % ') }
+        else if (m.type === 'text') say(m.text ?? '')
+        else if (m.type === 'keys' && m.keys?.includes('enter')) say("\r\n(this demo doesn't run commands)\r\nsam@mac-mini shop % ")
+        ws.send(JSON.stringify({ type: 'ack', id: m.id }))
+        return
+      }
       const msg = JSON.parse(String(raw)) as { type: string; chats?: string[] }
       if (msg.type === 'ping') return void ws.send(JSON.stringify({ type: 'pong' }))
       if (msg.type !== 'watch') return

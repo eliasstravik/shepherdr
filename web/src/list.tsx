@@ -169,7 +169,7 @@ export function newSpaceDialog(machine?: string) {
             <p>A folder on one of your machines, with its own chat.</p>
             <label className="fld">
               <span>Name</span>
-              <input className="inp" name="space" value={name} placeholder="docs" autoComplete="off" autoCapitalize="off" onChange={(e) => setName(e.target.value)} />
+              <input className="inp" name="space" value={name} placeholder="# docs" autoComplete="off" autoCapitalize="off" onChange={(e) => setName(e.target.value)} />
             </label>
             <MachineField value={m} onChange={setM} />
             <label className="fld">

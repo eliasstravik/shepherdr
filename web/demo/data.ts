@@ -91,7 +91,7 @@ export function snapshot(mode: 'normal' | 'empty' | 'down' = 'normal'): Snapshot
     host: 'mac-mini',
     user: 'Sam',
     everything: EV,
-    places: [place(EV, 'home', 'mac-mini', { home: true }), place(P.shop, 'shop', 'mac-mini'), place(P.blog, 'blog', 'mac-mini'), place(P.notes, 'notes', 'mac-mini'), place(P.garden, 'garden-app', 'vm')],
+    places: [place(EV, 'home', 'mac-mini', { home: true, where: '~/herdr-home' }), place(P.shop, 'shop', 'mac-mini', { where: '~/dev/shop' }), place(P.blog, 'blog', 'mac-mini', { where: '~/dev/blog' }), place(P.notes, 'notes', 'mac-mini', { where: '~/notes' }), place(P.garden, 'garden-app', 'vm', { where: '~/dev/garden-app' })],
     sections: [{ id: 's:store', name: 'Store', machine: 'mac-mini', spaces: [P.shop, P.blog] }],
     machines: [
       { id: 'm:mac-mini', machine: 'mac-mini', name: 'mac-mini', status: 'idle', here: true, health: { meters: [{ name: 'CPU', pct: 34, detail: '', level: 'ok' }, { name: 'Memory', pct: 71, detail: '', level: 'ok' }, { name: 'Disk', pct: 58, detail: '', level: 'ok' }], herdr: true, working: 5, held: 0, at: '' } },
