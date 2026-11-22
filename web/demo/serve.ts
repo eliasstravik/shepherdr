@@ -117,10 +117,10 @@ Bun.serve<{ mode: 'normal' | 'empty' | 'down'; watch: string[] }, never>({
     if (path === '/api/screen') return server.upgrade(req, { data: { mode: 'normal', watch: [], screen: url.searchParams.get('key') ?? '' } as any }) ? undefined : new Response('no', { status: 400 })
     if (path === '/api/terminal') return server.upgrade(req, { data: { mode: 'normal', watch: [], term: url.searchParams.get('chat') ?? '' } as any }) ? undefined : new Response('no', { status: 400 })
     if (path === '/api/ws') {
-      const ref = new URL(req.headers.get('referer') ?? url).searchParams.get('case') ?? url.searchParams.get('case')
-      return server.upgrade(req, { data: { mode: ref === 'empty' || ref === 'down' ? ref : 'normal', watch: [] } }) ? undefined : new Response('no', { status: 400 })
+      // which day to show: the page was opened with ?case=empty or ?case=down (kept in a cookie: the app rewrites its address)
+      const c = /(?:^|;\s*)demo-case=(\w+)/.exec(req.headers.get('cookie') ?? '')?.[1]
+      return server.upgrade(req, { data: { mode: c === 'empty' || c === 'down' ? c : 'normal', watch: [] } }) ? undefined : new Response('no', { status: 400 })
     }
-    if (path === '/api/screen/shot') return new Response(Bun.file(shotFile(url.searchParams.get('key') ?? '')))
     if (path === '/api/me') return Response.json({ login: 'sam', off: [] })
     if (path === '/api/action') return Response.json(action((await req.json()) as Record<string, any>) ?? { ok: true })
     if (path === '/api/upload') return Response.json({ path: `/tmp/demo/${Date.now()}`, name: 'file' })
@@ -131,7 +131,9 @@ Bun.serve<{ mode: 'normal' | 'empty' | 'down'; watch: string[] }, never>({
     // under any path (tailscale serve --set-path /name): the file as asked, else without its first part
     for (const p of [url.pathname, url.pathname.replace(/^\/[\w-]+(?=\/)/, '')]) {
       const f = Bun.file(join(dist, p.endsWith('/') ? `${p}index.html` : p))
-      if (await f.exists()) return new Response(f)
+      if (!(await f.exists())) continue
+      // the page itself says which day the demo shows
+      return p.endsWith('/') ? new Response(f, { headers: { 'set-cookie': `demo-case=${url.searchParams.get('case') ?? 'normal'}; Path=/; SameSite=Lax` } }) : new Response(f)
     }
     return new Response(Bun.file(join(dist, 'index.html')))
   },
