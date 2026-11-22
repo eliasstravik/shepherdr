@@ -379,10 +379,9 @@ function Thumb({ k, src }: { k: string; src: 'b' | 'd' }) {
     const t = setInterval(() => document.visibilityState === 'visible' && setN((x) => x + 1), 5000)
     return () => clearInterval(t)
   }, [])
-  const demo = useSnap()?.demo
   return (
     <button type="button" className="thumb" aria-label="Open the live view" onClick={() => openScreen(k)}>
-      {demo ? <div style={{ aspectRatio: '2 / 1', background: '#fff', color: '#171717', textAlign: 'left', padding: '10px 14px', fontSize: 9, overflow: 'hidden' }}>{k.includes('SHOP-17') ? <div style={{ width: '80%', maxWidth: 180, margin: 'auto', display: 'grid', gap: 4 }}><strong>Check your phone</strong><span>Enter the 6-digit code we sent you.</span><span style={{ border: '1px solid #ddd', padding: 4 }}>000000</span><span style={{ background: '#171717', color: '#fff', padding: 4, textAlign: 'center' }}>Continue</span></div> : <><strong>Your basket</strong><div style={{ borderTop: '1px solid #ddd', marginTop: 4 }}>Garden gloves <span style={{ float: 'right' }}>€12.00</span></div><div style={{ borderTop: '1px solid #ddd' }}>Total <span style={{ float: 'right' }}>€12.00</span></div><div style={{ background: '#171717', color: '#fff', textAlign: 'center', padding: 3 }}>Pay now</div></>}</div> : <img src={`${shotUrl(k, src)}&n=${n}`} alt="" />}
+      <img src={`${shotUrl(k, src)}&n=${n}`} alt="" />
     </button>
   )
 }
