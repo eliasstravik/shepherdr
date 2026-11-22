@@ -154,10 +154,12 @@ export function newSpaceDialog(machine?: string) {
           setBusy(true)
           try {
             const r = await fetch('api/spaces', { method: 'POST', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify({ machine: m === snap.host ? undefined : m, path, name: name.trim().replace(/^#\s*/, '') || undefined, agent: pick ?? undefined, create: true }) })
-            const j = (await r.json().catch(() => ({}))) as { place?: string; error?: string }
+            const j = (await r.json().catch(() => ({}))) as { place?: string; error?: string; warning?: string }
             if (!r.ok || !j.place) throw new Error(j.error || 'The space could not be made.')
             close()
             go(j.place)
+            // made, but its agent didn't start: said, not hidden (its first message starts one)
+            if (j.warning) notice(j.warning, 10000)
           } catch (e) {
             setBusy(false)
             notice(e instanceof Error ? e.message : 'The space could not be made.')

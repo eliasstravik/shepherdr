@@ -11,6 +11,7 @@ import type { Hub } from "./hub.ts";
 import { HOME, where } from "./paths.ts";
 import * as SC from "../core/secrets.js";
 import * as HC from "../core/host.js";
+import { spawn } from "./spawn.ts";
 
 const { NAME, ASK, asksIn, keptLine, declinedLine, SECRETS_DOC, secretsRecord, believeRecord, autoKeeper, followTo, COUNT_SCRIPT } = SC as any;
 const { HOST_DOC, newestHost } = HC as any;
@@ -24,13 +25,13 @@ const BIN = [join(import.meta.dir, "..", "bin", "herdr-secret"), join(HOME, ".lo
 export const secretBin = () => BIN;
 
 async function run(args: string[], input?: string) {
-  const p = Bun.spawn([BIN, ...args], { stdin: input === undefined ? "ignore" : "pipe", stdout: "pipe", stderr: "pipe" });
+  const p = spawn([BIN, ...args], { stdin: input === undefined ? "ignore" : "pipe", stdout: "pipe", stderr: "pipe" });
   if (input !== undefined) { (p.stdin as any).write(input); (p.stdin as any).end(); }
   const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
   return { code: await p.exited, out, err };
 }
 async function hc(args: string[]) {
-  const p = Bun.spawn([process.env.SHEPHERDR_HC || "hc", ...args], { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
+  const p = spawn([process.env.SHEPHERDR_HC || "hc", ...args], { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
   return p.exited;
 }
 
@@ -185,7 +186,7 @@ export class SecretsHome {
       const w = t.labels?.["herdr.secret.want"];
       if (!w || !t.address.includes("/") || this.served.has(w)) continue;
       this.served.add(w);
-      void Bun.spawn([BIN, "serve", t.address], { stdin: "ignore", stdout: "ignore", stderr: "ignore" }).exited.catch(() => {});
+      void spawn([BIN, "serve", t.address], { stdin: "ignore", stdout: "ignore", stderr: "ignore" }).exited.catch(() => {});
     }
     if (this.served.size > 200) this.served.clear();
   }

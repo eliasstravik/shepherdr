@@ -7,6 +7,7 @@ import type { Hub } from "./hub.ts";
 import { sh } from "./model.ts";
 import { ChatReader } from "../core/chat-reader.js";
 import { reportMsg, subagentsOf } from "../core/chat-view.js";
+import { spawn } from "./spawn.ts";
 
 /** A page following a chat: told the reader (and the terminal now) each time the conversation changes. */
 export type Watcher = (reader: ChatReader, terminal: any) => void;
@@ -41,7 +42,7 @@ async function withForeground(addr: string, t: any) {
   if (!c || Date.now() - c.at > 10_000) {
     let foreground = null;
     try {
-      const p = Bun.spawn([process.env.SHEPHERDR_HC || "hc", "get", addr, "--json"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+      const p = spawn([process.env.SHEPHERDR_HC || "hc", "get", addr, "--json"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
       foreground = JSON.parse(await new Response(p.stdout).text())?.foreground ?? null;
     } catch {}
     fg.set(addr, (c = { at: Date.now(), foreground }));

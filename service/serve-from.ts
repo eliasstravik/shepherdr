@@ -96,7 +96,7 @@ let there = await node(to);
 if (!there || there.version !== VERSION || (there.build && there.build !== BUILD) || (!there.build && to !== null)) {
   say(`Installing Shepherdr's web service on ${to ?? "this computer"}…`);
   const cli = process.env.SHEPHERDR_CLI || "shepherdr";
-  const p = Bun.spawn([cli, "web", "install-on", to ?? "here"], { stdout: json ? "pipe" : "inherit", stderr: "pipe", stdin: "ignore" });
+  const p = spawn([cli, "web", "install-on", to ?? "here"], { stdout: json ? "pipe" : "inherit", stderr: "pipe", stdin: "ignore" });
   const err = await new Response(p.stderr).text();
   if ((await p.exited) !== 0) fail(err.trim().split("\n").pop()?.replace(/^shepherdr: /, "") || `couldn't install it on ${to}`);
   for (let i = 0; i < 60 && !(there?.build === BUILD); i++) { await Bun.sleep(2000); there = await node(to); }
@@ -119,6 +119,7 @@ for hp, web in (s.get("Web") or {}).items():
 if [ -s "$f.tmp" ]; then read port proxy < "$f.tmp"; printf '{"port":"%s","proxy":"%s","at":%s}\\n' "$port" "$proxy" "$(date +%s)" > "$f"
   tailscale serve --https="$port" --set-path /shepherdr off >/dev/null; echo "took $proxy"; fi
 rm -f "$f.tmp"`;
+import { spawn } from "./spawn.ts";
 if (take) {
   const r = await exec(["sh", "-c", `PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/Applications/Tailscale.app/Contents/MacOS:$PATH"; ${TAKE}`], to);
   if (r.code !== 0) fail(`couldn't set aside /shepherdr on ${to ?? "this computer"}: ${r.stderr.trim()}`);

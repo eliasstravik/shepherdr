@@ -144,6 +144,30 @@ class Repo(unittest.TestCase):
                 for spec in re.findall(r'''from\s+["']([^"']+)["']''', src):
                     self.assertTrue(spec.startswith("./"), f"core/{f} imports {spec}")
 
+    def test_service_spawns_in_its_session(self):
+        """Every program the service starts lands in Shepherdr's own herdr-core session (SHEP-294): Bun.spawn and
+        Bun.spawnSync only in service/spawn.ts (its helpers give each child an explicit env with HC_SESSION), and node's
+        child_process only with an env of its own."""
+        bad = []
+        for d, dirs, files in os.walk(J("service")):
+            dirs[:] = [x for x in dirs if x != "node_modules"]
+            for f in files:
+                path = os.path.join(d, f)
+                rel = os.path.relpath(path, ROOT)
+                if not f.endswith((".ts", ".js")) or re.search(r"\.test\.[tj]s$", f) or rel == "service/spawn.ts":
+                    continue
+                with open(path, encoding="utf-8") as fh:
+                    src = fh.read()
+                if re.search(r"\bBun\s*\.\s*(spawn|spawnSync\b|\$)", src):
+                    bad.append(f"{rel}: Bun.spawn (use ./spawn.ts)")
+                if re.search(r"""["'](node:)?child_process["']""", src):
+                    for call in re.finditer(r"\b(spawn|spawnSync|exec|execSync|execFile|execFileSync|fork)\s*\(", src):
+                        # the call's own line(s), up to its closing: an env of its own
+                        tail = src[call.end():call.end() + 400].split("\n\n")[0]
+                        if "env" not in tail.split(")\n")[0]:
+                            bad.append(f"{rel}: {call.group(1)}( without env")
+        self.assertEqual(bad, [])
+
     def test_version_everywhere(self):
         v = re.search(r'^VERSION = "([^"]+)"', open(J("bin", "shepherdr")).read(), re.M).group(1)
         self.assertEqual(v, "3.2.0")
