@@ -316,7 +316,7 @@ export class Model {
         // when its Assistant last changed state (its terminal's status time)
         changedAt: Number((k as any)?.status_ms) || 0,
         section: bar.sections.find((x: any) => (x.spaces ?? []).includes(s.id))?.id ?? null,
-        assistant: k?.address ?? null, turn: (k as any)?.turn ?? 0, assistantStatus: k && k.state !== "live" ? "stopped" : (k as any)?.status?.state ?? null,
+        assistant: k?.address ?? null, turn: (k as any)?.turn ?? 0, assistantStatus: k && (k.state !== "live" || (k as any)?.status?.state === "error") ? "stopped" : (k as any)?.status?.state ?? null,
         git: this.gitOf(s),
         unread: isUnread(k),
         red: here.filter((r) => r.section === "needs").length + ((k as any)?.status?.state === "blocked" ? 1 : 0),

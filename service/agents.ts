@@ -231,8 +231,8 @@ export class Agents {
   /** Restarts it on the picked CLI, model, effort and speed; resolves with the new agent's address. */
   async restart(addr: string, reader: any, pick: { kind: string; model?: string; effort?: string; speed?: string; perm?: string }) {
     const t: any = this.hub.terminals.get(addr);
-    if (!t || t.state !== "live") throw new Error("That agent isn't running.");
-    const kind = kindOf(t) ?? "claude";
+    if (!t) throw new Error("That agent isn't here any more.");
+    const kind = kindOf(t) ?? reader?.kind ?? "claude";
     const old = { agent: kind, argv: t.foreground?.argv ?? t.argv ?? [], session: sessionOf(kind, reader?.path ?? null) };
     const built = argvFor({ agent: pick.kind, model: pick.model, effort: pick.effort, fast: speedOf(pick.speed), perm: pick.perm ?? current(kind, old.argv, {}, {}).perm }, old);
     const pane = t.labels?.["herdr.chat"] ?? "";

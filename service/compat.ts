@@ -652,7 +652,7 @@ export class Compat {
     const note = addr ? watch?.notes?.get(addr)?.text : undefined;
     // instead of the conversation, the window's notice: still opening, not a chat agent, its log not found, ended
     const kind = kindOfTerm(t);
-    const notice = t && t.state !== "live" ? "ended" : !reader.conv && (reader.state === "finding" || reader.state === "pending") ? "opening"
+    const notice = (t && t.state !== "live") || note ? "ended" : !reader.conv && (reader.state === "finding" || reader.state === "pending") ? "opening"
       : reader.state === "missing" && reader.pinned ? "gone"
       : reader.state === "none" || reader.state === "missing" ? ((t && t.state !== "live") || !t ? "ended" : kind ? "none" : "unsupported")
       : !reader.pinned && (!t || t.state !== "live") && !items.length ? "ended" : null;
