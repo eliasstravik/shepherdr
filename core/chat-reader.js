@@ -51,6 +51,7 @@ export class ChatReader {
   // Finds the log of the agent this terminal runs now (t: its herdr-core record). -> true when it changed.
   async locate(t) {
     if (this.pinned) return false;
+    if (t && t.state !== "live" && this.path) return false; // keep the conversation already found when its agent ends
     const kind = kindOf(t);
     const pid = t?.foreground?.pid;
     if (!kind || !pid) { const was = this.state; if (was !== "none") { this.reset(); this.state = "none"; } return was !== "none"; }

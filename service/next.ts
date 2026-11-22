@@ -221,7 +221,7 @@ export function enrich(snap: Snapshot, f: Facts): Snapshot {
   const everything = f.spaces.find((s) => !s.machine && atHome(s))?.id;
   const places: Place[] = snap.places.map((p) => {
     const s = spaceOf.get(p.id);
-    const blocked = s?.assistantStatus === "blocked" || !!f.asked(p.chat);
+    const blocked = ["blocked", "stopped"].includes(s?.assistantStatus) || !!f.asked(p.chat);
     return { ...p, ...(homes.has(p.id) ? { home: true, name: "home" } : {}), ...(f.archived.includes(p.id) ? { archived: true } : {}), ...(blocked ? { needs: true } : {}) };
   });
   const rowOf = new Map(f.rows.map((r) => [r.machine ? `${r.machine}:${r.ref}` : r.ref, r]));

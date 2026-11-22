@@ -324,7 +324,7 @@ function WorkingTail({ chat }: { chat: Chat | undefined }) {
  *  Restart. Shepherdr never starts it again on its own. */
 function StoppedChat({ chat, thread }: { chat: Chat | undefined; thread: Thread }) {
   const snap = useSnap()
-  if (!chat || !snap || thread.task || (chat.notice !== 'ended' && chat.notice !== 'gone') || !chat.messages.length) return null
+  if (!chat || !snap || thread.task || (chat.notice !== 'ended' && chat.notice !== 'gone')) return null
   const pick = pickOf(snap, chat, thread)
   return (
     <div className="card" data-card={`stopped:${chat.key}`}>
