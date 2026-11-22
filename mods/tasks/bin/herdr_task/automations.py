@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 
-from .base import ENTRY, Fail, guard, hc_json, layout, now, STORE, WHERE
+from .base import ENTRY, Fail, guard, hc_json, layout, now, plugin_off, STORE, WHERE
 from .when import parse_at
 from .settings import bare, set_task, settings_for, SET_KEYS, worker_argv, worktrees_on
 from .agents import agent_running, live_agents, starting, status_of, task_status
@@ -285,7 +285,7 @@ def run_ended(s, r):
 def auto_view(s, a):
     v = {k: a.get(k) for k in ("id", "title", "prompt", "mode", "agent", "set", "on", "match", "space", "paused",
                                 "next_run", "last_run", "last_task", "last_error", "from_error", "created")}
-    enabled = settings_for(s, a.get("space"))["automations"].get("enabled", True)
+    enabled = not plugin_off("schedules") and settings_for(s, a.get("space"))["automations"].get("enabled", True)
     runs = [{**r, "ended": run_ended(s, r)} for r in a.get("runs") or []]
     # 3.2, for the Scheduled tab: name, when (words `--when` takes back), what, once, active (it fires now: not paused,
     # its space not stopped, schedules on in Settings), its runs each with how it ended, and the last one.
@@ -772,10 +772,12 @@ def automations_pass(s, seen, report, feeds=None):
     if not autos:
         return
     gone = []
-    enabled = settings_for(s)["automations"].get("enabled", True)
+    # Settings › Plugins: Schedules off, no schedule starts a run (its record still moves on, as when it is off in Settings).
+    plugin = not plugin_off("schedules")
+    enabled = plugin and settings_for(s)["automations"].get("enabled", True)
     happened = events_in(s, seen) if any(a.get("on") and not a.get("from") for a in autos) else []
     for a in autos:
-        on = settings_for(s, a.get("space"))["automations"].get("enabled", True) if a.get("space") else enabled
+        on = plugin and settings_for(s, a.get("space"))["automations"].get("enabled", True) if a.get("space") else enabled
         whys = []
         if a.get("every") and a.get("next_run") and now() >= a["next_run"]:
             a["next_run"] = next_run(a["every"], now())

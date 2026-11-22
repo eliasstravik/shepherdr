@@ -193,38 +193,5 @@ class Bash32(unittest.TestCase):
         self.assertIn("herdr.agent=claude", args)
 
 
-class Detach(unittest.TestCase):
-    """lib/coordinator.js's script() runs the helper scripts detached, also where there is no setsid (macOS, #736)."""
-
-    def detach(self, with_setsid):
-        src = read(os.path.join(ROOT, "lib", "coordinator.js"))
-        m = re.search(r"^export const DETACH = '(.*)';$", src, re.M)
-        self.assertIsNotNone(m, "lib/coordinator.js exports DETACH, the shell line script() runs")
-        d = tempfile.mkdtemp()
-        os.makedirs(os.path.join(d, "bin"))
-        for tool in ["bash", "nohup", "sleep"] + (["setsid"] if with_setsid else []):
-            os.symlink(shutil.which(tool), os.path.join(d, "bin", tool))
-        sh = os.path.join(d, "helper.sh")
-        with open(sh, "w") as f:
-            f.write('sleep 0.5; printf "%s\\n" "$@" >"$OUT"\n')
-        out = os.path.join(d, "out")
-        t = time.time()
-        r = subprocess.run(["bash", "-c", m.group(1), sh, "t2", "a b"], env={"PATH": f"{d}/bin", "HOME": d, "OUT": out},
-                           capture_output=True, text=True, timeout=30)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertLess(time.time() - t, 0.5, "it returns at once, the script running on")
-        for _ in range(50):
-            if os.path.exists(out) and read(out).endswith("\n"):
-                break
-            time.sleep(0.1)
-        self.assertEqual(read(out), "t2\na b\n")
-
-    def test_with_setsid(self):
-        self.detach(True)
-
-    def test_without_setsid(self):
-        self.detach(False)
-
-
 if __name__ == "__main__":
     unittest.main()

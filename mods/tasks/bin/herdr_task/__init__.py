@@ -19,7 +19,7 @@ before it:
   queues       Queues: tasks that come after others, and a machine too busy to start more.
   archive      The archive: done tasks set aside after a while.
   output       Output: a task as JSON and as one line of text.
-  addons       Add-ons: which are off, a switch for each, and the words when one a command needs is off.
+  carry_over   The 3.1 to 3.2 switch: the default herdr-core session's documents and machines into Shepherdr's own.
   scheduler    Keeps the scheduler (herdr-automations) running on this machine.
   commands     The task commands: add, start, status, ready, accept, merge and the rest.
   news         News: what changed in a space's tasks, told to its Assistant.

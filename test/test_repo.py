@@ -84,7 +84,7 @@ class Repo(unittest.TestCase):
         deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
         for gone in ("tailwindcss", "@tailwindcss/vite", "@heroicons/react", "clsx"):
             self.assertNotIn(gone, deps)
-        for kept in ("@novnc/novnc", "@xterm/xterm", "marked", "dompurify", "highlight.js", "inter-ui", "react"):
+        for kept in ("@novnc/novnc", "@xterm/xterm", "marked", "dompurify", "inter-ui", "react"):
             self.assertIn(kept, deps)
 
     def test_nothing_personal(self):

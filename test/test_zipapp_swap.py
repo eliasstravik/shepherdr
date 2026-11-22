@@ -120,7 +120,8 @@ class InstallsSwapInOneStep(unittest.TestCase):
 
         def run(argv, cwd=None, check=False):
             ran.append(argv)
-            return subprocess.CompletedProcess(argv, 1 if "test" in argv else 0, "{}" if "test" not in argv else "", "")
+            asks = argv[-1] == cli.HAS_SOURCE   # does that machine hold herdr-task's source? No
+            return subprocess.CompletedProcess(argv, 1 if asks else 0, "" if asks else "{}", "")
 
         def write(argv, **kw):
             wrote.append(argv)

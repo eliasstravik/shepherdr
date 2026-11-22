@@ -1163,6 +1163,45 @@ def forget_old_record(r):
         pass
 
 
+def carry_over_session(r, rec, home, run=subprocess.run):
+    """At the switch, once the files are in place and before the service starts: what 3.1 kept in herdr-core's
+    default session (the shared document with the spaces, who keeps the secrets, Serve from, the window's spaces,
+    the machines) goes into Shepherdr's own session, and 3.1's scheduler there is removed: the new herdr-task's own
+    `carry-over`, which replaces nothing and is safe to run again. Only on the real home: a scratch root has no
+    herdr-core of its own. Never stops the install: what didn't go is a note, and the record says so (rec
+    "carry_over": "done" | "waiting"), so the next update tries again."""
+    if not home:
+        return
+    if r.dry:
+        say("  session: would carry Shepherdr's documents and machines over from herdr-core's default session (herdr-task carry-over)")
+        return
+    helper = r.p(f"{SHARE}/mods/tasks/bin/herdr-task")
+    env = {k: v for k, v in os.environ.items() if k not in ("HC_SESSION", "HC_SOCKET", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "HC_CORE_ID")}
+    out, err = None, ""
+    try:
+        p = run([sys.executable, helper, "carry-over", "--json"], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=300)
+        err = p.stderr.strip()
+        out = json.loads(p.stdout.strip().splitlines()[-1]) if p.stdout.strip() else None
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError) as e:
+        err = err or str(e)
+    if not isinstance(out, dict):
+        rec["carry_over"] = "waiting"
+        r.notes.append(f"Shepherdr's data in herdr-core's default session wasn't carried over ({(err.splitlines() or ['herdr-task carry-over failed'])[-1]}): "
+                       "`herdr-task carry-over` tries again")
+        return
+    rows = (out.get("machines") or []) + (out.get("documents") or [])
+    label = lambda x: x.get("name", "?") + (f" on {x['machine']}" if x.get("machine") else "")
+    copied = [label(x) for x in rows if x.get("state") in ("copied", "added")]
+    left = [label(x) + (f" ({x.get('why') or x.get('error')})" if x.get("why") or x.get("error") else "")
+            for x in rows if x.get("state") in ("waiting", "failed", "wrong-session")]
+    say("  session: " + (f"carried over {', '.join(copied)}" if copied else "nothing to carry over")
+        + ("; 3.1's scheduler removed" if out.get("scheduler") == "removed" else ""))
+    if left or out.get("scheduler") == "failed":
+        r.notes.append("not carried over into Shepherdr's own herdr-core session yet: " + "; ".join(left or ["3.1's scheduler in the default session"])
+                       + ". The next update, or `herdr-task carry-over`, tries again")
+    rec["carry_over"] = "waiting" if left or not out.get("ok", True) else "done"
+
+
 def convert_artifacts(r):
     """Once, at the switch: the artifacts 3.1 kept (recipes, window panels) become plain pages, by the new
     herdr-artifact's own `convert --all` when it has one. Never stops the install: a failure is a note."""
@@ -1302,6 +1341,8 @@ def cmd_install(a, update=False):
     rec["button"] = bool(button)
     rec["hooks"] = set_hooks(r, rec, None if a.no_hooks else True)
     move_data(r, a, home)   # before the service starts again: it then finds the data where it now is
+    if switching or rec.get("carry_over") == "waiting":
+        carry_over_session(r, rec, home)   # and its documents and machines in Shepherdr's own herdr-core session
     set_port(a, rec)
     set_https_port(a, root)
     started = time.time()
@@ -1319,7 +1360,7 @@ def cmd_install(a, update=False):
         if old:
             forget_old_record(r)
         whole_bad = install_checks(r, rec)[0]
-    for n in r.notes + notes + addons_off_notes(root):
+    for n in r.notes + notes:
         say(f"  - {n}")
     if a.dry_run:
         return 0
@@ -1345,23 +1386,6 @@ def cmd_install(a, update=False):
 def short(p):
     h = real_home()
     return "~" + p[len(h):] if p.startswith(h + "/") else p
-
-
-# GitHub #1091: herdr-task obeys the parts switched off (since 3.1.35): one switched off stops work people may count
-# on, so doctor and update say so, with how to turn it back on.
-ADDON_OFF_WORDS = {
-    "machines": "Other machines is off: nothing syncs to other machines, and tell-assistant and assistants reach only this machine",
-}
-
-
-def addons_off_notes(root):
-    try:
-        with open(where_for(root).path("settings")) as f:
-            off = (json.load(f).get("everywhere") or {}).get("off") or []
-    except (OSError, ValueError, AttributeError):
-        return []
-    return [f"{ADDON_OFF_WORDS[x]} (`herdr-task addons on {x}` turns it on)"
-            for x in ADDON_OFF_WORDS if isinstance(off, list) and x in off]
 
 
 def data_check(root):
@@ -1551,7 +1575,7 @@ def cmd_doctor(a):
         warn += github_checks_check(root)
     d_bad, d_notes = data_check(root)
     bad += d_bad
-    t_notes = d_notes + t_notes + addons_off_notes(root)
+    t_notes = d_notes + t_notes
     if home:
         s_bad, s_notes = serve_check(root)
         bad += s_bad

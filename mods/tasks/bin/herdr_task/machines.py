@@ -25,10 +25,9 @@ import sys
 import threading
 import time
 
-from .base import addon_off, APP_HOME, ASK_HOME, SESSION, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, layout, now, PACKAGE, run, STORE, WHERE
+from .base import ASK_HOME, OLD_SESSION, SESSION, SHARE, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, layout, now, PACKAGE, run, STORE, WHERE
 from .news import news_send, send_or_hold, typing
 from .settings import TEMPLATES
-from .addons import off_note
 
 
 # ---- sync: the same task tools on every machine ---------------------------------------------
@@ -93,7 +92,7 @@ def secrets_main_here():
             return None
     # Shepherdr's own session first (3.2), then the default one, where herdr-secret kept the record before: each
     # session is a core of its own, with its own id, so the record is compared with the id of the session it is in.
-    for d in dict.fromkeys((_core_dir(), os.path.join(os.path.dirname(_core_dir()), "default"))):
+    for d in dict.fromkeys((_core_dir(), os.path.join(os.path.dirname(_core_dir()), OLD_SESSION))):
         docs, core = js(os.path.join(d, "docs.json")) or {}, js(os.path.join(d, "core.json")) or {}
         rec = ((docs.get("shepherdr.secrets") if isinstance(docs, dict) else None) or {}).get("value")
         if isinstance(rec, dict) and rec.get("id"):
@@ -145,10 +144,10 @@ def manifest():
     if browser:
         add(".local/bin/herdr-browser", _read(browser), 0o755, [browser])
     # The chat's question-card hook (SHEP-139): a task worker's own hook (herdr-task _allow) runs it,
-    # so a machine that only runs tasks asks on the card too. From Herdr's app home, else the copy
-    # a sync left here (this machine passes it on).
+    # so a machine that only runs tasks asks on the card too. From Shepherdr's own install (<SHARE>/hooks),
+    # else the copy a sync left here (this machine passes it on).
     for name, mode in (("ask-hook.sh", 0o755), ("ask-end.py", 0o644)):
-        p = next((x for x in (os.path.join(APP_HOME, "mods", "chat", name), os.path.join(HOME, ASK_HOME, name)) if os.path.isfile(x)), None)
+        p = next((x for x in (os.path.join(SHARE, "hooks", name), os.path.join(HOME, ASK_HOME, name)) if os.path.isfile(x)), None)
         if p:
             add(f"{ASK_HOME}/{name}", _read(p), mode, [p])
     for role in ROLES:
@@ -197,9 +196,9 @@ try:
 except Exception:
     stamp = {}
 rec = stamp.get("files") or {}
-# The machine that holds herdr-task's source (Herdr's own folder, with its links into it) is
-# where copies come from: never written to.
-source = os.path.isdir(P(".config/herdr-app/mods/tasks/bin/herdr_task"))
+# The machine that holds herdr-task's source (Shepherdr's own install, with its links into it; before 3.2
+# Herdr's app folder) is where copies come from: never written to.
+source = any(os.path.isdir(P(d + "/mods/tasks/bin/herdr_task")) for d in (".local/share/shepherdr", ".config/herdr-app"))
 out = {"source": source, "files": {}, "links": {}, "stamp": {k: stamp.get(k) for k in ("version", "from", "at")},
        "python": sys.version.split()[0], "os": platform.system(), "home": H}
 for f in x["files"]:
@@ -442,7 +441,7 @@ def adopt(dry=False):
     through the link land there. The default session's list is only read, as a file: nothing in it changes.
     A machine Shepherdr's session has already is left alone (one that leads to another session there is said).
     Returns [{name, state: added | here | wrong-session | failed | would-add, ...}]."""
-    path = os.path.join(os.path.dirname(_core_dir()), "default", "machines.json")
+    path = os.path.join(os.path.dirname(_core_dir()), OLD_SESSION, "machines.json")
     try:
         with open(path) as f:
             theirs = json.load(f)
@@ -494,9 +493,6 @@ def cmd_machines(args):
                 word = {"current": "current", "source": "holds the source (left alone)", "drift": "out of date", "failed": "failed", "unreachable": "can't reach", "held": "held", "unsupported": "not supported"}.get(x["state"], x["state"])
                 more = f" (updated {len(x['changed'])} file(s))" if x.get("changed") else ""
                 print(f"  {x['machine']}: {word}{more}" + "".join(f"\n      {d}" for d in x["details"]))
-            note = off_note("machines")
-            if note:
-                print(note.replace("is off on this machine:", "is off on this machine, so nothing syncs by itself:"))
         if args.check and any(x["state"] not in ("current", "source") for x in r["machines"]):
             raise SystemExit(1)
 
@@ -537,7 +533,7 @@ def machines_pass(report):
     version = manifest()["version"]
     t = now()
     due = []
-    held = addon_off("machines") or sync_held()
+    held = sync_held()
 
     def look(d):
         if d.get("seen") != version:
@@ -562,7 +558,7 @@ def machines_pass(report):
     down = any(m.get("state") == "unreachable" for m in ms)
     net, st = _net(), _load_state()
     changed = net != st.get("net")
-    retry = down and not addon_off("machines") and (changed or t >= (st.get("net_again") or float("inf")))
+    retry = down and (changed or t >= (st.get("net_again") or float("inf")))
     if retry and _busy(".reach.lock"):
         pass  # a refresh is under way: the next round looks again (the new network stays unrecorded till then)
     elif retry:
@@ -733,11 +729,8 @@ def _reach_cache():
 
 
 def probe(depth=REACH_DEPTH, timeout=90, relink=False):
-    """The reach map from this machine, hops and all, checked now. With the Other machines add-on
-    off: this machine alone, no link followed. relink: every machine on the way first makes its
-    unreachable links try again now (#1104), each for at most RELINK_S."""
-    if addon_off("machines"):
-        depth, relink = 0, False
+    """The reach map from this machine, hops and all, checked now. relink: every machine on the way first makes
+    its unreachable links try again now (#1104), each for at most RELINK_S."""
     boot = "import sys; S = sys.stdin.read(); exec(S)"
     r = subprocess.run([sys.executable, "-c", boot, json.dumps({"depth": depth, "seen": [], "timeout": timeout, "relink": RELINK_S if relink else None})], input=PROBE,
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=timeout + 60)
@@ -929,9 +922,7 @@ def _try_host(h, ids):
 
 def find(go=False):
     """Find machines: without go, what it would contact (and the last run's answer); with go, try
-    each once now. Refused while the Other machines add-on is off, or within FIND_EVERY_MS of the last."""
-    if addon_off("machines"):
-        raise Fail("Find machines is off while the Other machines add-on is off: turn it on in Settings › Add-ons first")
+    each once now. Refused within FIND_EVERY_MS of the last."""
     linked = _linked()
     hosts = find_hosts(linked)
     last = _found()
@@ -1019,14 +1010,9 @@ def directory(refresh=False, max_age=30000):
 
 def cmd_assistants(args):
     _, rows = directory(refresh=args.refresh)
-    note = off_note("machines")  # #1091: only this machine's then, and it says why
     if args.json:
         print(json.dumps(rows))
-        if note:
-            print(note, file=sys.stderr)
         return
-    if note:
-        print(note.replace("is off on this machine:", "is off on this machine, so only its own Assistants show:"))
     if not rows:
         print("No live Assistants on any machine reachable from here.")
     for a in rows:
@@ -1105,8 +1091,7 @@ def tell(target, text, sender=None):
         d, rows = directory(refresh=True)
         hits = _find(rows, target)
     if not hits:
-        note = off_note("machines")
-        raise Fail(f"no live Assistant {target!r} reachable from here (herdr-task assistants lists them)" + (f". {note}" if note else ""))
+        raise Fail(f"no live Assistant {target!r} reachable from here (herdr-task assistants lists them)")
     if len(hits) > 1:
         raise Fail(f"{target!r} is more than one Assistant: " + ", ".join(a["target"] for a in hits))
     to = hits[0]

@@ -21,6 +21,9 @@ export function carryOver(own: unknown, imported: unknown, docs: Map<string | nu
   for (const [machine, doc] of docs) {
     const key = machine ?? "";
     if (done.has(key)) continue;
+    // nothing there yet (its copy into Shepherdr's session may still be on its way at the switch): looked at again
+    // later rather than marked done with its spaces missing; this computer with no window at all has none to wait for
+    if (doc == null && machine !== null) continue;
     for (const s of (spacesFromDoc as any)(doc, machine) as { id: string; name: string; folder: string }[]) {
       // the document's ids are bare ("sp1"); spacesFromDoc names another machine's "vm/sp1"
       const id = machine && s.id.startsWith(`${machine}/`) ? s.id.slice(machine.length + 1) : s.id;

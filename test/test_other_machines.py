@@ -195,77 +195,351 @@ class BarePath(unittest.TestCase):
             self.assertEqual(r.stdout.strip(), os.path.join(home, ".local", "bin", "hc"), helper + r.stderr)
 
 
-class AddonOffSays(unittest.TestCase):
-    """#1091: herdr-task obeys the add-ons switched off since 3.1.35; it now says so, and `herdr-task addons` switches one."""
+class NoAddons(unittest.TestCase):
+    """3.2: add-ons are gone (the web app's plugins are switched in the service's settings). herdr-task has no `addons`
+    command, the sync to other machines has no switch, and nothing reads lib/addons.json."""
 
-    def herdr_task(self, *argv, settings=None):
-        home = getattr(self, "home", None) or scratch(self)
-        self.home = home
-        self.settings = os.path.join(home, "settings.json")
-        if settings is not None:
-            with open(self.settings, "w") as f:
-                json.dump(settings, f)
-        env = {"HOME": home, "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HERDR_TASK_SETTINGS": self.settings,
-               "HERDR_TASK_STORE": os.path.join(home, "tasks")}
-        return subprocess.run([sys.executable, os.path.join(BIN, "herdr-task"), *argv], env=env, capture_output=True, text=True, timeout=60)
-
-    def test_names_agree_with_the_manifest(self):
-        from herdr_task import addons
-        with open(os.path.join(ROOT, "lib", "addons.json")) as f:
-            titles = {a["id"]: a["title"] for a in json.load(f)["addons"]}
-        for k, v in addons.NAMES.items():
-            if k in titles:  # 3.2: the manifest is only a marker for 3.1's updater, and lists none
-                self.assertEqual(titles[k], v, k)
-
-    def test_list_and_switch_in_the_settings_file(self):
-        r = self.herdr_task("addons", "--json", settings={"everywhere": {"off": ["machines", "browser"], "theme": "x"}})
-        rows = {x["id"]: x["on"] for x in json.loads(r.stdout)["addons"]}
-        self.assertEqual((rows["machines"], rows["browser"]), (False, False), r.stderr)
-        r = self.herdr_task("addons", "on", "Other machines")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("Other machines is on now", r.stdout)
-        with open(self.settings) as f:
-            d = json.load(f)
-        self.assertEqual(d["everywhere"], {"off": ["browser"], "theme": "x"})
-        r = self.herdr_task("addons", "on", "browser")
-        with open(self.settings) as f:
-            self.assertNotIn("off", json.load(f)["everywhere"])
-        r = self.herdr_task("addons", "on", "nope")
+    def test_no_addons_command_or_module(self):
+        self.assertFalse(os.path.exists(os.path.join(BIN, "herdr_task", "addons.py")))
+        home = scratch(self)
+        env = {"HOME": home, "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HERDR_TASK_STORE": os.path.join(home, "tasks")}
+        r = subprocess.run([sys.executable, os.path.join(BIN, "herdr-task"), "addons", "--json"], env=env, capture_output=True, text=True, timeout=60)
         self.assertNotEqual(r.returncode, 0)
-        self.assertIn("No add-on 'nope'", r.stderr)
+        self.assertIn("invalid choice", r.stderr)
 
-    def test_a_pushed_copy_is_not_switched_here(self):
-        r = self.herdr_task("addons", "on", "machines", settings={"pushed_from": "herdr-app", "everywhere": {"off": ["machines"]}})
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("switch it there", r.stderr)
+    def test_nothing_reads_the_addons_manifest(self):
+        for folder, _, names in os.walk(os.path.join(BIN, "herdr_task")):
+            for n in names:
+                if n.endswith(".py"):
+                    with open(os.path.join(folder, n)) as f:
+                        text = f.read()
+                    self.assertNotIn("addons.json", text, n)
+                    self.assertNotIn("herdr-task addons", text, n)
+        with open(os.path.join(ROOT, "bin", "shepherdr")) as f:
+            self.assertNotIn("herdr-task addons", f.read())
 
-    def test_tell_says_other_machines_is_off(self):
+    def test_3_1s_other_machines_switch_is_ignored(self):
         from unittest import mock
         from herdr_task import base
         p = os.path.join(scratch(self), "s.json")
         with open(p, "w") as f:
-            json.dump({"everywhere": {"off": ["machines"]}}, f)
-        with mock.patch.dict(os.environ, {"HERDR_TASK_SETTINGS": p}), mock.patch.object(machines, "directory", lambda refresh=False: ({"graph": {}}, [])):
-            with self.assertRaises(base.Fail) as e:
-                machines.tell("vm-demo/t3", "hi")
-        self.assertIn("The Other machines add-on is off", str(e.exception))
-        self.assertIn("herdr-task addons on machines", str(e.exception))
+            json.dump({"everywhere": {"off": ["machines", "chat", "browser"]}}, f)
+        with mock.patch.dict(os.environ, {"HERDR_TASK_SETTINGS": p}):
+            self.assertFalse(base.plugin_off("machines"))
+            self.assertFalse(base.addon_off("browser"))
+            with mock.patch.object(machines, "directory", lambda refresh=False: ({"graph": {}}, [])):
+                with self.assertRaises(base.Fail) as e:
+                    machines.tell("vm-demo/t3", "hi")
+        self.assertNotIn("add-on", str(e.exception))
 
-    def test_doctor_names_an_off_addon(self):
+
+class SourceMachine(unittest.TestCase):
+    """3.2: the machine that holds herdr-task's source is the one with Shepherdr's own install
+    (~/.local/share/shepherdr/mods/tasks/bin/herdr_task); 3.1's place in Herdr's app folder still counts."""
+
+    def check(self, made):
+        home = scratch(self)
+        if made:
+            os.makedirs(os.path.join(home, made))
+        r = subprocess.run([sys.executable, "-c", machines.INSTALL], input=json.dumps(install_payload(".local/bin/x")),
+                           env={"HOME": home, "PATH": os.environ.get("PATH", "")}, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout.strip().splitlines()[-1]), os.path.exists(os.path.join(home, ".local", "bin", "x"))
+
+    def test_the_install_script_never_writes_where_the_source_is(self):
+        for made in (".local/share/shepherdr/mods/tasks/bin/herdr_task", ".config/herdr-app/mods/tasks/bin/herdr_task"):
+            out, wrote = self.check(made)
+            self.assertEqual((out["source"], out["files"], wrote), (True, {".local/bin/x": "source here"}, False), made)
+        out, wrote = self.check(None)
+        self.assertEqual((out["source"], out["files"], wrote), (False, {".local/bin/x": "installed"}, True))
+
+    def test_the_question_asked_there_is_the_same_rule(self):
+        from herdr_task import cli
+        for made, want in ((".local/share/shepherdr/mods/tasks/bin/herdr_task", 0), (".config/herdr-app/mods/tasks/bin/herdr_task", 0), ("elsewhere", 1)):
+            home = scratch(self)
+            os.makedirs(os.path.join(home, made))
+            r = subprocess.run(["sh", "-c", cli.HAS_SOURCE], env={"HOME": home, "PATH": os.environ.get("PATH", "")})
+            self.assertEqual(r.returncode, want, made)
+
+
+class InstalledVersion(unittest.TestCase):
+    """feedback's version line reads the install's record where 3.2 keeps it (<SHARE>/installed.json), 3.1's only
+    on a machine that hasn't switched."""
+
+    def test_the_record_in_shepherdrs_own_folder_first(self):
+        from unittest import mock
+        from herdr_task import feedback
+        share, home, app = scratch(self), scratch(self), scratch(self)
+        with mock.patch.object(feedback, "SHARE", share), mock.patch.object(feedback, "HOME", home), mock.patch.object(feedback, "APP_HOME", app):
+            self.assertEqual(feedback.shepherdr_version(), "unknown")
+            os.makedirs(os.path.join(app, "data", "shepherdr"))
+            with open(os.path.join(app, "data", "shepherdr", "installed.json"), "w") as f:
+                json.dump({"version": "3.1.46"}, f)
+            self.assertEqual(feedback.shepherdr_version(), "3.1.46")
+            with open(os.path.join(share, "installed.json"), "w") as f:
+                json.dump({"version": "3.2.0"}, f)
+            self.assertEqual(feedback.shepherdr_version(), "3.2.0")
+
+
+class ServingMachine(unittest.TestCase):
+    """3.2: the home round (every machine's news to Everything) is the scheduler's on the machine that serves the web
+    app: a service runs here, and Serve from's record names this machine or there is none."""
+
+    def setUp(self):
+        from unittest import mock
+        from herdr_task import home
+        self.home, self.dir = home, scratch(self)
+        self.core, self.svc = os.path.join(self.dir, "core"), os.path.join(self.dir, "service")
+        os.makedirs(self.core)
+        os.makedirs(self.svc)
+
+        def core_file(name):
+            try:
+                with open(os.path.join(self.core, name)) as f:
+                    return json.load(f)
+            except (OSError, ValueError):
+                return None
+        where = mock.Mock()
+        where.path = lambda kind: self.svc if kind == "service" else os.path.join(self.dir, kind)
+        for name, value in (("_core_file", core_file), ("WHERE", where)):
+            p = mock.patch.object(home, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def put(self, name, value, folder=None):
+        with open(os.path.join(folder or self.core, name), "w") as f:
+            json.dump(value, f)
+
+    def test_only_where_the_service_runs_and_serves(self):
+        self.put("core.json", {"id": "id-here", "name": "here"})
+        self.assertFalse(self.home.main_here(), "no service here (a machine that only runs tasks)")
+        self.put("service.json", {"port": 7788, "id": "x", "pid": os.getpid()}, self.svc)
+        self.assertTrue(self.home.main_here(), "no Serve from record: a machine with a service serves itself")
+        self.put("docs.json", {"shepherdr.host": {"value": {"id": "id-other", "at": 1}, "version": 1}})
+        self.assertFalse(self.home.main_here(), "another machine serves")
+        self.put("docs.json", {"shepherdr.host": {"value": {"id": "id-here", "at": 2}, "version": 2}})
+        self.assertTrue(self.home.main_here())
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait()
+        self.put("service.json", {"port": 7788, "id": "x", "pid": dead.pid}, self.svc)
+        self.assertFalse(self.home.main_here(), "its service is gone (a stale service.json)")
+
+    def test_the_serving_machine_keeps_a_scheduler(self):
+        from unittest import mock
+        from herdr_task import scheduler
+        ran = []
+        ok = subprocess.CompletedProcess([], 0, "{}", "")
+        with mock.patch.object(scheduler, "store_files", lambda: []), mock.patch.object(scheduler, "hc_json", lambda *a: None), \
+                mock.patch.object(scheduler, "run", lambda argv, **k: ran.append(argv) or ok):
+            with mock.patch.object(self.home, "main_here", lambda: False):
+                self.assertFalse(scheduler.ensure_scheduler()["started"])
+            with mock.patch.object(self.home, "main_here", lambda: True):
+                self.assertTrue(scheduler.ensure_scheduler()["started"])
+        self.assertEqual(ran[-1][:3], ["hc", "run", "--bg"])
+
+
+class CarryOver(unittest.TestCase):
+    """3.2's switch (herdr-task carry-over): the default herdr-core session's documents go into Shepherdr's own, once,
+    with each machine's id changed to its id there; nothing in Shepherdr's session is replaced; 3.1's scheduler in the
+    default session is removed, and only that. Two fake cores stand in for the sessions: no hc runs."""
+
+    def setUp(self):
+        from unittest import mock
+        from herdr_task import carry_over as co
+        self.co, self.mock = co, mock
+        self.dir = scratch(self)
+        os.makedirs(os.path.join(self.dir, "herdr-core", co.OLD_SESSION))
+        open(os.path.join(self.dir, "herdr-core", co.OLD_SESSION, "core.json"), "w").close()
+        # each session: its own id, its machines (name -> {id, state}), its documents, and each linked machine's
+        self.cores = {co.OLD_SESSION: {"id": "old-here", "machines": {"mini": {"id": "old-mini", "state": "connected"}}, "docs": {}, "there": {"mini": {}}},
+                      co.SESSION: {"id": "new-here", "machines": {"mini": {"id": "new-mini", "state": "connected"}}, "docs": {}, "there": {"mini": {}}}}
+        self.sets, self.real_old_scheduler = [], co.old_scheduler
+
+        def rpc(session, calls, timeout=60):
+            c, out = self.cores[session], []
+            for method, p in calls:
+                docs = c["there"][p["on"]] if p.get("on") else c["docs"]
+                if method == "server.status":
+                    out.append({"core": {"id": c["id"]}})
+                elif method == "machine.list":
+                    out.append({"machines": [{"name": n, **m} for n, m in c["machines"].items()]})
+                elif method == "doc.get":
+                    out.append(dict(docs.get(p["name"]) or {"value": None, "version": 0}))
+                elif method == "doc.set":
+                    have = (docs.get(p["name"]) or {}).get("version", 0)
+                    if p["version"] != have:
+                        out.append({"error": {"message": "conflict", "data": {"kind": "conflict"}}})
+                        continue
+                    self.sets.append((session, p.get("on"), p["name"]))
+                    docs[p["name"]] = {"value": p["value"], "version": have + 1}
+                    out.append({"version": have + 1})
+            return out
+        import herdr_task.machines as m
+        for target, name, value in ((co, "rpc", rpc), (co, "core_dir", lambda s: os.path.join(self.dir, "herdr-core", s)),
+                                    (co, "old_scheduler", lambda dry: "none"), (m, "adopt", lambda dry=False: [{"name": "mini", "state": "here"}]),
+                                    (co, "FOREIGN_SESSION", False), (co.time, "sleep", lambda s: None)):
+            p = mock.patch.object(target, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def old(self, name, value, on=None):
+        c = self.cores[self.co.OLD_SESSION]
+        (c["there"][on] if on else c["docs"])[name] = {"value": value, "version": 3}
+
+    def new(self, name, on=None):
+        c = self.cores[self.co.SESSION]
+        return ((c["there"][on] if on else c["docs"]).get(name) or {}).get("value")
+
+    def states(self, out):
+        return {(d["name"], d.get("machine")): d["state"] for d in out["documents"]}
+
+    def test_every_document_once_with_the_ids_of_shepherdrs_session(self):
+        self.old("shepherdr", {"spaces": [{"id": "sp1", "name": "shop", "folder": "/w/shop", "machine": None}], "by": "old-here", "seen": {"old-mini": 4}})
+        self.old("shepherdr.secrets", {"id": "old-here", "at": 5, "by": "old-mini"})
+        self.old("shepherdr.host", {"id": "old-mini", "at": 7})
+        self.old("herdr-app", {"spaces": [{"id": "sp1", "name": "shop"}]})
+        self.old("herdr-app", {"spaces": [{"id": "sp7", "name": "there"}]}, on="mini")
+        dry = self.co.carry_over(dry=True)
+        self.assertEqual(self.sets, [], "a dry run writes nothing")
+        self.assertEqual(self.states(dry)[("shepherdr", None)], "would-copy")
+        out = self.co.carry_over()
+        self.assertTrue(out["ok"])
+        self.assertEqual(self.states(out), {("shepherdr", None): "copied", ("shepherdr.secrets", None): "copied", ("shepherdr.host", None): "copied",
+                                            ("shepherdr.web", None): "none", ("herdr-app", None): "copied", ("herdr-app", "mini"): "copied"})
+        self.assertEqual(self.new("shepherdr"), {"spaces": [{"id": "sp1", "name": "shop", "folder": "/w/shop", "machine": None}], "by": "new-here", "seen": {"new-mini": 4}})
+        self.assertEqual(self.new("shepherdr.secrets"), {"id": "new-here", "at": 5, "by": "new-mini"})
+        self.assertEqual(self.new("shepherdr.host"), {"id": "new-mini", "at": 7})
+        self.assertEqual(self.new("herdr-app", on="mini"), {"spaces": [{"id": "sp7", "name": "there"}]})
+        self.assertTrue(all(s == self.co.SESSION for s, _, _ in self.sets), "the default session is only read")
+        # again: nothing is written, whatever changed in the old session since
+        n = len(self.sets)
+        self.old("shepherdr", {"spaces": [], "by": "old-here"})
+        again = self.co.carry_over()
+        self.assertEqual(len(self.sets), n)
+        self.assertEqual(set(self.states(again).values()), {"kept", "none"})
+        self.assertEqual(self.new("shepherdr")["spaces"][0]["id"], "sp1")
+
+    def test_what_shepherdrs_session_has_is_never_replaced(self):
+        self.old("shepherdr", {"spaces": [{"id": "old"}]})
+        self.old("shepherdr.host", {"id": "old-here", "at": 1})
+        self.cores[self.co.SESSION]["docs"]["shepherdr"] = {"value": {"spaces": [{"id": "newer"}]}, "version": 9}
+        self.cores[self.co.SESSION]["docs"]["shepherdr.host"] = {"value": {}, "version": 2}   # an empty one counts as none
+        out = self.co.carry_over()
+        self.assertEqual((self.states(out)[("shepherdr", None)], self.states(out)[("shepherdr.host", None)]), ("kept", "copied"))
+        self.assertEqual(self.new("shepherdr"), {"spaces": [{"id": "newer"}]})
+        self.assertEqual(self.new("shepherdr.host"), {"id": "new-here", "at": 1})
+
+    def test_a_record_naming_a_machine_not_connected_yet_waits(self):
+        self.old("shepherdr.host", {"id": "old-mini", "at": 7})
+        self.old("herdr-app", {"spaces": [{"id": "sp7"}]}, on="mini")
+        self.cores[self.co.SESSION]["machines"]["mini"] = {"id": None, "state": "connecting"}
+        out = self.co.carry_over(wait=3)
+        rows = {(d["name"], d.get("machine")): d for d in out["documents"]}
+        self.assertEqual(rows[("shepherdr.host", None)]["state"], "waiting")
+        self.assertIn("mini", rows[("shepherdr.host", None)]["why"])
+        self.assertEqual(rows[("herdr-app", "mini")]["state"], "waiting")
+        self.assertTrue(out["ok"], "waiting isn't a failure: a later run copies it")
+        self.assertIsNone(self.new("shepherdr.host"))
+        # the link is up: the next run copies both
+        self.cores[self.co.SESSION]["machines"]["mini"] = {"id": "new-mini", "state": "connected"}
+        out = self.co.carry_over()
+        self.assertEqual((self.new("shepherdr.host"), self.new("herdr-app", on="mini")), ({"id": "new-mini", "at": 7}, {"spaces": [{"id": "sp7"}]}))
+
+    def test_no_default_session_here_nothing_to_do(self):
+        os.remove(os.path.join(self.dir, "herdr-core", self.co.OLD_SESSION, "core.json"))
+        out = self.co.carry_over()
+        self.assertEqual((out["documents"], out["machines"], out["ok"]), ([], [], True))
+        self.assertIn("nothing to carry over", out["note"])
+
+    def test_only_3_1s_scheduler_is_removed(self):
+        co, calls = self.co, []
+        terminals = {"herdr-automations": {"address": "t4", "name": "herdr-automations", "state": "live",
+                                           "argv": ["/usr/bin/python3", "/h/.config/herdr-app/mods/tasks/bin/herdr-task", "scheduler"]}}
+
+        def run(argv, env=None, **k):
+            calls.append((argv, (env or {}).get("HC_SESSION")))
+            t = terminals.get(argv[2])
+            if argv[1] == "get":
+                return subprocess.CompletedProcess(argv, 0 if t else 1, json.dumps(t) if t else "", "")
+            if argv[1] == "rm":
+                terminals.pop(argv[2], None)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        with self.mock.patch.object(co.subprocess, "run", run), self.mock.patch.object(co, "guard", lambda a: None), \
+                self.mock.patch.object(co, "OLD_SESSION", "old-one"), self.mock.patch.object(co, "old_scheduler", self.real_old_scheduler):
+            self.assertEqual(co.old_scheduler(True), "would-remove")
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(co.old_scheduler(False), "removed")
+            self.assertEqual([c[0][1:3] for c in calls[2:]], [["kill", "herdr-automations"], ["rm", "herdr-automations"]])
+            self.assertTrue(all(session == "old-one" for _, session in calls), "every call is in the old session, by name")
+            self.assertEqual(co.old_scheduler(False), "none")
+            # someone else's terminal by that name: left alone
+            terminals["herdr-automations"] = {"address": "t9", "name": "herdr-automations", "state": "live", "argv": ["vim", "scheduler"]}
+            n = len(calls)
+            self.assertEqual(co.old_scheduler(False), "not ours")
+            self.assertEqual(len(calls), n + 1)
+
+    def test_the_default_session_is_asked_without_a_session_name(self):
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"HC_SESSION": "shepherdr", "HC_TERMINAL_ID": "t1", "HC_SOCKET": "/x"}):
+            self.assertNotIn("HC_SESSION", self.co.session_env("default"))
+            env = self.co.session_env("shepherdr")
+            self.assertEqual(env["HC_SESSION"], "shepherdr")
+            self.assertFalse({"HC_TERMINAL_ID", "HC_SOCKET"} & set(env))
+
+
+class InstallerCarriesOver(unittest.TestCase):
+    """bin/shepherdr runs `herdr-task carry-over` at the switch, on the real home only, and never stops the install."""
+
+    def setUp(self):
         import importlib.machinery
         import importlib.util
-        loader = importlib.machinery.SourceFileLoader("shepherdr_bin2", os.path.join(ROOT, "bin", "shepherdr"))
-        spec = importlib.util.spec_from_loader("shepherdr_bin2", loader)
-        sh = importlib.util.module_from_spec(spec)
-        loader.exec_module(sh)
-        root = scratch(self)
-        path = sh.where_for(root).path("settings")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w") as f:
-            json.dump({"everywhere": {"off": ["machines", "voice"]}}, f)
-        notes = sh.addons_off_notes(root)
-        self.assertEqual(len(notes), 1)
-        self.assertIn("Other machines is off", notes[0])
+        loader = importlib.machinery.SourceFileLoader("shepherdr_bin_co", os.path.join(ROOT, "bin", "shepherdr"))
+        spec = importlib.util.spec_from_loader("shepherdr_bin_co", loader)
+        self.sh = importlib.util.module_from_spec(spec)
+        loader.exec_module(self.sh)
+
+    def go(self, answer, home=True, dry=False, code=0):
+        ran, rec = [], {}
+
+        def run(argv, **k):
+            ran.append((argv, k.get("env") or {}))
+            if isinstance(answer, Exception):
+                raise answer
+            return subprocess.CompletedProcess(argv, code, json.dumps(answer) if answer is not None else "", "boom")
+        r = self.sh.Run(scratch(self), dry)
+        from unittest import mock
+        with mock.patch.object(self.sh, "say", lambda *a: None):
+            self.sh.carry_over_session(r, rec, home, run=run)
+        return ran, rec, r.notes
+
+    def test_it_runs_the_installed_herdr_task_once_the_files_are_in(self):
+        ran, rec, notes = self.go({"ok": True, "machines": [{"name": "mini", "state": "added"}], "documents": [{"name": "shepherdr", "state": "copied"}], "scheduler": "removed"})
+        [(argv, env)] = ran
+        self.assertEqual(argv[1:], [os.path.join(os.path.dirname(argv[1]), "herdr-task"), "carry-over", "--json"])
+        self.assertTrue(argv[1].endswith(".local/share/shepherdr/mods/tasks/bin/herdr-task"), argv[1])
+        self.assertNotIn("HC_SESSION", env)
+        self.assertEqual((rec, notes), ({"carry_over": "done"}, []))
+
+    def test_what_waits_is_a_note_and_the_next_update_tries_again(self):
+        _, rec, notes = self.go({"ok": True, "machines": [], "documents": [{"name": "shepherdr.host", "state": "waiting", "why": "it names mini"}], "scheduler": "none"})
+        self.assertEqual(rec, {"carry_over": "waiting"})
+        self.assertIn("shepherdr.host (it names mini)", notes[0])
+        for bad in (None, OSError("no python")):
+            _, rec, notes = self.go(bad, code=1)
+            self.assertEqual(rec, {"carry_over": "waiting"})
+            self.assertIn("herdr-task carry-over", notes[0])
+
+    def test_never_on_a_scratch_root_or_a_dry_run(self):
+        self.assertEqual(self.go({"ok": True}, home=False)[0], [])
+        self.assertEqual(self.go({"ok": True}, dry=True)[0], [])
+
+    def test_the_install_runs_it_before_the_service_starts(self):
+        with open(os.path.join(ROOT, "bin", "shepherdr")) as f:
+            text = f.read()
+        body = text[text.index("def cmd_install("):text.index("# ---- doctor")]
+        self.assertLess(body.index("move_data(r, a, home)"), body.index("carry_over_session(r, rec, home)"))
+        self.assertLess(body.index("carry_over_session(r, rec, home)"), body.index("install_service(r, rec, home)"))
+        self.assertIn('if switching or rec.get("carry_over") == "waiting":', body)
 
 
 class TaskSpaceByRepo(unittest.TestCase):

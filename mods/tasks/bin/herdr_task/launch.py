@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-from .base import ASK_HOME, ENTRY, Fail, git, hc_json, now, run, WORKTREES
+from .base import ASK_HOME, ENTRY, Fail, git, hc_json, now, run, SHARE, WORKTREES
 from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, CLAUDE_PROFILE, REVIEW_TOOLS, codex_too_old, codex_update_words, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, instructions_part, keep_review, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
@@ -156,7 +156,7 @@ def codex_hook_hash(ident):
 
 
 # Shepherdr's own chat hooks as the installer writes them in Codex's hooks.json (bin/shepherdr).
-OWN_HOOK = re.compile(r"sh '[^'\n]*/mods/chat/(session-note|ask-hook)\.sh'")
+OWN_HOOK = re.compile(r"sh '[^'\n]*/(?:hooks|mods/chat)/(session-note|ask-hook)\.sh'")
 # Codex's event names in hooks.state keys, from hooks.json's.
 CODEX_EVENTS = {"SessionStart": "session_start", "PermissionRequest": "permission_request"}
 
@@ -307,10 +307,10 @@ def helper_hc(words):
 
 
 def ask_hook():
-    """The chat's question-card hook (mods/chat/ask-hook.sh): Herdr's app home's, else the copy a
-    sync left on a machine that only runs tasks (ASK_HOME); None when there's neither."""
-    app = os.environ.get("HERDR_APP_HOME") or os.path.join(os.path.expanduser("~"), ".config", "herdr-app")
-    for p in (os.path.join(app, "mods", "chat", "ask-hook.sh"), os.path.join(os.path.expanduser("~"), ASK_HOME, "ask-hook.sh")):
+    """The chat's question-card hook: Shepherdr's own (<SHARE>/hooks/ask-hook.sh, beside this herdr-task's
+    install; in a checkout the repo's), else the copy a sync left on a machine that only runs tasks (ASK_HOME);
+    None when there's neither."""
+    for p in (os.path.join(SHARE, "hooks", "ask-hook.sh"), os.path.join(os.path.expanduser("~"), ASK_HOME, "ask-hook.sh")):
         if os.path.isfile(p):
             return p
     return None

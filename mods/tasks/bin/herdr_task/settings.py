@@ -56,8 +56,12 @@ def read_settings():
 def reactions_on(space=None, d=None):
     """Settings › Agents › Reactions in a space, for every agent there (reactions.py): the space's
     own, else Everywhere's, else on. A layer's agents.reactions, else what SHEP-42 kept as
-    assistant.reactions (when only the Assistant reacted): the window and the web app move it."""
+    assistant.reactions (when only the Assistant reacted): the window and the web app move it.
+    Off everywhere while the Reactions plugin is off (Settings › Plugins: Everywhere's plugins_off)."""
     d = read_settings() if d is None else d
+    off = (d.get("everywhere") or {}).get("plugins_off") if isinstance(d.get("everywhere"), dict) else None
+    if isinstance(off, list) and "reactions" in off:
+        return False
     own = (d.get("spaces") or {}).get(bare(space)) if space else None
     for layer in (own, d.get("everywhere")):
         for key in ("agents", "assistant"):

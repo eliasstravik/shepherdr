@@ -10,6 +10,7 @@
 //      host shares /shepherdr, the old one stops, the others read and write their shared data there;
 //   5. the new link, once the new host says it.
 // shepherdr web status [--json]: which machine serves it now and its link.
+import { SESSION } from "./session.ts";
 import { CoreClient } from "./hc/client.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -27,7 +28,7 @@ const [cmd, target] = args.filter((a) => !a.startsWith("--"));
 const say = (s: string) => { if (!json) console.log(s); };
 const fail = (s: string): never => { if (json) console.log(JSON.stringify({ ok: false, error: s })); else console.error(`shepherdr: ${s}`); process.exit(1); };
 
-const c = await CoreClient.endpoint({ binary: process.env.SHEPHERDR_HC || "hc" }).catch((e) => fail(`herdr-core isn't answering here: ${(e as Error).message}`));
+const c = await CoreClient.endpoint({ binary: process.env.SHEPHERDR_HC || "hc", ...(SESSION ? { session: SESSION } : {}) }).catch((e) => fail(`herdr-core isn't answering here: ${(e as Error).message}`));
 const call = <T = any>(method: string, params: Record<string, unknown> = {}, timeout = 20_000) => c.call<T>(method, params, timeout);
 const at = (on: string | null) => (on ? { on } : {});
 const getDoc = (name: string, on: string | null) => call<{ value: any; version: number }>("doc.get", { name, ...at(on) });

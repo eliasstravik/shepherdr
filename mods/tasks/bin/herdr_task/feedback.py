@@ -29,7 +29,7 @@ import sys
 import tempfile
 from contextlib import contextmanager
 
-from .base import APP_HOME, ENTRY, Fail, GH, HOME, hc_json, now, run, STORE
+from .base import APP_HOME, ENTRY, Fail, GH, HOME, hc_json, now, run, SHARE, STORE
 from .settings import DEFAULTS, bare, read_settings
 
 STATE = os.path.join(STORE, ".feedback.json")
@@ -202,11 +202,18 @@ def trim(text):
 # ---- the issue ------------------------------------------------------------------------------
 
 def shepherdr_version():
-    try:
-        with open(os.path.join(APP_HOME, "data", "shepherdr", "installed.json")) as f:
-            return str(json.load(f).get("version") or "unknown")
-    except (OSError, ValueError, AttributeError):
-        return "unknown"
+    """The installed version: the install's record (<SHARE>/installed.json; a machine not switched to 3.2 yet
+    keeps it in Herdr's app folder)."""
+    for p in (os.path.join(SHARE, "installed.json"), os.path.join(HOME, ".local", "share", "shepherdr", "installed.json"),
+              os.path.join(APP_HOME, "data", "shepherdr", "installed.json")):
+        try:
+            with open(p) as f:
+                v = json.load(f).get("version")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if v:
+            return str(v)
+    return "unknown"
 
 
 def os_words():

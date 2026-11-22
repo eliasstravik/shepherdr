@@ -68,17 +68,25 @@ def sync_held():
     return None
 
 
-# Shepherdr's add-ons (lib/addons.json): one the person switched off in Shepherdr settings >
-# Window is in Everywhere's "off" (the settings file, or HERDR_TASK_SETTINGS), and its
-# background work here stops (browsers, the sync to other machines).
-def addon_off(name):
+# The web app's optional plugins (Settings › Plugins; service/next.ts PLUGINS): one switched off is in Everywhere's
+# "plugins_off" in the settings file (or HERDR_TASK_SETTINGS). herdr-task obeys the two that are its own work:
+# "schedules" off, the scheduler starts no schedule's run; "screens" off, a worker gets no browser.
+PLUGINS = ("terminal", "screens", "voice", "schedules", "reactions")
+# 3.1's add-on names still asked for by callers, as the plugin that took their place.
+_PLUGIN_OF = {"browser": "screens"}
+
+
+def plugin_off(name):
     path = os.environ.get("HERDR_TASK_SETTINGS") or WHERE.path("settings")
     try:
         with open(path) as f:
-            off = (json.load(f).get("everywhere") or {}).get("off")
+            off = (json.load(f).get("everywhere") or {}).get("plugins_off")
     except (OSError, ValueError, AttributeError):
         return False
-    return isinstance(off, list) and name in off
+    return isinstance(off, list) and _PLUGIN_OF.get(name, name) in off
+
+
+addon_off = plugin_off
 
 
 def now():
@@ -119,6 +127,9 @@ def stop_note(kind, **fields):
 # HC_SESSION from its core, so an agent calling herdr-task or hc from inside lands in the same one.
 # SHEPHERDR_SESSION: another name (a test's throwaway core).
 SESSION = os.environ.get("SHEPHERDR_SESSION") or "shepherdr"
+# The session Shepherdr lived in until 3.2 (the default one, the Herdr app's): only read, and only by what carries
+# its data over (carry_over.py, machines.adopt). SHEPHERDR_FROM_SESSION: another name (a test's throwaway core).
+OLD_SESSION = os.environ.get("SHEPHERDR_FROM_SESSION") or "default"
 # As herdr-task was called: None, "", "default" (a shell, the Herdr app's terminal) and SESSION are
 # taken into Shepherdr's session; any other is someone else's (a test's), and hc is refused (guard).
 CALLER_SESSION = os.environ.get("HC_SESSION")
@@ -202,7 +213,7 @@ def hc_json(*args):
     except ValueError:
         return None
 APP_HOME = os.path.join(HOME, ".config", "herdr-app")
-# Where a machine that only runs tasks keeps the chat's question-card hook (mods/chat/ask-hook.sh
+# Where a machine that only runs tasks keeps the chat's question-card hook (hooks/ask-hook.sh
 # and ask-end.py), synced there beside herdr-task (machines.manifest; launch.ask_hook runs it).
 ASK_HOME = os.path.join(".local", "share", "herdr", "ask")
 # ---- this herdr-task ------------------------------------------------------------------------
@@ -212,6 +223,22 @@ ASK_HOME = os.path.join(".local", "share", "herdr", "ask")
 PACKAGE = os.path.dirname(os.path.realpath(__file__))
 _OUTER = os.path.dirname(PACKAGE)
 ENTRY = _OUTER if os.path.isfile(_OUTER) else os.path.join(_OUTER, "herdr-task")
+
+
+def _share():
+    """Shepherdr's own install folder (bin/shepherdr's SHARE: service/, hooks/, templates/, installed.json), found
+    from where this herdr-task lives: <SHARE>/mods/tasks/bin/herdr_task, so in a checkout it is the repo. A lone
+    copy (the zipapp a sync left in ~/.local/bin) has none beside it: ~/.local/share/shepherdr, should one be there.
+    SHEPHERDR_SHARE: another folder (a test's own)."""
+    if os.environ.get("SHEPHERDR_SHARE"):
+        return os.environ["SHEPHERDR_SHARE"]
+    parts = _OUTER.split(os.sep)
+    if os.path.isdir(_OUTER) and parts[-3:] == ["mods", "tasks", "bin"]:
+        return os.sep.join(parts[:-3]) or os.sep
+    return os.path.join(HOME, ".local", "share", "shepherdr")
+
+
+SHARE = _share()
 
 
 def bundle():

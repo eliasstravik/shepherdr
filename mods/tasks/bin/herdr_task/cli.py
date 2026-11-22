@@ -21,7 +21,6 @@ from .commands import (
 from .tick import cmd_tick
 from .automations import auto_list, cmd_auto, cmd_scheduler, cmd_track, EVENTS, HOW
 from .machines import cmd_assistants, cmd_machines, cmd_sync_auto, cmd_tell
-from .addons import cmd_addons
 from .flags import cmd_flags
 from .home import cmd_home
 from .assistant_settings import cmd_session_note
@@ -30,6 +29,10 @@ from .sandbox import cmd_sandbox
 
 
 # ---- another machine ------------------------------------------------------------------------
+
+# Run there (sh -c): whether that machine holds herdr-task's source (machines.py INSTALL has the same rule).
+HAS_SOURCE = ('test -d "$HOME/.local/share/shepherdr/mods/tasks/bin/herdr_task" || '
+              'test -d "$HOME/.config/herdr-app/mods/tasks/bin/herdr_task"')
 
 def install_secret(machine):
     """herdr-secret goes along to another machine (its `install --on`: no values, only the
@@ -85,9 +88,10 @@ def remote_run(machine, argv, timeout=None):
             raise Fail(f"{machine} is linked to herdr-core session {linked.get('session') or 'default'!r} there, not Shepherdr's own "
                        f"({SESSION}): add it again with `hc machine add {linked.get('target') or machine} --name {machine} --session {SESSION}` "
                        "(herdr-task machines adopt does it for the default session's machines).")
-        # A machine with Herdr's own install (its window's) holds herdr-task's source: copies come from there, it's
-        # never written to (machines.py, the same rule). Its link ~/.local/bin/herdr-task leads into that install.
-        there = run(["hc", "exec", "--on", machine, "--", "test", "-d", ".config/herdr-app/mods/tasks/bin/herdr_task"])
+        # A machine with Shepherdr's own install (before 3.2: in Herdr's app folder) holds herdr-task's source: copies
+        # come from there, it's never written to (machines.py, the same rule). Its link ~/.local/bin/herdr-task leads
+        # into that install.
+        there = run(["hc", "exec", "--on", machine, "--", "sh", "-c", HAS_SOURCE])
         if link.lost(there):
             raise Fail(f"Can't reach {machine}: its link is down, and nothing was run there. Try again once it's back.")
         if there.returncode == 0:
@@ -454,6 +458,12 @@ def main():
     c.add_argument("--dry-run", action="store_true", help="only say which would be added")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_machines)
+    c = sub.add_parser("carry-over", help="3.2's switch, safe to run again: what Shepherdr kept in the default herdr-core session (its documents, "
+                                          "its machines) into its own session, and 3.1's scheduler there removed")
+    c.add_argument("--dry-run", action="store_true", help="only say what it would do")
+    c.add_argument("--wait", type=int, default=20, help="seconds to wait for the machines just added to connect (default 20)")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=lambda a: __import__("herdr_task.carry_over", fromlist=["cmd_carry_over"]).cmd_carry_over(a))
     c = ma.add_parser("reach", help="the reach map: the machines this one links to over herdr-core, and through each, what that one links to (contacts nothing else)")
     c.add_argument("--refresh", action="store_true", help="check every link now, and make each unreachable one try to connect again first (default: the scheduler's map, at most 10 minutes old)")
     c.add_argument("--quiet", action="store_true", help=argparse.SUPPRESS)
@@ -480,16 +490,6 @@ def main():
     c.add_argument("--to", help="send everything to this Assistant instead (a test's own)")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_home)
-    ad = sub.add_parser("addons", help="Shepherdr's add-ons: which are off (list), and switch one on or off as Settings › Add-ons does")
-    ad.set_defaults(fn=cmd_addons, addons=None)
-    ads = ad.add_subparsers(dest="addons")
-    c = ads.add_parser("list")
-    c.add_argument("--json", action="store_true")
-    for word in ("on", "off"):
-        c = ads.add_parser(word)
-        c.add_argument("addon", help="its id or title (list shows them), e.g. machines, browser")
-        c.add_argument("--json", action="store_true")
-    ad.add_argument("--json", action="store_true")
     c = sub.add_parser("assistants", help="every live Assistant on every machine reachable from here: its address (machine/terminal), space and folder")
     c.add_argument("--refresh", action="store_true", help="look again now")
     c.add_argument("--json", action="store_true")

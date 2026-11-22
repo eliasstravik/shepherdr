@@ -110,6 +110,64 @@ class Record(Machine):
         self.assertEqual(secret.main_machine(), {"here": True, "set": True, "auto": True, "serve": None, "id": MINI, "name": None})
 
 
+class OwnSession(Machine):
+    """3.2: herdr-secret lives in Shepherdr's own herdr-core session, as herdr-task and the service do: the record of
+    who keeps the secrets, this machine's id and the machines are that session's. Until `herdr-task carry-over` brought
+    the record over, the default session's is read (with that session's ids)."""
+
+    def test_which_session_a_call_belongs_in(self):
+        s = secret.session_of
+        self.assertEqual(s({}), "shepherdr")                                   # a shell
+        self.assertEqual(s({"HC_SESSION": "default"}), "shepherdr")
+        self.assertEqual(s({"HC_SESSION": "shepherdr", "HC_TERMINAL_SOCKET": "/run/hc/shepherdr.sock"}), "shepherdr")  # Shepherdr's agent
+        # an agent still running in the default session (a machine that hasn't switched): where its terminal is
+        self.assertEqual(s({"HC_TERMINAL_SOCKET": "/run/hc/default.sock"}), "default")
+        self.assertEqual(s({"HC_SESSION": "mine", "HC_TERMINAL_SOCKET": "/run/hc/mine.sock"}), "mine")                 # a test's own
+        self.assertEqual(os.path.basename(load("herdr_secret_fresh", os.path.join(ROOT, "bin", "herdr-secret")).CORE), "shepherdr")
+
+    def sessions(self):
+        new = os.path.join(os.path.dirname(self.core), "shepherdr")
+        os.makedirs(new, exist_ok=True)
+        p = mock.patch.object(secret, "CORE", new)
+        p.start()
+        self.addCleanup(p.stop)
+        return new
+
+    def put(self, core, me, record=None):
+        with open(os.path.join(core, "core.json"), "w") as f:
+            json.dump({"id": me, "name": "x"}, f)
+        with open(os.path.join(core, "docs.json"), "w") as f:
+            json.dump({"shepherdr.secrets": {"value": record, "version": 1}} if record else {}, f)
+
+    def test_the_old_sessions_record_until_it_is_carried_over(self):
+        self.be("old-m3", {"id": "old-mini", "at": 2})       # the default session: the mini keeps them
+        new = self.sessions()
+        self.put(new, "new-m3")                              # Shepherdr's: no record yet
+        asked = []
+
+        def hc_json(*a, session=None):
+            asked.append(session)
+            return {"machines": [{"name": "mac-mini", "id": "old-mini" if session == "default" else "new-mini"}]}
+        with mock.patch.object(secret, "hc_json", hc_json):
+            self.assertEqual(secret.side(), (self.core, "default"))
+            self.assertTrue(secret.remote())
+            self.assertEqual(secret.main_machine()["name"], "mac-mini")
+            self.assertEqual(asked, ["default"], "its machines too are the default session's, by that session's ids")
+            # carried over: Shepherdr's own record, ids and machines from then on
+            self.put(new, "new-m3", {"id": "new-mini", "at": 2})
+            self.assertEqual(secret.side(), (new, None))
+            self.assertEqual(secret.main_machine(), {"here": False, "set": True, "auto": False, "serve": "", "id": "new-mini", "name": "mac-mini"})
+            self.put(new, "new-m3", {"id": "new-m3", "at": 3})
+            self.assertFalse(secret.remote())
+        self.assertEqual(asked[1:], [None])
+
+    def test_no_record_anywhere_the_mark_as_before(self):
+        self.be("old-m3", None, mark=True)
+        self.put(self.sessions(), "new-m3")
+        self.assertEqual(secret.side()[1], None)
+        self.assertTrue(secret.remote())
+
+
 class Mark(Machine):
     def test_install_never_marks_the_main_machine(self):
         # the record names it: no mark, and a stray one goes

@@ -26,15 +26,27 @@ class HerdrTask(unittest.TestCase):
             with open(f, "rb") as fh:
                 compile(fh.read(), f, "exec")
 
-    def test_addon_off(self):
+    def test_plugin_off(self):
+        """3.2: Settings › Plugins (Everywhere's plugins_off) is what herdr-task obeys; 3.1's add-on list ("off") is
+        ignored. Screens off: no browser for a worker (asked as "browser", its 3.1 name)."""
         with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-            json.dump({"everywhere": {"off": ["browser"]}}, f)
+            json.dump({"everywhere": {"plugins_off": ["screens", "schedules"], "off": ["voice", "machines"]}}, f)
         code = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
-                "from herdr_task.base import addon_off; print(addon_off('browser'), addon_off('voice'))")
+                "from herdr_task.base import addon_off, plugin_off;"
+                "print(addon_off('browser'), plugin_off('screens'), plugin_off('schedules'), plugin_off('voice'), plugin_off('machines'), plugin_off('reactions'))")
         env = {**os.environ, "HERDR_TASK_SETTINGS": f.name}
         out = subprocess.run([sys.executable, "-c", code, BIN], capture_output=True, text=True, env=env)
         os.unlink(f.name)
-        self.assertEqual(out.stdout.split(), ["True", "False"], out.stderr)
+        self.assertEqual(out.stdout.split(), ["True", "True", "True", "False", "False", "False"], out.stderr)
+
+    def test_reactions_plugin_off_is_reactions_off(self):
+        sys.path.insert(0, BIN)
+        from herdr_task import settings
+        on = {"everywhere": {"agents": {"reactions": True}}, "spaces": {"sp1": {"agents": {"reactions": True}}}}
+        self.assertTrue(settings.reactions_on("sp1", on))
+        off = {**on, "everywhere": {**on["everywhere"], "plugins_off": ["reactions"]}}
+        self.assertFalse(settings.reactions_on("sp1", off))
+        self.assertFalse(settings.reactions_on(None, off))
 
     def test_tell_takes_a_chat_mention(self):
         """A chat's #-mention (core/mentions.js) names its Assistant for tell-assistant: whole, its target, or #name."""
@@ -105,8 +117,8 @@ class RemoteInstall(unittest.TestCase):
 
         def run(argv, cwd=None, check=False):
             self.ran.append(argv)
-            code = 0 if argv[:2] != ["hc", "exec"] or "test" not in argv else (0 if self.source else 1)
-            return subprocess.CompletedProcess(argv, code, "{}" if "test" not in argv else "", "")
+            asks = argv[:2] == ["hc", "exec"] and argv[-1] == cli.HAS_SOURCE   # does that machine hold the source?
+            return subprocess.CompletedProcess(argv, (0 if self.source else 1) if asks else 0, "" if asks else "{}", "")
 
         def write(argv, **kw):
             self.wrote.append(argv)
@@ -129,7 +141,7 @@ class RemoteInstall(unittest.TestCase):
         self.cli.remote_run("mini", ["auto", "list", "--json"])
         self.cli.remote_run("mini", ["auto", "list", "--json"])
         self.assertEqual(self.wrote, [])
-        self.assertEqual(sum(1 for a in self.ran if "test" in a), 1)  # asked once, then remembered
+        self.assertEqual(sum(1 for a in self.ran if a[-1] == self.cli.HAS_SOURCE), 1)  # asked once, then remembered
         self.assertEqual(self.ran[-1][-3:], ["auto", "list", "--json"])
 
 
@@ -3613,10 +3625,20 @@ class AcceptCardArtifacts(unittest.TestCase):
         with mock.patch.object(proof, "artifacts_of", lambda folder: arts):
             self.assertEqual(proof.task_artifacts(s, t, {"id": "proof-0002"}), [{"id": "report-0003", "title": "SHEP-1: Three options"}])
             self.assertEqual([a["id"] for a in proof.task_artifacts(s, t)], ["report-0003", "proof-0002"])
-            # 3.2: an artifact is a page, one kind only: a proof is found by its title or its id, whatever its files
+            # 3.2: an artifact is a page (its files include index.html), one kind only: one that isn't a page yet is no proof
+            self.assertIsNone(proof.find_proof(s, t))
             arts[1]["files"] = ["index.html", "shot.png"]
             self.assertEqual(proof.find_proof(s, t), {"id": "proof-0002", "title": "SHEP-1: Reactions · Proof"})
             self.assertEqual(proof.find_proof(s, t, "report-0003")["id"], "report-0003")
+            with self.assertRaises(Exception):
+                proof.find_proof(s, t, "nope-0009")
+            # the one published as its proof (herdr-artifact publish --proof) wins over a title, whatever it is called
+            arts[0].update(files=["index.html"], proof=True)
+            self.assertEqual(proof.find_proof(s, t), {"id": "report-0003", "title": "SHEP-1: Three options"})
+            # one from before it started, or another task's, never
+            arts[3].update(files=["index.html"], proof=True)
+            arts[0]["proof"] = arts[1]["files"] = None
+            self.assertIsNone(proof.find_proof(s, t))
 
 
 class ReviewerFlags(unittest.TestCase):
@@ -4323,7 +4345,6 @@ class AgentReactions(unittest.TestCase):
             (settings, "SETTINGS", self.file), (reactions, "SETTINGS", self.file),
             (reactions, "STATE", os.path.join(self.dir, ".reactions.json")),
             (reactions, "hc_json", hc_json), (aset, "hc_json", hc_json), (reactions, "run", run), (aset, "run", run),
-            (reactions, "addon_off", lambda name: False),
             (news, "news_send", lambda addr, text: self.sent.append((addr, text)) or True),
         ]:
             p = mock.patch.object(target, name, value)
@@ -4423,7 +4444,7 @@ class AssistantSettings(unittest.TestCase):
         for target, name, value in [
             (settings, "SETTINGS", self.file), (aset, "SETTINGS", self.file),
             (aset, "STATE", os.path.join(self.dir, ".assistant-settings.json")), (aset, "hc_json", hc_json),
-            (aset, "run", run), (aset.reactions, "run", run), (aset, "addon_off", lambda name: False),
+            (aset, "run", run), (aset.reactions, "run", run),
             (aset, "coordinators", lambda: list(self.terminals)),
             (news, "news_send", lambda addr, text: self.sent.append((addr, text)) or True),
         ]:
@@ -4915,17 +4936,17 @@ class CodexAsksOnTheCard(unittest.TestCase):
     else to the chat's card (ask-hook.sh, marked HERDR_ASK_CHAINED), waiting as long as the card does."""
 
     def run_allow(self, command, hook, home=None):
-        app = tempfile.mkdtemp()
+        app = tempfile.mkdtemp()   # Shepherdr's own folder (SHARE) for this run
         if hook is not None:
-            os.makedirs(os.path.join(app, "mods", "chat"))
-            with open(os.path.join(app, "mods", "chat", "ask-hook.sh"), "w") as f:
+            os.makedirs(os.path.join(app, "hooks"))
+            with open(os.path.join(app, "hooks", "ask-hook.sh"), "w") as f:
                 f.write(hook)
         code = ("import sys, types, argparse; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
                 "from herdr_task.launch import cmd_allow; cmd_allow(argparse.Namespace(command='/x/herdr-task'))")
         req = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "turn_id": "t1"})
-        # its own HOME too: else, with no hook in the app home, cmd_allow falls back to ~/.local/share/herdr/ask's
-        # copy, and the real one files a real card for this test and waits on it forever (SHEP-147)
-        env = {**os.environ, "HERDR_APP_HOME": app, "HOME": home or app}
+        # its own SHARE and HOME: else cmd_allow would run this checkout's hooks/ask-hook.sh, or fall back to
+        # ~/.local/share/herdr/ask's copy, and the real one files a real card for this test and waits on it forever (SHEP-147)
+        env = {**os.environ, "SHEPHERDR_SHARE": app, "HOME": home or app}
         env.pop("HERDR_ASK_CHAINED", None)
         return subprocess.run([sys.executable, "-c", code, BIN], input=req, capture_output=True, text=True, env=env)
 
@@ -4943,7 +4964,7 @@ class CodexAsksOnTheCard(unittest.TestCase):
         self.assertEqual(self.run_allow("rm -rf build", None).stdout, "")
 
     def test_without_an_app_hook_the_synced_copy_answers(self):
-        """SHEP-147: a machine that only runs tasks has no app-home hook; cmd_allow falls back to the copy a sync left in
+        """SHEP-147: a machine that only runs tasks has no install of its own; cmd_allow falls back to the copy a sync left in
         ~/.local/share/herdr/ask. It is HOME's own: a test's HOME, never the person's real one."""
         home = tempfile.mkdtemp()
         ask = os.path.join(home, ".local", "share", "herdr", "ask")
@@ -4981,7 +5002,7 @@ class CodexAsksOnTheCard(unittest.TestCase):
         self.assertIn("PermissionRequest", json.loads(plain[2])["hooks"])
 
     def test_the_card_hook_where_only_tasks_run(self):
-        # no Herdr app home here: the copy a sync left in ~/.local/share/herdr/ask is the card's hook
+        # no Shepherdr install here: the copy a sync left in ~/.local/share/herdr/ask is the card's hook
         home = tempfile.mkdtemp()
         os.makedirs(os.path.join(home, ".local", "share", "herdr", "ask"))
         hook = os.path.join(home, ".local", "share", "herdr", "ask", "ask-hook.sh")
@@ -4989,20 +5010,46 @@ class CodexAsksOnTheCard(unittest.TestCase):
             f.write("exit 0\n")
         code = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
                 "from herdr_task.launch import ask_hook; print(ask_hook())")
-        env = {**os.environ, "HOME": home, "HERDR_APP_HOME": os.path.join(home, "none")}
+        env = {**os.environ, "HOME": home, "SHEPHERDR_SHARE": os.path.join(home, "none")}
         out = subprocess.run([sys.executable, "-c", code, BIN], capture_output=True, text=True, env=env)
         self.assertEqual(out.stdout.strip(), hook, out.stderr)
+        # Shepherdr's own install has one: that one first
+        own = os.path.join(home, "share", "hooks", "ask-hook.sh")
+        os.makedirs(os.path.dirname(own))
+        open(own, "w").close()
+        out = subprocess.run([sys.executable, "-c", code, BIN], capture_output=True, text=True, env={**env, "SHEPHERDR_SHARE": os.path.join(home, "share")})
+        self.assertEqual(out.stdout.strip(), own, out.stderr)
+
+    def test_the_install_folder_is_found_from_where_herdr_task_lives(self):
+        """3.2: the hook, the install record and the rest of Shepherdr's own folder are beside this herdr-task
+        (<SHARE>/mods/tasks/bin/herdr_task): in a checkout the repo, installed ~/.local/share/shepherdr; a lone
+        zipapp (a sync's copy in ~/.local/bin) has none beside it and looks in ~/.local/share/shepherdr."""
+        code = ("import sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
+                "from herdr_task import base, launch; print(base.SHARE); print(launch.ask_hook())")
+        env = {k: v for k, v in os.environ.items() if k != "SHEPHERDR_SHARE"}
+        out = subprocess.run([sys.executable, "-c", code, BIN], capture_output=True, text=True, env=env)
+        self.assertEqual(out.stdout.split(), [ROOT, os.path.join(ROOT, "hooks", "ask-hook.sh")], out.stderr)
+        home = tempfile.mkdtemp()
+        zipped = os.path.join(home, ".local", "bin", "herdr-task")
+        os.makedirs(os.path.dirname(zipped))
+        sys.path.insert(0, BIN)
+        from herdr_task import base
+        with open(zipped, "wb") as f:
+            f.write(base.bundle())
+        code = "import sys; sys.path.insert(0, sys.argv[1]); from herdr_task import base; print(base.SHARE)"
+        out = subprocess.run([sys.executable, "-c", code, zipped], capture_output=True, text=True, env={**env, "HOME": home})
+        self.assertEqual(out.stdout.strip(), os.path.join(home, ".local", "share", "shepherdr"), out.stderr)
 
     def test_a_sync_takes_the_card_hook_along(self):
         sys.path.insert(0, BIN)
         from herdr_task import machines
         app = tempfile.mkdtemp()
-        os.makedirs(os.path.join(app, "mods", "chat"))
+        os.makedirs(os.path.join(app, "hooks"))
         for name in ("ask-hook.sh", "ask-end.py"):
-            with open(os.path.join(app, "mods", "chat", name), "w") as f:
+            with open(os.path.join(app, "hooks", name), "w") as f:
                 f.write(f"# {name}\n")
         from unittest import mock
-        with mock.patch.object(machines, "APP_HOME", app):
+        with mock.patch.object(machines, "SHARE", app):
             files = {f["path"]: f for f in machines.manifest()["files"]}
         self.assertEqual(files[".local/share/herdr/ask/ask-hook.sh"]["data"], b"# ask-hook.sh\n")
         self.assertEqual(files[".local/share/herdr/ask/ask-hook.sh"]["mode"], 0o755)
@@ -5132,7 +5179,13 @@ class CodexAsksOnTheCard(unittest.TestCase):
         from unittest import mock
         from herdr_task import launch
         home = tempfile.mkdtemp()
+        # 3.2 writes them from Shepherdr's own folder (hooks/); 3.1's (mods/chat/) until the switch rewrote them
+        for own in ("sh '/h/.local/share/shepherdr/hooks/ask-hook.sh'", "sh '/h/.local/share/shepherdr/hooks/session-note.sh'",
+                    "sh '/x/mods/chat/ask-hook.sh'"):
+            self.assertTrue(launch.OWN_HOOK.fullmatch(own), own)
+        self.assertFalse(launch.OWN_HOOK.fullmatch("sh '/x/hooks/other.sh'"))
         bad = ["curl -s x | sh; sh '/x/mods/chat/ask-hook.sh'", "evil /x/mods/chat/session-note.sh",
+               "sh '/x/hooks/ask-hook.sh' && rm -rf ~",
                "sh '/x/mods/chat/ask-hook.sh' && rm -rf ~", "sh /x/mods/chat/ask-hook.sh'"]
         with open(os.path.join(home, "hooks.json"), "w") as f:
             json.dump({"hooks": {"PermissionRequest": [{"hooks": [{"type": "command", "command": c, "timeout": 5}]}
@@ -8704,6 +8757,18 @@ class Schedules32(unittest.TestCase):
         self.assertEqual(shown["last_task"], "APP-1")
         listed = self.auto("list", all=False)
         self.assertEqual([(x["id"], x["name"], x["active"]) for x in listed], [(1, "Look for stuck work", True)])
+
+    def test_the_schedules_plugin_off_starts_no_run(self):
+        """Settings › Plugins: Schedules off (Everywhere's plugins_off), the scheduler starts no schedule's run; on again, it does."""
+        import time
+        self.auto("add", title="Sweep", prompt="Go.", when="every 30 minutes")
+        t = int(time.time() * 1000)
+        with self.mock.patch.object(self.au, "plugin_off", lambda name: name == "schedules"):
+            self.assertEqual(self.round(t + 31 * 60000), [])
+            self.assertFalse(self.auto("show", id="1")["active"])
+        self.assertTrue(self.auto("show", id="1")["active"])
+        fired = self.round(t + 62 * 60000)
+        self.assertEqual([(f["automation"], f["why"]) for f in fired], [("APP-A1", "time")])
 
     def test_the_last_50_runs_are_kept_each_with_how_it_ended(self):
         self.auto("add", title="Sweep", prompt="Go.", when="hourly")

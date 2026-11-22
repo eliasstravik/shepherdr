@@ -64,10 +64,6 @@ class Reach(unittest.TestCase):
                   mock.patch.object(machines, "FOUND", os.path.join(store, ".found.json"), create=True)):
             p.start()
             self.addCleanup(p.stop)
-        self.off = []
-        p = mock.patch.object(machines, "addon_off", lambda n: n in self.off)
-        p.start()
-        self.addCleanup(p.stop)
 
     def calls(self, prog):
         with open(self.log) as f:
@@ -83,14 +79,6 @@ class Reach(unittest.TestCase):
         links = d["graph"]["links"]
         self.assertEqual([(l["how"], l["to"], l["ok"]) for l in links], [("herdr-core", "vm1", True)])
         self.assertIn("links", links[0]["next"])
-
-    def test_add_on_off_follows_no_link(self):
-        """The scheduler still refreshes this machine's own part (its spaces for #-mentions): nothing leaves it."""
-        self.off = ["machines"]
-        machines.probe(depth=machines.REACH_DEPTH, timeout=20)
-        self.assertEqual(self.calls("ssh"), [])
-        self.assertEqual(self.calls("tailscale"), [])
-        self.assertEqual([c for c in self.calls("hc") if c.startswith("exec")], [], "add-on off: a hop went to another machine")
 
     def test_find_says_what_it_will_contact_first(self):
         r = machines.find(go=False)
@@ -123,12 +111,6 @@ class Reach(unittest.TestCase):
         with mock.patch.object(machines, "_found", found):
             with self.assertRaisesRegex(base.Fail, "again in"):
                 machines.find(go=True)
-        self.assertEqual(self.calls("ssh"), [])
-
-    def test_find_refused_with_the_add_on_off(self):
-        self.off = ["machines"]
-        with self.assertRaisesRegex(base.Fail, "Other machines"):
-            machines.find(go=True)
         self.assertEqual(self.calls("ssh"), [])
 
 
@@ -177,27 +159,21 @@ class Relink(unittest.TestCase):
         self.assertEqual([c for c in self.calls("hc") if c.startswith("machine login")], [])
         self.assertEqual(self.links(machines._reach_cache())[0], ("vm1", "unreachable", False))
 
-    def test_add_on_off_retries_nothing(self):
-        self.off = ["machines"]
-        machines.reach(refresh=True)
-        self.assertEqual([c for c in self.calls("hc") if c.startswith(("machine login", "exec"))], [])
-
 
 class NetworkBack(unittest.TestCase):
     """The scheduler's round: a network change while a link is unreachable starts a refresh (which retries it), and
-    once more NET_AGAIN_MS later; no change, nothing unreachable, or the add-on off: nothing extra."""
+    once more NET_AGAIN_MS later; no change or nothing unreachable: nothing extra."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, True)
-        self.state, self.net, self.links, self.t, self.off, self.spawned = "unreachable", ["100.64.0.1", "10.0.0.2"], None, 10**12, [], []
+        self.state, self.net, self.links, self.t, self.spawned = "unreachable", ["100.64.0.1", "10.0.0.2"], None, 10**12, []
         for p in (mock.patch.object(machines, "STORE", self.tmp), mock.patch.object(machines, "MACHINES", os.path.join(self.tmp, ".machines.json")),
                   mock.patch.object(machines, "REACH", os.path.join(self.tmp, ".reach.json")),
                   mock.patch.object(machines, "connected_machines", lambda: [{"name": "vm1", "state": self.state}]),
                   mock.patch.object(machines, "manifest", lambda: {"version": "v1"}),
                   mock.patch.object(machines, "now", lambda: self.t),
                   mock.patch.object(machines, "_net", lambda: list(self.net), create=True),
-                  mock.patch.object(machines, "addon_off", lambda n: n in self.off),
                   mock.patch.object(machines, "sync_held", lambda: True),
                   mock.patch.object(machines, "_spawn", lambda argv, log: self.spawned.append(argv))):
             p.start()
@@ -228,12 +204,6 @@ class NetworkBack(unittest.TestCase):
         self.assertEqual(self.round(), [])
         self.state = "unreachable"
         self.assertEqual(self.round(), [], "the network was already seen: hc's own retries and the 5-minute map cover it")
-
-    def test_add_on_off_no_refresh(self):
-        self.off = ["machines"]
-        self.round()
-        self.net = ["100.89.1.2", "10.0.0.2"]
-        self.assertEqual(self.round(), [])
 
 
 

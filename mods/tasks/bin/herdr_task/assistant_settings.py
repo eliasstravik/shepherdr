@@ -12,7 +12,7 @@ import json
 import os
 import sys
 
-from .base import addon_off, hc_json, now, run, STORE
+from .base import hc_json, now, run, STORE
 from .settings import DEFAULTS, LOCAL_MACHINE, MUST_WORDS, SETTINGS, agent_key, bare, instructions_text, read_settings
 from .launch import coordinators, is_coordinator
 from . import reactions
@@ -200,8 +200,6 @@ def settings_pass(report, quiet):
     LABEL), in one message. One without the label (started before this) gets the whole block once
     it has had a turn. quiet: news_pass's {address: {turn, at}}, so a no-reply to this leaves a read
     chat read."""
-    if addon_off("chat"):
-        return
     try:
         mtime = os.path.getmtime(SETTINGS)
     except OSError:
