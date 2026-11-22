@@ -2,7 +2,7 @@
 // frequently used), and the full set (loaded only when the picker first opens: it ships with the app, a chunk of its own).
 
 /** the quick row's favourites */
-export const EMOJI = ['👍', '❤️', '😂', '🙌', '👀', '✅']
+export const EMOJI = ['👍', '❤️', '😂', '🎉', '👀', '🙏']
 
 /** the spelling Unicode calls fully qualified: no presentation mark after a character that is already an emoji, so 👍
     from the quick row and 👍 from the picker are the same reaction */
