@@ -20,7 +20,7 @@ from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, CLAUDE_PROFILE, R
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
 from .github import finish, remote_of
-from .browsers import browser_env, browser_line, browser_path
+from .browsers import browser_env, browser_line, browser_path, desktop_path
 
 
 # ---- an agent's own herdr-task commands never ask -------------------------------------------
@@ -68,6 +68,9 @@ def own_rules(path):
     # The task's browser (HERD-57): every herdr-browser command, as the brief writes it.
     bp = browser_path()
     for p in [bp, "herdr-browser"] if bp and re.fullmatch(r"[\w@%+=:,./-]+", bp) else []:
+        rules += [f"Bash({p}:*)"]
+    dp = desktop_path()  # its desktop, the same
+    for p in [dp, "herdr-desktop"] if dp and re.fullmatch(r"[\w@%+=:,./-]+", dp) else []:
         rules += [f"Bash({p}:*)"]
     return rules
 
@@ -232,6 +235,8 @@ def own_command(path, text, sandboxed=False):
         return True
     if len(words) >= 2 and words[0] == "@herdr-browser" and browser_path():
         return True
+    if len(words) >= 2 and words[0] == "@herdr-desktop" and desktop_path():
+        return True
     if sandboxed and len(words) >= 2 and words[0] == "@herdr-artifact" and words[1] in ARTIFACT and "--custom" not in words:
         return True
     if sandboxed and len(words) >= 2 and words[0] == "git" and words[1] in GIT:
@@ -243,16 +248,16 @@ def own_command(path, text, sandboxed=False):
 
 def tool_name(word, path):
     """The tool a command's first word runs, as "@<name>" when it is one own_command knows: this herdr-task (its path, or the bare
-    name when PATH's is this one), herdr-browser, herdr-artifact, herdr-secret or hc by their path on PATH or their
+    name when PATH's is this one), herdr-browser, herdr-desktop, herdr-artifact, herdr-secret or hc by their path on PATH or their
     bare name (#1098: a Codex worker's full-path `/…/hc read` asked and hung, the bare one didn't); else the word."""
     real = lambda p: os.path.realpath(os.path.expanduser(p)) if p else None  # noqa: E731
     if word == path or (word == "herdr-task" and real(shutil.which("herdr-task")) == real(path)):
         return "@herdr-task"
-    if word in ("herdr-browser", "herdr-artifact", "herdr-secret", "hc"):
+    if word in ("herdr-browser", "herdr-desktop", "herdr-artifact", "herdr-secret", "hc"):
         return "@" + word
     if os.sep not in word:
         return word
-    for name, at in (("herdr-browser", browser_path()), ("herdr-artifact", artifact_path()),
+    for name, at in (("herdr-browser", browser_path()), ("herdr-desktop", desktop_path()), ("herdr-artifact", artifact_path()),
                      ("herdr-secret", secret_path()), ("hc", shutil.which("hc"))):
         if at and (word == at or real(word) == real(at)):
             return "@" + name
@@ -641,7 +646,7 @@ def closing_line(s, task, parent=None, argv=None):
     if argv and agent_key(argv) == "codex":
         # #1136 #1142: run in the sandbox, hc can't open Herdr's core and the browser's socket folder is read-only
         text += (" Codex's sandbox can't reach Herdr nor write git's data, so give those commands, herdr-browser's (your task's "
-                 "browser), herdr-artifact's (your proof), `git add`/`git commit` and your review's `hc run`/`hc wait`/`hc read`/"
+                 "browser), herdr-desktop's (your desktop), herdr-artifact's (your proof), `git add`/`git commit` and your review's `hc run`/`hc wait`/`hc read`/"
                  "`hc get`/`hc kill` (its prompt in single quotes) "
                  "sandbox_permissions \"require_escalated\" from the first try, each as one plain command (no && chains, no $(…), "
                  "no git options before the verb): then they run without asking.")

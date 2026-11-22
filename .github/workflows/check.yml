@@ -63,7 +63,7 @@ jobs:
         # every script under plain bash (macOS's bash 3.2 is what people run; #908), and one whose first line says sh
         # also under sh (dash here). test_repo's test_each_parses checks every shipped script the same way.
         run: |
-          for f in install.sh bin/herdr-browser hooks/*.sh $(ls service/restart.sh 2>/dev/null); do
+          for f in install.sh bin/herdr-browser bin/herdr-desktop hooks/*.sh $(ls service/restart.sh 2>/dev/null); do
             bash -n "$f" || { echo "::error file=$f::doesn't parse under bash"; exit 1; }
             case "$(head -1 "$f")" in *bash*) ;; *) sh -n "$f" || { echo "::error file=$f::doesn't parse under sh"; exit 1; } ;; esac
           done

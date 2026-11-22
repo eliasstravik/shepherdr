@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import fake_ab
 from importlib.machinery import SourceFileLoader
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -92,6 +93,11 @@ class Install(unittest.TestCase):
         self.assertFalse(os.path.exists(self.p(OLD_RECORD)), "no record in the Herdr app any more")
         self.assertTrue(os.path.isfile(self.p(SHARE, "mods/tasks/bin/herdr-task")))
         self.assertEqual(os.path.realpath(self.p(".local/bin/herdr-task")), os.path.realpath(self.p(SHARE, "mods/tasks/bin/herdr-task")))
+        # the agents' browser and desktop (Screens): shipped in bin/, linked on the PATH, runnable
+        for name in ("herdr-browser", "herdr-desktop"):
+            self.assertTrue(os.access(self.p(SHARE, "bin", name), os.X_OK), name)
+            self.assertEqual(os.path.realpath(self.p(".local/bin", name)), os.path.realpath(self.p(SHARE, "bin", name)))
+            self.assertIn(f"{SHARE}/bin/{name}", rec["files"])
         # In the Herdr app: the one button and nothing else of Shepherdr's (no layout, no lib/, core/, bin/).
         self.assertEqual(sorted(os.listdir(self.p(APP, "mods"))), ["changes", "open-shepherdr"])
         self.assertEqual(sorted(os.listdir(self.p(APP))), ["keys.json", "mods"])
@@ -157,7 +163,9 @@ class Install(unittest.TestCase):
                 self.assertEqual(json.loads(after[k]), json.loads(v), k)
             else:
                 self.assertEqual(after[k], v, k)
-        self.assertFalse(os.path.lexists(self.p(".local/bin/herdr-task")))
+        for name in ("herdr-task", "herdr-browser", "herdr-desktop"):
+            self.assertFalse(os.path.lexists(self.p(".local/bin", name)), name)
+        self.assertFalse(os.path.exists(self.p(SHARE, "bin/herdr-desktop")))
         self.assertFalse(os.path.exists(self.p(APP, "mods/open-shepherdr")))
         self.assertFalse(os.path.exists(self.p(".codex/hooks.json")), "a hooks file it made goes with its hooks")
         self.assertFalse(os.path.exists(self.p(SHARE, "service")))
@@ -912,7 +920,8 @@ class SwitchFromTheWindow(unittest.TestCase):
         self.assertEqual(codex.count("/hooks/ask-hook.sh"), 1)
         # the --guard link is gone; the helpers' links lead into Shepherdr's own folder
         self.assertFalse(os.path.lexists(self.p(".local/bin/herdr-app")))
-        for name, target in (("herdr-task", "mods/tasks/bin/herdr-task"), ("shepherdr", "bin/shepherdr"), ("herdr-secret", "bin/herdr-secret")):
+        for name, target in (("herdr-task", "mods/tasks/bin/herdr-task"), ("shepherdr", "bin/shepherdr"), ("herdr-secret", "bin/herdr-secret"),
+                             ("herdr-browser", "bin/herdr-browser"), ("herdr-desktop", "bin/herdr-desktop")):
             self.assertEqual(os.path.realpath(self.p(".local/bin", name)), os.path.realpath(self.p(SHARE, target)))
         # what 3.1 kept in Shepherdr's folder and no longer ships is retired with it
         for gone in ("lib", "mods/coordinator", "mods/artifacts/recipe-view.js", "mods/artifacts/core", "service/layout-scripts.ts"):
@@ -1043,14 +1052,13 @@ class SwitchFromTheWindow(unittest.TestCase):
 
 
 # A stand-in for agent-browser's release binary: says its version, has Chrome once `install` ran (unless told it fails)
-FAKE_RELEASE = """#!/bin/sh
-case "$1" in
-  --version) echo "agent-browser 0.41.1" ;;
+# as an agent-browser that starts a space's browser and joins it (fake_ab), then:
+FAKE_RELEASE = fake_ab.script("""case "$1" in
   doctor) if [ -f "$HOME/chrome" ]; then s=pass; else s=fail; fi; echo "{\\"checks\\":[{\\"id\\":\\"chrome.installed\\",\\"status\\":\\"$s\\"}]}" ;;
   install) if [ -n "$FAKE_CHROME_FAILS" ]; then echo "Chrome CDN unreachable" >&2; exit 1; fi; : > "$HOME/chrome" ;;
-  *) echo "mine $*" ;;
+  *) echo "mine $all" ;;
 esac
-"""
+""")
 PLATFORMS = ("darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "linux-musl-arm64", "linux-musl-x64")
 
 
@@ -1081,13 +1089,13 @@ class AgentBrowser(unittest.TestCase):
         os.makedirs(d, exist_ok=True)
         if version:
             with open(os.path.join(d, "agent-browser"), "w") as f:
-                f.write(f'#!/bin/sh\n[ "$1" = --version ] && {{ echo "agent-browser {version}"; exit 0; }}\necho "path $*"\n')
+                f.write(fake_ab.script('echo "path $all"').replace("agent-browser 0.41.1", f"agent-browser {version}"))
             os.chmod(os.path.join(d, "agent-browser"), 0o755)
         return d
 
     def hbr(self, *args, path=None, url=None, sha=None, **extra):
         env = {"HOME": self.home, "PATH": f"{path or self.on_path(None)}:/usr/bin:/bin",
-               "HERDR_BROWSER_URL": url or "file://" + self.rel, "HERDR_BROWSER_SHA256": sha or self.sha, **extra}
+               "HERDR_BROWSER_URL": url or "file://" + self.rel, "HERDR_BROWSER_SHA256": sha or self.sha, **fake_ab.ENV, **extra}
         return subprocess.run(["sh", self.hb, *args], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL)
 
     def status(self, **kw):
@@ -1112,7 +1120,7 @@ class AgentBrowser(unittest.TestCase):
         for args in (("--help",), ("-h",), ("help",), ("--task", "a#1", "--help")):
             p = self.hbr(*args, path=old)
             self.assertEqual(p.returncode, 0, (args, p.stderr))
-            self.assertIn("this task's own browser", p.stdout)
+            self.assertIn("your own tab in your space's browser", p.stdout)
             self.assertIn("this machine has 0.31.1", p.stdout)
             self.assertNotIn("installing", p.stderr)
             self.assertFalse(os.path.exists(self.mine), args)

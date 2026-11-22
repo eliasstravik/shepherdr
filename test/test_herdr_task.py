@@ -5055,6 +5055,47 @@ class CodexAsksOnTheCard(unittest.TestCase):
         self.assertEqual(files[".local/share/herdr/ask/ask-hook.sh"]["mode"], 0o755)
         self.assertIn(".local/share/herdr/ask/ask-end.py", files)
 
+    def test_a_sync_takes_the_browser_and_the_desktop_along(self):
+        sys.path.insert(0, BIN)
+        from herdr_task import machines
+        from unittest import mock
+        here = tempfile.mkdtemp()
+        for name in ("herdr-browser", "herdr-desktop"):
+            with open(os.path.join(here, name), "w") as f:
+                f.write(f"#!/bin/sh\n# {name}\n")
+        real = lambda rel: os.path.join(here, os.path.basename(rel)) if os.path.basename(rel) in ("herdr-browser", "herdr-desktop") else None  # noqa: E731
+        with mock.patch.object(machines, "_real", real):
+            files = {f["path"]: f for f in machines.manifest()["files"]}
+        for name in ("herdr-browser", "herdr-desktop"):
+            self.assertEqual(files[f".local/bin/{name}"]["data"], f"#!/bin/sh\n# {name}\n".encode())
+            self.assertEqual(files[f".local/bin/{name}"]["mode"], 0o755)
+        with mock.patch.object(machines, "_real", lambda rel: None):  # a machine without them passes none on
+            self.assertFalse([f for f in machines.manifest()["files"] if "herdr-desktop" in f["path"] or "herdr-browser" in f["path"]])
+
+    def test_its_desktop_never_asks_as_its_browser(self):
+        """3.2: a worker's herdr-desktop commands are its own, as herdr-browser's: by bare name or the path on PATH, in
+        Claude's allow rules and in the hook's answer; not where there is none, and nothing chained."""
+        sys.path.insert(0, BIN)
+        from unittest import mock
+        from herdr_task import launch
+        which = lambda n: {"herdr-browser": "/b/herdr-browser", "herdr-desktop": "/b/herdr-desktop"}.get(n)  # noqa: E731
+        own = lambda c: launch.own_command("/x/herdr-task", c)  # noqa: E731
+        with mock.patch.object(launch.shutil, "which", which), mock.patch.object(launch, "browser_path", lambda: "/b/herdr-browser"), \
+                mock.patch.object(launch, "desktop_path", lambda: "/b/herdr-desktop"):
+            for c in ("herdr-desktop snapshot", "/b/herdr-desktop click @e3", "herdr-desktop hands 'a sign-in code'", "herdr-browser snapshot -i"):
+                self.assertTrue(own(c), c)
+            for c in ("herdr-desktop", "/elsewhere/herdr-desktop snapshot", "herdr-desktop snapshot && rm -rf build"):
+                self.assertFalse(own(c), c)
+            self.assertEqual(launch.tool_name("/b/herdr-desktop", "/x/herdr-task"), "@herdr-desktop")
+            rules = launch.own_rules("/x/herdr-task")
+            for r in ("Bash(/b/herdr-desktop:*)", "Bash(herdr-desktop:*)", "Bash(/b/herdr-browser:*)"):
+                self.assertIn(r, rules)
+        with mock.patch.object(launch.shutil, "which", which), mock.patch.object(launch, "browser_path", lambda: "/b/herdr-browser"), \
+                mock.patch.object(launch, "desktop_path", lambda: None):
+            self.assertFalse(own("herdr-desktop snapshot"))
+            self.assertFalse([r for r in launch.own_rules("/x/herdr-task") if "herdr-desktop" in r])
+        self.assertIn("herdr-desktop's (your desktop)", open(os.path.join(BIN, "herdr_task", "launch.py")).read())
+
     def test_codex_waits_as_long_as_the_card(self):
         sys.path.insert(0, BIN)
         from herdr_task import launch

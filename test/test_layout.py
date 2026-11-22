@@ -6,6 +6,7 @@ really runs against the other.
 """
 import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import errno
+import fake_ab
 import json
 import os
 import shutil
@@ -675,22 +676,25 @@ class OneTable(unittest.TestCase):
             with mock.patch.object(L, "migrate", side_effect=AssertionError("moved")):
                 self.assertIsNone(L.ensure())
 
-    def test_browser_keeps_a_running_profiles_path(self):
+    def test_browser_sign_ins_move_and_the_spaces_profile_is_in_the_new_place(self):
         home = tempfile.mkdtemp(prefix="shep-browser-")
         self.addCleanup(shutil.rmtree, home, True)
         write(os.path.join(home, ".herdr", "browser", "dev-shop-2", "Default", "Cookies"), "signed in")
         L.migrate(home=home, env={}, mac=False)
         name = lambda task: json.loads(subprocess.run(["sh", os.path.join(ROOT, "bin", "herdr-browser"), "--task", task, "--name"],
                                                      env={"HOME": home, "PATH": os.environ["PATH"]}, capture_output=True, text=True).stdout)
-        # the browser started before the move: the same path agent-browser knows it by (a link to the same folder)
-        self.assertEqual(name("dev-shop#2")["profile"], os.path.join(home, ".herdr", "browser", "dev-shop-2"))
-        # a new task's browser: the new place
-        self.assertEqual(name("dev-shop#3")["profile"], os.path.join(home, ".local", "state", "shepherdr", "browser", "dev-shop-3"))
+        # 3.2: one browser per space, one profile: every task of the space names the same one, in the new place
+        new = os.path.join(home, ".local", "state", "shepherdr", "browser")
+        self.assertEqual(name("dev-shop#2")["profile"], os.path.join(new, "spaces", "list-dev-shop"))
+        self.assertEqual(name("dev-shop#3")["profile"], name("dev-shop#2")["profile"])
+        # 3.1's own profile of the task moved along, sign-ins kept: the space's browser starts from it
+        self.assertEqual(open(os.path.join(new, "dev-shop-2", "Default", "Cookies")).read(), "signed in")
 
 
 class BrowserSessionNames(unittest.TestCase):
     """SHEP-178: agent-browser's session name stays short (its socket path is at most 103 bytes), whatever the task's
-    folder; the same each call, one per task, and the old names where they fit."""
+    folder; the same each call, one per task, and the plain names where they fit. 3.2: the session is the task's own
+    page in its space's one browser."""
 
     LONG = "tmp-" + "very-long-folder-name-" * 6 + "demo#1"
 
@@ -700,11 +704,11 @@ class BrowserSessionNames(unittest.TestCase):
         self.log = os.path.join(self.home, "ab.log")
         self.bin = os.path.join(self.home, "agent-browser")
         with open(self.bin, "w") as f:
-            f.write('#!/bin/sh\n[ "$1" = --version ] && { echo "agent-browser 0.41.1"; exit 0; }\necho "$*" >> %s\n' % self.log)
+            f.write(fake_ab.script('echo "$sess: $*" >> %s' % self.log))
         os.chmod(self.bin, 0o755)
 
     def run_it(self, task, *args):
-        env = {"HOME": self.home, "PATH": os.environ["PATH"], "HERDR_BROWSER_BIN": self.bin}
+        env = {"HOME": self.home, "PATH": os.environ["PATH"], "HERDR_BROWSER_BIN": self.bin, **fake_ab.ENV}
         return subprocess.run(["sh", os.path.join(ROOT, "bin", "herdr-browser"), "--task", task, *args],
                               env=env, capture_output=True, text=True)
 
@@ -724,7 +728,7 @@ class BrowserSessionNames(unittest.TestCase):
         self.assertRegex(s, r"^herdr-[A-Za-z0-9_-]+-[0-9a-f]{8}$")
         self.assertTrue(s.startswith("herdr-g-folder-name-demo-1-"), s)
         self.assertEqual(s, self.session(self.LONG))  # the same every call
-        name = json.loads(self.run_it(self.LONG, "--name").stdout)["profile"].rsplit("/", 1)[1]
+        name = json.loads(self.run_it(self.LONG, "--name").stdout)["name"]
         self.assertEqual(session_of(self.LONG, name), s)  # the tick looks for the same one
 
     def test_two_tasks_with_the_same_tail_differ(self):
@@ -739,21 +743,18 @@ class BrowserSessionNames(unittest.TestCase):
         from herdr_task.browsers import session_of
         self.assertEqual(session_of("dev-shop#2", "dev-shop-2"), "herdr-dev-shop-2")
 
-    def test_a_browser_opened_under_the_old_name_is_closed_once(self):
-        task = "home-someone-dev-a-rather-long-repo#12"   # 37 characters: fit before, cut now
-        s = self.session(task)
-        self.run_it(task, "open", "about:blank")
-        self.run_it(task, "snapshot")
-        self.assertEqual(self.calls(), [
-            "--session herdr-home-someone-dev-a-rather-long-repo-12 close",
-            "--session %s --profile %s open about:blank" % (s, os.path.join(self.home, ".herdr", "browser", task.replace("#", "-"))),
-            "--session %s --profile %s snapshot" % (s, os.path.join(self.home, ".herdr", "browser", task.replace("#", "-"))),
-        ])
+    def test_a_long_names_commands_run_in_its_short_session(self):
+        s = self.session(self.LONG)
+        self.assertEqual(self.run_it(self.LONG, "--space", "sp1", "open", "about:blank").returncode, 0)
+        self.assertEqual(self.run_it(self.LONG, "--space", "sp1", "snapshot").returncode, 0)
+        self.assertEqual(self.calls(), ["%s: open about:blank" % s, "%s: snapshot" % s])
 
-    def test_a_name_too_long_to_have_run_isnt_closed(self):
-        self.run_it(self.LONG, "snapshot")
-        self.assertEqual(len(self.calls()), 1)
-        self.assertIn("snapshot", self.calls()[0])
+    def test_the_space_has_one_profile_whatever_the_task(self):
+        a = json.loads(self.run_it("dev-shop#1", "--space", "sp1", "--name").stdout)
+        b = json.loads(self.run_it(self.LONG, "--space", "sp1", "--name").stdout)
+        self.assertEqual(a["profile"], os.path.join(self.home, ".herdr", "browser", "spaces", "sp1"))
+        self.assertEqual((b["profile"], b["owner"]), (a["profile"], "herdr-s-sp1"))
+        self.assertNotEqual(a["session"], b["session"])
 
 
 if __name__ == "__main__":

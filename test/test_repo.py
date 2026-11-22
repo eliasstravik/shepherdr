@@ -181,6 +181,7 @@ class ShellScripts(unittest.TestCase):
         self.assertIn("install.sh", names)
         self.assertIn(os.path.join("hooks", "ask-hook.sh"), names)
         self.assertIn(os.path.join("bin", "herdr-browser"), names)
+        self.assertIn(os.path.join("bin", "herdr-desktop"), names)
 
     def test_no_here_doc_inside_command_substitution(self):
         # $( up to its first ), across lines, holding a here-doc (<< or <<-, not the <<< here-string)

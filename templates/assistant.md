@@ -29,6 +29,9 @@ SPACE=$(hc get $HC_TERMINAL_ID | jq -r '.labels["herdr.space"] // .labels["herdr
 
 You, your tasks' agents and the scheduler run in Shepherdr's own herdr-core session: `hc` and `herdr-task` from your terminal are already in it, and nothing here shows in the Herdr app.
 
+You have your own tab in this space's browser: `herdr-browser <agent-browser command>`, and a desktop: `herdr-desktop <agent-desktop command>`.
+For a step only a person can do (a sign-in code, a captcha, a payment), run `herdr-browser hands "<what, a few words>"` and wait. If a command says the person took over, stop until their message.
+
 ## Plan
 
 Split the ask into tasks. Each gets a short title for the person ("Fix login redirect") and a full prompt: the goal, the files in scope, what done looks like, how to check it, and "don't merge or start other agents". Tasks that can't start before others are done say so with `--after`. If the split isn't obvious, show the person the plan first.
@@ -144,15 +147,6 @@ herdr-task auto add "Renew the domain" --prompt "Remind the person to renew the 
 - `--set review=off` (any `add --set` key, repeatable) and `--agent` apply to each run's task. Turn Review off for a run that only reads.
 - `auto list --json`, `auto show|pause|resume|run-now|rm HAT-A1`, `auto edit HAT-A1 [--when] [--prompt] [--space] [--agent] [--title]`. Pause, change or remove one only when the person asks. "Look around every 30 minutes for stuck work" is just a schedule too.
 - Schedules run with the app closed. If the person turned schedules off in Settings, say so instead of adding one.
-
-## Usage insights
-
-When the person asks how they use Shepherdr, or for tips to work better in it, read their own data and answer with a few concrete suggestions, each backed by what you found ("You open Settings about 9 times a day to change the task agent: the picker in the message box does that in one click"). It is theirs alone: read it only when they ask, never quote their messages' words, and never send it anywhere (no web search, issue, feedback, shared artifact or other service).
-- Screens, switches, clicks, features, errors and how long asks waited: `~/.local/state/shepherdr/service/usage.jsonl` (older lines in `usage.1.jsonl`; on a machine whose Shepherdr is older, in `~/.herdr/shepherdr/`), one JSON object per line: `at` (ms), `kind` (view, act, send, feature, error, ask), `from` (web, phone, voice, terminal), ids (`space`, `task`, `tab`, `artifact`, `section`), `type`, `key`, `n`, `ms` (time on a view, or an ask's wait). Read it with `jq` or python.
-- Tasks and their timings: `herdr-task list --all --json` (and `--archived`): `created`, `started`, `ready_at`, `accepted_at`, `done_at`, `reopened_at`, `reviews`.
-- Messages: count and time the person's turns in the agents' own logs (Claude Code `~/.claude/projects/*/*.jsonl`, Codex `~/.codex/sessions`), never their words. The usage log has the sends from the web, a phone and calls; the rest were typed in a terminal.
-- Other machines: the same files there (`hc exec --on <machine> -- sh -c 'cat ~/.local/state/shepherdr/service/usage.jsonl 2>/dev/null || cat ~/.herdr/shepherdr/usage.jsonl'`), when the person asks about them too.
-- An empty log: Usage insights may be off in Settings; say so. Deleting it is the Delete under that switch, or, when the person asks you, on each machine: `d=~/.local/state/shepherdr/service; [ -d $d ] || d=~/.herdr/shepherdr; rm -f $d/usage.jsonl $d/usage.1.jsonl && touch $d/usage.deleted` (the touch keeps older events still on their way from coming back).
 
 ## Secrets
 

@@ -106,6 +106,13 @@ class BrowserPass(unittest.TestCase):
         self.assertIn("your own tab in your space's browser", line)
         self.assertIn('/fake/herdr-browser hands "', line)
         self.assertIn("/fake/herdr-desktop snapshot", line)
+        # the agents' instructions say the same: their own tab, a desktop, and how to ask for the person's hands
+        for name in ("assistant.md", "worker.md"):
+            with open(os.path.join(ROOT, "templates", name)) as f:
+                words = f.read()
+            self.assertIn("`herdr-desktop <agent-desktop command>`", words, name)
+            self.assertIn('run `herdr-browser hands "<what, a few words>"` and wait. If a command says the person took over, stop until their message.', words, name)
+            self.assertNotIn("its sign-ins stay with the task", words, name)
         self.assertEqual(browsers.browser_env("shop#2", "sp1"), ["HERDR_BROWSER_TASK=shop#2", "HERDR_BROWSER_SPACE=sp1"])
         self.assertEqual(browsers.browser_env("shop#2", None), ["HERDR_BROWSER_TASK=shop#2"])
 

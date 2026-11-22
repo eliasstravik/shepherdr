@@ -11,7 +11,7 @@ mods/tasks/bin/          herdr-task (entry) and its herdr_task package
 mods/tasks/bin/herdr_task/layout.py   where Shepherdr's data lives (the one source); core/paths.js says the same
 mods/artifacts/          herdr-artifact (bin/) and ARTIFACTS.md, the guide agents read
 bin/shepherdr            the installer (install, update, uninstall, doctor); ./install.sh runs it
-bin/                     herdr-secret, herdr-browser, herdr-browser-view, sync-shared
+bin/                     herdr-secret, herdr-browser, herdr-desktop, sync-shared
 herdr/open-shepherdr/    the one Herdr mod: an "Open Shepherdr" button
 hooks/                   the agents' question and permission hooks
 templates/               assistant.md, worker.md, reviewer.md: the agents' instructions (herdr-core templates)
@@ -51,7 +51,7 @@ python3 bin/sync-shared --check
 for f in core/*.js herdr/open-shepherdr/main.js; do node --input-type=module --check < "$f"; done
 bun install --frozen-lockfile && bun web/build-plugins.ts
 bunx tsc --noEmit -p . && bun test service core web && bun run build
-for f in install.sh bin/herdr-browser hooks/*.sh service/restart.sh; do bash -n "$f"; done
+for f in install.sh bin/herdr-browser bin/herdr-desktop hooks/*.sh service/restart.sh; do bash -n "$f"; done
 python3 -m unittest discover -s test
 ```
 

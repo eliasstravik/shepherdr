@@ -32,7 +32,7 @@ from .settings import TEMPLATES
 
 # ---- sync: the same task tools on every machine ---------------------------------------------
 # What a machine needs to run tasks: herdr-task (one zipapp), herdr-artifact (with its guide and
-# markup), herdr-secret (a remote copy: it asks the main machine), herdr-browser once it exists,
+# markup), herdr-secret (a remote copy: it asks the main machine), herdr-browser and herdr-desktop once they exist,
 # and the role templates. Each goes to the same place under that machine's home as here
 # (~/.local/bin/..., ~/.config/herdr-core/templates/...). A stamp there (tools.json in Shepherdr's data;
 # STAMP names its old place, which SHEP turns into wherever it is on that machine)
@@ -140,9 +140,10 @@ def manifest():
         # marks nothing.
         if secrets_main_here():
             touch.append({"path": ".herdr/secret-remote", "unless": ".herdr/vault.json", "unless_main": True})
-    browser = _real(".local/bin/herdr-browser")
-    if browser:
-        add(".local/bin/herdr-browser", _read(browser), 0o755, [browser])
+    for helper in ("herdr-browser", "herdr-desktop"):
+        p = _real(f".local/bin/{helper}")
+        if p:
+            add(f".local/bin/{helper}", _read(p), 0o755, [p])
     # The chat's question-card hook (SHEP-139): a task worker's own hook (herdr-task _allow) runs it,
     # so a machine that only runs tasks asks on the card too. From Shepherdr's own install (<SHARE>/hooks),
     # else the copy a sync left here (this machine passes it on).

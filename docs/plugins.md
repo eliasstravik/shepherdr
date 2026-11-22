@@ -19,6 +19,17 @@ the rest. [`web/plugins.json`](../web/plugins.json) is the list, in order.
 Settings › Plugins has the switches. They are kept as `everywhere.plugins_off` in `~/.config/shepherdr/settings.json`
 (`service/next.ts` `PLUGINS`). An open page starts again when a switch flips.
 
+## Screens
+
+- Each space has one browser with one profile, so its agents share the sign-ins. Each chat and each task has its own
+  page in it: `herdr-browser <agent-browser command>`.
+- Each agent has a desktop too: `herdr-desktop <agent-desktop command>`. On Linux it is the agent's own virtual
+  display (Xvnc, or Xvfb with x11vnc). A Mac has one real screen, shared by its agents one at a time.
+- You watch a screen live and Take over; the agent's commands are refused until you Hand back. An agent asks for a
+  step only a person can do with `herdr-browser hands "<what>"`.
+- For now, live views and actions work only for agents on the machine that serves Shepherdr.
+- The streams listen on the machine itself only (127.0.0.1) and reach the page through the Shepherdr service.
+
 ## The places
 
 `Registry` in [`web/src/kernel.ts`](../web/src/kernel.ts) names every place a plugin can fill. The shell
