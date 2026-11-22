@@ -82,7 +82,7 @@ export class Model {
     this.timer ??= setTimeout(() => { this.timer = null; this.build(); }, 150);
   }
 
-  private spaces: any[] = [];
+  spaces: any[] = [];
   /** Each space folder's git, as the window's sidebar reads it: { name (the repo), linked (a worktree), repo }, null:
    *  not a repo. Read once, then again each minute. */
   private git = new Map<string, { info: { name: string; linked: boolean; repo: string; branch?: string | null } | null; at: number }>();
@@ -271,6 +271,9 @@ export class Model {
         // the space whose Assistant started it (herdr-task keeps it): the window counts and lists it there
         space: task.space ? (list.machine ? `${list.machine}/${task.space}` : task.space) : null,
         worker, archived: !!task.archived, pinned: pins.has(taskKey(list, task)),
+        // 3.2: the facts the app works a status out from (service/next.ts enrich), as herdr-task keeps them
+        x: { merged: !!task.merged, quiet: task.quiet ?? null, told: task.told ?? null, automation: task.automation ?? null, stopped_by: task.stopped_by ?? null, stopped_why: task.stopped_why ?? null,
+          merge_failed: task.merge_failed ?? null, attention_at: task.attention_at ?? null, after: task.after ?? null, closed_unmerged: !!task.closed_unmerged },
         scheduled_for: task.state === "scheduled" ? task.scheduled_for ?? null : null,
         started: task.started ?? null, ready_at: task.ready_at ?? null, done_at: task.done_at ?? null,
         summary: task.summary ?? null, details: task.details ?? null, pr: task.pr ?? task.pr_seen ?? null, prompt: String(task.prompt ?? "").slice(0, 500), why: p.why ?? null,

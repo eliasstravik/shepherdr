@@ -24,7 +24,9 @@ import { Live } from "./live.ts";
 import { Model } from "./model.ts";
 import { checkEvery, runPilot } from "./autopilot.ts";
 import { checkFlags } from "./flags.ts";
-import { windowSection, setWindow, offList, offPlugins } from "./window.ts";
+import { windowSection, setWindow, offList } from "./window.ts";
+import type { Snapshot } from "../web/shared/types.ts";
+import { catalogOf, configOf, enrich, offPlugins, plansOf, setConfig } from "./next.ts";
 import { record, deleteAll, note as noteUsage, followSwitch, isOn as insightsOn, logLines } from "./usage.ts";
 import { insightsSummary } from "./voice-data.ts";
 import { Chats } from "./chats.ts";
@@ -331,7 +333,32 @@ model.doc = () => store.doc.value;
 compat.shared = { value: (k) => model.value(k), set: (k, v) => store.set(k, v) };
 store.on(() => model.rebuild());
 void store.load().catch(() => {});
-const snapshotOf = (b: Parameters<NonNullable<typeof model.onBuild>>[0]) => live.setSnapshot(alertNewAnd(compat.snapshot({
+/** 3.2 (service/next.ts): what the new app shows on top of the model's snapshot */
+const withNext = (snap: Snapshot, b: Parameters<NonNullable<typeof model.onBuild>>[0]): Snapshot => {
+  const d = pickFrom(settings.choices?.defaults) ?? { agent: "claude" };
+  // reviews run on the other agent where there is one, as before
+  const others = Object.keys(settings.choices?.menus ?? {}).filter((k) => k !== d.agent);
+  const review = others.length ? { agent: others[0], model: settings.choices.menus[others[0]]?.models?.[0]?.id ?? null, effort: null, fast: false as const, perm: null } : d;
+  const config = configOf({ defaults: { Chats: d, Tasks: d, Reviews: review }, spaces: b.spaces.map((x: any) => x.id), secrets: secretNames, plans: plansOf(snap),
+    addMachine: "hc machine add <its name on your tailnet>", desktops: desktopsOf() });
+  const asked = (chat: string) => {
+    const a = compat.addrOf(chat);
+    if (a) for (const x of compat.asks?.open.values() ?? []) if ((x as any).terminal === a) return (x as any).words?.kind === "permission" ? "permission" as const : "question" as const;
+    return null;
+  };
+  const reportOf = (address: string | null) => {
+    const k: any = address ? hub.terminals.get(address) : null;
+    if (!k) return null;
+    const st = typeof k.status === "object" ? k.status : null;
+    return { state: st?.state, kind: st?.kind ?? k.report?.kind };
+  };
+  const bar = model.value("spaces-chat") as any;
+  return enrich(snap, { spaces: b.spaces, rows: b.rows, archived: Array.isArray(bar?.archived) ? bar.archived : [], asked, reportOf, config });
+};
+const pickFrom = (v: any) => (v?.agent ? { agent: String(v.agent), model: v.model ?? null, effort: v.effort ?? null, fast: v.fast === "ultrafast" ? "ultrafast" as const : !!v.fast, perm: v.perm ?? null } : null);
+/** the machines with a real screen whose desktop can be opened (Settings › Machines): filled by the screens relay */
+let desktopsOf: () => string[] = () => [];
+const snapshotOf = (b: Parameters<NonNullable<typeof model.onBuild>>[0]) => live.setSnapshot(alertNewAnd(withNext(compat.snapshot({
   host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows, artifacts: artifacts.list, automations: b.automations,
   settings: [...settings.sections(webNow ?? ownLink(), b.spaces.map((s: any) => ({ id: s.id, name: s.name, machine: s.machine ?? null })), b.machines, me?.host ?? "this machine",
     // Settings › Autopilot (Everywhere's and each space's own), while its add-on is on
@@ -345,7 +372,7 @@ const snapshotOf = (b: Parameters<NonNullable<typeof model.onBuild>>[0]) => live
   // in the order the person dragged them into (SHEP-153): this computer first until then
   machines: (SPm.byMachineOrder as any)([{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.known.map((m) => ({ name: m.name, here: false, state: m.state }))],
     (SPm.machineOrderOf as any)(model.value("spaces-chat")), (m: { name: string; here: boolean }) => (m.here ? null : m.name)),
-})));
+}), b)));
 // a task that moved on (accepted, done) changes its news lines in its Assistant's chat, whose conversation may not move:
 // open chats are told again (compat.chat reads the rows the snapshot just took)
 let newsWas: string | null = null;
@@ -584,6 +611,35 @@ const voiceIO: VoiceIO = {
 
 /** One of the web app's actions (an Action, POST /api/action), as the page sends it: a voice call's acts go here too. */
 async function doAction(body: any): Promise<Response> {
+  // 3.2's settings window: one value for everything ("all") or a space; null puts a space's row back (Reset)
+  if (body?.type === "config" && typeof body.key === "string") {
+    try {
+      const place = typeof body.place === "string" ? body.place : "all";
+      const sp = place === "all" ? null : (model.spaces as any[]).find((x) => x.id === place);
+      setConfig(place, body.key, body.value ?? null, sp ? { id: sp.id, name: sp.name, machine: sp.machine ?? null, folder: sp.folder ?? null } : null);
+      model.rebuild();
+      return json({ ok: true });
+    } catch (err) { return json({ ok: false, error: (err as Error).message }); }
+  }
+  // the picker's lists: a machine's agents and each one's own models, efforts, speeds and permission modes
+  if (body?.type === "catalog") {
+    const machine = !body.machine || body.machine === me?.host ? null : String(body.machine);
+    try {
+      let check: any = {};
+      try { check = JSON.parse(readFileSync(where()["cli-check"], "utf8"))?.machines?.[machine ?? ""] ?? {}; } catch {}
+      const known = ((model.value("machines.stats") as any)?.[machine ?? ""]?.agents ?? []) as { key: string; name: string }[];
+      return json({ ok: true, catalog: catalogOf(machine ?? me?.host ?? "", (await compat.agents!.choices(machine)) as any[], { claude: check.claude !== "missing", codex: check.codex !== "missing" }, known) });
+    } catch (err) { return json({ ok: false, error: (err as Error).message }); }
+  }
+  // archive a space (out of the list, its schedules stopped, nothing deleted) or bring it back
+  if (body?.type === "space-archive" && typeof body.place === "string") {
+    const bar = { ...((model.value("spaces-chat") as any) ?? {}) };
+    const was: string[] = Array.isArray(bar.archived) ? bar.archived : [];
+    bar.archived = body.on === false ? was.filter((x) => x !== body.place) : [...new Set([...was, body.place])];
+    await store.set("spaces-chat", bar);
+    model.rebuild();
+    return json({ ok: true });
+  }
   if (body?.type === "secret" && typeof body.name === "string" && typeof body.level === "string") {
     // a value goes straight to the vault (herdr-secret set, from stdin); the agent hears its name only
     try {

@@ -1,0 +1,250 @@
+// What the 3.2 app shows on top of the model: Everything and which spaces are home or archived, each task's facts
+// (web/shared/view.ts works its status out from them by plain rules: no model in that path), the settings window's
+// values for everything and each space, the picker's lists read from each agent's own catalog, the plans' use and
+// the warnings line. And the app's own actions on them. The service only says what is so; behaviour stays words the
+// agents read (herdr-task turns Settings into lines of a brief).
+import type { Automation, Catalog, CatalogAgent, Config, LevelConfig, Place, Snapshot, Task, AgentPick } from "../web/shared/types.ts";
+import { HOME } from "./paths.ts";
+import { readSettings, writeSettings } from "./settings.ts";
+
+/** the plugins: Tasks, Artifacts, Search and Alerts are always on; the rest each have a switch */
+export const PLUGINS: { id: string; name: string; always?: boolean }[] = [
+  { id: "tasks", name: "Tasks", always: true }, { id: "artifacts", name: "Artifacts", always: true }, { id: "terminal", name: "Terminal" },
+  { id: "screens", name: "Screens" }, { id: "voice", name: "Voice" }, { id: "schedules", name: "Schedules" }, { id: "reactions", name: "Reactions" },
+  { id: "search", name: "Search", always: true }, { id: "alerts", name: "Alerts", always: true },
+];
+
+function file(): any { try { return readSettings(); } catch { return {}; } }
+
+/** The plugins switched off (Settings › Plugins): left out of the page, their buttons, menu items and settings gone. */
+export function offPlugins(): string[] {
+  const off = file()?.everywhere?.plugins_off;
+  return Array.isArray(off) ? off.filter((id) => PLUGINS.some((p) => p.id === id && !p.always)) : [];
+}
+export const pluginOn = (id: string) => !offPlugins().includes(id);
+
+/* ---------- settings: everything's, and a space's own on top ---------- */
+
+const ROLE = { Chats: "coordinator", Tasks: "worker", Reviews: "reviewer" } as const;
+const MERGE: Record<string, LevelConfig["merge"]> = { ask: "done", checks: "checks", auto: "now" };
+const MERGE_BACK: Record<LevelConfig["merge"], string> = { done: "ask", checks: "checks", now: "auto" };
+const pickOf = (v: any): AgentPick | null => (v && typeof v === "object" && typeof v.agent === "string" ? { agent: v.agent, model: v.model ?? null, effort: v.effort ?? null, fast: v.fast === "ultrafast" ? "ultrafast" : !!v.fast, perm: v.perm ?? null } : null);
+
+/** What an unset role runs: the first installed agent's own defaults; reviews, the other agent where there is one. */
+export type Defaults = { Chats: AgentPick; Tasks: AgentPick; Reviews: AgentPick };
+
+function levelOf(layer: any, base: LevelConfig): { lv: LevelConfig; own: string[] } {
+  const own: string[] = [];
+  const agents = { ...base.agents };
+  for (const [name, key] of Object.entries(ROLE) as [keyof typeof ROLE, string][]) {
+    const p = pickOf(layer?.[key]);
+    if (p) { agents[name] = p; own.push(`agents.${name}`); }
+  }
+  const t = layer?.tasks ?? {};
+  const has = (k: string) => t[k] !== undefined && t[k] !== null;
+  if (has("review_rounds")) own.push("review");
+  if (has("merge")) own.push("merge");
+  if (has("proof")) own.push("proof");
+  const instructions = typeof layer?.instructions === "string" ? layer.instructions : null;
+  if (instructions !== null) own.push("instructions");
+  return {
+    own,
+    lv: {
+      agents,
+      review: has("review_rounds") ? Number(t.review_rounds) > 0 : base.review,
+      merge: has("merge") ? MERGE[t.merge] ?? base.merge : base.merge,
+      proof: has("proof") ? !!t.proof : base.proof,
+      instructions: instructions ?? base.instructions,
+    },
+  };
+}
+
+export function configOf(input: { defaults: Defaults; spaces: string[]; secrets: { name: string; space: string | null }[]; plans: Config["plans"]; addMachine?: string; desktops?: string[] }): Config {
+  const f = file();
+  const start: LevelConfig = { agents: input.defaults, review: false, merge: "done", proof: true, instructions: "" };
+  const all = levelOf(f.everywhere, start).lv;
+  const spaces: Config["spaces"] = {};
+  for (const id of input.spaces) {
+    const layer = f.spaces?.[id];
+    if (!layer) continue;
+    const { lv, own } = levelOf(layer, all);
+    // a space's instructions are its own words, added to everything's: never everything's shown again as its own
+    if (own.length) spaces[id] = { ...lv, instructions: own.includes("instructions") ? lv.instructions : "", own };
+  }
+  const off = offPlugins();
+  return {
+    all, spaces,
+    secrets: input.secrets.map((s) => ({ name: s.name, scope: s.space ?? "all" })),
+    plugins: PLUGINS.map((p) => ({ id: p.id, name: p.name, on: !off.includes(p.id), ...(p.always ? { always: true } : {}) })),
+    plans: input.plans,
+    ...(input.addMachine ? { addMachine: input.addMachine } : {}),
+    ...(input.desktops?.length ? { desktops: input.desktops } : {}),
+  };
+}
+
+/** One setting changed from the settings window: for everything ("all") or a space; null puts a space's row back to
+ *  Everything's value (Reset). */
+export function setConfig(place: string, key: string, value: unknown, scope?: { id: string; name: string; machine: string | null; folder?: string | null } | null) {
+  const next = structuredClone(file());
+  if (key.startsWith("plugin.")) {
+    const id = key.slice(7);
+    if (!PLUGINS.some((p) => p.id === id && !p.always)) throw new Error("That plugin is always on.");
+    const e = (next.everywhere ??= {});
+    const off = new Set<string>(Array.isArray(e.plugins_off) ? e.plugins_off : []);
+    if (value) off.delete(id); else off.add(id);
+    if (off.size) e.plugins_off = [...off]; else delete e.plugins_off;
+    return writeSettings(next);
+  }
+  const all = place === "all";
+  if (!all && !scope) throw new Error("That space isn't here any more.");
+  if (!all && ["__proto__", "constructor", "prototype"].includes(place)) throw new Error("That space isn't here any more.");
+  const layer = all ? (next.everywhere ??= {}) : ((next.spaces ??= {})[place] ??= {});
+  if (!all) {
+    if (scope!.folder) layer.folder = scope!.folder;
+    layer.name = scope!.name;
+    if (scope!.machine) layer.machine = scope!.machine;
+  }
+  const task = (field: string, v: unknown) => {
+    const t = { ...(layer.tasks ?? {}) };
+    if (v === null) delete t[field]; else t[field] = v;
+    if (Object.keys(t).length) layer.tasks = t; else delete layer.tasks;
+  };
+  const m = /^agents\.(Chats|Tasks|Reviews)$/.exec(key);
+  if (m) {
+    const p = value === null ? null : pickOf(value);
+    if (value !== null && (!p || !/^[\w.-]{1,40}$/.test(p.agent) || [p.model, p.effort, p.perm].some((x) => x != null && !/^[\w.\[\]:/ -]{1,80}$/.test(String(x))))) throw new Error("Not an agent.");
+    const role = ROLE[m[1] as keyof typeof ROLE];
+    if (p) layer[role] = p; else delete layer[role];
+  } else if (key === "review") {
+    // on: a second agent reviews (the rounds set before, else one); off: none
+    const was = Number(layer.tasks?.review_rounds ?? next.everywhere?.tasks?.review_rounds) || 0;
+    task("review_rounds", value === null ? null : value ? Math.max(1, was) : 0);
+  } else if (key === "merge") {
+    if (value !== null && !(String(value) in MERGE_BACK)) throw new Error("Not one of its choices.");
+    task("merge", value === null ? null : MERGE_BACK[value as LevelConfig["merge"]]);
+  } else if (key === "proof") task("proof", value === null ? null : !!value);
+  else if (key === "instructions") {
+    const text = value === null ? "" : String(value).slice(0, 20_000);
+    if (text.trim()) layer.instructions = text; else delete layer.instructions;
+  } else throw new Error("That setting can't be changed here.");
+  writeSettings(next);
+}
+
+/* ---------- the picker's lists ---------- */
+
+const PERM_ABOUT: Record<string, Record<string, string>> = {
+  claude: { manual: "Asks before edits and commands", default: "Asks before edits and commands", acceptEdits: "Edits files without asking", plan: "Plans first and changes nothing", auto: "Decides by itself what is safe to run", bypassPermissions: "Never asks" },
+  codex: { "read-only": "Reads, and asks before anything else", auto: "Works in the folder, asks before leaving it", full: "Never asks" },
+};
+const PERM_LABEL: Record<string, string> = { manual: "Default", bypassPermissions: "Bypass" };
+
+/** A machine's agents and their models, from what each agent's own settings and catalog say there (`choices`: per CLI
+ *  { kind, name, models, speeds, perms, permDefault }); `known`: the other agents herdr-core can run there. */
+export function catalogOf(machine: string, choices: any[], installed: Record<string, boolean>, known: { key: string; name: string; installed?: boolean }[] = []): Catalog {
+  const agents: CatalogAgent[] = choices.map((c) => {
+    const speeds = (m: any) => ["regular", ...(m.fast || (c.speeds ?? []).includes("fast") ? ["fast"] : []), ...(m.ultrafast || (c.speeds ?? []).includes("ultrafast") ? ["ultrafast"] : [])];
+    const efforts = [...new Set<string>((c.models ?? []).flatMap((m: any) => m.efforts ?? []))];
+    return {
+      id: c.kind, name: c.name, installed: installed[c.kind] !== false,
+      ...(installed[c.kind] === false ? { why: "Not installed" } : {}),
+      models: (c.models ?? []).map((m: any) => ({ id: m.id, name: m.label ?? m.name ?? m.id, speeds: speeds(m), ...(m.efforts?.length ? { efforts: m.efforts } : {}), ...(m.defaultEffort ? { defaultEffort: m.defaultEffort } : {}) })),
+      efforts,
+      perms: (c.perms ?? []).map((p: any) => ({ id: p.id, label: PERM_LABEL[p.id] ?? p.label, about: PERM_ABOUT[c.kind]?.[p.id] ?? "" })),
+      permDefault: c.permDefault,
+      defaultModel: c.models?.[0]?.id,
+    };
+  });
+  // the agents herdr-core can run that Shepherdr can't hold a chat with yet: listed, greyed, with why
+  for (const k of known) if (!agents.some((a) => a.id === k.key)) agents.push({ id: k.key, name: k.name, installed: false, why: k.installed === false ? "Not installed" : "No chat yet", models: [], efforts: [], perms: [] });
+  return { machine, agents };
+}
+
+/* ---------- the plans' use, and the warnings line ---------- */
+
+const PLAN_NAMES: Record<string, string> = { claude: "Claude", codex: "Codex", elevenlabs: "ElevenLabs" };
+
+export function plansOf(snap: Snapshot): Config["plans"] {
+  const out: Config["plans"] = [];
+  const m = snap.machines.find((x) => x.here) ?? snap.machines[0];
+  for (const [cli, l] of Object.entries((m?.limits ?? {}) as Record<string, any>)) {
+    if (l?.state !== "ok" || !Array.isArray(l.windows) || !l.windows.length) continue;
+    out.push({ name: [PLAN_NAMES[cli] ?? cli, l.plan].filter(Boolean).join(" "), windows: l.windows.map((w: any) => ({ name: w.name, used: Math.round(Number(w.used) || 0), ...(w.resets ? { resets: /^reset/i.test(w.resets) ? w.resets : `Resets ${w.resets}` } : {}) })) });
+  }
+  return out;
+}
+
+/** A plan past 75%, a machine running low (disk or memory over 90%) or out of reach. */
+export function warningsOf(snap: Snapshot, plans: Config["plans"]): NonNullable<Snapshot["warnings"]> {
+  const out: NonNullable<Snapshot["warnings"]> = [];
+  for (const p of plans) {
+    const w = [...p.windows].sort((a, b) => b.used - a.used)[0];
+    if (w && w.used > 75) out.push({ id: `u:${p.name}:${w.name}`, kind: "usage", text: `You've used ${w.used}% of ${/week/i.test(w.name) ? "this week's" : "your"} ${p.name.split(" ")[0]} plan` });
+  }
+  for (const m of snap.machines) {
+    if (m.status === "off" && !m.connecting) { out.push({ id: `m:${m.machine}:down`, kind: "machine", text: `Can't reach ${m.name}${m.unreachableSince ? ` · last seen ${m.unreachableSince}` : ""}` }); continue; }
+    const hot = m.health?.meters.find((x) => /disk|memory/i.test(x.name) && x.pct > 90);
+    if (hot) out.push({ id: `m:${m.machine}:${hot.name.toLowerCase()}`, kind: "machine", text: `${m.name}: ${/disk/i.test(hot.name) ? "disk" : "memory"} nearly full` });
+  }
+  return out;
+}
+
+/* ---------- the snapshot's 3.2 facts ---------- */
+
+/** a machine's home folder: this computer's own, another's /home/<user>, /Users/<user> or /root */
+const atHome = (s: { folder?: string; machine?: string | null }) => (s.machine ? /^\/(home\/[^/]+|Users\/[^/]+|root)\/?$/.test(s.folder ?? "") : s.folder === HOME);
+
+export interface Facts {
+  spaces: any[];
+  rows: any[];
+  /** shared "spaces-chat": its archived list */
+  archived: string[];
+  /** the open cards by task chat: "permission" or "question" */
+  asked: (chat: string) => "permission" | "question" | null;
+  /** an agent's own report (OSC 7501): its state and kind */
+  reportOf: (address: string | null) => { state?: string; kind?: string } | null;
+  config: Config;
+}
+
+/** Adds what 3.2 shows to the snapshot the model made: Everything, home and archived spaces, each task's facts. */
+export function enrich(snap: Snapshot, f: Facts): Snapshot {
+  const spaceOf = new Map(f.spaces.map((s) => [s.id, s]));
+  const homes = new Set(f.spaces.filter(atHome).map((s) => s.id));
+  const everything = f.spaces.find((s) => !s.machine && atHome(s))?.id;
+  const places: Place[] = snap.places.map((p) => {
+    const s = spaceOf.get(p.id);
+    const blocked = s?.assistantStatus === "blocked" || !!f.asked(p.chat);
+    return { ...p, ...(homes.has(p.id) ? { home: true, name: "home" } : {}), ...(f.archived.includes(p.id) ? { archived: true } : {}), ...(blocked ? { needs: true } : {}) };
+  });
+  const rowOf = new Map(f.rows.map((r) => [r.machine ? `${r.machine}:${r.ref}` : r.ref, r]));
+  const titleOf = (r: any, id: unknown) => f.rows.find((x) => x.folder === r.folder && (x.machine ?? null) === (r.machine ?? null) && String(x.id) === String(id))?.title;
+  const tasks: Task[] = snap.tasks.map((t) => {
+    const r = rowOf.get(t.id);
+    if (!r) return t;
+    const x = r.x ?? {};
+    const s = spaceOf.get(t.place);
+    const chat = t.agent?.chat ?? `${t.id}/worker`;
+    const card = f.asked(chat);
+    const rep = f.reportOf(r.worker);
+    const blocked = t.status !== "need" ? undefined : card ?? (rep?.kind === "auth" ? "auth" : rep?.kind === "permission" || rep?.kind === "question" ? rep.kind : rep?.state === "blocked" ? "prompt" : undefined);
+    const stopped = x.stopped_by && t.status !== "done" && t.status !== "work" ? { by: x.stopped_by as "you" | "error" | "limit", ...(x.stopped_why ? { why: String(x.stopped_why).slice(0, 200) } : {}) } : undefined;
+    const after = Array.isArray(x.after) && x.after.length ? titleOf(r, x.after[0]) : undefined;
+    return {
+      ...t,
+      repo: r.branch || r.pr || (r.worktree && r.worktree !== r.folder) ? "branch" : s?.git ? "folder" : undefined,
+      ...(stopped ? { stopped, status: "need" as const } : {}),
+      ...(blocked ? { blocked } : {}),
+      ...(x.merged ? { merged: true } : {}),
+      ...(x.quiet === "nothing" || x.quiet === "told" ? { quiet: x.quiet } : {}),
+      ...(x.told && x.quiet === "told" ? { doneNote: `told you in ${t.place === everything ? "Everything" : `#${places.find((p) => p.id === t.place)?.name ?? "its space"}`}` } : {}),
+      ...(x.automation ? { schedule: String(x.automation) } : {}),
+      ...(t.status === "need" || t.status === "ready" || stopped ? { needsAt: x.attention_at ?? r.ready_at ?? r.started ?? undefined } : {}),
+      ...(x.merge_failed ? { mergeFailed: String(x.merge_failed).slice(0, 200) } : {}),
+      ...(after ? { afterTitle: after } : {}),
+    };
+  });
+  const automations: Record<string, Automation[]> = {};
+  for (const [key, list] of Object.entries(snap.automations ?? {}))
+    automations[key] = list.map((a: any) => ({ ...a, id: a.id ?? `${key}|${a.name}`, place: a.place ?? key }));
+  const plans = f.config.plans;
+  return { ...snap, places, tasks, automations, ...(everything ? { everything } : {}), config: f.config, warnings: warningsOf(snap, plans), off: offPlugins() };
+}
