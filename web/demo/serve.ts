@@ -10,11 +10,11 @@ const dist = join(fileURLToPath(new URL('../', import.meta.url)), 'dist')
 const port = Number(process.argv[2] || 7799)
 type Sock = { send(s: string): void; data: { mode: 'normal' | 'empty' | 'down'; watch: string[] } }
 const socks = new Set<Sock>()
-const state = { normal: snapshot('normal'), empty: snapshot('empty'), down: snapshot('down') }
+const state = { normal: structuredClone(snapshot('normal')), empty: structuredClone(snapshot('empty')), down: structuredClone(snapshot('down')) }
 const chats: Record<string, Chat> = structuredClone(seed)
 let n = 1000
 function resetDemo() {
-  for (const mode of ['normal', 'empty', 'down'] as const) state[mode] = snapshot(mode)
+  for (const mode of ['normal', 'empty', 'down'] as const) state[mode] = structuredClone(snapshot(mode))
   for (const key of Object.keys(chats)) delete chats[key]
   Object.assign(chats, structuredClone(seed))
   n = 1000

@@ -28,6 +28,7 @@ test('demo chat adds a task and a reminder to the expected places', async () => 
     await fetch(`${url}/`, { headers: { accept: 'text/html' } })
     for (let i = 0; i < 30 && snapshots.at(-1)?.tasks.some((t: any) => t.name === 'Check labels'); i++) await Bun.sleep(20)
     expect(snapshots.at(-1).tasks.some((t: any) => t.name === 'Check labels')).toBe(false)
+    expect(snapshots.at(-1).automations['p:mac-mini:~'].some((a: any) => a.name === 'Pay the VAT')).toBe(false)
     ws.close()
   } finally { child.kill(); await child.exited }
 })
