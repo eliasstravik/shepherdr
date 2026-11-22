@@ -244,7 +244,7 @@ function TaskTermButton({ thread }: { thread: Thread }) {
 
 /** "Waiting at a prompt": an agent's session waits for input that is not one of the app's own cards. Never raised by
  *  reading the agent's screen: it is what a blocked report with no kind looks like. It opens the agent's terminal. */
-function Stuck({ thread }: { chat: Chat | undefined; thread: Thread }) {
+function Stuck({ chat: own, thread }: { chat: Chat | undefined; thread: Thread }) {
   const snap = useSnap()
   if (!snap) return null
   const stuck = (t: Task) => t.blocked === 'prompt' && !t.archived && tstate(t) !== 'done'
@@ -259,7 +259,7 @@ function Stuck({ thread }: { chat: Chat | undefined; thread: Thread }) {
   const p = placeOf(snap, thread.place)
   return (
     <>
-      {p?.needs && getState().chats[thread.chat]?.blocked === 'prompt' && banner('own', 'Waiting at a prompt', thread.chat)}
+      {p?.needs && !!own?.blocked && !own.messages.some((m) => m.question && m.question.sent === undefined && !m.question.closed) && banner('own', 'Waiting at a prompt', thread.chat)}
       {tasksIn(snap, thread.place).filter(stuck).map((t) => banner(t.id, `${t.name} is waiting at a prompt`, taskChat(t), t))}
     </>
   )

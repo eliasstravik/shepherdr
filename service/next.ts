@@ -142,7 +142,8 @@ const PERM_LABEL: Record<string, string> = { manual: "Default", bypassPermission
  *  { kind, name, models, speeds, perms, permDefault }); `known`: the other agents herdr-core can run there. */
 export function catalogOf(machine: string, choices: any[], installed: Record<string, boolean>, known: { key: string; name: string; installed?: boolean }[] = []): Catalog {
   const agents: CatalogAgent[] = choices.map((c) => {
-    const speeds = (m: any) => ["regular", ...(m.fast || (c.speeds ?? []).includes("fast") ? ["fast"] : []), ...(m.ultrafast || (c.speeds ?? []).includes("ultrafast") ? ["ultrafast"] : [])];
+    // a model's own speeds (its service tiers): Speed shows only where a model has more than one
+    const speeds = (m: any) => ["regular", ...(m.fast ? ["fast"] : []), ...(m.ultrafast ? ["ultrafast"] : [])];
     const efforts = [...new Set<string>((c.models ?? []).flatMap((m: any) => m.efforts ?? []))];
     return {
       id: c.kind, name: c.name, installed: installed[c.kind] !== false,
@@ -203,6 +204,8 @@ export interface Facts {
   /** an agent's own report (OSC 7501): its state and kind */
   reportOf: (address: string | null) => { state?: string; kind?: string } | null;
   config: Config;
+  /** this machine's own name */
+  hostName?: string;
   /** every schedule as herdr-task keeps it (its list's folder and machine with it) */
   schedules?: any[];
 }
@@ -246,7 +249,9 @@ export function enrich(snap: Snapshot, f: Facts): Snapshot {
   });
   const automations = f.schedules ? schedulesOf(f.schedules, f.spaces, everything, (ref, machine) => snap.tasks.find((t) => t.id === (machine ? `${machine}:${ref}` : ref))) : {};
   const plans = f.config.plans;
-  return { ...snap, places, tasks, automations, ...(everything ? { everything } : {}), config: f.config, warnings: warningsOf(snap, plans), off: offPlugins() };
+  // a machine is named by its own name, this one too (never "This computer": the app is opened from other devices)
+  const machines = snap.machines.map((m) => (m.here && (m.name === "This computer" || !m.name) ? { ...m, name: f.hostName || m.machine } : m));
+  return { ...snap, machines, places, tasks, automations, ...(everything ? { everything } : {}), config: f.config, warnings: warningsOf(snap, plans), off: offPlugins() };
 }
 
 /* ---------- schedules ---------- */

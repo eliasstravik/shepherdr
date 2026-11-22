@@ -9,7 +9,8 @@ import { act, getState } from './kernel.ts'
 import { openDialog } from './overlay.tsx'
 import { Btn, I, IB, Logo, Row, Seg } from './ui.tsx'
 
-export type Pick = AgentPick
+/** what runs: the agent, its model, effort, speed and permission mode; `label`: the model's name as a running agent reports it */
+export type Pick = AgentPick & { label?: string | null }
 
 /* ---------- each machine's catalog: its agents and their own models, read once and kept ---------- */
 
@@ -56,7 +57,10 @@ export function forgetCatalogs() {
 }
 
 const agentOf = (cat: Catalog | undefined, id: string): CatalogAgent | undefined => cat?.agents.find((a) => a.id === id)
-const modelOf = (a: CatalogAgent | undefined, p: Pick): CatalogModel | undefined => a?.models.find((m) => m.id === p.model) ?? a?.models.find((m) => m.id === a.defaultModel) ?? a?.models[0]
+/** the model a pick names: by its id, else by the name the agent itself reports for it (a running agent says
+ *  "claude-opus-5-5" where its menu says "opus"), else the agent's first */
+const modelOf = (a: CatalogAgent | undefined, p: Pick & { label?: string | null }): CatalogModel | undefined =>
+  a?.models.find((m) => m.id === p.model) ?? (p.label ? a?.models.find((m) => m.name === p.label) : undefined) ?? (p.model ? undefined : (a?.models.find((m) => m.id === a.defaultModel) ?? a?.models[0]))
 
 const SPEEDS: Record<string, string> = { regular: 'Regular', fast: 'Fast', ultrafast: 'Ultra-fast' }
 const speedOf = (p: Pick) => (p.fast === 'ultrafast' ? 'ultrafast' : p.fast ? 'fast' : 'regular')
@@ -69,7 +73,7 @@ export function pickWords(p: Pick, cat?: Catalog) {
   const m = modelOf(a, p)
   const effort = p.effort ?? m?.defaultEffort ?? a?.defaultEffort ?? ''
   const perm = p.perm && a && p.perm !== a.permDefault ? (a.perms.find((x) => x.id === p.perm)?.label ?? p.perm) : ''
-  return { agent: a?.name ?? NAMES[p.agent] ?? p.agent, model: m?.name ?? p.model ?? '', group: m?.group ?? '', effort: effort ? cap(effort) : '', speed: speedOf(p), perm }
+  return { agent: a?.name ?? NAMES[p.agent] ?? p.agent, model: m?.name ?? (p as { label?: string | null }).label ?? p.model ?? '', group: m?.group ?? '', effort: effort ? cap(effort) : '', speed: speedOf(p), perm }
 }
 
 /** "Claude Code · Sonnet 5.5 · medium effort · fast · plan" */

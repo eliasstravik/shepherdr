@@ -8,6 +8,7 @@ import type { Live } from "./live.ts";
 import { where } from "./paths.ts";
 import { READ_LISTS, taskLists } from "../core/tasklists.js";
 import { carryOver, IMPORTED } from "./carry-over.ts";
+import { HOME } from "./paths.ts";
 import * as T from "../core/tasks.js";
 import { isHelper, subagentsOf } from "../core/chat-view.js";
 // The core is plain JavaScript; its defaults read as narrow types to TypeScript.
@@ -130,6 +131,18 @@ export class Model {
     if (this.carrying || !this.own?.ready()) return;
     const done: unknown = this.doc()[IMPORTED];
     const todo = [null, ...this.machines].filter((m) => !(Array.isArray(done) && done.includes(m ?? "")));
+    // Everything: the root space, one agent in the home folder on the serving machine. Once this computer's spaces
+    // are carried over and none of them is the home folder, it is made (its agent starts with its first message).
+    const own: any[] = Array.isArray(this.doc().spaces) ? this.doc().spaces : [];
+    if (Array.isArray(done) && done.includes("") && !own.some((x) => !x.machine && x.folder === HOME)) {
+      this.carrying = true;
+      try {
+        await this.own.update((v) => {
+          const list: any[] = Array.isArray(v.spaces) ? (v.spaces as any[]) : [];
+          return list.some((x) => !x.machine && x.folder === HOME) ? v : { ...v, spaces: [{ id: "home", name: "Home", folder: HOME, machine: null, at: Date.now() }, ...list] };
+        });
+      } catch {} finally { this.carrying = false; }
+    }
     if (!todo.length) return;
     this.carrying = true;
     try {

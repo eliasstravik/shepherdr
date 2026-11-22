@@ -21,6 +21,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync, copyFileSync, chmodSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { HOME, where } from "./paths.ts";
+import { SESSION, useSession } from "./session.ts";
 import { SH } from "../core/paths.js";
 import * as SC from "../core/secrets.js";
 import * as HC from "../core/host.js";
@@ -40,8 +41,9 @@ const VAULT = where().vault, MARK = where()["secret-remote"], SECRETS = dirname(
 // herdr-secret and hc there, wherever they were installed (PATH over herdr-core's exec may not have them)
 const PATHS = 'PATH="$HOME/.local/bin:$HOME/.local/share/shepherdr/bin:${HERDR_APP_HOME:-$HOME/.config/herdr-app}/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; export PATH; ';
 
-// the hc session as hc and herdr-secret take it (HC_SESSION), else the default one
-const c = await CoreClient.endpoint({ binary: process.env.SHEPHERDR_HC || "hc", ...(process.env.HC_SESSION ? { session: process.env.HC_SESSION } : {}) }).catch((e) => fail(`herdr-core isn't answering here: ${(e as Error).message}`));
+// Shepherdr's own herdr-core session (session.ts), where the record and the machines are, as herdr-secret reads them
+useSession();
+const c = await CoreClient.endpoint({ binary: process.env.SHEPHERDR_HC || "hc", ...(SESSION ? { session: SESSION } : {}) }).catch((e) => fail(`herdr-core isn't answering here: ${(e as Error).message}`));
 const call = <T = any>(method: string, params: Record<string, unknown> = {}, timeout = 20_000) => c.call<T>(method, params, timeout);
 const at = (on: string | null) => (on ? { on } : {});
 const getDoc = (name: string, on: string | null) => call<{ value: any; version: number }>("doc.get", { name, ...at(on) });

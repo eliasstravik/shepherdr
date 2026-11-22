@@ -9,8 +9,9 @@ import { exec } from "./model.ts";
 import * as MC from "../core/machines.js";
 
 const { holdOf, nextRead, healthMeters } = MC as any;
-const SCRIPT = [join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "mods", "tasks", "bin", "herdr_task", "machine.py"),
-  join(HOME, ".local", "share", "shepherdr", "mods", "tasks", "bin", "herdr_task", "machine.py")].find(existsSync);
+// machine.py beside this service (Shepherdr's own folder, or a checkout: <it>/service and <it>/mods/tasks/bin), else the installed one
+const SCRIPT = [join(import.meta.dir, ".."), join(HOME, ".local", "share", "shepherdr")]
+  .map((root) => join(root, "mods", "tasks", "bin", "herdr_task", "machine.py")).find(existsSync);
 
 export class Machines {
   stats = new Map<string | null, any>();

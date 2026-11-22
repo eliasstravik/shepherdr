@@ -12,6 +12,7 @@ import { useSession } from "./session.ts";
 useSession();
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, rmSync, watchFile } from "node:fs";
 import { join, normalize } from "node:path";
+import { hostname } from "node:os";
 import { randomBytes } from "node:crypto";
 import { DATA, SOCK, TOKEN, PORT, HOME, ensureData, settingsFile, where } from "./paths.ts";
 import { holdLock } from "./lock.ts";
@@ -347,7 +348,7 @@ const withNext = (snap: Snapshot, b: Parameters<NonNullable<typeof model.onBuild
     return { state: st?.state, kind: st?.kind ?? k.report?.kind };
   };
   const bar = model.value("spaces-chat") as any;
-  return enrich(snap, { spaces: b.spaces, rows: b.rows, archived: Array.isArray(bar?.archived) ? bar.archived : [], asked, reportOf, config, schedules: pluginOn("schedules") ? b.automations : [] });
+  return enrich(snap, { spaces: b.spaces, rows: b.rows, archived: Array.isArray(bar?.archived) ? bar.archived : [], asked, reportOf, config, hostName: hostname().split(".")[0], schedules: pluginOn("schedules") ? b.automations : [] });
 };
 const pickFrom = (v: any) => (v?.agent ? { agent: String(v.agent), model: v.model ?? null, effort: v.effort ?? null, fast: v.fast === "ultrafast" ? "ultrafast" as const : !!v.fast, perm: v.perm ?? null } : null);
 /** where your own terminal starts: a space's folder, or a task's (its worktree when it has one), on its machine */

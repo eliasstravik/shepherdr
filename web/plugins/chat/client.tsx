@@ -272,7 +272,9 @@ function Messages({ thread }: { thread: Thread }) {
       if (t) lastRef = t.id
       const text = m.news?.text ?? m.card?.text ?? m.text ?? ''
       if (text) out.push(<Bubble key={k} msg={{ ...m, text }} chat={stub} thread={thread} gap={false} />)
-    } else if (m.brief) out.push(<div key={k} className="ref"><I n="note" c="s16" /><span>{m.brief.label}</span></div>)
+    }
+    // when its agent was started again, earlier messages stay, above a thin "New session" line
+    else if (m.brief) out.push(/new session/i.test(m.brief.label) ? <div key={k} className="time" role="separator">New session</div> : <div key={k} className="ref"><I n="note" c="s16" /><span>{m.brief.label}</span></div>)
     else if (m.ended) out.push(<DoneRow key={k}>{m.text ?? 'Ended'}</DoneRow>)
     else if (m.error) out.push(<div key={k} className="ref c-red"><I n="warn" c="s16" /><span>{m.text}</span></div>)
     else if (m.file) out.push(<FileRow key={k} msg={m} chat={stub} gap={gap} />)
@@ -327,14 +329,15 @@ const spent = new Set<string>()
 /** what a chat runs on now: its agent's own report, else what is set for its kind */
 export function pickOf(snap: Snapshot, chat: Chat | undefined, thread: Thread): Pick {
   const a = chat?.agent
-  if (a?.kind) return { agent: a.kind, model: a.model ?? a.planned?.model ?? null, effort: a.effort ?? a.planned?.effort ?? null, fast: a.speed === 'ultrafast' ? 'ultrafast' : a.speed === 'fast', perm: (a as { perm?: string }).perm ?? null }
+  if (a?.kind) return { agent: a.kind, label: a.modelLabel ?? a.planned?.modelLabel ?? null, model: a.model ?? a.planned?.model ?? null, effort: a.effort ?? a.planned?.effort ?? null, fast: a.speed === 'ultrafast' ? 'ultrafast' : a.speed === 'fast', perm: (a as { perm?: string }).perm ?? null }
   return pickFor(snap, isEverything(snap, thread.place) ? 'all' : thread.place, thread.task ? 'Tasks' : 'Chats')
 }
 
 /** A new model, effort or permission mode applies from your next message. A different agent restarts that chat, after
  *  you confirm; earlier messages stay. */
 export function applyPick(chat: string, was: Pick, now: Pick, names: { agent: string }) {
-  if (JSON.stringify(was) === JSON.stringify(now)) return
+  const same = (a: Pick, b: Pick) => a.agent === b.agent && (a.model ?? null) === (b.model ?? null) && (a.effort ?? null) === (b.effort ?? null) && (a.fast ?? false) === (b.fast ?? false) && (a.perm ?? null) === (b.perm ?? null)
+  if (same(was, now)) return
   const run = (live: boolean) => void tryAct({ type: 'restart', chat, kind: now.agent, model: now.model ?? undefined, effort: now.effort ?? undefined, speed: now.fast === 'ultrafast' ? 'ultrafast' : now.fast ? 'fast' : 'normal', perm: now.perm ?? undefined, live })
   if (was.agent === now.agent) return run(true)
   confirm({ title: `Switch to ${names.agent}?`, body: 'This chat starts again on the new agent. Earlier messages stay, above a "New session" line.', ok: 'Switch', run: () => run(false) })
