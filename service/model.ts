@@ -3,6 +3,8 @@
 // task's status from its live agents. Kept fresh from herdr-core's events, the local task folder's changes, and a slow
 // poll for other machines.
 import { watch, existsSync } from "node:fs";
+import { join } from "node:path";
+import { CoreClient } from "./hc/client.ts";
 import type { Hub } from "./hub.ts";
 import type { Live } from "./live.ts";
 import { where } from "./paths.ts";
@@ -123,6 +125,18 @@ export class Model {
     this.build();
   }
 
+  // Read the old session directly if its copy has not arrived. A failed read must remain retryable.
+  legacySpaces: ((machine: string | null) => Promise<any>) | null = null;
+  private async oldSpaces(machine: string | null): Promise<any> {
+    if (this.legacySpaces) return this.legacySpaces(machine);
+    const session = process.env.SHEPHERDR_FROM_SESSION || "default";
+    const state = process.env.XDG_STATE_HOME || join(HOME, ".local", "state");
+    if (!existsSync(join(state, "herdr-core", session, "core.json"))) return null;
+    const client = await CoreClient.endpoint({ binary: process.env.SHEPHERDR_HC || "hc", ...(session !== "default" ? { session } : {}) });
+    try { return (await client.call<{ value: any }>("doc.get", { name: "herdr-app", ...(machine ? { on: machine } : {}) }, 8000)).value ?? null; }
+    finally { client.close(); }
+  }
+
   private carrying = false;
   /** The Herdr window's spaces, carried over once per machine (service/carry-over.ts): each machine not in the marker
    *  yet has its "herdr-app" document read (this computer's, and every connected machine's: one that is offline now is
@@ -148,9 +162,12 @@ export class Model {
     try {
       const docs = new Map<string | null, any>();
       await Promise.all(todo.map(async (m) => {
-        try { docs.set(m, (await this.hub.call<{ value: any }>("doc.get", { name: "herdr-app", ...(m ? { on: m } : {}) }, 8000)).value ?? null); }
-        // no such document there (a machine that never had the window): nothing to carry over; not reached: later
-        catch (e) { if (/not.?found|no.?such|missing/i.test(`${(e as any)?.kind ?? ""} ${(e as Error)?.message ?? ""}`)) docs.set(m, null); }
+        try {
+          const current = (await this.hub.call<{ value: any }>("doc.get", { name: "herdr-app", ...(m ? { on: m } : {}) }, 8000)).value ?? null;
+          // A missing copy does not mean the old session had no spaces. Read it before marking this machine done.
+          const old = current == null || Object.keys(current).length === 0 ? await this.oldSpaces(m) : current;
+          docs.set(m, old ?? {});
+        } catch { /* unavailable or uncertain: retry without marking it imported */ }
       }));
       // against the document as it is when written (a space made meanwhile stays)
       if (docs.size) await this.own.update((v) => { const r = carryOver(v.spaces, v[IMPORTED], docs); return r ? { ...v, spaces: r.spaces, [IMPORTED]: r.imported } : v; });

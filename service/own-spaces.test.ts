@@ -154,3 +154,20 @@ test("the model carries the window's spaces over once per machine, then never re
   expect(doc.spaces.filter((s: any) => s.id === "home").length).toBe(1);
   expect(read).toEqual(["here", "vm"]);
 });
+
+test("a missing copied document waits for the old session and imports it on retry", async () => {
+  const { Model } = await import("./model.ts");
+  const hub: any = { terminals: new Map(), on: () => () => {}, call: async (method: string) => method === "machine.list" ? { machines: [] } : { value: null } };
+  const m = new Model(hub, { put: () => {} } as any);
+  const doc: Record<string, any> = {};
+  m.doc = () => doc;
+  m.own = { ready: () => true, update: async (change) => Object.assign(doc, change(doc)) };
+  let available = false;
+  m.legacySpaces = async () => { if (!available) throw new Error("unavailable"); return { spaces: [{ id: "sp1", name: "Old", folder: "/old" }] }; };
+  await m.refresh();
+  expect(doc[IMPORTED]).toBeUndefined();
+  available = true;
+  await m.refresh();
+  expect(doc.spaces).toMatchObject([{ id: "sp1", name: "Old", folder: "/old" }]);
+  expect(doc[IMPORTED]).toEqual([""]);
+});
