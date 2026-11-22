@@ -554,7 +554,14 @@ const voiceIO: VoiceIO = {
     const r = await doAction(body);
     const text = await r.text();
     if (!r.ok) throw new Error(text.trim() || "That didn't go through.");
-    try { return JSON.parse(text); } catch { return { ok: true }; }
+    let result: any;
+    try { result = JSON.parse(text); } catch { result = { ok: true }; }
+    if (result?.ok !== false && body.type === "answer" && body.byVoice === true && typeof body.question === "string" && typeof body.chat === "string" && typeof body.voiceAnswer === "string") {
+      const entry = { id: body.question, chat: body.chat, text: body.voiceAnswer.slice(0, 4000), at: Date.now() };
+      await store.update((v) => ({ ...v, "voice.answers": [...(Array.isArray(v["voice.answers"]) ? v["voice.answers"] as any[] : []).filter((x: any) => x.id !== entry.id), entry].slice(-200) })).catch(() => {});
+      live.chats?.refreshAll();
+    }
+    return result;
   },
   addrOf: (key) => compat.addrOf(key),
   taskWhere: (id) => { const t = compat.taskOf(id); return t ? { ref: t.ref, folder: t.folder, machine: t.machine } : null; },

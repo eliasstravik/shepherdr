@@ -136,7 +136,7 @@ export function toggleCall(resume: string | null = null) {
     later(1800, () => setUI({ callCap: '“Open the payment question.”' }))
     later(3200, () => { openTask('SHOP-14'); setUI({ voiced: 'SHOP-14', callCap: 'It asks: Stripe or Adyen? It would go with Stripe.' }) })
     later(6400, () => setUI({ callCap: '“Go with Stripe.”' }))
-    later(7800, () => { void tryAct({ type: 'answer', chat: 'SHOP-14/worker', question: 'q-pay', choice: 0 }); setUI({ voiced: 'SHOP-14', callCap: 'Sent. It is carrying on.' }) })
+    later(7800, () => { void tryAct({ type: 'answer', chat: 'SHOP-14/worker', question: 'q-pay', choice: 0, byVoice: true }); setUI({ voiced: 'SHOP-14', callCap: 'Sent. It is carrying on.' }) })
     later(10200, () => setUI({ callCap: 'Listening…' }))
     return
   }

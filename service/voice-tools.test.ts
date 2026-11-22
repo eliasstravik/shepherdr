@@ -360,7 +360,7 @@ test("act answer: a question's choice, a command allowed once or declined, as th
   const x = io();
   const r = await voiceTool("act", { action: "answer", id: "outbound list", value: "Norway", confirmed: false }, web, x);
   expect(r.result).toBe('Answered the task "Outbound list": Norway.');
-  expect(x.calls.pop()).toEqual({ type: "answer", chat: "mini:GARD-3/worker", question: "q1", choice: 1 });
+  expect(x.calls.pop()).toEqual({ type: "answer", chat: "mini:GARD-3/worker", question: "q1", choice: 1, byVoice: true, voiceAnswer: "Norway" });
   await voiceTool("act", { action: "answer", id: "outbound list", value: "the first one", confirmed: false }, web, x);
   expect(x.calls.pop()).toMatchObject({ question: "q1", choice: 0 });
   expect((await voiceTool("act", { action: "answer", id: "garden", value: "allow", confirmed: false }, web, x)).result).toBe("Allowed it once for #garden.");

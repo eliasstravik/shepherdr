@@ -114,7 +114,7 @@ function Bubble({ msg, chat, thread, gap, pending, failed }: { msg: Message; cha
         onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget && (e.preventDefault(), open(e.currentTarget))}
       >
         {msg.reply && <span className="quote">{msg.reply.text}</span>}
-        {mine ? <div className="md" style={{ whiteSpace: 'pre-wrap' }}>{msg.text}</div> : <Markdown text={msg.text ?? ''} mentions={msg.mentions} />}
+        {mine ? <div className="md" style={{ whiteSpace: 'pre-wrap' }}>{msg.text}{msg.byVoice && <span className="hint"> · by voice</span>}</div> : <Markdown text={msg.text ?? ''} mentions={msg.mentions} />}
       </div>
       {failed !== undefined && msg.cid && (
         <div className="ref" style={{ justifySelf: 'end', marginTop: 0 }}>

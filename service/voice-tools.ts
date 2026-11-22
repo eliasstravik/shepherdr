@@ -907,7 +907,7 @@ async function act(snap: Snapshot, where: Where, io: VoiceIO, p: any, id: string
     const pick = choiceOf(n, value);
     // words that pick no choice are a reply: what is typed next in that chat goes to its agent
     if (pick === null) return fail(q.command !== undefined ? "Allow it or decline it?" : q.choices?.length ? `That isn't one of its choices: ${q.choices.slice(0, 6).map((x) => cut(x.label, 40)).join(", ")}. Which one? Other words go in its chat with send.` : "It has no choices to pick: reply in its chat with send.");
-    body = { type: "answer", chat: c.key, question: q.id, choice: pick };
+    body = { type: "answer", chat: c.key, question: q.id, choice: pick, ...(q.command === undefined ? { byVoice: true, voiceAnswer: q.choices[pick]?.label ?? value } : {}) };
     did = q.command !== undefined ? (pick === 0 ? `Allowed it once for ${c.name}.` : `Declined it for ${c.name}.`) : `Answered ${c.name}: ${cut(q.choices[pick]?.label ?? value, 60)}.`;
   } else if (action in SCHEDULE_ACTS) {
     const all = schedulesOf(snap);

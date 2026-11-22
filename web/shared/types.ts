@@ -457,7 +457,7 @@ export interface Question {
   /** answered without a pick: the words it was answered with (an Other answer, or the message that answered it) */
   said?: string
   /** answered without a pick, and not on the card: by a message in the chat, or in the CLI's own terminal */
-  via?: 'chat' | 'terminal'
+  via?: 'chat' | 'terminal' | 'voice'
   /** who asks, when it is not the agent's own message ("Claude Code asks") */
   asks?: string
   /** answered on its other copy (a task's question and its copy in its space's chat): where, and a link to that chat */
@@ -567,6 +567,8 @@ export interface Reaction {
 export interface Message {
   id: string
   who: 'you' | 'agent'
+  /** This answer was given through the voice call. */
+  byVoice?: boolean
   /** the agent's suggested next message (its reply's last line): greyed out in the box until something is typed (SHEP-186) */
   suggest?: string
   /** a live row: when it last changed; at keeps its place in the chat */

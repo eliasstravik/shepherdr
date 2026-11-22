@@ -47,7 +47,7 @@ export function QuestionCard({ q, chat, place }: { q: Question; chat: string; pl
   const down = downLine(snap, place)
   if (q.sent !== undefined && q.command !== undefined) return <DoneRow>{q.sent === 0 ? 'You allowed this' : 'You declined this'}</DoneRow>
   // an answered question: the answer shows as your message (the agent's reply follows it in the chat)
-  if (q.sent !== undefined) return <p className="b mine gap">{q.said || q.choices[q.sent]?.label || 'Answered'}</p>
+  if (q.sent !== undefined) return <p className="b mine gap">{q.said || q.choices[q.sent]?.label || 'Answered'}{q.via === 'voice' && <span className="hint"> · by voice</span>}</p>
   if (q.closed) return <DoneRow>{q.closed}</DoneRow>
   if (down) return down
   const say = async (body: Record<string, unknown>) => {

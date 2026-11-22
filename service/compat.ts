@@ -586,6 +586,16 @@ export class Compat {
       for (const [n, path] of (s?.files ?? []).entries()) messages.push({ id: `${q.id}:f${n}`, file: { name: path.split("/").pop() ?? "image", path }, ...mark } as Message);
       if (!s && q.images) messages.push({ id: `${q.id}:n`, images: q.images, ...mark } as Message);
     }
+    // A voice answer is a small, shared marker, so every copy of the task's chat shows how it was answered.
+    const voiceAnswers = this.shared?.value("voice.answers");
+    for (const v of Array.isArray(voiceAnswers) ? voiceAnswers : []) {
+      if (!v || typeof v.chat !== "string" || typeof v.text !== "string") continue;
+      const row = this.rows.find((r) => `${taskId(r)}/worker` === v.chat);
+      const home = this.spaceList.find((s) => !s.machine && s.folder === HOME)?.id;
+      const rowSpace = row?.space || this.spaceList.find((s) => (s.machine ?? null) === (row?.machine ?? null) && s.folder === row?.folder)?.id;
+      if (key === v.chat || (space && row && (rowSpace === space || home === space)))
+        messages.push({ id: `voice-answer:${v.id}`, who: "you", text: v.text, at: v.at, byVoice: true });
+    }
     // what the agent asks now, as cards at the end of its chat
     for (const a of addr ? this.asks?.of(addr) ?? [] : []) messages.push({ id: `ask:${a.id}`, who: "agent", at: a.at, question: this.question(a, key) });
     if (codexCard) messages.push({ id: `ask:cq:${codexCard.id}`, who: "agent", at: codexCard.at ?? Date.now(), question: codexQuestion(codexCard, key) });

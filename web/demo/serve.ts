@@ -64,9 +64,10 @@ function action(a: Record<string, any>): unknown {
     return { ok: true, at: Date.now() }
   }
   if (a.type === 'answer') {
-    for (const c of Object.values(chats)) for (const m of c.messages) if (m.question?.id === a.question) { m.question = { ...m.question, sent: a.choice ?? 0, said: m.question.choices[a.choice ?? 0]?.label }; pushChat(c.key) }
+    for (const c of Object.values(chats)) for (const m of c.messages) if (m.question?.id === a.question) { m.question = { ...m.question, sent: a.choice ?? 0, said: m.question.choices[a.choice ?? 0]?.label, ...(a.byVoice ? { via: 'voice' as const } : {}) }; pushChat(c.key) }
     const t = a.question === 'q-pay' ? 'SHOP-14' : 'vm:GARDEN-4'
     patchTask(t, { status: 'work', blocked: undefined, report: { msg: 'Carrying on' } })
+    if (a.byVoice && a.question === 'q-pay') setTimeout(() => say('SHOP-14/worker', { text: "Going with Stripe. I'll tell you when it's ready." }), 500)
     return { ok: true }
   }
   if (a.type === 'accept') {
