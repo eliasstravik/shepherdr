@@ -101,3 +101,4 @@ button:disabled{opacity:.5;cursor:default}
 [data-drop-over="heading"]{background:var(--control);border-radius:8px}
 [data-drop-over="before"]{box-shadow:inset 0 2px 0 var(--fg)}
 .side .rowx,.drawer .rowx{touch-action:pan-y}
+.tbar span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
