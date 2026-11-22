@@ -1,32 +1,29 @@
 #!/usr/bin/env python3
-"""herdr-artifact: Herdr's artifacts, the one way to make and change them.
+"""herdr-artifact: Shepherdr's artifacts, the one way to make and change them.
 
-An artifact is what an agent shows the person: a report, a dashboard, a form, a proof. It is a
-recipe (recipe.json and its pictures, Shepherdr 3.1), drawn natively by the window and by the web
-app; only a rare custom one (a game, a live tool: --custom) is a Herdr mod the window runs
-(main.js), which the web shows as the picture the window last took of it. It belongs to one folder, like
-a task: the repo root in git (a linked worktree counts as its main repo), else the folder itself.
-Each folder's artifacts are listed in ~/.herdr/artifacts/<slug>.json on the machine where the
-folder lives; every version's files are kept in ~/.herdr/artifacts/files/<id>/v<n>/ (the last 20).
-The current version is installed as the mod mods/art-<id>/ of the Herdr app on that machine (a
-remote artifact is pulled into this window's app as art-<machine>-<id> when it's opened).
+An artifact is a web page an agent writes to show the person something: a report, a board, a form, a proof. It is a
+folder with an index.html and the files beside it (css, js, pictures, data). It belongs to one folder, like a task:
+the repo root in git (a linked worktree counts as its main repo), else the folder itself. Each folder's artifacts are
+listed in <artifacts>/<slug>.json on the machine where the folder lives; every version's files are kept in
+<artifacts>/files/<id>/v<n>/ (the last 20), with a picture of the page taken when it was published
+(.thumb.png, .thumb-dark.png) beside them.
 
-Every write takes the folder list's lock and replaces it atomically. Publishing first checks the
-mod with `herdr-app check`, so a broken artifact never reaches the person.
+Every write takes the folder list's lock and replaces it atomically. `convert` turns what Shepherdr 3.1 kept (drawn
+"recipes" and custom window panels) into pages, once.
 """
 
 import argparse
 import contextlib
 import errno
 import fcntl
+import glob
 import hashlib
-import io
+import html
 import json
 import os
 import re
 import secrets
 import shutil
-import signal
 import struct
 import subprocess
 import sys
@@ -69,41 +66,24 @@ def SHEP(rel, _t={'.herdr/shepherdr.json': ('config', 'settings.json'), '.herdr/
 # else the old ~/.herdr/artifacts (which then links to the new place).
 STORE = SHEP(".herdr/artifacts")
 FILES = os.path.join(STORE, "files")
-APP = os.environ.get("HERDR_APP_HOME") or os.path.join(HOME, ".config", "herdr-app")
 GUIDE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "ARTIFACTS.md")
-# Mark up (the person points at a spot and writes to the agent), laid over every installed artifact.
-MARKUP = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "markup.js")
-# What Mark up imports beside it (markup.js's dirs.js, and dirs.js's core/paths.js): each copy carries them too (#870).
-MARKUP_HELPERS = ("dirs.js", os.path.join("core", "paths.js"))
-# A recipe artifact (recipe.json, Shepherdr 3.1) is drawn by the shared recipe view: copied into its installed mod.
-RECIPE_VIEW = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "recipe-view.js")
-RECIPE_CORE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "core", "recipe.js")
-RECIPE_TYPES = {"heading", "text", "list", "table", "chart", "stats", "image", "video", "audio", "pdf", "pair", "code", "callout",
-                "columns", "tabs", "details", "divider", "choice", "form", "button", "buttons"}
-NOTES = os.path.join(STORE, "notes")
-# A custom artifact's picture, as the window last showed it (a version's folder; the web shows it in its place).
+PAGE = "index.html"
+# The picture of a version's page, taken when it is published (the app's tile), light and dark: kept in the version's
+# folder under names no page file can have (a page's own files never start with a dot).
+THUMB, THUMB_DARK = ".thumb.png", ".thumb-dark.png"
+SHOT = (800, 500)
+SHOT_WAIT = 45
+# What a version was before `convert` made it a page (its recipe.json, its panel's code): kept, never served.
+OLD = ".old"
+# A custom panel's picture, as the old window last showed it (convert shows it on the page).
 PICTURE = ".window.png"
-# A task's proof, as herdr-task finds it ("HAT-2: ... · Proof"): always a recipe, the person accepts from their phone too.
-PROOF = re.compile(r"\bproof\b", re.I)
-NARROW = 320
+# A task's proof by its title ("HAT-2: ... · Proof"), when --proof wasn't given.
+PROOF = re.compile(r"·\s*proof\s*$", re.I)
 KEEP = 20
-MAX_FILES = 200
+MAX_FILES = 500
 MB = 1024 * 1024
-# The whole artifact (every version is kept, so every byte counts 20 times over: the limits are sized for that)
-MAX_BYTES = 64 * MB
-MAX_FILE = 4 * MB
-# Media (SHEP-209): a clip, a sound or a PDF is a block of its own, and may be bigger than a picture. Browsers play
-# these kinds; the window draws their poster or a placeholder (its player plays nothing).
-MEDIA = {"video": ("mp4", "m4v", "webm", "mov"), "audio": ("mp3", "m4a", "wav", "ogg"), "pdf": ("pdf",)}
-MEDIA_MAX = {"video": 40 * MB, "audio": 20 * MB, "pdf": 25 * MB}
-# The codecs a browser plays (ffprobe's names); anything else is converted to an mp4 copy when ffmpeg is here.
-BROWSER_VIDEO = ("h264", "vp8", "vp9", "av1")
-BROWSER_AUDIO = ("aac", "mp3", "opus", "vorbis", "flac", "pcm_s16le", "pcm_s24le", "pcm_f32le")
-# What a mod folder may hold: code, text, pictures and media. No node_modules.
-ALLOWED = {".js", ".mjs", ".json", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".md", ".txt", ".csv", ".ttf", ".otf",
-           *(f".{e}" for kind in MEDIA for e in MEDIA[kind])}
-SKIP = {"jsconfig.json", "gpui-kit.d.ts", "herdr.d.ts", "artifact.js", "artifact-main.js", "artifact-markup.js", ".version"}
-
+# The whole page (every version is kept, so every byte counts 20 times over)
+MAX_BYTES = 50 * MB
 
 class Fail(Exception):
     pass
@@ -275,840 +255,375 @@ def task_ref(key):
 
 # ---- files -------------------------------------------------------------------------------
 
-def kind_of(name):
-    """A file's media kind: "video", "audio", "pdf", or None (a picture or anything else)."""
-    e = os.path.splitext(name)[1].lower().lstrip(".")
-    return next((k for k, es in MEDIA.items() if e in es), None)
-
-
-def too_big(rel, n, kind):
-    mb = n / MB
-    if kind == "video":
-        return (f"{rel} is {mb:.0f} MB: a video can be at most {MEDIA_MAX[kind] // MB} MB. Make it shorter or smaller, e.g. "
-                f"`ffmpeg -i {rel} -vf scale=960:-2 -crf 28 -an short.mp4` (-an drops the sound), then use short.mp4.")
-    if kind:
-        noun = {"video": "a video", "audio": "a sound", "pdf": "a PDF"}[kind]
-        return f"{rel} is {mb:.0f} MB: {noun} can be at most {MEDIA_MAX[kind] // MB} MB."
-    return f"{rel} is {mb:.1f} MB: a picture or other file can be at most {MAX_FILE // MB} MB (crop or compress it)."
-
-
 def gather(src, limits=True):
-    """The files of a mod folder to keep, relative paths. Fails on anything a mod can't hold. limits: False for a
-    version already kept, which its publish may have grown past them (a poster, an mp4 copy: #1108)."""
+    """A page's folder and its files (relative paths, sorted). Fails when it has no index.html, holds a link, or is
+    too big. Files and folders that start with a dot, and node_modules, are left out."""
     src = os.path.realpath(os.path.expanduser(src))
-    if os.path.isfile(src) and os.path.basename(src) == "main.js":
+    if os.path.isfile(src) and os.path.basename(src) == PAGE:
         src = os.path.dirname(src)
-    if not os.path.isfile(os.path.join(src, "main.js")) and not os.path.isfile(os.path.join(src, "recipe.json")):
-        raise Fail(f"{src} has no recipe.json (or main.js). An artifact is a folder with a recipe.json (`herdr-artifact new <dir>` makes one).")
+    if not os.path.isdir(src):
+        raise Fail(f"No such folder: {src}")
+    if not os.path.isfile(os.path.join(src, PAGE)):
+        raise Fail(f"{src} has no index.html. An artifact is a folder with an index.html and the files beside it "
+                   "(`herdr-artifact new <dir>` writes a starting one).")
     out, size = [], 0
     for root, dirs, names in os.walk(src):
+        for d in dirs:
+            if os.path.islink(os.path.join(root, d)):
+                raise Fail(f"{os.path.relpath(os.path.join(root, d), src)} is a link: copy the folder in instead.")
         dirs[:] = [d for d in dirs if not d.startswith(".") and d != "node_modules"]
         for n in names:
-            rel = os.path.relpath(os.path.join(root, n), src)
-            if n.startswith(".") or n in SKIP or n.endswith(".error"):
+            if n.startswith("."):
                 continue
-            if os.path.splitext(n)[1].lower() not in ALLOWED:
-                raise Fail(f"{rel}: an artifact holds only .js, .json, .svg, pictures, videos, sounds, PDFs, fonts and text.")
-            n_bytes = os.path.getsize(os.path.join(root, n))
-            kind = kind_of(n)
-            if limits and n_bytes > MEDIA_MAX.get(kind, MAX_FILE):
-                raise Fail(too_big(rel, n_bytes, kind))
-            size += n_bytes
+            p = os.path.join(root, n)
+            rel = os.path.relpath(p, src)
+            if os.path.islink(p):
+                raise Fail(f"{rel} is a link: copy the file in instead.")
+            if not os.path.isfile(p):
+                continue
+            size += os.path.getsize(p)
             out.append(rel)
     if limits and (len(out) > MAX_FILES or size > MAX_BYTES):
-        raise Fail(f"Too big: {len(out)} files, {size // MB} MB (at most {MAX_FILES} files, {MAX_BYTES // MB} MB in all).")
+        raise Fail(f"Too big: {len(out)} files, {size / MB:.0f} MB (at most {MAX_FILES} files, {MAX_BYTES // MB} MB in all). "
+                   "Make pictures and clips smaller, or leave out what the page doesn't show.")
     return src, sorted(out)
 
 
-def is_recipe(files):
-    return "recipe.json" in files and "main.js" not in files
+LINK = re.compile(r"""\b(?:src|href|poster)\s*=\s*(["'])(.*?)\1""", re.I | re.S)
 
 
-def version_kind(aid, v):
-    """A kept version's kind from its files: "recipe" or "custom" (None when they're gone)."""
-    d = os.path.join(FILES, aid, f"v{v}")
-    if not os.path.isdir(d):
-        return None
-    return "recipe" if os.path.isfile(os.path.join(d, "recipe.json")) and not os.path.isfile(os.path.join(d, "main.js")) else "custom"
-
-
-NOT_RECIPE = ("{src} is a custom panel (main.js): only the Herdr window runs it, so the web app on the person's phone shows "
-              "just a picture of it. Write it as a recipe instead (recipe.json: text, tables, charts, pictures, forms; "
-              "`herdr-artifact guide`). Only when a recipe truly can't do it (a game, a live tool), publish it with --custom.")
-
-
-MEDIA_BLOCKS = {"image": ("image",), "video": ("video",), "audio": ("audio",), "pdf": ("pdf",), "pair": ("image", "video")}
-PICTURE_EXT = ("png", "jpg", "jpeg", "gif", "webp", "svg")
-
-
-def file_kind(name):
-    """What a recipe's file is: "image", "video", "audio", "pdf", or None."""
-    if os.path.splitext(name)[1].lower().lstrip(".") in PICTURE_EXT:
-        return "image"
-    return kind_of(name)
-
-
-def recipe_problems(src, files):
-    """What's wrong with a recipe.json, in words (core/recipe.js's problems(), its main rules)."""
+def link_warnings(src, files):
+    """What in index.html won't load once it is published: a path from the root or the disk, one that leaves the
+    folder, a file that isn't beside it."""
     try:
-        with open(os.path.join(src, "recipe.json")) as f:
-            r = json.load(f)
-    except (OSError, ValueError) as e:
-        return [f"recipe.json isn't valid JSON: {e}"]
-    if not isinstance(r, dict) or r.get("recipe") != 1:
-        return ['recipe.json needs "recipe": 1.']
-    out = []
-
-    def walk(blocks, at):
-        if not isinstance(blocks, list):
-            out.append(f"{at or 'blocks'}: must be a list of blocks.")
-            return
-        for i, b in enumerate(blocks):
-            where = f"{at}{i + 1}"
-            if not isinstance(b, dict) or b.get("type") not in RECIPE_TYPES:
-                out.append(f"block {where}: type must be one of {', '.join(sorted(RECIPE_TYPES))}.")
-                continue
-            want = MEDIA_BLOCKS.get(b["type"])
-            sides = [b] if b["type"] in ("image", "video", "audio", "pdf") else [b.get(k) or {} for k in ("before", "after")] if b["type"] == "pair" else []
-            for side in sides if want else []:
-                x = side.get("src")
-                if not isinstance(x, str) or x not in files:
-                    out.append(f"block {where} ({b['type']}): {x!r} isn't a file beside recipe.json.")
-                elif file_kind(x) not in want:
-                    out.append(f"block {where} ({b['type']}): {x} must be {' or '.join(want)} (png, jpg, gif, webp or svg for a picture; mp4, webm or mov for a clip; mp3, m4a, wav or ogg for a sound; pdf for a PDF).")
-                if b["type"] == "video" and side.get("poster") is not None and side.get("poster") not in files:
-                    out.append(f"block {where} (video): poster {side.get('poster')!r} isn't a file beside recipe.json.")
-                elif side.get("poster") is not None and file_kind(str(side.get("poster"))) != "image":
-                    out.append(f"block {where} ({b['type']}): poster must be a picture beside recipe.json.")
-            for x in ([b] if b["type"] == "button" else (b.get("items") or [None]) if b["type"] == "buttons" else []):
-                # a button: words, and a reply, a plain https link or both (core/recipe.js buttonProblem)
-                x = x if isinstance(x, dict) else {}
-                href = x.get("href")
-                if not isinstance(x.get("label"), str) or not (isinstance(x.get("reply"), str) or isinstance(href, str)):
-                    out.append(f"block {where} ({b['type']}): a button needs a label and a reply or an href.")
-                if href is not None and not (isinstance(href, str) and re.fullmatch(r'https://[^\s"<>]+', href)):
-                    out.append(f"block {where} ({b['type']}): href must be an https:// link.")
-            if b["type"] == "columns":
-                for j, c in enumerate(b.get("columns") or []):
-                    walk(c, f"{where}.{j + 1}.")
-            elif b["type"] == "tabs":
-                for j, t in enumerate(b.get("tabs") or []):
-                    walk((t or {}).get("blocks"), f"{where}.{j + 1}.")
-            elif b["type"] == "details":
-                walk(b.get("blocks"), f"{where}.")
-    if not r.get("blocks"):
-        return ['"blocks" must be a list with at least one block.']
-    walk(r["blocks"], "")
-    # the picture its card in the chat shows first (core/recipe.js preview()): one beside it
-    if "cover" in r and (not isinstance(r["cover"], str) or r["cover"] not in files):
-        out.append('"cover" must be a picture beside recipe.json.')
-    return out
-
-
-def recipe_parts(dst):
-    """The shared recipe view in an installed (or checked) recipe artifact: main.js draws recipe.json natively."""
-    shutil.copyfile(RECIPE_VIEW, os.path.join(dst, "recipe-view.js"))
-    shutil.copyfile(RECIPE_CORE, os.path.join(dst, "recipe.js"))
-    # the recipe as a module the view imports at once (a check then draws every block, not an empty panel)
-    with open(os.path.join(dst, "recipe.json")) as f:
-        data = f.read()
-    with open(os.path.join(dst, "recipe-data.js"), "w") as f:
-        f.write(f"// Written by herdr-artifact from recipe.json.\nexport default {data.strip()};\n")
-    with open(os.path.join(dst, "main.js"), "w") as f:
-        f.write('// Written by herdr-artifact: this artifact is a recipe (recipe.json), drawn by the shared recipe view.\n'
-                'export { default } from "./recipe-view.js";\n')
-
-
-def probe(path):
-    """A clip's first video and audio codec names (ffprobe's, "" for none), or None when ffprobe isn't here."""
-    if not shutil.which("ffprobe"):
-        return None
-
-    def codec(sel):
-        r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", sel, "-show_entries", "stream=codec_name",
-                            "-of", "csv=p=0", path], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
-        return r.stdout.decode().strip().split("\n")[0] if r.returncode == 0 else ""
-    return codec("v:0"), codec("a:0")
-
-
-def media_blocks(blocks):
-    """Every block (and pair side) that shows a clip, as its dict, in order; the blocks nested in columns, tabs and details too."""
-    for b in blocks or []:
-        if not isinstance(b, dict):
+        with open(os.path.join(src, PAGE), encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return []
+    have, out = set(files), []
+    for m in LINK.finditer(text):
+        ref = html.unescape(m.group(2)).strip()
+        if not ref or ref.startswith(("#", "//", "?")) or re.match(r"^[a-z][a-z0-9+.-]*:", ref, re.I) and not ref.lower().startswith("file:"):
             continue
-        if b.get("type") == "video":
-            yield b
-        if b.get("type") == "pair":
-            yield from (x for x in (b.get("before"), b.get("after")) if isinstance(x, dict) and file_kind(str(x.get("src", ""))) == "video")
-        if b.get("type") == "columns":
-            for c in b.get("columns") or []:
-                yield from media_blocks(c)
-        if b.get("type") == "tabs":
-            for t in b.get("tabs") or []:
-                yield from media_blocks((t or {}).get("blocks"))
-        if b.get("type") == "details":
-            yield from media_blocks(b.get("blocks"))
-
-
-def ready_media(keep, files):
-    """The stored copy of a recipe made ready for every browser (SHEP-209): a clip the browser can't play becomes an
-    mp4 copy (ffmpeg here), and a clip with no poster gets its first frame as one. Only the stored version changes, never
-    the folder the person keeps. Returns (files, notes for the person)."""
-    rp = os.path.join(keep, "recipe.json")
-    with open(rp) as f:
-        recipe = json.load(f)
-    notes, changed = [], False
-    ffmpeg = shutil.which("ffmpeg") is not None
-    codecs = {x: probe(os.path.join(keep, x)) for x in files if file_kind(x) == "video"} if ffmpeg else {}
-    frames = {}  # a clip's first frame, made once however many blocks show it
-    for b in media_blocks(recipe.get("blocks")):
-        src = b.get("src")
-        if not isinstance(src, str) or src not in files:
+        path = urllib.parse.unquote(re.split(r"[?#]", ref, 1)[0])
+        if ref.lower().startswith("file:") or path.startswith("/"):
+            w = f"{ref}: a path from the root or the disk won't load. Put the file in the folder and name it from there (\"shot.png\")."
+        elif os.path.normpath(path).startswith(".."):
+            w = f"{ref}: it leaves the page's folder, so it won't load. Put the file in the folder."
+        elif os.path.normpath(path) not in have and not (path.endswith("/") and os.path.join(os.path.normpath(path), PAGE) in have):
+            w = f"{ref}: no such file in the folder."
+        else:
             continue
-        stem = os.path.splitext(src)[0]
-        if not ffmpeg:
-            if src.lower().endswith(".mov"):
-                notes.append(f"{src} is a .mov: Safari plays it, Chrome and Firefox may not. ffmpeg here would make an mp4 copy for every browser.")
-            continue
-        got = codecs.get(src)
-        if got and (got[0] not in BROWSER_VIDEO or (got[1] and got[1] not in BROWSER_AUDIO)):
-            out = free(f"{stem}.web.mp4", files)
-            r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", os.path.join(keep, src), "-c:v", "libx264", "-pix_fmt", "yuv420p",
-                                "-preset", "veryfast", "-crf", "23", "-c:a", "aac", "-movflags", "+faststart", os.path.join(keep, out)],
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=600)
-            if r.returncode == 0:
-                os.remove(os.path.join(keep, src))
-                files = sorted([x for x in files if x != src] + [out])
-                b["src"] = out
-                changed = True
-                why = f"its video is {got[0]}" if got[0] not in BROWSER_VIDEO else f"its sound is {got[1]}"
-                notes.append(f"{src}: {why}, which browsers mostly don't play. Made {out}, an mp4 every browser plays.")
-                src = out
-            else:
-                why = (r.stderr.decode().strip().splitlines() or ["ffmpeg failed"])[-1][:160]
-                notes.append(f"{src} couldn't be converted to mp4 ({why}). Browsers that can't play it show a download link.")
-        if not b.get("poster"):
-            if src not in frames:
-                out = free(f"{stem}.poster.jpg", files)
-                r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", os.path.join(keep, src), "-frames:v", "1", "-q:v", "3",
-                                    os.path.join(keep, out)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
-                frames[src] = out if r.returncode == 0 and os.path.isfile(os.path.join(keep, out)) else None
-                if frames[src]:
-                    files = sorted(set(files) | {out})
-                    changed = True
-                else:
-                    notes.append(f"{src}: no first frame could be made, so the window shows a tile for it.")
-            if frames[src]:
-                b["poster"] = frames[src]
-    if changed:
-        with open(rp, "w") as f:
-            json.dump(recipe, f, ensure_ascii=False, indent=2)
-            f.write("\n")
-    return files, notes
-
-
-def free(name, files):
-    """name, or name with a number before its extension when the folder already holds that name."""
-    stem, ext = os.path.splitext(name)
-    out, n = name, 2
-    while out in files:
-        out, n = f"{stem}-{n}{ext}", n + 1
-    return out
+        if w not in out:
+            out.append(w)
+    return out[:20]
 
 
 def copy_files(src, files, dst):
-    # copyfile, not copy2: a copy is ours to rewrite (the light check's imports), even from a read-only install (Nix)
     for rel in files:
-        os.makedirs(os.path.dirname(os.path.join(dst, rel)), exist_ok=True)
-        shutil.copyfile(os.path.join(src, rel), os.path.join(dst, rel))
+        to = os.path.join(dst, rel)
+        os.makedirs(os.path.dirname(to), exist_ok=True)
+        shutil.copyfile(os.path.join(src, rel), to)
 
 
-def helper(art, mod, agent, machine=None, custom=False):
-    """artifact.js, written into the installed mod: who made it and how to answer them."""
-    return f"""// Written by herdr-artifact each time this artifact is installed. Don't edit: it's replaced.
-import {{ hc }} from "herdr";
-
-export const id = {json.dumps(art["id"])};
-export const title = {json.dumps(art["title"])};
-export const version = {art["version"]};
-/** The newest version when this one was installed (an older version shows only when picked). */
-export const latest = {art.get("latest") or art["version"]};
-export const folder = {json.dumps(art["folder"])};
-/** The machine the artifact (and its agent) is on, null for this one. */
-export const machine = {json.dumps(machine)};
-/** This mod's folder, for image() and svg(): asset("chart.svg") -> "mods/{mod}/chart.svg". */
-export const dir = "mods/{mod}";
-export const asset = (name) => `${{dir}}/${{name}}`;
-/** The agent that made it (a terminal address), or null. */
-export const agent = {json.dumps(agent)};
-/** A custom panel (its own main.js), not a recipe: the window keeps a picture of it for the web app. */
-export const custom = {json.dumps(bool(custom))};
-
-/** Sends text to the agent that made this artifact, as a message it reads like the person's.
- *  Resolves true when it was delivered, false when that agent is gone. Call it from a click. */
-export async function reply(text) {{
-  if (!agent) return false;
-  const body = `<hc from="artifact" id="${{id}}" version="${{version}}" title=${{JSON.stringify(title)}}>\\n${{text}}\\n</hc>`;
-  const r = await hc(["send", agent, body]);
-  return r.code === 0;
-}}
-"""
-
-
-WRAPPER = """// Written by herdr-artifact: the artifact (artifact-main.js) with Mark up laid over it
-// (artifact-markup.js). Don't edit: it's replaced.
-import Artifact from "./artifact-main.js";
-import { markupInit, markupWrap } from "./artifact-markup.js";
-
-export default class MarkedArtifact extends Artifact {
-  init(props, cx) {
-    if (super.init) super.init(props, cx);
-    this.__herdrMark = markupInit(cx);
-  }
-  render(cx) {
-    return markupWrap(this.__herdrMark, super.render(cx), cx);
-  }
-}
-"""
-
-
-def wrap_markup(dst):
-    """Lays Mark up over an installed artifact: its main.js becomes artifact-main.js under a
-    wrapper, and Mark up's helpers come along beside it. Without the markup template or its helpers (an old copy on
-    another machine) it stays as it is."""
-    here = os.path.dirname(MARKUP)
-    if not os.path.isfile(MARKUP) or not all(os.path.isfile(os.path.join(here, h)) for h in MARKUP_HELPERS):
-        return
-    os.replace(os.path.join(dst, "main.js"), os.path.join(dst, "artifact-main.js"))
-    shutil.copyfile(MARKUP, os.path.join(dst, "artifact-markup.js"))
-    for h in MARKUP_HELPERS:
-        os.makedirs(os.path.dirname(os.path.join(dst, h)), exist_ok=True)
-        shutil.copyfile(os.path.join(here, h), os.path.join(dst, h))
-    with open(os.path.join(dst, "main.js"), "w") as f:
-        f.write(WRAPPER)
-
-
-def write_mod(src, files, art, mod, agent, machine=None):
-    """Installs files as the Herdr app's mod `mod`, replacing the old one in one move."""
-    mods = os.path.join(APP, "mods")
-    if not os.path.isdir(mods):
-        return None
-    tmp = os.path.join(mods, f".{mod}.new-{secrets.token_hex(3)}")
-    copy_files(src, files, tmp)
-    if is_recipe(files):
-        recipe_parts(tmp)
-    wrap_markup(tmp)
-    meta = {}
-    try:
-        with open(os.path.join(tmp, "mod.json")) as f:
-            meta = json.load(f)
-    except (OSError, ValueError):
-        pass
-    meta["place"] = "none"
-    with open(os.path.join(tmp, "mod.json"), "w") as f:
-        json.dump(meta, f, indent=2)
-    with open(os.path.join(tmp, "artifact.js"), "w") as f:
-        f.write(helper(art, mod, agent, machine, not is_recipe(files)))
-    with open(os.path.join(tmp, ".version"), "w") as f:
-        # The version, and which Mark up it carries (a newer one reinstalls it on the next open).
-        f.write(f"{art['version']} {markup_hash() if os.path.isfile(os.path.join(tmp, 'artifact-markup.js')) else ''}".strip() + "\n")
-    dst = os.path.join(mods, mod)
-    old = None
-    if os.path.exists(dst):
-        old = os.path.join(mods, f".{mod}.old-{secrets.token_hex(3)}")
-        os.rename(dst, old)
-    os.rename(tmp, dst)
-    if old:
-        shutil.rmtree(old, ignore_errors=True)
-    return dst
-
-
-# The check sees the artifact in light and in dark: a staged copy's `herdr` imports go through this
-# shim, whose theme() is a light (or dark) preset from themes(). Plain `herdr-app check`, nothing
-# else: no second app, no other home.
-SHIM = """export * from "herdr";
-import * as H from "herdr";
-const LIGHT = %s;
-const all = H.themes();
-const pick = all.find((t) => t.light === LIGHT && t.name === (LIGHT ? "paper" : "graphite")) ?? all.find((t) => t.light === LIGHT);
-export function theme() { return pick?.colors ?? H.theme(); }
-export function settings() { return { ...H.settings(), dark: !LIGHT }; }
-"""
-SHIM_NAME = ".herdr-check-theme.js"
-IMPORT = re.compile(r"""(\bfrom\s*|\bimport\s*\(?\s*)(["'])herdr\2""")
-
-
-def stage_theme(stage, light):
-    """Points every .js file's `herdr` import at the shim for `light` (True / False)."""
-    with open(os.path.join(stage, SHIM_NAME), "w") as f:
-        f.write(SHIM % ("true" if light else "false"))
-    for root, _dirs, names in os.walk(stage):
-        for n in names:
-            if not n.endswith((".js", ".mjs")) or n == SHIM_NAME:
-                continue
-            p = os.path.join(root, n)
-            rel = os.path.relpath(os.path.join(stage, SHIM_NAME), root)
-            rel = rel if rel.startswith(".") else "./" + rel
-            with open(p) as f:
-                text = f.read()
-            new = IMPORT.sub(lambda m: f"{m.group(1)}{m.group(2)}{rel}{m.group(2)}", text)
-            if new != text:
-                with open(p, "w") as f:
-                    f.write(new)
-
-
-# How long one `herdr-app check` may take, and the waits before trying again when Herdr's checker couldn't start: its
-# checker has its own short deadline to connect, which a busy machine misses (#987), so it is tried three times, waiting
-# longer each time. A check that ran out of time isn't tried again (#1130: twice made a publish wait three minutes).
-CHECK_TIMEOUT = 90
-RETRY_WAITS = (3, 10)
-# herdr-app's own trouble drawing it (its isolated checker didn't connect, after Herdr restarted), not the artifact's
-CHECKER_DOWN = re.compile(r"isolated checker|did not connect|timed out", re.I)
-
-
-def check_run(stage):
-    """`herdr-app check <stage> --print-spec`: (code, stdout, stderr), or None when it didn't finish in time
-    (its whole process group is ended: a checker it started too)."""
-    p = subprocess.Popen(["herdr-app", "check", stage, "--print-spec"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         stdin=subprocess.DEVNULL, universal_newlines=True, start_new_session=True)
-    try:
-        out, err = p.communicate(timeout=CHECK_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        with contextlib.suppress(OSError):
-            os.killpg(p.pid, signal.SIGKILL)
-        with contextlib.suppress(subprocess.TimeoutExpired):
-            p.communicate(timeout=5)
-        return None
-    return p.returncode, out, err
-
-
-def check_tries(stage):
-    """check_run, again after a wait (longer each time) when Herdr's checker couldn't start: (code, stdout, stderr), or
-    (None, "", why) when it still couldn't."""
-    waits, timeouts = list(RETRY_WAITS), 0
-    while True:
-        r = check_run(stage)
-        if r is None:
-            timeouts += 1
-            why = f"herdr-app check didn't finish in {CHECK_TIMEOUT:g} s"
-        elif r[0] != 0 and CHECKER_DOWN.search(r[2] or ""):
-            why = (r[2] or "").strip().splitlines()[-1]
-        else:
-            return r
-        if not waits or timeouts:
-            return None, "", why
-        time.sleep(waits.pop(0))
-
-
-def check(src, files, art):
-    """herdr-app check on a staged copy (with its artifact.js), in light and in dark.
-    Returns (error text or None, [warnings], why it wasn't drawn or None). When Herdr's checker can't run (it doesn't
-    connect, or hangs), a recipe (its schema checked here, drawn by the shared recipe view) is still published, with
-    why; a custom panel is not."""
-    if is_recipe(files):
-        bad = recipe_problems(src, files)
-        if bad:
-            return "\n".join(bad[:20]), [], None
-    if not shutil.which("herdr-app"):
-        return None, [], None
-    specs = {}
-    with tempfile.TemporaryDirectory(prefix="herdr-artifact-") as d:
-        for look in ("dark", "light"):
-            stage = os.path.join(d, look, f"art-{art['id']}")
-            copy_files(src, files, stage)
-            if is_recipe(files):
-                recipe_parts(stage)
-            with open(os.path.join(stage, "artifact.js"), "w") as f:
-                f.write(helper(art, f"art-{art['id']}", None))
-            if look == "light":
-                stage_theme(stage, True)
-            code, stdout, stderr = check_tries(stage)
-            if code is None:
-                if is_recipe(files):
-                    return None, [], stderr
-                return (f"Herdr couldn't draw it to check ({stderr}). Try again in a minute; if it keeps failing, "
-                        "restart Herdr."), [], None
-            if code != 0:
-                text = stderr.strip() or stdout.strip() or "herdr-app check failed"
-                text = "\n".join(l for l in text.replace(stage + "/", "").replace(SHIM_NAME, "herdr").splitlines()
-                                 if not l.startswith("check failed:")).strip()
-                return (f"In {look}: {text}" if look == "light" else text), [], None
-            specs[look] = stdout
-    try:
-        return None, review(specs), None
-    except Exception:  # a spec this version can't read: the load check above still stands
-        return None, [], None
-
-
-# ---- what the check reads in the built UI ------------------------------------------------------
-# `herdr-app check --print-spec` prints the element tree: one element a line, indented, its style
-# calls after it (`.p[Number(16.0)] .bg[Str("#17191d")]`), text as `text "..."`.
-
-def spec_args(s):
+def files_of(d):
+    """A kept version's own files (what its page is made of)."""
     out = []
-    for m in re.finditer(r'(Number|Str|Bool)\((".*?(?<!\\)"|[^)]*)\)', s):
-        kind, v = m.groups()
-        if kind == "Number":
-            try:
-                out.append(float(v))
-            except ValueError:
-                out.append(v)
-        elif kind == "Str":
-            try:
-                out.append(json.loads(v))
-            except ValueError:
-                out.append(v.strip('"'))
-        else:
-            out.append(v == "true")
-    return out
+    for root, dirs, names in os.walk(d):
+        dirs[:] = [x for x in dirs if not x.startswith(".")]
+        out += [os.path.relpath(os.path.join(root, n), d) for n in names if not n.startswith(".")]
+    return sorted(out)
 
 
-def spec_calls(rest):
-    """The `.name[args]` calls of one line; `:hover(...)` and other `:` parts are skipped."""
-    calls, i, n = {}, 0, len(rest)
-    while i < n:
-        c = rest[i]
-        if c in ".:" and i + 1 < n and (rest[i + 1].isalpha() or rest[i + 1] == "_"):
-            j = i + 1
-            while j < n and (rest[j].isalnum() or rest[j] == "_"):
-                j += 1
-            name, args = rest[i + 1:j], []
-            if j < n and rest[j] in "[(":
-                open_, close = rest[j], "]" if rest[j] == "[" else ")"
-                depth, k, quote = 0, j, False
-                while k < n:
-                    ch = rest[k]
-                    if ch == '"' and rest[k - 1] != "\\":
-                        quote = not quote
-                    elif not quote and ch == open_:
-                        depth += 1
-                    elif not quote and ch == close:
-                        depth -= 1
-                        if depth == 0:
-                            break
-                    k += 1
-                args = spec_args(rest[j + 1:k])
-                j = k + 1
-            if c == ".":
-                calls[name] = args
-            i = j
-        else:
-            i += 1
-    return calls
+# ---- serving a page on this machine (its picture, `preview`) ---------------------------------------
+# A page is served as the app serves it: from its own folder only, sandboxed (it runs its scripts but is no page of
+# whoever serves it), under a path that starts with a random token (any account here can reach a loopback port).
 
+TYPES = {".html": "text/html; charset=utf-8", ".htm": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
+         ".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8", ".json": "application/json",
+         ".map": "application/json", ".txt": "text/plain; charset=utf-8", ".md": "text/plain; charset=utf-8",
+         ".csv": "text/csv; charset=utf-8", ".xml": "application/xml", ".svg": "image/svg+xml", ".png": "image/png",
+         ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".avif": "image/avif",
+         ".ico": "image/x-icon", ".woff": "font/woff", ".woff2": "font/woff2", ".ttf": "font/ttf", ".otf": "font/otf",
+         ".wasm": "application/wasm", ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm",
+         ".mov": "video/quicktime", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav", ".ogg": "audio/ogg",
+         ".pdf": "application/pdf"}
+SANDBOX = "sandbox allow-scripts allow-forms allow-popups"
 
-def parse_spec(text):
-    root = {"name": "root", "calls": {}, "kids": [], "text": None}
-    stack = [(-1, root)]
-    for line in text.splitlines():
-        if not line.strip() or line.startswith("check "):
-            continue
-        ind = len(line) - len(line.lstrip(" "))
-        body = line.strip()
-        if body.startswith('text "'):
-            try:
-                txt = json.loads(body[5:])
-            except ValueError:
-                txt = body[6:-1]
-            node = {"name": "text", "calls": {}, "kids": [], "text": txt}
-        else:
-            name, _, rest = body.partition(" ")
-            node = {"name": name, "calls": spec_calls(rest), "kids": [], "text": None}
-            if name in ("image", "svg"):
-                m = re.match(r'"((?:[^"\\]|\\.)*)"', rest)
-                node["src"] = m.group(1) if m else None
-        while stack[-1][0] >= ind:
-            stack.pop()
-        stack[-1][1]["kids"].append(node)
-        stack.append((ind, node))
-    return root["kids"][0] if root["kids"] else None
-
-
-def num(calls, name, default=0.0):
-    v = calls.get(name)
-    return v[0] if v and isinstance(v[0], (int, float)) else default
-
-
-def words(node, limit=40):
-    """The first text inside an element, to name it."""
-    if node["text"]:
-        return node["text"].strip()[:limit]
-    for k in node["kids"]:
-        w = words(k, limit)
-        if w:
-            return w
-    return ""
-
-
-def label(node):
-    ident = node["calls"].get("id")
-    w = words(node)
-    return f"“{w}”" if w else (f"#{ident[0]}" if ident else node["name"])
-
-
-def min_width(node):
-    """About the narrowest the element can get: fixed widths and rows of them, plus padding.
-    Text wraps; truncated, clipped and min_w(0) elements shrink. Returns (px, element that sets it)."""
-    c = node["calls"]
-    if node["name"] == "text":
-        return 0.0, None
-    fixed = max(num(c, "w"), num(c, "size"), num(c, "min_w"))
-    pad = num(c, "p") * 2 + num(c, "px") * 2 + num(c, "pl") + num(c, "pr")
-    pad += 2 * (num(c, "border") or (1 if "border_1" in c else 2 if "border_2" in c else 0))
-    shrinks = any(k in c for k in ("truncate", "overflow_hidden", "overflow_x_hidden", "overflow_scroll", "overflow_x_scroll",
-                                   "overflow_x_scrollbar", "overflow_scrollbar"))
-    kids = [min_width(k) for k in node["kids"]]
-    row = node["name"] == "h_flex" or "flex_row" in c or ("flex" in c and "flex_col" not in c and node["name"] == "div")
-    if not kids or shrinks:
-        content, who = 0.0, None
-    elif row and "flex_wrap" not in c:
-        gap = num(c, "gap_x") or num(c, "gap")
-        content = sum(k[0] for k in kids) + gap * (len(kids) - 1)
-        who = node if sum(1 for k in kids if k[0] > 0) > 1 else max(kids, key=lambda k: k[0])[1]
-    else:
-        content, who = max(kids, key=lambda k: k[0])
-    content += pad
-    if "min_w" in c and num(c, "min_w") == 0 and "w" not in c and "size" not in c:
-        return 0.0, None
-    if fixed >= content:
-        return fixed, (node if fixed > 0 else None)
-    return content, who
-
-
-def rgba(color):
-    s = str(color or "").strip().lstrip("#")
-    if not re.fullmatch(r"[0-9a-fA-F]{3,8}", s) or len(s) not in (3, 4, 6, 8):
+def span(header, size):
+    """A Range header's one span of a file size bytes long: (start, end) with end included, "bad" when it can't be met,
+    None for the whole file (service/media.ts's span, the same rules)."""
+    m = re.fullmatch(r"bytes=(\d*)-(\d*)", (header or "").strip())
+    if not m or not (m.group(1) or m.group(2)):
         return None
-    if len(s) in (3, 4):
-        s = "".join(ch * 2 for ch in s)
-    r, g, b = (int(s[i:i + 2], 16) for i in (0, 2, 4))
-    a = int(s[6:8], 16) / 255 if len(s) == 8 else 1.0
-    return r, g, b, a
+    if not m.group(1):
+        start, end = max(0, size - int(m.group(2))), size - 1
+    else:
+        start, end = int(m.group(1)), (min(int(m.group(2)), size - 1) if m.group(2) else size - 1)
+    return "bad" if start > end or start >= size else (start, end)
 
 
-def over(top, under):
-    r, g, b, a = top
-    return tuple(round(top[i] * a + under[i] * (1 - a)) for i in range(3)) + (1.0,)
+def page_file(base, rel):
+    """The file a page's path names inside its folder, or None: no dot files, nothing outside, a folder is its index.html."""
+    rel = rel.lstrip("/")
+    if not rel or rel.endswith("/"):
+        rel += PAGE
+    parts = rel.split("/")
+    if any(p in ("", "..") or p.startswith(".") for p in parts):
+        return None
+    base = os.path.realpath(base)
+    p = os.path.realpath(os.path.join(base, *parts))
+    if os.path.isdir(p):
+        p = os.path.join(p, PAGE)
+    return p if p.startswith(base + os.sep) and os.path.isfile(p) else None
 
 
-def contrast(x, y):
-    def lum(c):
-        def ch(v):
-            v /= 255
-            return v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4
-        return 0.2126 * ch(c[0]) + 0.7152 * ch(c[1]) + 0.0722 * ch(c[2])
-    a, b = sorted((lum(x), lum(y)), reverse=True)
-    return (a + 0.05) / (b + 0.05)
+def page_server(resolve, on_request=None):
+    """An HTTP server on 127.0.0.1 (a free port) for pages: resolve(path after the token) -> a file's path, a
+    (code, body, type) answer, or None. Returns (server, token); its links start http://127.0.0.1:<port>/<token>/."""
+    import hmac
+    import http.server
+    token = secrets.token_urlsafe(24)
+
+    class H(http.server.BaseHTTPRequestHandler):
+        server_version = "herdr-artifact"
+
+        def log_message(self, *_a):
+            pass
+
+        def send(self, code, body, ctype, extra=None):
+            if isinstance(body, str):
+                body = body.encode()
+            self.send_response(code)
+            for k, v in {"content-type": ctype, "content-length": str(len(body)), "x-content-type-options": "nosniff",
+                         "cache-control": "no-store", "referrer-policy": "no-referrer", "content-security-policy": SANDBOX,
+                         "access-control-allow-origin": "*", **(extra or {})}.items():
+                self.send_header(k, v)
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
+        def do_HEAD(self):
+            self.do_GET()
+
+        def do_GET(self):
+            if on_request:
+                on_request()
+            if (self.headers.get("host") or "").rsplit(":", 1)[0] not in ("127.0.0.1", "localhost"):
+                return self.send(403, "Only on this machine.", "text/plain")
+            path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
+            given, _, rest = path.lstrip("/").partition("/")
+            if not hmac.compare_digest(given.encode(), token.encode()):
+                return self.send(403, "This link needs its token: `herdr-artifact preview <id>` gives the whole link.", "text/plain")
+            p = resolve(rest)
+            if isinstance(p, tuple):
+                return self.send(*p)
+            if not p:
+                return self.send(404, "No such file.", "text/plain")
+            size = os.path.getsize(p)
+            part = span(self.headers.get("range"), size)
+            ctype = TYPES.get(os.path.splitext(p)[1].lower(), "application/octet-stream")
+            if part == "bad":
+                return self.send(416, b"", ctype, {"content-range": f"bytes */{size}"})
+            start, end = part or (0, size - 1)
+            with open(p, "rb") as f:
+                f.seek(start)
+                body = f.read(end - start + 1)
+            return self.send(206 if part else 200, body, ctype,
+                             {"accept-ranges": "bytes", **({"content-range": f"bytes {start}-{end}/{size}"} if part else {})})
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    srv.daemon_threads = True
+    return srv, token
 
 
-def hard_to_read(node, fg=None, bg=None, out=None):
-    """Text whose color is too close to what's behind it: [(text, fg, bg, ratio)]."""
-    out = [] if out is None else out
-    c = node["calls"]
-    if "bg" in c and rgba(c["bg"][0] if c["bg"] else None):
-        mine = rgba(c["bg"][0])
-        bg = over(mine, bg) if bg else (mine if mine[3] >= 1 else None)
-    if "text_color" in c and rgba(c["text_color"][0] if c["text_color"] else None):
-        fg = rgba(c["text_color"][0])
-    if node["name"] == "text" and node["text"] and node["text"].strip() and fg and bg:
-        shown = over(fg, bg)
-        ratio = contrast(shown, bg)
-        if ratio < 2.2:
-            out.append((node["text"].strip()[:40], "#%02x%02x%02x" % shown[:3], "#%02x%02x%02x" % bg[:3], ratio))
-    for k in node["kids"]:
-        hard_to_read(k, fg, bg, out)
+# ---- a picture of the page (the app's tile) -------------------------------------------------------
+
+def chrome_bin():
+    """A Chrome to take the picture with: $HERDR_ARTIFACT_CHROME (empty: none), the task browser's own (agent-browser's
+    Chrome for Testing, as herdr-browser installs it), else the machine's. None: no picture."""
+    named = os.environ.get("HERDR_ARTIFACT_CHROME")
+    if named is not None:
+        return named if named and os.access(named, os.X_OK) else None
+    found = []
+    for base in (os.path.join(HOME, ".agent-browser", "browsers"),):
+        for pat in ("chrome-*/chrome", "chrome-*/*/chrome", "chrome-*/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
+                    "chrome-*/*/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"):
+            found += [p for p in glob.glob(os.path.join(base, pat)) if os.path.isfile(p) and os.access(p, os.X_OK)]
+    if found:
+        ver = lambda p: [int(x) for x in re.findall(r"\d+", os.path.relpath(p, os.path.join(HOME, ".agent-browser", "browsers")).split(os.sep)[0])]
+        return max(found, key=ver)
+    for n in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser"):
+        p = shutil.which(n)
+        if p:
+            return p
+    mac = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    return mac if os.access(mac, os.X_OK) else None
+
+
+def shoot(folder):
+    """Pictures of the page in `folder`, light and dark, at SHOT's size: {THUMB: path, THUMB_DARK: path} of the ones
+    taken, in a temp folder the caller removes ("dir"). Empty when no browser is here or it didn't draw: a publish
+    never fails for its picture."""
+    chrome = chrome_bin()
+    if not chrome:
+        return {}
+    import threading
+    srv, token = page_server(lambda rel: page_file(folder, rel))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    tmp = tempfile.mkdtemp(prefix="herdr-artifact-shot-")
+    url = f"http://127.0.0.1:{srv.server_address[1]}/{token}/"
+    out = {"dir": tmp}
+
+    def start(name, dark, sandbox=True):
+        args = [chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check",
+                "--disable-extensions", "--mute-audio", f"--user-data-dir={os.path.join(tmp, 'profile-' + name)}",
+                f"--window-size={SHOT[0]},{SHOT[1]}", "--virtual-time-budget=4000", f"--screenshot={os.path.join(tmp, name)}"]
+        if dark:
+            args += ["--force-dark-mode", "--blink-settings=preferredColorScheme=0"]
+        if not sandbox:
+            args.append("--no-sandbox")
+        return subprocess.Popen(args + [url], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def ok(name):
+        try:
+            return png_size(os.path.join(tmp, name))[0] > 0
+        except (OSError, ValueError, struct.error):
+            return False
+    try:
+        for sandbox in (True, False):  # a machine that refuses Chrome's own sandbox (root, AppArmor): once more without
+            todo = [(n, d) for n, d in ((THUMB, False), (THUMB_DARK, True)) if not ok(n)]
+            if not todo:
+                break
+            ps = []
+            with contextlib.suppress(OSError):
+                ps = [start(n, d, sandbox) for n, d in todo]
+            end = time.time() + SHOT_WAIT
+            for p in ps:
+                try:
+                    p.wait(timeout=max(1, end - time.time()))
+                except subprocess.TimeoutExpired:
+                    p.kill()
+        for n in (THUMB, THUMB_DARK):
+            if ok(n):
+                out[n] = os.path.join(tmp, n)
+    finally:
+        srv.shutdown()
+        srv.server_close()
     return out
 
 
-def review(specs):
-    """What the check found in the built UI, as warnings for the agent."""
-    warn = []
-    dark = parse_spec(specs.get("dark", ""))
-    if dark is not None:
-        w, who = min_width(dark)
-        if w > NARROW:
-            row = who is not None and (who["name"] == "h_flex" or "flex" in who["calls"]) and len(who["kids"]) > 1
-            where = f" {'The row with ' if row else ''}{label(who)} is too wide." if who is not None else ""
-            warn.append(f"At {NARROW} px wide it doesn't fit: it needs about {round(w)} px.{where} Let it wrap, shrink or scroll.")
-    for look in ("light", "dark"):
-        tree = parse_spec(specs.get(look, ""))
-        if tree is None:
-            continue
-        seen = set()
-        # Behind the panel: the block's theme background and foreground (graphite / paper).
-        base = ("#ffffff", "#1b1b1e") if look == "light" else ("#17191d", "#eeeeef")
-        for text, fg, bg, ratio in hard_to_read(tree, rgba(base[1]), rgba(base[0])):
-            if text in seen:
-                continue
-            seen.add(text)
-            warn.append(f"In {look}, “{text}” is hard to read: {fg} on {bg} ({ratio:.1f}:1). Use theme() colors.")
-            if len(seen) >= 4:
-                break
-    return warn[:8]
+def keep_shots(shots, dst):
+    """The pictures taken, put in a version's folder; True when it has its (light) picture."""
+    try:
+        for n in (THUMB, THUMB_DARK):
+            if shots.get(n):
+                shutil.copyfile(shots[n], os.path.join(dst, n))
+    except OSError:
+        pass
+    finally:
+        if shots.get("dir"):
+            shutil.rmtree(shots["dir"], ignore_errors=True)
+    return os.path.isfile(os.path.join(dst, THUMB))
 
 
 # ---- commands ----------------------------------------------------------------------------
 
 def public(a):
-    return {k: a.get(k) for k in ("id", "title", "version", "folder", "publisher", "task", "at", "created", "versions", "files")}
+    """An artifact as list and show give it."""
+    out = {k: a.get(k) for k in ("id", "title", "version", "folder", "publisher", "task", "at", "created", "versions", "files")}
+    last = (a.get("versions") or [{}])[-1]
+    return dict(out, proof=bool(a.get("proof")), pinned=bool(a.get("pinned")), thumb=bool(last.get("thumb")))
+
+
+def next_version(art):
+    return (art["versions"][-1]["v"] if art["versions"] else 0) + 1
+
+
+def trim(art):
+    """Only the last KEEP versions stay."""
+    for old in art["versions"][:-KEEP]:
+        shutil.rmtree(os.path.join(FILES, art["id"], f"v{old['v']}"), ignore_errors=True)
+    art["versions"] = art["versions"][-KEEP:]
 
 
 def cmd_publish(o):
     src, files = gather(o.dir)
-    custom = not is_recipe(files)
-    if custom and not getattr(o, "custom", False):
-        raise Fail(NOT_RECIPE.format(src=src))
-    # convert: a new version in its maker's name (its publisher and task stay)
-    as_maker = getattr(o, "as_maker", False)
-    who = {"terminal": None, "task": None} if as_maker else me()
+    who = me()
     loc = find_anywhere(o.id) if o.id and not o.folder else locate(o.folder)
-    # Drawn and checked first, with no lock held (#972): a check can take minutes under load, and the folder's lock held
-    # through it kept every other publish (and, before reads stopped locking, every preview) waiting. The lock is
-    # taken only to save, from the list as it is then.
     with Store(loc, write=False) as s:
         art = s.find(o.id) if o.id else None
-    if art:
-        title = o.title or art["title"]
-    else:
-        if not o.title:
-            raise Fail("Give it a title: --title \"Coverage by package\".")
-        title = o.title
-        base = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:24].strip("-") or "artifact"
-        while True:  # its files' folder, made now: the id is this publish's (another can't pick it meanwhile)
-            aid = f"{base}-{secrets.token_hex(2)}"
-            try:
-                os.makedirs(FILES, exist_ok=True)
-                os.mkdir(os.path.join(FILES, aid))
-                break
-            except FileExistsError:
-                pass
-            except OSError as e:  # a read-only store (a sandbox) says so, as an update does (#1108)
-                read_only(e)
-                raise
-        art = {"id": aid, "created": now(), "versions": []}
-    fresh = not o.id
+    if not art and not o.title:
+        raise Fail("Give it a title: --title \"Coverage by package\".")
+    as_proof = bool(getattr(o, "proof", False))
 
     def named(art, title):
         """(title, task): a task's agent names its task first, "HAT-2: Coverage by package"."""
         task = o.task or art.get("task") or who["task"]
         return (f"{task}: {title}" if task and not title.upper().startswith(task.upper()) else title), task
-    title, task = named(art, title)
-
-    def drop():
-        if fresh:
-            shutil.rmtree(os.path.join(FILES, art["id"]), ignore_errors=True)
-    if custom and PROOF.search(title):
-        drop()
-        raise Fail("A task's proof is always a recipe (recipe.json), so the person can open it on their phone too. "
-                   "`herdr-artifact guide` shows how (A task's proof).")
-    v = (art["versions"][-1]["v"] if art["versions"] else 0) + 1
-    draft = dict(art, title=title, version=v, folder=loc["folder"])
-    err, warnings, unchecked = check(src, files, draft)
-    if err:
-        drop()
-        raise Fail(f"herdr-app check failed, nothing was published:\n{err}")
-    with Store(loc) as s:
-        if fresh:
-            s.data["artifacts"].insert(0, art)
-        else:
-            art = s.find(o.id)  # as it is now: another publish may have saved a version meanwhile
-            v = (art["versions"][-1]["v"] if art["versions"] else 0) + 1
-            # its title and task too: what this one didn't give comes from that newest one, never the older read (#1108)
-            title, task = named(art, o.title or art["title"])
-        keep = os.path.join(FILES, art["id"], f"v{v}")
-        copy_files(src, files, keep)
-        # the stored copy is made ready for every browser (a poster, an mp4 for a clip no browser plays): SHEP-209
-        media_notes = []
-        if not custom:
-            files, media_notes = ready_media(keep, files)
-        at = now()
-        publisher = art.get("publisher") if as_maker else who["terminal"]
-        # each version's kind (the web draws a recipe, and shows a custom one's picture); older ones from their files
-        for x in art["versions"]:
-            if "kind" not in x and version_kind(art["id"], x["v"]):
-                x["kind"] = version_kind(art["id"], x["v"])
-        # a conversion keeps the artifact's time and place in the list (only its version is new)
-        art.update(title=title, version=v, folder=loc["folder"], publisher=publisher, task=task, at=art.get("at", at) if as_maker else at, files=files)
-        art["versions"].append({"v": v, "at": at, "publisher": publisher, "kind": "custom" if custom else "recipe",
-                                **({"note": o.note} if o.note else {})})
-        for old in art["versions"][:-KEEP]:
-            shutil.rmtree(os.path.join(FILES, art["id"], f"v{old['v']}"), ignore_errors=True)
-        art["versions"] = art["versions"][-KEEP:]
-        # Newest first.
-        if not as_maker:
+    title, task = named(art or {}, o.title or (art or {}).get("title"))
+    if as_proof and not task:
+        raise Fail("--proof needs the task it proves: --task SHOP-4.")
+    warnings = link_warnings(src, files)
+    # The picture first, with no lock held: it takes a few seconds, and the folder's lock held through it would keep
+    # every other publish waiting. The lock is taken only to save, from the list as it is then.
+    shots = shoot(src)
+    try:
+        if not art:
+            base = re.sub(r"[^a-z0-9]+", "-", o.title.lower()).strip("-")[:24].strip("-") or "artifact"
+            while True:  # its files' folder, made now: the id is this publish's (another can't pick it meanwhile)
+                aid = f"{base}-{secrets.token_hex(2)}"
+                try:
+                    os.makedirs(FILES, exist_ok=True)
+                    os.mkdir(os.path.join(FILES, aid))
+                    break
+                except FileExistsError:
+                    pass
+                except OSError as e:  # a read-only store (a sandbox) says so
+                    read_only(e)
+                    raise
+            art = {"id": aid, "created": now(), "versions": []}
+        with Store(loc) as s:
+            if not o.id:
+                s.data["artifacts"].insert(0, art)
+            else:
+                art = s.find(o.id)  # as it is now: another publish may have saved a version meanwhile
+                title, task = named(art, o.title or art["title"])
+            v = next_version(art)
+            keep = os.path.join(FILES, art["id"], f"v{v}")
+            try:
+                copy_files(src, files, keep)
+            except OSError as e:
+                read_only(e)
+                raise
+            thumb = keep_shots(shots, keep)
+            shots = {}
+            at = now()
+            art.update(title=title, version=v, folder=loc["folder"], publisher=who["terminal"], task=task, at=at, files=files)
+            # a task's proof stays on its task until the person keeps it; once kept it is an artifact like any other
+            if task and not art.get("kept") and (as_proof or PROOF.search(title)):
+                art["proof"] = True
+            art["versions"].append({"v": v, "at": at, "publisher": who["terminal"], **({"note": o.note} if o.note else {}),
+                                    **({"thumb": True} if thumb else {})})
+            trim(art)
             s.data["artifacts"].remove(art)
             s.data["artifacts"].insert(0, art)
-        s.dirty = True
-        installed = None if getattr(o, "no_install", False) else write_mod(keep, files, art, f"art-{art['id']}", publisher)
-        prune_versions(art)
-    out = dict(public(art), mod=f"art-{art['id']}", installed=bool(installed), warnings=warnings,
-               **({"unchecked": unchecked} if unchecked else {}), **({"notes": media_notes} if media_notes else {}))
+            s.dirty = True
+    finally:
+        if shots.get("dir"):
+            shutil.rmtree(shots["dir"], ignore_errors=True)
+    out = dict(public(art), warnings=warnings)
     if o.json:
         print(json.dumps(out))
     else:
         print(f"Published {art['id']} v{v}: {title}")
-        print("The person sees it in the Artifacts panel; your chat shows a card for it.")
-        if custom:
-            print("A custom panel: the web app on the person's phone shows only a picture of it, taken when the window "
-                  "shows this version. A recipe opens everywhere: make it one when you can.")
-        for n in media_notes:
-            print(f"Media: {n}")
-        if unchecked:
-            print(f"Herdr couldn't draw it to check ({unchecked}), so only its recipe was checked. "
-                  f"It is published. Draw it later, when the machine is less busy: herdr-artifact check {art['id']}")
-        elif warnings:
-            print(f"\nThe check (light, dark, {NARROW} px wide) found what to fix, then update it:")
-            for w in warnings:
-                print(f"  - {w}")
-        else:
-            print(f"Checked in light and dark and at {NARROW} px wide: nothing to fix. (The check reads the built UI; it doesn't take a picture.)")
-    return 0
-
-
-def cmd_check(o):
-    """Draws a published version again with `herdr-app check`, as publish does, changing nothing: for a publish whose
-    drawing was skipped because Herdr's checker couldn't start (#987)."""
-    with Store(find_anywhere(o.id), write=False) as s:
-        a = as_version(s.find(o.id), o.version)
-    if not shutil.which("herdr-app"):  # #1108: nothing draws it here, so nothing to say it drew
-        raise Fail("herdr-app isn't here: it draws the artifact to check it. Run this on a machine with Herdr's window.")
-    keep = os.path.join(FILES, a["id"], f"v{a['version']}")
-    keep, files = gather(keep, limits=False)
-    err, warnings, unchecked = check(keep, files, a)
-    out = {"id": a["id"], "version": a["version"], "ok": not err and not unchecked, "warnings": warnings,
-           **({"error": err} if err else {}), **({"unchecked": unchecked} if unchecked else {})}
-    if o.json:
-        print(json.dumps(out))
-    elif err:
-        print(f"v{a['version']} of {a['id']} doesn't draw:\n{err}\nFix it, then: herdr-artifact update {a['id']} <dir>")
-    elif unchecked:
-        print(f"Herdr still couldn't draw it ({unchecked}). Try again in a minute: herdr-artifact check {a['id']}")
-    elif warnings:
-        print(f"The check (light, dark, {NARROW} px wide) found what to fix in v{a['version']}, then update it:")
+        print("It's the proof of " + task + ": it shows on that task." if art.get("proof") else "The person sees it in Artifacts; your chat shows its tile.")
+        if not thumb:
+            print("No picture of it was taken (no browser here): its tile shows its title only.")
         for w in warnings:
-            print(f"  - {w}")
-    else:
-        print(f"v{a['version']} of {a['id']}: drawn in light and dark and at {NARROW} px wide, nothing to fix.")
-    return 1 if err else 2 if unchecked else 0
-
-
-def version_mod(base, v):
-    """An older version's mod: art-<id>--v3 (ids never hold "--")."""
-    return f"{base}--v{v}"
-
-
-def prune_versions(art, base=None):
-    """Removes installed older versions no longer kept (the last 20 are)."""
-    mods = os.path.join(APP, "mods")
-    base = base or f"art-{art['id']}"
-    kept = {str(v["v"]) for v in art.get("versions") or []}
-    try:
-        names = os.listdir(mods)
-    except OSError:
-        return
-    for n in names:
-        if n.startswith(base + "--v") and n[len(base) + 3:] not in kept:
-            shutil.rmtree(os.path.join(mods, n), ignore_errors=True)
+            print(f"Fix, then update it: {w}")
+        print(f"See it as the person does: herdr-artifact preview {art['id']}")
+    return 0
 
 
 def cmd_list(o):
@@ -1121,7 +636,8 @@ def cmd_list(o):
                         lists.append(json.load(fh))
                 except (OSError, ValueError):
                     pass
-        arts = sorted((a for d in lists for a in d.get("artifacts") or []), key=lambda a: -(a.get("at") or 0))
+        arts = sorted((dict(a, folder=a.get("folder") or d.get("folder")) for d in lists if isinstance(d, dict) for a in d.get("artifacts") or []),
+                      key=lambda a: -(a.get("at") or 0))
         out = {"artifacts": [public(a) for a in arts]}
     else:
         loc = locate(o.folder)
@@ -1134,7 +650,8 @@ def cmd_list(o):
     if not out["artifacts"]:
         print("No artifacts.")
     for a in out["artifacts"]:
-        print(f"{a['id']:<32} v{a['version']:<3} {a['title']}")
+        marks = "".join(f"  ({w})" for w, on in (("pinned", a["pinned"]), ("proof", a["proof"])) if on)
+        print(f"{a['id']:<32} v{a['version']:<3} {a['title']}{marks}")
     return 0
 
 
@@ -1150,11 +667,12 @@ def cmd_show(o):
     with Store(loc, write=False) as s:
         a = s.find(o.id)
     if o.json:
-        print(json.dumps(public(a)))
+        print(json.dumps(dict(public(a), path=os.path.join(FILES, a["id"], f"v{a['version']}"))))
     else:
-        print(f"{a['title']}  ({a['id']}, v{a['version']})")
+        print(f"{a['title']}  ({a['id']}, v{a['version']})" + ("  proof" if a.get("proof") else "") + ("  pinned" if a.get("pinned") else ""))
         for v in reversed(a["versions"]):
             print(f"  v{v['v']}  {time.strftime('%Y-%m-%d %H:%M', time.localtime(v['at'] / 1000))}  {v.get('note', '')}")
+        print(f"  files: {os.path.join(FILES, a['id'], 'v' + str(a['version']))}")
     return 0
 
 
@@ -1165,98 +683,80 @@ def cmd_rm(o):
         s.data["artifacts"].remove(a)
         s.dirty = True
     shutil.rmtree(os.path.join(FILES, o.id), ignore_errors=True)
-    shutil.rmtree(os.path.join(APP, "mods", f"art-{o.id}"), ignore_errors=True)
-    prune_versions({"id": o.id, "versions": []})
     print(json.dumps({"removed": o.id}) if o.json else f"Removed {o.id}.")
     return 0
 
 
-def as_version(a, v):
-    """The record as version v shows it (v None: the latest). Fails when v isn't kept."""
-    if not v or v == a["version"]:
-        return dict(a, latest=a["version"])
-    if not any(x["v"] == v for x in a.get("versions") or []) or not os.path.isdir(os.path.join(FILES, a["id"], f"v{v}")):
-        raise Fail(f"v{v} of {a['id']} isn't kept (only the last {KEEP} versions are). `herdr-artifact show {a['id']}` lists them.")
-    return dict(a, version=v, latest=a["version"], files=None)
-
-
-def cmd_pack(o):
-    """A version's files (default: the current one) as a tar on stdout, with its record (for pull)."""
+def change(o, fn, said):
+    """One change to an artifact's record, saved; prints what `said(a)` says."""
     loc = find_anywhere(o.id)
-    with Store(loc, write=False) as s:
-        a = as_version(s.find(o.id), o.version)
-    d = os.path.join(FILES, a["id"], f"v{a['version']}")
-    with open(os.path.join(d, ".record.json"), "w") as f:
-        json.dump(dict(public(a), latest=a["latest"]), f)
-    sys.stdout.flush()
-    return subprocess.call(["tar", "-C", d, "-cf", "-", "."])
+    with Store(loc) as s:
+        a = s.find(o.id)
+        fn(a)
+        s.dirty = True
+    print(json.dumps(public(a)) if o.json else said(a))
+    return 0
 
 
-def markup_hash():
-    """The version of Mark up and its helpers: a change to any of them reinstalls the artifacts that carry it."""
-    h = hashlib.sha1()
-    try:
-        for p in [MARKUP] + [os.path.join(os.path.dirname(MARKUP), x) for x in MARKUP_HELPERS]:
-            with open(p, "rb") as f:
-                h.update(f.read())
-    except OSError:
-        return ""
-    return h.hexdigest()[:12]
+def cmd_rename(o):
+    title = " ".join(o.title.split())
+    if not title:
+        raise Fail("Give it a name.")
+    return change(o, lambda a: a.update(title=title[:200]), lambda a: f"{a['id']} is now: {a['title']}")
 
 
-def current(mod, version):
-    """Whether the installed mod is this version with this app's Mark up."""
-    try:
-        with open(os.path.join(APP, "mods", mod, ".version")) as f:
-            got = f.read().split()
-    except OSError:
-        return False
-    h = markup_hash()
-    return got == [str(version), h] if h else got[:1] == [str(version)]
+def cmd_pin(o):
+    return change(o, lambda a: a.update(pinned=True), lambda a: f"Pinned {a['id']}.")
 
 
-def pull(aid, machine, version=None):
-    """Copies another machine's artifact into this window's app as art-<machine>-<id> (an older
-    version as art-<machine>-<id>--v<n>), unless it's already there. Returns the mod name."""
-    base = f"art-{re.sub(r'[^A-Za-z0-9_-]+', '-', machine)}-{aid}"
-    if version:
-        # pack --version needs this herdr-artifact there: --on installs it when it differs.
-        run([sys.executable, os.path.realpath(__file__), "--on", machine, "--version"])
-    with tempfile.TemporaryDirectory(prefix="herdr-artifact-") as d:
-        p = subprocess.run(["hc", "exec", "--on", machine, "--", "sh", "-c", 'exec "$HOME/.local/bin/herdr-artifact" pack "$@"', "x", aid,
-                            *(["--version", str(version)] if version else [])],
-                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if p.returncode != 0:
-            raise Fail(f"Couldn't fetch {aid} from {machine}: {p.stderr.decode().strip() or 'herdr-artifact missing there?'}")
-        t = subprocess.run(["tar", "-C", d, "-xf", "-"], input=p.stdout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        if t.returncode != 0:
-            raise Fail(f"Couldn't unpack {aid} from {machine}.")
-        with open(os.path.join(d, ".record.json")) as f:
-            art = json.load(f)
-        latest = art.get("latest") or art["version"]
-        mod = base if art["version"] == latest else version_mod(base, art["version"])
-        if current(mod, art["version"]):
-            return mod
-        _, files = gather(d)
-        agent = f"{machine}/{art['publisher']}" if art.get("publisher") else None
-        write_mod(d, files, art, mod, agent, machine)
-    return mod
+def cmd_unpin(o):
+    return change(o, lambda a: a.pop("pinned", None), lambda a: f"Unpinned {a['id']}.")
 
 
-def local_mod(aid, version=None):
-    """This machine's artifact as this app's mod art-<id> (an older version as art-<id>--v<n>),
-    written if it isn't there yet (or was installed before this app's Mark up)."""
-    loc = find_anywhere(aid)
-    with Store(loc, write=False) as s:
-        a = as_version(s.find(aid), version)
-    mod = f"art-{aid}" if a["version"] == a["latest"] else version_mod(f"art-{aid}", a["version"])
-    if not current(mod, a["version"]):
-        d = os.path.join(FILES, a["id"], f"v{a['version']}")
-        write_mod(d, a.get("files") or gather(d)[1], a, mod, a.get("publisher"))
-    return mod
+def cmd_keep(o):
+    """A task's proof kept as an artifact of its own: it shows in Artifacts from now on."""
+    def keep(a):
+        a.pop("proof", None)
+        a["kept"] = True
+    return change(o, keep, lambda a: f"Kept {a['id']}: it's in Artifacts now.")
 
 
-# ---- notes from the person (the viewer's Mark up) ------------------------------------------------
+def kept_version(a, v):
+    """The folder of version v of an artifact (v None: the latest). Fails when it isn't kept."""
+    v = v or a["version"]
+    d = os.path.join(FILES, a["id"], f"v{v}")
+    if not any(x["v"] == v for x in a.get("versions") or []) or not os.path.isdir(d):
+        raise Fail(f"v{v} of {a['id']} isn't kept (only the last {KEEP} versions are). `herdr-artifact show {a['id']}` lists them.")
+    return v, d
+
+
+def cmd_restore(o):
+    """An earlier version made the newest again: a copy of it as a new version (nothing is lost)."""
+    loc = find_anywhere(o.id)
+    with Store(loc) as s:
+        a = s.find(o.id)
+        n, src = kept_version(a, o.version)
+        if n == a["version"]:
+            raise Fail(f"v{n} is the newest version of {a['id']} already.")
+        v = next_version(a)
+        dst = os.path.join(FILES, a["id"], f"v{v}")
+        try:
+            shutil.copytree(src, dst, ignore=shutil.ignore_patterns(OLD))
+        except OSError as e:
+            read_only(e)
+            raise
+        was = next(x for x in a["versions"] if x["v"] == n)
+        at = now()
+        a.update(version=v, at=at, files=files_of(dst))
+        a["versions"].append({"v": v, "at": at, "publisher": was.get("publisher"), "note": f"v{n} restored", "restored": n,
+                              **({"thumb": True} if os.path.isfile(os.path.join(dst, THUMB)) else {})})
+        trim(a)
+        s.data["artifacts"].remove(a)
+        s.data["artifacts"].insert(0, a)
+        s.dirty = True
+    print(json.dumps(public(a)) if o.json else f"Restored v{n} of {a['id']} as v{v}.")
+    return 0
+
 
 def live_terminals():
     r = run(["hc", "ls", "--json"])
@@ -1291,24 +791,57 @@ def task_worker(task, folder, live):
     return None
 
 
+def assistant_for(folder, live):
+    """The live Assistant of the space this folder is: the one working in it, else in one of its repo's worktrees."""
+    r = run(["hc", "ls", "--label", "herdr.role=coordinator", "--json"])
+    try:
+        d = json.loads(r.stdout)
+    except ValueError:
+        return None
+    rows = d if isinstance(d, list) else d.get("terminals", [])
+    real, near = os.path.realpath(folder), None
+    for k in rows:
+        addr = k.get("address")
+        if not addr or "/" in addr or addr not in live:
+            continue
+        cwd = k.get("cwd")
+        if not cwd:
+            try:
+                cwd = json.loads(run(["hc", "get", addr, "--json"]).stdout).get("cwd")
+            except (ValueError, AttributeError):
+                cwd = None
+        if not cwd:
+            continue
+        if os.path.realpath(cwd) == real:
+            return addr
+        with contextlib.suppress(Fail, OSError):
+            if not near and os.path.isdir(cwd) and locate(cwd)["folder"] == real:
+                near = addr
+    return near
+
+
 def keeper(a, folder):
-    """Who keeps an artifact: the agent that published it, while it runs; else its task's worker."""
+    """Who hears the person about an artifact: the agent that made it, while it runs; else its task's worker; else,
+    with that agent gone, the Assistant of its space (the space's chat)."""
     live = live_terminals()
     if a.get("publisher") in live:
         return a["publisher"], "made it"
     w = task_worker(a.get("task"), folder, live)
     if w:
         return w, f"works on {a['task']}"
-    raise Fail("The agent that made this artifact has ended" + (f", and {a['task']} has no agent running" if a.get("task") else "") + ".")
+    c = assistant_for(folder, live)
+    if c:
+        return c, "is its space's Assistant (the agent that made it has ended)"
+    raise Fail("The agent that made this page has ended, and its space has no chat running. Open the space's chat, then send it again.")
 
 
 def attr(s):
     return re.sub(r"[<>]", "", str(s)).replace('"', "”")
 
 
-# ---- pictures without ImageMagick (#1054) ------------------------------------------------------
-# A stock machine may have no ImageMagick and no PIL: an 8-bit RGB or RGBA PNG (what herdr-app shot and herdr-browser
-# screenshot write) is cut and outlined here in plain Python. ImageMagick is used when it is there (faster).
+# ---- PNGs in plain Python (#1054) ------------------------------------------------------------
+# A stock machine has no ImageMagick and no PIL: an 8-bit RGB or RGBA PNG (what a browser's screenshot writes) is read,
+# cut and written here.
 
 def png_read(path, upto=None):
     """(width, height, channels, rows) of an 8-bit RGB or RGBA PNG, not interlaced; rows (bytearrays) only down to
@@ -1440,45 +973,6 @@ def cmd_crop(o):
     return 0
 
 
-def crop_shot(shot, panel, area, out):
-    """The artifact's panel cut from a window shot (logical px rects), the spot outlined (area None:
-    just the panel). The shot is at the window's physical size: its scale is the shot's width over
-    the window's (window.json), snapped to a quarter. ImageMagick when it is there, else plain Python (#1054)."""
-    magick = shutil.which("magick")
-    try:
-        pw = int(run(["magick", "identify", "-format", "%w", shot]).stdout.strip()) if magick else png_size(shot)[0]
-        with open(os.path.join(APP, "window.json")) as f:
-            ww = float(json.load(f)["bounds"][2])
-        scale = max(1.0, round(pw / ww * 4) / 4)
-    except (ValueError, OSError, KeyError, IndexError, TypeError, ZeroDivisionError, struct.error):
-        return False
-    px, py, pw_, ph = (round(v * scale) for v in panel)
-    if area is None:
-        if not magick:
-            try:
-                return png_cut(shot, out, px, py, pw_, ph, longest=1600)
-            except (OSError, ValueError, struct.error, zlib.error):
-                return False
-        r = run(["magick", shot, "-crop", f"{pw_}x{ph}+{px}+{py}", "+repage", "-resize", "1600x1600>", out])
-        return r.returncode == 0 and os.path.isfile(out)
-    ax, ay, aw, ah = ((v - o) * scale for v, o in zip(area, (panel[0], panel[1], 0, 0)))
-    small = aw < 8 * scale and ah < 8 * scale
-    cx, cy = ax + aw / 2, ay + ah / 2
-    if not magick:
-        try:
-            return png_cut(shot, out, px, py, pw_, ph, stroke=max(2, round(2 * scale)),
-                           outline=("circle", cx, cy, 14 * scale) if small else ("rect", ax, ay, ax + aw, ay + ah))
-        except (OSError, ValueError, struct.error, zlib.error):
-            return False
-    if small:
-        draw = f"circle {cx:.0f},{cy:.0f} {cx + 14 * scale:.0f},{cy:.0f}"
-    else:
-        draw = f"rectangle {ax:.0f},{ay:.0f} {ax + aw:.0f},{ay + ah:.0f}"
-    r = run(["magick", shot, "-crop", f"{pw_}x{ph}+{px}+{py}", "+repage", "-fill", "none", "-stroke", "#2f81f7",
-             "-strokewidth", str(max(2, round(2 * scale))), "-draw", draw, out])
-    return r.returncode == 0 and os.path.isfile(out)
-
-
 def rect(s):
     try:
         v = [float(x) for x in s.split(",")]
@@ -1489,72 +983,71 @@ def rect(s):
     return v
 
 
-def cmd_note(o):
-    """The person's note on an artifact (the viewer's Mark up), sent to the agent that keeps it."""
-    image = o.image
-    if o.shot:
-        os.makedirs(NOTES, exist_ok=True)
-        for f in os.listdir(NOTES):  # a day later they go
-            try:
-                if os.path.getmtime(os.path.join(NOTES, f)) < time.time() - 86400:
-                    os.remove(os.path.join(NOTES, f))
-            except OSError:
-                pass
-        out = os.path.join(NOTES, f"{o.id}-v{o.version or 0}-{now()}.png")
-        try:
-            if o.panel and o.area and crop_shot(o.shot, rect(o.panel), rect(o.area), out):
-                image = out
-        finally:
-            try:
-                os.remove(o.shot)
-            except OSError:
-                pass
-    if o.machine:
-        args = ["note", o.id, "--text", o.text, "--json"] + (["--version", str(o.version)] if o.version else []) + (["--spot", o.spot] if o.spot else [])
-        if image:
-            rel = f".herdr/artifacts/notes/{os.path.basename(image)}"
-            with open(image, "rb") as f:
-                w = subprocess.run(["hc", "file", "write", "--on", o.machine, rel], input=f.read(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if w.returncode == 0:
-                args += ["--image", f"~/{rel}"]
-        # Through --on, which installs this herdr-artifact there first.
-        r = run([sys.executable, os.path.realpath(__file__), "--on", o.machine, *args])
-        try:
-            out = json.loads(r.stdout.strip().splitlines()[-1])
-        except (ValueError, IndexError):
-            raise Fail(r.stderr.strip() or f"Couldn't reach {o.machine}.")
-        if out.get("error"):
-            raise Fail(plain_error(out["error"])[1])
-        out["to"] = f"{o.machine}/{out['to']}"
-        print(json.dumps(out) if o.json else out.get("said") or f"Sent to {out['to']}.")
-        return 0
+# ---- the person's words to the agent (a note on the page, an answer from it) ----------------------------
+
+def spot_of(s):
+    """A pin "x,y" as fractions of the page's width and height (0 to 1) -> (x, y, words), or None when it's words."""
+    m = re.fullmatch(r"\s*(-?\d*\.?\d+)\s*,\s*(-?\d*\.?\d+)\s*", s or "")
+    if not m:
+        return None
+    x, y = (min(1.0, max(0.0, float(v))) for v in m.groups())
+    third = lambda v: min(2, int(v * 3))
+    yw, xw = ("top", "middle", "bottom")[third(y)], ("left", "center", "right")[third(x)]
+    near = "the middle" if (yw, xw) == ("middle", "center") else f"the middle {xw}" if yw == "middle" else f"the {yw} center" if xw == "center" else f"the {yw} {xw}"
+    return x, y, f"{round(x * 100)}% from the left, {round(y * 100)}% from the top of the page (near {near})"
+
+
+def tell(o, extra, lines):
+    """The person's words about an artifact, sent to who keeps it as <hc from="artifact" …>; held for an agent that
+    waits on a question (typing would answer it)."""
     loc = find_anywhere(o.id)
     with Store(loc, write=False) as s:
         a = s.find(o.id)
     v = o.version or a["version"]
     to, why = keeper(a, loc["folder"])
-    on = f' on="{attr(o.spot)}"' if o.spot else ""
-    lines = [o.text.strip()]
     if v != a["version"]:
-        lines.append(f"(Written on v{v}; the latest is v{a['version']}.)")
-    if image:
-        lines.append(f"The artifact as they saw it, the spot outlined in blue: {image}")
-    body = f'<hc from="artifact" id="{attr(a["id"])}" version="{v}" title="{attr(a["title"])}"{on}>\n' + "\n\n".join(lines) + "\n</hc>"
+        lines = lines + [f"(Written on v{v}; the latest is v{a['version']}.)"]
+    if why.startswith("is its space"):
+        lines = lines + [f"(The agent that made this page has ended, so this comes to you. Its files: {os.path.join(FILES, a['id'], 'v' + str(a['version']))}; "
+                         f"change a copy and `herdr-artifact update {a['id']} <dir>`.)"]
+    body = f'<hc from="artifact" id="{attr(a["id"])}" version="{v}" title="{attr(a["title"])}"{extra}>\n' + "\n\n".join(lines) + "\n</hc>"
     r = run(["hc", "send", to, body])
+    out = {"to": to, "why": why, "version": v}
     if r.returncode != 0:
         kind, msg = plain_error(r.stderr.strip() or r.stdout.strip())
         if kind != "blocked":
             raise Fail(msg or f"Couldn't send it to {to}.")
-        # On a question card (#1213): typing would answer it. Held as tell-assistant holds, herdr-task's tick sends it
-        # once the question is answered, in order with any other held note.
         if not hold_note(to, body):
-            raise Fail("It's waiting on a question, and the note couldn't be kept for later: send it again once that's answered.")
-        out = {"to": to, "why": why, "version": v, "image": image, "held": True, "said": HELD_NOTE}
+            raise Fail("It's waiting on a question, and this couldn't be kept for later: send it again once that's answered.")
+        out.update(held=True, said=HELD_NOTE)
         print(json.dumps(out) if o.json else f"Held for {to}: {HELD_NOTE}")
         return 0
-    out = {"to": to, "why": why, "version": v, "image": image}
     print(json.dumps(out) if o.json else f"Sent to {to} ({why}).")
     return 0
+
+
+def cmd_note(o):
+    """The person's note on a page (tap to drop a pin, then write), sent to the agent that keeps it."""
+    text = (o.text or "").strip()
+    if not text:
+        raise Fail("Write the note: --text \"…\".")
+    extra, lines = "", [text]
+    if o.spot:
+        at = spot_of(o.spot)
+        if at:
+            extra = f' spot="{at[0]:.3f},{at[1]:.3f}"'
+            lines.append(f"(Their pin: {at[2]}.)")
+        else:
+            extra = f' on="{attr(o.spot)}"'
+    return tell(o, extra, lines)
+
+
+def cmd_say(o):
+    """The person's answer from the page itself (its postMessage), sent to the agent that keeps it."""
+    text = (o.text or "").strip()
+    if not text:
+        raise Fail("Nothing to send: --text \"…\".")
+    return tell(o, " answer", [text])
 
 
 HELD_NOTE = "It's waiting on a question: your note goes to it once that's answered."
@@ -1591,323 +1084,389 @@ def hold_note(to, body):
         return False
 
 
-# ---- a custom artifact's picture (the web app shows it in its place) -------------------------------
+# ---- pages for what Shepherdr 3.1 kept (convert, once) ---------------------------------------------
+# 3.1's artifacts were recipes (recipe.json: a list of blocks each side drew) or, rarely, custom panels only the Herdr
+# window ran (main.js). Each kept version becomes a plain page that needs nothing else: this small renderer is all
+# that is left of the recipe format.
 
-def cmd_picture(o):
-    """The window's picture of a custom artifact's version, taken as it shows it (Mark up's wrapper: a window shot and
-    the panel's place in it), kept beside that version's files as .window.png for the web app; another machine's goes
-    there. The newest one replaces the last."""
-    src, tmp = o.image and os.path.expanduser(o.image), None
-    if o.shot:
-        os.makedirs(NOTES, exist_ok=True)
-        tmp = os.path.join(NOTES, f"{o.id}-v{o.version}-picture-{now()}.png")
-        try:
-            ok = bool(o.panel) and crop_shot(o.shot, rect(o.panel), None, tmp)
-        finally:
-            try:
-                os.remove(o.shot)
-            except OSError:
-                pass
-        if not ok:
-            raise Fail("Couldn't cut the panel from the window's picture.")
-        src = tmp
-    if not src or not os.path.isfile(src):
-        raise Fail("Give --shot and --panel (a window shot and the panel in it), or --image.")
-    try:
-        if o.machine:
-            rel = f".herdr/artifacts/notes/{os.path.basename(src)}"
-            with open(src, "rb") as f:
-                w = subprocess.run(["hc", "file", "write", "--on", o.machine, rel], input=f.read(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            if w.returncode != 0:
-                raise Fail(f"Couldn't send the picture to {o.machine}.")
-            r = run([sys.executable, os.path.realpath(__file__), "--on", o.machine, "picture", o.id, "--version", str(o.version),
-                     "--image", f"~/{rel}", "--json"])
-            try:
-                out = json.loads(r.stdout.strip().splitlines()[-1])
-            except (ValueError, IndexError):
-                raise Fail(r.stderr.strip() or f"Couldn't reach {o.machine}.")
-            if out.get("error"):
-                raise Fail(out["error"])
-            print(json.dumps(out) if o.json else f"Kept on {o.machine}.")
-            return 0
-        loc = find_anywhere(o.id)
-        with Store(loc) as s:
-            a = s.find(o.id)
-            x = next((x for x in a["versions"] if x["v"] == o.version), None)
-            d = os.path.join(FILES, a["id"], f"v{o.version}")
-            if not x or not os.path.isdir(d):
-                raise Fail(f"v{o.version} of {o.id} isn't kept.")
-            if version_kind(a["id"], o.version) == "recipe":
-                raise Fail("A recipe needs no picture: the web app draws it.")
-            shutil.copyfile(src, os.path.join(d, PICTURE))
-            x["kind"], x["picture"] = "custom", now()
-            s.dirty = True
-        out = {"id": o.id, "version": o.version, "picture": x["picture"]}
-        print(json.dumps(out) if o.json else f"Kept the picture of {o.id} v{o.version}.")
-        return 0
-    finally:
-        # a picture sent here from another machine (notes/), or cut here
-        for f in {tmp, src if src and os.path.dirname(os.path.realpath(src)) == os.path.realpath(NOTES) else None} - {None}:
-            try:
-                os.remove(f)
-            except OSError:
-                pass
+CSS = """:root { color-scheme: light dark; --fg: #111; --bg: #fff; --muted: #666; --line: #ddd; --good: #1a7f37; --warn: #9a6700; --bad: #cf222e; }
+@media (prefers-color-scheme: dark) { :root { --fg: #eee; --bg: #111; --muted: #999; --line: #333; --good: #3fb950; --warn: #d29922; --bad: #f85149; } }
+* { box-sizing: border-box; }
+body { margin: 0 auto; padding: 16px; max-width: 720px; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); overflow-wrap: anywhere; }
+h1 { font-size: 22px; line-height: 1.25; margin: 0 0 12px; }
+h2 { font-size: 18px; margin: 28px 0 8px; }
+h3 { font-size: 16px; margin: 20px 0 6px; }
+p, ul, ol, figure, pre, table { margin: 0 0 14px; }
+img, video { max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
+figcaption, .muted { color: var(--muted); font-size: 14px; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { text-align: left; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+pre { overflow-x: auto; padding: 12px; border: 1px solid var(--line); border-radius: 6px; }
+pre, code { font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+a { color: inherit; }
+button { font: inherit; padding: 8px 14px; border: 1px solid var(--fg); border-radius: 6px; background: var(--fg); color: var(--bg); }
+.good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }"""
+# what only converted pages need
+CSS_OLD = """.stats { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 0 0 14px; }
+.stats b { display: block; font-size: 24px; line-height: 1.2; }
+.note { border-left: 3px solid var(--line); padding: 2px 0 2px 12px; margin: 0 0 14px; }
+.note.good { border-color: var(--good); color: inherit; } .note.warn { border-color: var(--warn); color: inherit; } .note.bad { border-color: var(--bad); color: inherit; }
+.note p:last-child { margin: 0; }
+.cols { display: flex; flex-wrap: wrap; gap: 0 24px; } .cols > div { flex: 1 1 260px; min-width: 0; }
+.right { text-align: right; } .center { text-align: center; }
+details { margin: 0 0 14px; } summary { cursor: pointer; }"""
+
+esc = lambda s: html.escape("" if s is None else str(s), quote=True)
 
 
-# ---- convert: an older GPUI artifact into a recipe -------------------------------------------------
-# Shepherdr 3.1 draws artifacts from recipes on both sides. An artifact made before is drawn once by
-# herdr-app check (its element tree, as the window builds it), and that tree becomes recipe blocks:
-# headings, text, lists, code, pictures, and a bordered card as a callout. Interactive ones (a game)
-# keep only their words and pictures; the old version stays, viewable in the window.
-
-def _leaf_text(n):
-    """All the words inside an element, in order."""
-    if n["text"]:
-        return n["text"]
-    return " ".join(t for t in (_leaf_text(k) for k in n["kids"]) if t).strip()
-
-
-def _is_leaf(n):
-    """An element that holds words only (not other elements): one line, heading or code."""
-    return bool(n["text"]) or (bool(n["kids"]) and all(k["name"] == "text" for k in n["kids"]))
-
-
-BULLET = re.compile(r"^[•·‣–-]\s+(?=\S)")
-SCROLL_X = ("overflow_x_scroll", "overflow_x_scrollbar")
-
-
-def _lines(n):
-    """An element's words a line each (a row's side by side), as in a terminal box."""
-    if _is_leaf(n):
-        return [_leaf_text(n).rstrip()]
-    if n["name"] == "h_flex" or "flex_row" in n["calls"]:
-        return [" ".join(x for k in n["kids"] for x in _lines(k) if x).rstrip()]
-    return [x for k in n["kids"] for x in _lines(k)]
-
-
-def _has(n, name):
-    return n["name"] == name or any(_has(k, name) for k in n["kids"])
-
-
-def _strong(c):
-    return "font_semibold" in c or "font_bold" in c or "font_medium" in c or num(c, "font_weight") >= 500
-
-
-def _blocks(n, size=13.0):
-    """The recipe blocks an element shows."""
-    size = num(n["calls"], "text_size", size)
-    if n["name"] == "image" and n.get("src"):
-        return [{"type": "image", "src": os.path.basename(n["src"])}]
-    if n["name"] == "svg" or n["name"] == "text":
-        return [{"type": "text", "md": n["text"]}] if n["name"] == "text" and n["text"] and n["text"].strip() else []
-    kids, c = n["kids"], n["calls"]
-    page = "size_full" in c or "overflow_y_scrollbar" in c or "overflow_y_scroll" in c or "max_w" in c
-    # a terminal box: lines that don't wrap (or a monospace font, or scrolling sideways) on a card
-    if not page and kids and not _is_leaf(n) and not _has(n, "image") and (
-            "font_family" in c or any(k in c for k in SCROLL_X)
-            or (("border_1" in c or "bg" in c) and any("whitespace_nowrap" in k["calls"] or "font_family" in k["calls"] for k in kids))):
-        return [{"type": "code", "text": "\n".join(_lines(n)).strip("\n")}]
-    # a bullet row: a small empty mark, then words
-    if n["name"] == "h_flex" and len(kids) == 2 and not kids[0]["kids"] and not kids[0]["text"] and _leaf_text(kids[1]):
-        return [{"type": "_item", "md": _leaf_text(kids[1])}]
-    # words side by side: a label and its words ("Before  the old text"), or a table's row (gathered after)
-    if n["name"] == "h_flex" and kids and all(_is_leaf(k) for k in kids) and len(kids) <= 6:
-        parts = [_leaf_text(k) for k in kids if _leaf_text(k)]
-        if len(parts) >= 2:
-            return [{"type": "_row", "cells": parts, "head": _strong(c) or all(_strong(k["calls"]) for k in kids if _leaf_text(k))}]
-        return [{"type": "text", "md": parts[0]}] if parts else []
-    if _is_leaf(n) and _leaf_text(n):
-        t = _leaf_text(n)
-        if "font_family" in c:
-            return [{"type": "code", "text": t}]
-        # a bullet written into the words ("• Not shown live")
-        if BULLET.match(t):
-            return [{"type": "_item", "md": BULLET.sub("", t)}]
-        if ("font_semibold" in c or "font_bold" in c or num(c, "font_weight") >= 600) and len(t) <= 120:
-            return [{"type": "heading", "text": t, "level": 2 if size >= 14 else 3}]
-        if "font_medium" in c and len(t) <= 60 and not t.rstrip().endswith((".", ":", ";", ",")):
-            return [{"type": "heading", "text": t, "level": 3}]
-        return [{"type": "text", "md": t}]
+def md_inline(s):
+    """One line of Markdown as HTML: `code`, **bold**, *italic*, [links](https://…)."""
+    parts = re.split(r"(`[^`\n]+`)", "" if s is None else str(s))
     out = []
-    for k in kids:
-        out += _blocks(k, size)
-    # a bordered card of words: one callout
-    if not page and ("border_1" in c or "bg" in c) and "p" in c and out and all(b["type"] in ("text", "heading", "_item") for b in out) and 1 < len(out) <= 12:
-        title = out[0]["text"] if out[0]["type"] == "heading" else None
-        rest = out[1:] if title else out
-        md = "\n".join(("- " + b["md"]) if b["type"] == "_item" else (b.get("md") or f"**{b.get('text')}**") for b in rest)
-        return [{"type": "callout", "tone": "info", **({"title": title} if title else {}), "md": md}]
-    return out
-
-
-def _row_text(cells):
-    """One row of words alone: "**Before** the old text", or its parts with dots between."""
-    if len(cells) == 2 and len(cells[0]) <= 24:
-        return {"type": "text", "md": f"**{cells[0]}** {cells[1]}"}
-    return {"type": "text", "md": " · ".join(cells)}
-
-
-def recipe_from_spec(spec):
-    """The recipe a drawn artifact shows: bullet rows gathered into lists, rows of words under a header row into
-    tables."""
-    root = parse_spec(spec)
-    raw = _blocks(root) if root else []
-    for i, b in enumerate(raw):
-        if b["type"] == "text" and BULLET.match(b["md"]):
-            raw[i] = {"type": "_item", "md": BULLET.sub("", b["md"])}
-    # under a "Not proven" heading, its lines are a list
-    under = False
-    for i, b in enumerate(raw):
-        if b["type"] == "heading":
-            under = bool(re.match(r"^not proven\b", b["text"].strip(), re.I))
-        elif under and b["type"] == "text":
-            raw[i] = {"type": "_item", "md": b["md"]}
-        elif under and b["type"] != "_item":
-            under = False
-    blocks, items, rows = [], [], []
-
-    def flush_rows():
-        if len(rows) >= 2 and rows[0]["head"] and all(len(r["cells"]) == len(rows[0]["cells"]) for r in rows):
-            blocks.append({"type": "table", "columns": rows[0]["cells"], "rows": [r["cells"] for r in rows[1:]]})
-        else:
-            blocks.extend(_row_text(r["cells"]) for r in rows)
-        rows.clear()
-
-    for b in raw + [None]:
-        if b and b["type"] == "_item":
-            if rows:
-                flush_rows()
-            items.append(b["md"])
+    for i, p in enumerate(parts):
+        if i % 2:
+            out.append(f"<code>{esc(p[1:-1])}</code>")
             continue
+        t = esc(p)
+        t = re.sub(r"!?\[([^\]\n]*)\]\(((?:https?://|mailto:)[^)\s]+)\)", lambda m: f'<a href="{m.group(2)}" target="_blank" rel="noopener">{m.group(1) or m.group(2)}</a>', t)
+        t = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", t)
+        t = re.sub(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])", r"<em>\1</em>", t)
+        out.append(t)
+    return "".join(out)
+
+
+def md_block(text):
+    """Markdown as HTML: paragraphs, headings, lists, fenced code."""
+    out, para, items, kind = [], [], [], None
+
+    def flush():
+        nonlocal para, items, kind
+        if para:
+            out.append("<p>" + "<br>".join(md_inline(x) for x in para) + "</p>")
         if items:
-            blocks.append({"type": "list", "items": items})
-            items = []
-        if b and b["type"] == "_row" and (not rows or (len(b["cells"]) == len(rows[0]["cells"]) and not b["head"])):
-            rows.append(b)
+            out.append(f"<{kind}>" + "".join(f"<li>{md_inline(x)}</li>" for x in items) + f"</{kind}>")
+        para, items, kind = [], [], None
+    lines = ("" if text is None else str(text)).replace("\r\n", "\n").split("\n")
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        fence = re.match(r"^\s*(```|~~~)", line)
+        if fence:
+            flush()
+            j = i + 1
+            while j < len(lines) and not lines[j].strip().startswith(fence.group(1)):
+                j += 1
+            out.append("<pre><code>" + esc("\n".join(lines[i + 1:j])) + "</code></pre>")
+            i = j + 1
             continue
-        if rows:
-            flush_rows()
-        if b and b["type"] == "_row":
-            rows.append(b)
+        h = re.match(r"^(#{1,4})\s+(.*)$", line)
+        li = re.match(r"^\s*(?:([-*•])|(\d+)[.)])\s+(.*)$", line)
+        if not line.strip():
+            flush()
+        elif h:
+            flush()
+            n = min(4, len(h.group(1)) + 1)
+            out.append(f"<h{n}>{md_inline(h.group(2))}</h{n}>")
+        elif li:
+            want = "ul" if li.group(1) else "ol"
+            if para or (kind and kind != want):
+                flush()
+            kind = want
+            items.append(li.group(3))
+        elif items and line.startswith((" ", "\t")):
+            items[-1] += " " + line.strip()
+        else:
+            if items:
+                flush()
+            para.append(line)
+        i += 1
+    flush()
+    return "\n".join(out)
+
+
+def _src(name, have):
+    """A file beside the page by its name, as a link; None when it isn't there (or isn't a plain relative name)."""
+    name = "" if name is None else str(name)
+    if not name or name.startswith(("/", ".")) or ".." in name.split("/") or name not in have:
+        return None
+    return urllib.parse.quote(name)
+
+
+def _media(src, have, caption=None, poster=None, flags=None, label=None):
+    """A picture, clip, sound or PDF beside the page, with its caption."""
+    link, ext = _src(src, have), os.path.splitext(str(src or ""))[1].lower()
+    cap = "".join(f"<figcaption>{x}</figcaption>" for x in [" · ".join(md_inline(x) for x in (label, caption) if x)] if x)
+    if not link:
+        return f'<p class="muted">{esc(caption or label or "A file")} ({esc(src)}: not kept)</p>' if src else ""
+    if ext in (".mp4", ".m4v", ".webm", ".mov"):
+        f = flags or {}
+        more = "".join(f" {k}" for k in ("autoplay", "loop", "muted") if f.get(k)) + (f' poster="{_src(poster, have)}"' if _src(poster, have) else "")
+        body = f'<video controls playsinline preload="metadata" src="{link}"{more}></video>'
+    elif ext in (".mp3", ".m4a", ".wav", ".ogg"):
+        body = f'<audio controls preload="metadata" src="{link}"></audio>'
+    elif ext == ".pdf":
+        return f'<p><a href="{link}" target="_blank" rel="noopener">{md_inline(caption or label) or "Open the PDF"}</a> (PDF)</p>'
+    else:
+        body = f'<img src="{link}" alt="{esc(caption or label or "")}">'
+    return f"<figure>{body}{cap}</figure>"
+
+
+def _button(b):
+    return f"[{esc(b.get('label') or 'Button')}]" + (f' <a href="{esc(b["href"])}" target="_blank" rel="noopener">{esc(b["href"])}</a>'
+                                                    if str(b.get("href") or "").startswith("https://") else "")
+
+
+def recipe_html(blocks, have, depth=0):
+    """A recipe's blocks as plain HTML, top to bottom. What the person could press (a choice, a form, a button) reads
+    as its labels."""
+    out = []
+    for b in blocks if isinstance(blocks, list) and depth < 6 else []:
+        if not isinstance(b, dict):
             continue
-        if b:
-            blocks.append(b)
-    return {"recipe": 1, "blocks": blocks or [{"type": "text", "md": "(This artifact showed nothing to keep.)"}]}
+        t = b.get("type")
+        if t == "heading":
+            try:
+                n = min(4, max(2, int(b.get("level") or 1) + 1))
+            except (TypeError, ValueError):
+                n = 2
+            out.append(f"<h{n}>{md_inline(b.get('text'))}</h{n}>")
+        elif t == "text":
+            out.append(md_block(b.get("md")))
+        elif t == "list":
+            tag = "ol" if b.get("ordered") else "ul"
+            out.append(f"<{tag}>" + "".join(f"<li>{md_inline(x)}</li>" for x in b.get("items") or []) + f"</{tag}>")
+        elif t == "table":
+            cols = [c if isinstance(c, dict) else {"label": c} for c in b.get("columns") or []]
+            cls = [f' class="{c["align"]}"' if c.get("align") in ("right", "center") else "" for c in cols]
+            head = "".join(f"<th{cls[i]}>{md_inline(c.get('label'))}</th>" for i, c in enumerate(cols))
+            rows = "".join("<tr>" + "".join(f"<td{cls[i] if i < len(cls) else ''}>{md_inline(x)}</td>" for i, x in enumerate(r if isinstance(r, list) else [r])) + "</tr>"
+                           for r in b.get("rows") or [])
+            out.append(f'<div class="scroll"><table>{"<thead><tr>" + head + "</tr></thead>" if head else ""}<tbody>{rows}</tbody></table></div>')
+        elif t == "chart":
+            series = [s for s in b.get("series") or [] if isinstance(s, dict)]
+            head = "<th></th>" + "".join(f'<th class="right">{esc(s.get("name") or "")}</th>' for s in series)
+            rows = "".join(f"<tr><td>{esc(lab)}</td>" + "".join(
+                f'<td class="right">{esc((s.get("values") or [])[i] if i < len(s.get("values") or []) else "")}</td>' for s in series) + "</tr>"
+                for i, lab in enumerate(b.get("labels") or []))
+            out.append(f'<div class="scroll"><table><thead><tr>{head}</tr></thead><tbody>{rows}</tbody></table></div>')
+        elif t == "stats":
+            out.append('<div class="stats">' + "".join(
+                f"<div><b>{esc(x.get('value'))}</b>{esc(x.get('label'))}" + (f' <span class="muted">{esc(x["note"])}</span>' if x.get("note") else "") + "</div>"
+                for x in b.get("items") or [] if isinstance(x, dict)) + "</div>")
+        elif t in ("image", "video", "audio", "pdf"):
+            out.append(_media(b.get("src"), have, b.get("caption"), b.get("poster"), b))
+        elif t == "pair":
+            sides = [(k.capitalize(), b.get(k)) for k in ("before", "after") if isinstance(b.get(k), dict)]
+            out.append('<div class="cols">' + "".join(f"<div>{_media(x.get('src'), have, x.get('caption'), x.get('poster'), None, lab)}</div>" for lab, x in sides) + "</div>")
+        elif t == "code":
+            out.append(f"<pre><code>{esc(b.get('text'))}</code></pre>")
+        elif t == "callout":
+            tone = b.get("tone") if b.get("tone") in ("good", "warn", "bad") else ""
+            out.append(f'<div class="note {tone}">' + (f"<p><strong>{md_inline(b['title'])}</strong></p>" if b.get("title") else "") + md_block(b.get("md")) + "</div>")
+        elif t == "columns":
+            out.append('<div class="cols">' + "".join(f"<div>{recipe_html(c, have, depth + 1)}</div>" for c in b.get("columns") or []) + "</div>")
+        elif t == "tabs":
+            for tab in b.get("tabs") or []:
+                if isinstance(tab, dict):
+                    out.append(f"<h3>{esc(tab.get('label'))}</h3>" + recipe_html(tab.get("blocks"), have, depth + 1))
+        elif t == "details":
+            out.append(f"<details><summary>{md_inline(b.get('summary'))}</summary>{recipe_html(b.get('blocks'), have, depth + 1)}</details>")
+        elif t == "divider":
+            out.append("<hr>")
+        elif t == "choice":
+            out.append(f"<p><strong>{md_inline(b.get('question'))}</strong></p><ul>" + "".join(
+                f"<li>{esc(x.get('label'))}" + (f': <span class="muted">{esc(x["description"])}</span>' if x.get("description") else "") + "</li>"
+                for x in b.get("options") or [] if isinstance(x, dict)) + "</ul>")
+        elif t == "form":
+            rows = []
+            for f in b.get("fields") or []:
+                if not isinstance(f, dict):
+                    continue
+                more = [", ".join(str(x) for x in f["options"])] if f.get("options") else []
+                if f.get("value") not in (None, "", False):
+                    more.append("yes" if f["value"] is True else str(f["value"]))
+                rows.append(f"<li>{esc(f.get('label') or f.get('name'))}" + (f': <span class="muted">{esc(" · ".join(more))}</span>' if more else "") + "</li>")
+            out.append(f"<ul>{''.join(rows)}</ul><p class=\"muted\">[{esc(b.get('submit') or 'Send')}]</p>")
+        elif t == "button":
+            out.append(f'<p class="muted">{_button(b)}</p>')
+        elif t == "buttons":
+            out.append('<p class="muted">' + " ".join(_button(x) for x in b.get("items") or [] if isinstance(x, dict)) + "</p>")
+    return "\n".join(x for x in out if x)
 
 
-# What a drawn element tree can't keep: a panel that answers clicks or reads data while open (tabs, filters, a
-# form, a game, files read live). Those are converted by hand (convert --id <id> --recipe <dir>) or stay custom.
-LIVE = [(re.compile(r"\.on_click\(|\.on_mouse_(down|up|move)\(|\.on_key_down\("), "it answers clicks (tabs, filters, a form, a game)"),
-        (re.compile(r"\breadTextFile\(|\bexec\(|\bfetch\("), "it reads its data while open"),
-        (re.compile(r"cx\.timer\.every"), "it changes over time")]
+def page_html(title, body, old=False):
+    return (f'<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+            f"<title>{esc(title)}</title>\n<style>\n{CSS}{chr(10) + CSS_OLD if old else ''}\n</style>\n</head>\n<body>\n{body}\n</body>\n</html>\n")
 
 
-def live_parts(src, files):
-    """Why a GPUI artifact's drawing alone can't make its recipe (empty: it can)."""
-    why = []
-    for rel in files:
-        if not rel.endswith((".js", ".mjs")):
-            continue
+def convert_version(a, d):
+    """One kept version's folder made a page, in place: its recipe drawn as index.html (its pictures and clips stay
+    beside it), or a custom panel's page showing the picture the window last took. What it was goes to .old/ inside
+    it. Returns "recipe", "custom", or None when it is a page already (or gone)."""
+    if not os.path.isdir(d) or os.path.isfile(os.path.join(d, PAGE)):
+        return None
+    old = os.path.join(d, OLD)
+    at = lambda n: next((p for p in (os.path.join(d, n), os.path.join(old, n)) if os.path.isfile(p)), None)
+    custom = bool(at("main.js")) or not at("recipe.json")
+    title = a.get("title") or a["id"]
+    os.makedirs(old, exist_ok=True)
+    if custom:
+        for n in os.listdir(d):  # a panel's code is nothing a page shows
+            if not n.startswith("."):
+                os.replace(os.path.join(d, n), os.path.join(old, n))
+        pic = at(PICTURE)
+        if pic:
+            shutil.copyfile(pic, os.path.join(d, "window.png"))
+        body = f"<h1>{esc(title)}</h1>\n" + (f'<figure><img src="window.png" alt="{esc(title)}"><figcaption>As the old Herdr window last showed it.</figcaption></figure>'
+                                             if pic else '<p class="muted">This was made for the old Herdr window, so there is nothing to show here.</p>')
+    else:
         try:
-            with open(os.path.join(src, rel)) as f:
-                text = f.read()
-        except OSError:
-            continue
-        why += [w for rx, w in LIVE if rx.search(text) and w not in why]
-    return why
+            with open(at("recipe.json"), encoding="utf-8") as f:
+                recipe = json.load(f)
+            blocks = recipe.get("blocks") if isinstance(recipe, dict) else None
+        except (OSError, ValueError):
+            blocks = None
+        have = set(files_of(d))
+        body = f"<h1>{esc(title)}</h1>\n" + (recipe_html(blocks, have) if isinstance(blocks, list)
+                                             else '<p class="muted">What this showed could not be read.</p>')
+        if os.path.isfile(os.path.join(d, "recipe.json")):
+            os.replace(os.path.join(d, "recipe.json"), os.path.join(old, "recipe.json"))
+    tmp = os.path.join(d, ".index.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(page_html(title, body, old=True))
+    os.replace(tmp, os.path.join(d, PAGE))
+    return "custom" if custom else "recipe"
 
 
-def convert_publish(a, out):
-    """A recipe folder published as an artifact's newest version, in its maker's name (its publisher and task stay):
-    kept, not installed (the window installs it when opened; the GPUI versions before it stay)."""
-    with contextlib.redirect_stdout(io.StringIO()):
-        cmd_publish(argparse.Namespace(dir=out, id=a["id"], title=None, folder=None, task=None, json=True, no_install=True,
-                                       as_maker=True, note="as a recipe: opens in the window and on the web"))
+def converted_mark():
+    return os.path.join(STORE, ".pages")
 
 
-def cmd_convert(o):
-    """Each older artifact of this machine as a recipe: into --out (look first), or with --publish as its newest
-    version (kept, not installed: the window installs it when opened; the GPUI versions stay). One that answers clicks
-    or reads data while open is listed instead (--force converts what it draws); `--id <id> --recipe <dir>` publishes
-    a recipe written by hand for it."""
-    if o.recipe:
-        if not o.id:
-            raise Fail("--recipe needs --id: the artifact it's for.")
-        loc = find_anywhere(o.id)
-        with Store(loc, write=False) as s:
-            a = s.find(o.id)
-        _, files = gather(o.recipe)
-        if not is_recipe(files):
-            raise Fail(f"{o.recipe} has no recipe.json (or has a main.js).")
-        convert_publish(a, o.recipe)
-        res = {"converted": [{"id": a["id"], "by": "hand"}], "already": [], "by_hand": [], "failed": []}
-        print(json.dumps(res) if o.json else f"Converted {a['id']} (by hand).")
+def edit_list(path, fn):
+    """One folder's list changed under its lock: fn(data) -> True to save it."""
+    with open(os.path.join(STORE, "." + os.path.basename(path) + ".lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            if isinstance(data, dict) and fn(data):
+                fd, tmp = tempfile.mkstemp(dir=STORE, prefix=".tmp-")
+                with os.fdopen(fd, "w") as f:
+                    json.dump(data, f, indent=1)
+                    f.write("\n")
+                os.replace(tmp, path)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+def cmd_pictures(o):
+    """The picture of every artifact's newest version that has none yet (a converted one, or one published where no
+    browser was): a few at a time. Slow with many, and safe to stop and run again."""
+    from concurrent.futures import ThreadPoolExecutor
+    if not chrome_bin():
+        print(json.dumps({"taken": [], "browser": False}) if o.json else "No browser here to take pictures with.")
         return 0
-    if not shutil.which("herdr-app"):
-        raise Fail("herdr-app isn't here: it draws each artifact once to read what it shows.")
-    done, skipped, hand, failed = [], [], [], []
+    todo = []
     for name in sorted(os.listdir(STORE)) if os.path.isdir(STORE) else []:
         if not name.endswith(".json"):
             continue
-        loc = {"store": os.path.join(STORE, name)}
         try:
-            with open(loc["store"]) as f:
+            with open(os.path.join(STORE, name)) as f:
                 data = json.load(f)
         except (OSError, ValueError):
             continue
-        for a in data.get("artifacts", []):
-            if o.id and a["id"] != o.id:
-                continue
-            files = a.get("files") or []
-            if "recipe.json" in files and "main.js" not in files:
-                skipped.append(a["id"])
-                continue
-            src = os.path.join(FILES, a["id"], f"v{a['version']}")
-            if not os.path.isdir(src):
-                failed.append((a["id"], "its files are gone"))
-                continue
-            why = live_parts(src, files)
-            if why and not o.force:
-                hand.append((a["id"], "; ".join(why)))
-                continue
-            with tempfile.TemporaryDirectory(prefix="herdr-artifact-convert-") as d:
-                stage = os.path.join(d, f"art-{a['id']}")
-                copy_files(src, files, stage)
-                with open(os.path.join(stage, "artifact.js"), "w") as f:
-                    f.write(helper(a, f"art-{a['id']}", None))
-                r = run(["herdr-app", "check", stage, "--print-spec"])
-            if r.returncode != 0:
-                failed.append((a["id"], "it doesn't draw"))
-                continue
-            recipe = recipe_from_spec(r.stdout)
-            pics = sorted({b["src"] for b in recipe["blocks"] if b["type"] == "image"} & set(files))
-            recipe["blocks"] = [b for b in recipe["blocks"] if b["type"] != "image" or b["src"] in pics]
-            out = os.path.join(o.out, a["id"]) if o.out else tempfile.mkdtemp(prefix="herdr-artifact-recipe-")
-            os.makedirs(out, exist_ok=True)
-            with open(os.path.join(out, "recipe.json"), "w") as f:
-                json.dump(recipe, f, indent=1, ensure_ascii=False)
-            for pic in pics:
-                shutil.copyfile(os.path.join(src, pic), os.path.join(out, pic))
-            if o.publish:
-                convert_publish(a, out)
-            done.append({"id": a["id"], "blocks": len(recipe["blocks"]), "pictures": len(pics), **({"out": out} if o.out else {})})
-    res = {"converted": done, "already": skipped, "by_hand": [{"id": i, "why": w} for i, w in hand],
-           "failed": [{"id": i, "why": w} for i, w in failed]}
-    if o.json:
-        print(json.dumps(res))
-    else:
-        print(f"Converted {len(done)}, already recipes {len(skipped)}, by hand {len(hand)}, failed {len(failed)}."
-              + "".join(f"\n  {i}: {w}" for i, w in hand + failed))
-        if hand:
-            print("By hand: write its recipe.json, then `herdr-artifact convert --id <id> --recipe <dir>`; "
-                  "or --force converts what it draws now.")
-    return 0 if not failed else 1
+        for a in data.get("artifacts") or [] if isinstance(data, dict) else []:
+            d = os.path.join(FILES, str(a.get("id")), f"v{a.get('version')}")
+            if a.get("id") and (not o.id or a["id"] == o.id) and os.path.isfile(os.path.join(d, PAGE)) and not os.path.isfile(os.path.join(d, THUMB)):
+                todo.append((os.path.join(STORE, name), a["id"], a["version"], d))
+    taken = []
 
+    def one(item):
+        path, aid, v, d = item
+        if not keep_shots(shoot(d), d):
+            return
 
-def cmd_pull(o):
-    mod = pull(o.id, o.machine, o.version) if o.machine else local_mod(o.id, o.version)
-    print(json.dumps({"mod": mod}) if o.json else mod)
+        def mark(data):
+            for a in data.get("artifacts") or []:
+                for x in a.get("versions") or [] if a.get("id") == aid else []:
+                    if x.get("v") == v and not x.get("thumb"):
+                        x["thumb"] = True
+                        return True
+            return False
+        edit_list(path, mark)
+        taken.append(aid)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        list(pool.map(one, todo))
+    print(json.dumps({"taken": sorted(taken), "browser": True}) if o.json else f"Took {len(taken)} of {len(todo)} pictures.")
     return 0
+
+
+def cmd_convert(o):
+    """Once per machine: every artifact Shepherdr 3.1 kept becomes a page, every kept version of it, in place. Ids,
+    titles, versions, times and tasks stay. Running it again changes nothing."""
+    only = getattr(o, "id", None)
+    if not only and os.path.isfile(converted_mark()):
+        print(json.dumps({"converted": [], "done": True}) if o.json else "Nothing to convert: this machine's artifacts are pages already.")
+        return 0
+    done, failed = [], []
+    for name in sorted(os.listdir(STORE)) if os.path.isdir(STORE) else []:
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(STORE, name)
+
+        def turn(data):
+            dirty = False
+            for a in data.get("artifacts") or []:
+                if not isinstance(a, dict) or not a.get("id") or (only and a["id"] != only):
+                    continue
+                was = {}
+                for x in a.get("versions") or []:
+                    d = os.path.join(FILES, a["id"], f"v{x.get('v')}")
+                    try:
+                        kind = convert_version(a, d)
+                    except OSError as e:
+                        read_only(e)
+                        failed.append({"id": a["id"], "version": x.get("v"), "why": str(e)})
+                        continue
+                    # a version's record says pages only: no kinds, no window pictures
+                    if kind or "kind" in x or "picture" in x:
+                        if kind or x.get("kind"):
+                            x.setdefault("was", kind or x.get("kind"))
+                        x.pop("kind", None)
+                        x.pop("picture", None)
+                        dirty = True
+                    if kind:
+                        was[x["v"]] = kind
+                last = os.path.join(FILES, a["id"], f"v{a.get('version')}")
+                if was and os.path.isdir(last):
+                    a["files"] = files_of(last)
+                    # a picture each takes seconds, hundreds of artifacts minutes: only when asked (else `pictures`, later)
+                    if getattr(o, "pictures", False) and a["versions"] and not os.path.isfile(os.path.join(last, THUMB)):
+                        if keep_shots(shoot(last), last):
+                            a["versions"][-1]["thumb"] = True
+                # 3.1 knew a task's proof by its title: it stays on its task now, as a proof published today
+                if was and a.get("task") and PROOF.search(a.get("title") or "") and not a.get("kept") and not a.get("proof"):
+                    a["proof"] = True
+                if was:
+                    done.append({"id": a["id"], "versions": sorted(was), "was": sorted(set(was.values()))})
+            return dirty
+        try:
+            edit_list(path, turn)
+        except (OSError, ValueError) as e:
+            if isinstance(e, OSError):
+                read_only(e)
+            failed.append({"list": name, "why": str(e)})
+    if not only and not failed and os.path.isdir(STORE):
+        with open(converted_mark(), "w") as f:
+            json.dump({"at": now(), "converted": len(done)}, f)
+    if o.json:
+        print(json.dumps({"converted": done, "failed": failed}))
+    elif not done and not failed:
+        print("Nothing to convert.")
+    else:
+        print(f"Made {len(done)} artifact{'' if len(done) == 1 else 's'} a page." + "".join(f"\n  couldn't: {x.get('id') or x.get('list')}: {x['why']}" for x in failed))
+    return 1 if failed else 0
 
 
 # ---- showing the person (SHEP-99) ------------------------------------------------------------
@@ -1988,89 +1547,35 @@ def ask_screen(aid):
     return run(["hc", "label", me_, f"{SHOW}={json.dumps(ask, separators=(',', ':'))}"]).returncode == 0
 
 
-def open_window(o):
-    """Opens it in the Herdr window here, beside a pane or in a new tab: the mod's name, or None (no window here).
-    Fails when the window refuses it."""
-    if not shutil.which("herdr-app"):
-        return None
-    mod = pull(o.id, o.machine) if o.machine else local_mod(o.id)
-    if o.tab:
-        args = ["herdr-app", "do", "tab.new", "--mod", mod]
-    else:
-        args = ["herdr-app", "do", "pane.split", "--direction", o.direction, "--mod", mod] + (["--pane", o.beside] if o.beside else [])
-    r = run(args)
-    if r.returncode != 0:
-        raise Fail(r.stdout.strip() or r.stderr.strip() or "herdr-app couldn't open it")
-    return mod
-
-
 def cmd_open(o):
-    """Shows an artifact to the person wherever they are: the web app's page they use opens it, the Herdr window here
-    too (when there is one), and its link is printed, which always works."""
+    """Shows an artifact to the person wherever they are: the app's page they use opens it, and its link is printed."""
     known(o.id, o.machine)
     link = web_link(o.id)
     screen = ask_screen(o.id)
-    try:
-        window, why = open_window(o), None
-    except Fail as e:
-        window, why = None, str(e)
     if o.json:
-        print(json.dumps({"id": o.id, "link": link, "screen": screen, "window": window, **({"error": why} if why else {})}))
+        print(json.dumps({"id": o.id, "link": link, "screen": screen}))
     else:
         if screen:
-            print("Asked the person's screen to show it: the web app opens it on the page they use, if one is open.")
-        if window:
-            print(f"Opened {window} in the window here.")
-        elif why:
-            print(f"The window here couldn't open it: {why}")
+            print("Asked the person's screen to show it: the app opens it on the page they use, if one is open.")
         print(f"Link: {link}" if link else NO_LINK)
-    return 0 if (screen or window or link) else 1
+    return 0 if (screen or link) else 1
 
 
-# ---- seeing it here, as the person does (SHEP-149) -----------------------------------------------
-# The person's link leads to the machine that serves the web app, which this one may not reach. `preview` serves the
-# web app's own artifact viewer (web/viewer, built into one file: artifact-viewer.html) for this machine's artifacts on
-# 127.0.0.1 only, started on demand and gone after PREVIEW_IDLE seconds unused; the agent opens its link in its task's
-# browser (herdr-browser) at a phone's or a desktop's width and takes screenshots.
-HERE = os.path.dirname(os.path.realpath(__file__))
-VIEWERS = (os.path.join(HERE, "..", "viewer.html"),                                   # beside it: installed or synced (#1214)
-           os.path.join(HOME, ".local", "share", "shepherdr", "web", "dist", "artifact-viewer.html"),  # the installed web app's
-           os.path.join(HERE, "..", "..", "..", "web", "dist", "artifact-viewer.html"))  # a checkout's own build
-PREVIEW_STATE = os.path.join(STORE, ".preview")
+# ---- seeing it here, as the person does ------------------------------------------------------------
+# The person's link leads to the machine that serves the app, which this one may not reach. `preview` serves this
+# machine's pages themselves on 127.0.0.1 only (page_server: sandboxed as the app frames them, behind a random token),
+# started on demand and gone after PREVIEW_IDLE seconds unused; the agent opens the link in its task's browser
+# (herdr-browser) at a phone's and a desktop's width.
 PREVIEW_IDLE = 1800
-PREVIEW_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp",
-                 ".svg": "image/svg+xml", ".json": "application/json", ".txt": "text/plain; charset=utf-8",
-                 ".md": "text/plain; charset=utf-8", ".csv": "text/plain; charset=utf-8",
-                 ".mp4": "video/mp4", ".m4v": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
-                 ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".wav": "audio/wav", ".ogg": "audio/ogg", ".pdf": "application/pdf"}
-# the page: its own inline script and styles, its fonts inside; it asks only this server (its clips, sounds and PDFs too)
-VIEWER_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src data:; "
-              "img-src 'self' data:; media-src 'self'; frame-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; "
-              "frame-ancestors 'none'")
-# an artifact's own file, as the service sends it (service/artifacts.ts)
-FILE_CSP = "sandbox; default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'"
+PREVIEW_WAIT = 20
 
 
-def span(header, size):
-    """A Range header's one span of a file size bytes long: (start, end) with end included, "bad" when it can't be met,
-    None for the whole file (service/media.ts's span, the same rules)."""
-    m = re.fullmatch(r"bytes=(\d*)-(\d*)", (header or "").strip())
-    if not m or not (m.group(1) or m.group(2)):
-        return None
-    if not m.group(1):
-        start, end = max(0, size - int(m.group(2))), size - 1
-    else:
-        start, end = int(m.group(1)), (min(int(m.group(2)), size - 1) if m.group(2) else size - 1)
-    return "bad" if start > end or start >= size else (start, end)
+def preview_state():
+    return os.path.join(STORE, ".preview")
 
 
-def viewer_page():
-    return next((os.path.realpath(p) for p in VIEWERS if os.path.isfile(p)), None)
-
-
-NO_VIEWER = ("The artifact viewer isn't on this machine yet: it comes with Shepherdr's artifacts add-on from its next "
-             "update (`shepherdr update`), on another machine with the next sync (`herdr-task machines sync` on the main "
-             "machine), or build it in a checkout: `bun run build`.")
+def preview_log():
+    return os.path.join(STORE, ".preview.log")
 
 
 def code_stamp():
@@ -2085,10 +1590,10 @@ def preview_alive():
     """The running preview server's (port, token), when it answers as this herdr-artifact's for this store, else None."""
     import urllib.request
     try:
-        with open(PREVIEW_STATE) as f:
+        with open(preview_state()) as f:
             st = json.load(f)
         port, token = int(st["port"]), str(st["token"])
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping?t={urllib.parse.quote(token, safe='')}", timeout=2) as r:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/{urllib.parse.quote(token, safe='')}/ping", timeout=2) as r:
             me_ = json.load(r)
     except (OSError, ValueError, KeyError, TypeError):
         return None
@@ -2099,14 +1604,10 @@ def preview_alive():
     return port, token
 
 
-PREVIEW_LOG = os.path.join(STORE, ".preview.log")
-PREVIEW_WAIT = 20
-
-
 def preview_start():
-    """The (port, token) of this machine's preview server, started when none answers. Its own output goes to PREVIEW_LOG, so a
-    start that fails says why (#975); a busy machine gets PREVIEW_WAIT seconds, and a server that ended at once one
-    more try."""
+    """The (port, token) of this machine's preview server, started when none answers. Its own output goes to the
+    preview log, so a start that fails says why; a busy machine gets PREVIEW_WAIT seconds, and a server that ended at
+    once one more try."""
     alive = preview_alive()
     if alive:
         return alive
@@ -2114,8 +1615,8 @@ def preview_start():
     why = None
     for _ in (1, 2):
         with contextlib.suppress(OSError):
-            os.unlink(PREVIEW_STATE)
-        with open(PREVIEW_LOG, "w") as log:
+            os.unlink(preview_state())
+        with open(preview_log(), "w") as log:
             p = subprocess.Popen([sys.executable, os.path.realpath(__file__), "_serve"], stdin=subprocess.DEVNULL,
                                  stdout=log, stderr=log, start_new_session=True, close_fds=True)
         end = time.time() + PREVIEW_WAIT
@@ -2127,7 +1628,7 @@ def preview_start():
             if p.poll() is not None:
                 break
         try:
-            with open(PREVIEW_LOG) as f:
+            with open(preview_log()) as f:
                 tail = [l.rstrip() for l in f.read().strip().splitlines()[-3:]]
         except OSError:
             tail = []
@@ -2137,127 +1638,32 @@ def preview_start():
                 p.kill()
             break
         why = f"it ended at once (exit {p.returncode})" + (": " + " / ".join(tail) if tail else "")
-    raise Fail(f"The preview server didn't start: {why}. Its log: {PREVIEW_LOG}. Try again; if it keeps failing, "
-               "`herdr-artifact link <id>` gives the person's link instead.")
+    raise Fail(f"The preview server didn't start: {why}. Its log: {preview_log()}. Try again.")
+
+
+def preview_file(rest):
+    """What a preview link's path names: <id>/v<n>/<the page's own path>."""
+    if rest == "ping":
+        return 200, json.dumps({"store": STORE, "code": code_stamp()}), "application/json"
+    m = re.match(r"^([\w.-]+)/v(\d+)(?:/(.*))?$", rest)
+    if not m or m.group(1).startswith("."):
+        return None
+    if m.group(3) is None:  # the page's own links are read from its folder: it ends with a slash
+        return 302, "", "text/plain", {"location": f"v{m.group(2)}/"}
+    return page_file(os.path.join(FILES, m.group(1), f"v{int(m.group(2))}"), m.group(3))
 
 
 def serve_preview(idle=PREVIEW_IDLE):
-    """The preview server: the viewer page and this machine's artifacts, read only, on 127.0.0.1 (a free port, written
-    to PREVIEW_STATE). Answers only requests addressed to 127.0.0.1 or localhost (no other site's page reaches it
-    through a name of its own) that carry its random token (#1096: any account on this machine can reach a loopback
-    port, and the artifacts are the owner's alone): `?t=` on the link, which sets a cookie for the page's own requests
-    (its API calls, images, clips). The token is kept only in PREVIEW_STATE (0600). Ends after `idle` seconds without
-    a request."""
-    import hmac
-    import http.server
+    """The preview server: this machine's pages, read only, on 127.0.0.1 (a free port, written with its token to the
+    preview state, 0600). Ends after `idle` seconds without a request."""
     import threading
     last = [time.time()]
-    token = secrets.token_urlsafe(32)
-
-    def has_token(given):
-        return bool(given) and hmac.compare_digest(given.encode(), token.encode())
-
-    class H(http.server.BaseHTTPRequestHandler):
-        server_version = "herdr-artifact-preview"
-
-        def log_message(self, *_a):
-            pass
-
-        def send(self, code, body, ctype, csp=None, extra=None):
-            if isinstance(body, str):
-                body = body.encode()
-            self.send_response(code)
-            self.send_header("content-type", ctype)
-            self.send_header("content-length", str(len(body)))
-            self.send_header("x-content-type-options", "nosniff")
-            self.send_header("cache-control", "no-store")
-            self.send_header("referrer-policy", "no-referrer")
-            if csp:
-                self.send_header("content-security-policy", csp)
-            for k, v in (extra or {}).items():
-                self.send_header(k, v)
-            self.end_headers()
-            if self.command != "HEAD":
-                self.wfile.write(body)
-
-        def json(self, code, obj):
-            self.send(code, json.dumps(obj), "application/json")
-
-        def do_HEAD(self):
-            self.do_GET()
-
-        def do_GET(self):
-            last[0] = time.time()
-            host = (self.headers.get("host") or "").rsplit(":", 1)[0]
-            if host not in ("127.0.0.1", "localhost"):
-                return self.send(403, "Only on this machine.", "text/plain")
-            u = urllib.parse.urlsplit(self.path)
-            q = urllib.parse.parse_qs(u.query)
-            path = urllib.parse.unquote(u.path)
-            given = (q.get("t") or [""])[0]
-            cookie = f"herdr_preview_{self.server.server_address[1]}"   # cookies don't keep ports apart
-            jar = {}
-            for part in (self.headers.get("cookie") or "").split(";"):
-                k, _, v = part.strip().partition("=")
-                jar.setdefault(k, v)
-            if not has_token(given) and not has_token(jar.get(cookie, "")):
-                return self.send(403, "This link needs its token: `herdr-artifact preview <id>` gives the whole link.", "text/plain")
-            if path == "/api/ping":
-                return self.json(200, {"store": STORE, "code": code_stamp()})
-            if path in ("/", "/index.html"):
-                page = viewer_page()
-                if not page:
-                    return self.send(500, NO_VIEWER, "text/plain; charset=utf-8")
-                with open(page, "rb") as f:
-                    return self.send(200, f.read(), "text/html; charset=utf-8", VIEWER_CSP,
-                                     {"set-cookie": f"{cookie}={token}; Path=/; HttpOnly; SameSite=Strict"})
-            m = re.match(r"^/api/artifacts/([\w.-]+)(?:/(recipe|file/(.+)))?$", path)
-            if not m:
-                return self.send(404, "Not here.", "text/plain")
-            aid = m.group(1)
-            try:
-                with Store(find_anywhere(aid), write=False) as s:
-                    a = s.find(aid)
-            except Fail as e:
-                return self.json(404, {"error": str(e)})
-            if not m.group(2):
-                return self.json(200, dict(public(a), kind=(next((x for x in a.get("versions") or [] if x.get("v") == a.get("version")), {}).get("kind")
-                                                            or "recipe")))
-            try:
-                v = int((q.get("v") or [a["version"]])[0])
-            except ValueError:
-                v = 0
-            base = os.path.realpath(os.path.join(FILES, aid, f"v{v}"))
-            rel = "recipe.json" if m.group(2) == "recipe" else m.group(3)
-            p = os.path.realpath(os.path.join(base, rel))
-            ctype = PREVIEW_TYPES.get(os.path.splitext(p)[1].lower())
-            if v < 1 or not p.startswith(base + os.sep) or not os.path.isfile(p):
-                return self.send(404, "No such file.", "text/plain")
-            if not ctype:
-                return self.send(415, "Not shown here.", "text/plain")
-            # a clip is played part by part (Range), so a player can seek: the same answers as service/media.ts
-            size = os.path.getsize(p)
-            part = span(self.headers.get("range"), size)
-            if part == "bad":
-                self.send_response(416)
-                self.send_header("content-range", f"bytes */{size}")
-                self.send_header("content-length", "0")
-                self.end_headers()
-                return None
-            start, end = part or (0, size - 1)
-            with open(p, "rb") as f:
-                f.seek(start)
-                body = f.read(end - start + 1)
-            self.send(206 if part else 200, body, ctype, FILE_CSP, {"accept-ranges": "bytes", "content-range": f"bytes {start}-{end}/{size}"} if part else {"accept-ranges": "bytes"})
-            return None
-
-    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
-    srv.daemon_threads = True
+    srv, token = page_server(preview_file, lambda: last.__setitem__(0, time.time()))
     os.makedirs(STORE, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=STORE, prefix=".tmp-")
     with os.fdopen(fd, "w") as f:
         json.dump({"port": srv.server_address[1], "pid": os.getpid(), "token": token}, f)
-    os.replace(tmp, PREVIEW_STATE)
+    os.replace(tmp, preview_state())
 
     def watch():
         while time.time() - last[0] < idle:
@@ -2268,23 +1674,22 @@ def serve_preview(idle=PREVIEW_IDLE):
         srv.serve_forever()
     finally:
         with contextlib.suppress(OSError, ValueError):
-            with open(PREVIEW_STATE) as f:
+            with open(preview_state()) as f:
                 if json.load(f).get("pid") == os.getpid():
-                    os.unlink(PREVIEW_STATE)
+                    os.unlink(preview_state())
     return 0
 
 
 def cmd_preview(o):
-    """This machine's artifact in the web app's viewer, served here on 127.0.0.1: its link, for the task's browser."""
+    """This machine's page, served here on 127.0.0.1: its link, for the task's browser."""
     with Store(find_anywhere(o.id), write=False) as s:
-        as_version(s.find(o.id), o.version)
-    if not viewer_page():
-        raise Fail(NO_VIEWER)
+        v, d = kept_version(s.find(o.id), o.version)
+    if not os.path.isfile(os.path.join(d, PAGE)):
+        raise Fail(f"v{v} of {o.id} is no page yet (it was made for Shepherdr 3.1): run `herdr-artifact convert` once.")
     port, token = preview_start()
-    link = (f"http://127.0.0.1:{port}/?artifact={urllib.parse.quote(o.id, safe='')}" + (f"&v={o.version}" if o.version else "")
-            + f"&t={urllib.parse.quote(token, safe='')}")
+    link = f"http://127.0.0.1:{port}/{urllib.parse.quote(token, safe='')}/{urllib.parse.quote(o.id, safe='')}/v{v}/"
     if o.json:
-        print(json.dumps({"id": o.id, "link": link}))
+        print(json.dumps({"id": o.id, "version": v, "link": link}))
     else:
         print(link)
         print("Open it in your task's browser, as the person sees it on a phone and on a desktop:\n"
@@ -2293,55 +1698,26 @@ def cmd_preview(o):
     return 0
 
 
-EXAMPLE = '''import { View, div } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
-import { theme } from "herdr";
-import { reply } from "./artifact.js";
-
-// No title here: the viewer shows it right above this panel.
-export default class Artifact extends View {
-  init() { this.sent = false; }
-
-  render() {
-    const t = theme();
-    return v_flex().size_full().p(16).gap(12).bg(t.background).text_color(t.foreground).text_size(13)
-      .child(div().text_color(t.muted).child("Replace this with what you want to show."))
-      .child(h_flex().gap(8)
-        .child(div().id("ok").px(12).py(6).rounded(6).bg(t.solid).text_color(t.solid_foreground)
-          .cursor_pointer().hover((s) => s.opacity(0.9))
-          .on_click((_e, cx) => cx.spawn(async (cx) => { this.sent = await reply("Looks good."); cx.notify(); }))
-          .child(this.sent ? "Sent" : "Looks good")));
-  }
-}
-'''
-
-
-# What `new` starts a recipe with: a line, a table and a choice, each to replace.
-STARTER = {"recipe": 1, "blocks": [
-    {"type": "text", "md": "One line on what this shows. Replace these blocks with yours (`herdr-artifact guide` lists them)."},
-    {"type": "table", "columns": ["What", {"label": "Value", "align": "right"}], "rows": [["Example", "42"]]},
-    {"type": "choice", "question": "Does this look right?", "options": [{"label": "Yes"}, {"label": "Not yet"}]}]}
+# What `new` starts a page with: the starter style (the guide's), a line, a table and a button that answers.
+STARTER = """<h1>Title</h1>
+<p>One line on what this shows. Replace everything in the body with yours.</p>
+<div class="scroll">
+<table>
+<thead><tr><th>What</th><th>Value</th></tr></thead>
+<tbody><tr><td>Example</td><td>42</td></tr></tbody>
+</table>
+</div>
+<p><button onclick="parent.postMessage({ shepherdr: 'answer', text: 'Looks right' }, '*')">Looks right</button></p>"""
 
 
 def cmd_new(o):
     d = os.path.realpath(os.path.expanduser(o.dir))
-    name = "main.js" if o.custom else "recipe.json"
-    if os.path.exists(os.path.join(d, name)):
-        raise Fail(f"{d}/{name} exists already.")
+    if os.path.exists(os.path.join(d, PAGE)):
+        raise Fail(f"{d}/index.html exists already.")
     os.makedirs(d, exist_ok=True)
-    if not o.custom:
-        with open(os.path.join(d, name), "w") as f:
-            json.dump(STARTER, f, indent=1)
-            f.write("\n")
-        print(f"Wrote {d}/recipe.json. Put your blocks (and pictures beside it) in, then: herdr-artifact publish {o.dir} --title \"...\"")
-        return 0
-    with open(os.path.join(d, name), "w") as f:
-        f.write(EXAMPLE)
-    # So editors know the herdr and gpui-kit modules while the agent writes it.
-    with open(os.path.join(d, "jsconfig.json"), "w") as f:
-        json.dump({"compilerOptions": {"checkJs": True, "paths": {"gpui-kit": [os.path.join(APP, "gpui-kit.d.ts")], "herdr": [os.path.join(APP, "herdr.d.ts")]}}}, f, indent=2)
-    print(f"Wrote {d}/main.js, a custom panel only the window runs (the web shows a picture of it). Edit it, then: "
-          f"herdr-artifact publish {o.dir} --title \"...\" --custom")
+    with open(os.path.join(d, PAGE), "w", encoding="utf-8") as f:
+        f.write(page_html("Title", STARTER))
+    print(f"Wrote {d}/index.html. Write your page there (its files beside it), then: herdr-artifact publish {o.dir} --title \"...\"")
     return 0
 
 
@@ -2427,7 +1803,7 @@ def main():
     if argv[:1] == ["_serve"]:
         return serve_preview()
 
-    p = argparse.ArgumentParser(prog="herdr-artifact", description="Herdr's artifacts: recipes an agent writes to show the person something, drawn in the window and on the web.",
+    p = argparse.ArgumentParser(prog="herdr-artifact", description="Shepherdr's artifacts: web pages an agent writes to show the person something.",
                                 epilog="`herdr-artifact guide` explains how to write one. Another machine's folder: herdr-artifact --on <machine> <command> ...")
     sub = p.add_subparsers(dest="cmd")
 
@@ -2437,84 +1813,76 @@ def main():
         c.set_defaults(fn=fn)
         return c
 
-    c = cmd("publish", cmd_publish, "check a recipe folder and publish it (a new artifact, or with --id a new version)")
-    c.add_argument("dir", help="the folder with recipe.json (a custom panel: main.js, with --custom)")
+    c = cmd("publish", cmd_publish, "publish a page (a folder with index.html): a new artifact, or with --id a new version")
+    c.add_argument("dir", help="the folder with index.html and the files beside it")
     c.add_argument("--title", help="what it is, for people (needed for a new one)")
     c.add_argument("--id", help="an artifact's id: publish a new version of it")
     c.add_argument("--folder", help="the folder it belongs to (default: here)")
     c.add_argument("--task", help="the task it's for (default: this agent's task)")
     c.add_argument("--note", help="what changed in this version")
-    c.add_argument("--custom", action="store_true", help="a custom GPUI panel (main.js), only when a recipe truly can't: the web shows only its picture")
+    c.add_argument("--proof", action="store_true", help="it is its task's proof: it stays on the task, not in Artifacts")
     c = cmd("update", cmd_publish, "publish a new version of an artifact (publish --id)")
     c.add_argument("id")
     c.add_argument("dir")
     c.add_argument("--title")
     c.add_argument("--note")
-    c.add_argument("--custom", action="store_true", help="a custom GPUI panel (main.js), only when a recipe truly can't")
-    c.set_defaults(folder=None, task=None)
-    c = cmd("check", cmd_check, "draw a published version again to check it (when publish couldn't), changing nothing")
+    c.add_argument("--task")
+    c.add_argument("--proof", action="store_true")
+    c.set_defaults(folder=None)
+    c = cmd("new", cmd_new, "write a starting index.html into a folder")
+    c.add_argument("dir")
+    cmd("guide", cmd_guide, "how to write an artifact")
+    c = cmd("preview", cmd_preview, "see a page here as the person sees it: served on 127.0.0.1, for your task's browser")
     c.add_argument("id")
     c.add_argument("--version", type=int, help="an older version (default: the latest)")
-    c = cmd("crop", cmd_crop, "cut a PNG to what matters (a screenshot for an artifact), with nothing else installed")
+    c = cmd("list", cmd_list, "a folder's artifacts, newest first")
+    c.add_argument("--folder")
+    c.add_argument("--all", action="store_true", help="every folder's on this machine")
+    c = cmd("show", cmd_show, "an artifact, its versions and where its files are")
+    c.add_argument("id")
+    c = cmd("rm", cmd_rm, "delete an artifact and its versions")
+    c.add_argument("id")
+    c = cmd("rename", cmd_rename, "give an artifact another title")
+    c.add_argument("id")
+    c.add_argument("title")
+    c = cmd("pin", cmd_pin, "pin an artifact to the top of Artifacts")
+    c.add_argument("id")
+    c = cmd("unpin", cmd_unpin, "unpin it")
+    c.add_argument("id")
+    c = cmd("keep", cmd_keep, "keep a task's proof as an artifact of its own (it shows in Artifacts)")
+    c.add_argument("id")
+    c = cmd("restore", cmd_restore, "make an earlier version the newest again (a copy of it)")
+    c.add_argument("id")
+    c.add_argument("--version", type=int, required=True, help="the version to bring back")
+    c = cmd("note", cmd_note, "send the person's note on a page to the agent that keeps it")
+    c.add_argument("id")
+    c.add_argument("--text", required=True, help="what the person wrote")
+    c.add_argument("--version", type=int, help="the version they were looking at (default: the latest)")
+    c.add_argument("--spot", help="their pin: \"x,y\" as fractions of the page's width and height (0.5,0.2), or words")
+    c = cmd("say", cmd_say, "send the person's answer from a page to the agent that keeps it")
+    c.add_argument("id")
+    c.add_argument("--text", required=True, help="the answer")
+    c.add_argument("--version", type=int, help="the version they answered on (default: the latest)")
+    c = cmd("convert", cmd_convert, "once: make every artifact Shepherdr 3.1 kept (recipes, window panels) a page")
+    c.add_argument("--all", action="store_true", help="every artifact on this machine (the default)")
+    c.add_argument("--id", help="only this artifact")
+    c.add_argument("--pictures", action="store_true", help="also take each page's picture now (seconds each; else `herdr-artifact pictures` later)")
+    c = cmd("pictures", cmd_pictures, "take the picture of every artifact that has none yet (after convert; slow with many)")
+    c.add_argument("--all", action="store_true", help="every artifact on this machine (the default)")
+    c.add_argument("--id", help="only this artifact")
+    c = cmd("crop", cmd_crop, "cut a PNG to what matters (a screenshot for a page), with nothing else installed")
     c.add_argument("src", help="the PNG to cut")
     c.add_argument("out", help="where the cut PNG goes")
     c.add_argument("--rect", required=True, help="the part to keep, in the picture's pixels: x,y,w,h")
     c.add_argument("--max", type=int, help="shrink it so its longest side is at most this many pixels")
-    c = cmd("list", cmd_list, "a folder's artifacts, newest first")
-    c.add_argument("--folder")
-    c.add_argument("--all", action="store_true", help="every folder's on this machine")
-    c = cmd("show", cmd_show, "an artifact and its versions")
-    c.add_argument("id")
-    c = cmd("rm", cmd_rm, "delete an artifact and its versions")
-    c.add_argument("id")
-    c = cmd("convert", cmd_convert, "turn older GPUI artifacts into recipes (--out a folder to look first; --publish as their newest version)")
-    c.add_argument("--id", help="only this artifact")
-    c.add_argument("--out", help="write each recipe into this folder, change nothing")
-    c.add_argument("--publish", action="store_true", help="publish each as its newest version (not installed; the old versions stay)")
-    c.add_argument("--force", action="store_true", help="also convert ones that answer clicks or read data while open (what they draw at first)")
-    c.add_argument("--recipe", help="with --id: a recipe folder written by hand, published as its newest version")
-    c = cmd("new", cmd_new, "write a starting recipe.json into a folder")
-    c.add_argument("dir")
-    c.add_argument("--custom", action="store_true", help="a starting main.js instead (a custom panel, only when a recipe truly can't)")
-    cmd("guide", cmd_guide, "how to write an artifact")
     c = cmd("where", cmd_where, "where a folder's artifacts are listed")
     c.add_argument("--folder")
-    c = cmd("open", cmd_open, "show an artifact to the person, wherever they are (their web app page, the window here), and print its link")
+    c = cmd("open", cmd_open, "show an artifact to the person, wherever they are, and print its link")
     c.add_argument("id")
     c.add_argument("--from", dest="machine", help="the machine it's on (default: this one)")
-    c.add_argument("--beside", help="in the window: a pane to open it beside (default: the focused one)")
-    c.add_argument("--direction", default="right", choices=["right", "down"])
-    c.add_argument("--tab", action="store_true", help="in the window: in a new tab instead")
-    c = cmd("link", cmd_link, "an artifact's link in the web app, for the person")
+    c = cmd("link", cmd_link, "an artifact's link in the app, for the person")
     c.add_argument("id")
     c.add_argument("--from", dest="machine", help="the machine it's on (default: this one)")
-    c = cmd("preview", cmd_preview, "see an artifact here as the person sees it: the web app's viewer on 127.0.0.1, for your task's browser")
-    c.add_argument("id")
-    c.add_argument("--version", type=int, help="an older version (default: the latest)")
-    c = cmd("note", cmd_note, "send the person's note on an artifact to the agent that keeps it (the viewer's Mark up)")
-    c.add_argument("id")
-    c.add_argument("--text", required=True, help="what the person wrote")
-    c.add_argument("--version", type=int, help="the version they were looking at (default: the latest)")
-    c.add_argument("--spot", help="where on it, in words")
-    c.add_argument("--image", help="a picture of it, a path the agent can read")
-    c.add_argument("--shot", help="a window shot (herdr-app shot) to cut the panel from; removed after")
-    c.add_argument("--panel", help="the panel in the shot, logical px: x,y,w,h")
-    c.add_argument("--area", help="the marked spot in the shot, logical px: x,y,w,h")
-    c.add_argument("--from", dest="machine", help="the machine the artifact is on (default: this one)")
-    c = cmd("picture", cmd_picture, argparse.SUPPRESS)
-    c.add_argument("id")
-    c.add_argument("--version", type=int, required=True)
-    c.add_argument("--shot", help="a window shot (herdr-app shot) to cut the panel from; removed after")
-    c.add_argument("--panel", help="the panel in the shot, logical px: x,y,w,h")
-    c.add_argument("--image", help="the picture itself")
-    c.add_argument("--from", dest="machine", help="the machine the artifact is on (default: this one)")
-    c = cmd("pull", cmd_pull, argparse.SUPPRESS)
-    c.add_argument("id")
-    c.add_argument("--from", dest="machine", help="the machine it's on (default: this one)")
-    c.add_argument("--version", type=int, help="an older version (default: the latest)")
-    c = cmd("pack", cmd_pack, argparse.SUPPRESS)
-    c.add_argument("id")
-    c.add_argument("--version", type=int)
 
     o = p.parse_args(argv)
     if not o.cmd:
