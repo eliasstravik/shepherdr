@@ -1,6 +1,7 @@
 /** Only mounted visible panels own a socket. Typed input is never buffered or replayed. */
-const inputs = new Map<string, (message: { type: 'keys'; keys: string[] } | { type: 'text'; text: string }) => void>()
-export function streamInput(chat: string, message: { type: 'keys'; keys: string[] } | { type: 'text'; text: string }) {
+type Input = { type: 'keys'; keys: string[] } | { type: 'text'; text: string } | { type: 'resize'; cols: number; rows: number }
+const inputs = new Map<string, (message: Input) => void>()
+export function streamInput(chat: string, message: Input) {
   inputs.get(chat)?.(message)
 }
 export function connectTerminal(chat: string, output: (bytes: Uint8Array, done: () => void) => void,

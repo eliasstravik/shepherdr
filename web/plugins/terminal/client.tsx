@@ -52,11 +52,24 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
     let term: import('@xterm/xterm').Terminal | null = null
     let link: { close(): void } | null = null
     let cols = 80
+    const own = stream.startsWith('sh:')
+    let asked = ''
     const fit = () => {
       if (!term || !box.current) return
       const w = box.current.clientWidth - 16
+      if (own) {
+        // your own terminal takes the drawer's size: as many columns and rows as fit at the normal font
+        const c = Math.max(20, Math.floor(w / (13 * cellOf(MONO))))
+        const r = Math.max(5, Math.floor((box.current.clientHeight - 16) / (13 * 1.25)))
+        if (`${c}x${r}` !== asked && opened) {
+          asked = `${c}x${r}`
+          streamInput(stream, { type: 'resize', cols: c, rows: r })
+        }
+        return
+      }
       term.options.fontSize = Math.max(8, Math.min(13, Math.floor((w / (cols * cellOf(MONO))) * 4) / 4))
     }
+    let opened = false
     void Promise.all([import('@xterm/xterm'), import('@xterm/addon-unicode11')]).then(([{ Terminal }, { Unicode11Addon }]) => {
       if (gone || !host.current) return
       term = new Terminal({ cols: 80, rows: 24, scrollback: 2000, disableStdin: true, cursorBlink: true, fontFamily: MONO, fontSize: 13, lineHeight: 1.25, allowProposedApi: true, theme: { background: '#0a0a0a', foreground: '#d4d4d4', cursor: '#d4d4d4', selectionBackground: 'rgb(255 255 255 / 0.25)' } })
@@ -76,6 +89,7 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
         (c, r) => {
           cols = c
           term!.resize(c, r)
+          opened = true
           fit()
         },
         setStatus,
@@ -233,7 +247,7 @@ function TaskTermButton({ thread }: { thread: Thread }) {
 function Stuck({ thread }: { chat: Chat | undefined; thread: Thread }) {
   const snap = useSnap()
   if (!snap) return null
-  const stuck = (t: Task) => tstate(t) === 'ask' && t.blocked === 'prompt'
+  const stuck = (t: Task) => t.blocked === 'prompt' && !t.archived && tstate(t) !== 'done'
   const banner = (key: string, words: string, chat: string, open?: Task) => (
     <div className="banner" style={{ margin: '8px 0 0' }} key={key}>
       <I n="warn" c="c-ask" />

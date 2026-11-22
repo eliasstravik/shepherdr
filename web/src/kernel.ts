@@ -97,6 +97,9 @@ export interface Registry {
   messageEdge: { order: number; View: FC<{ msg: Message; chat: Chat }> }[]
   /** rows of a message's menu, and what sits above them (the emoji row) */
   messageMenu: { order: number; Top?: FC<{ msg: Message; chat: Chat; close: () => void }>; rows?: (msg: Message, chat: Chat) => MenuRow[] }[]
+  /** cards the app puts in a chat from a task's status, not an agent: each sits where it came up (`at`), among the
+   *  messages of that time; one without a time goes after the last message */
+  chatCards: { order: number; cards: (snap: Snapshot, thread: Thread) => { key: string; at?: number; node: ReactNode }[] }[]
   /** after a chat's messages (cards the app puts there from a task's status, the live picture, the working line) */
   chatTail: { order: number; View: FC<{ chat: Chat | undefined; thread: Thread }> }[]
   /** takes a chat's place (the agent's own terminal) */
@@ -126,7 +129,7 @@ export interface Registry {
 export const registry: Registry = {
   views: {},
   header: [], taskHeader: [], panes: [], bar: [], barEnd: [], barAbove: [], spaceMenu: [], taskMenu: [], messageParts: [], messageEdge: [],
-  messageMenu: [], chatTail: [], chatBody: [], aboveBox: [], boxButtons: [], drawer: [], sideHead: [], overlays: [], topBars: [], settings: [],
+  messageMenu: [], chatCards: [], chatTail: [], chatBody: [], aboveBox: [], boxButtons: [], drawer: [], sideHead: [], overlays: [], topBars: [], settings: [],
   keys: [], voiceWake: null, middle: [],
 }
 

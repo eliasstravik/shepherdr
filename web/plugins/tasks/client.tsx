@@ -1,7 +1,7 @@
 // Tasks: the pane with Now (Needs you, Working, Up next, Done, Archived) and Scheduled, a task opened as a thread
 // (back, title, Terminal, Screen, its menu, expand, its own reply box), the review card wherever it comes up, the
 // Start task dialog for one not started yet, and a task's menu.
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { PaneFrame, placeholderOf } from '@client/App.tsx'
 import { renameDialog } from '@client/list.tsx'
 import { definePlugin, getState, go, has, notice, openTask, registry, setUI, togglePane, tryAct, act, useSnap, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
@@ -9,7 +9,7 @@ import { confirm, openDialog, openMenu } from '@client/overlay.tsx'
 import { AgentField, pickFor, type Pick } from '@client/picker.tsx'
 import { edge } from '@client/resize.ts'
 import { Btn, Cnt, cx, Empty, Hd, I, IB } from '@client/ui.tsx'
-import type { Chat, MergeEvidence, Snapshot, Task } from '@shared/types.ts'
+import type { MergeEvidence, Snapshot, Task } from '@shared/types.ts'
 import { isEverything, machineLabel, needsCount, nowGroups, onBranch, placeDown, spaceLabel, spacesOf, statusWord, taskChat, taskLine, taskRef, taskWhen, tasksIn, tstate, whereWords, type TaskState } from '@shared/view.ts'
 import { DoneRow } from '@plugins/chat/cards.tsx'
 
@@ -218,34 +218,29 @@ export function StoppedCard({ t }: { t: Task }) {
   )
 }
 
-/** In a chat: the cards of the tasks that need the person there, each under a line naming its task. The app puts them
- *  there from each task's status, not an agent. In a task: its own review or stopped card. */
-function TaskCards({ thread }: { chat: Chat | undefined; thread: Thread }) {
-  const snap = useSnap()
-  if (!snap) return null
+/** In a chat: the cards of the tasks that need the person there (a review, a stopped agent), each where it came up.
+ *  The app puts them there from each task's status, not an agent. In a task: its own review or stopped card. */
+function taskCards(snap: Snapshot, thread: Thread): { key: string; at?: number; node: ReactNode }[] {
+  const reviewing = (t: Task) => tstate(t) === 'ready' || t.status === 'merging' || !!t.accepting
+  const halted = (t: Task) => tstate(t) === 'ask' && !!t.stopped && t.stopped.by !== 'you'
   if (thread.task) {
     const t = thread.task
-    return (
-      <>
-        {(tstate(t) === 'ready' || t.status === 'merging' || t.accepting) && <ReviewCard t={t} ctx="thread" />}
-        <StoppedCard t={t} />
-      </>
-    )
+    return [...(reviewing(t) ? [{ key: `review:${t.id}`, node: <ReviewCard t={t} ctx="thread" /> }] : []), ...(halted(t) ? [{ key: `stopped:${t.id}`, node: <StoppedCard t={t} /> }] : [])]
   }
   const mine = tasksIn(snap, thread.place)
-  const ready = mine.filter((t) => tstate(t) === 'ready' || t.status === 'merging' || t.accepting)
-  const stopped = mine.filter((t) => tstate(t) === 'ask' && t.stopped && t.stopped.by !== 'you')
-  return (
-    <>
-      {ready.map((t) => <ReviewCard key={t.id} t={t} ctx="chat" />)}
-      {stopped.map((t) => (
-        <div key={t.id} style={{ display: 'contents' }}>
+  return [
+    ...mine.filter(reviewing).map((t) => ({ key: `review:${t.id}`, at: t.needsAt, node: <ReviewCard t={t} ctx="chat" /> })),
+    ...mine.filter(halted).map((t) => ({
+      key: `stopped:${t.id}`,
+      at: t.needsAt,
+      node: (
+        <>
           <button type="button" className="ref" onClick={() => open(t)}><I n="chat" c="s16" />{t.name}</button>
           <StoppedCard t={t} />
-        </div>
-      ))}
-    </>
-  )
+        </>
+      ),
+    })),
+  ]
 }
 
 /* ---------- an open task ---------- */
@@ -412,7 +407,7 @@ export default definePlugin({
     reg.panes.push({ id: 'tasks', View: TasksPane })
     reg.views.taskHead = TaskHead
     reg.views.taskTop = TaskTop
-    reg.chatTail.push({ order: 20, View: TaskCards })
+    reg.chatCards.push({ order: 20, cards: taskCards })
   },
 })
 

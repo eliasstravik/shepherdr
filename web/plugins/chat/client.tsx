@@ -180,7 +180,13 @@ function Messages({ thread }: { thread: Thread }) {
     if (!sc) return
     stuck.current = true
     sc.scrollTop = sc.scrollHeight
+    let height = sc.scrollHeight
     const on = () => {
+      // the chat grew (a picture loaded, a card came): that is not the person scrolling up
+      if (sc.scrollHeight !== height) {
+        height = sc.scrollHeight
+        if (stuck.current) return void (sc.scrollTop = sc.scrollHeight)
+      }
       stuck.current = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80
       const c = getState().chats[thread.chat]
       if (sc.scrollTop < 40 && c?.earlier && !loading.has(thread.chat)) {
@@ -226,8 +232,20 @@ function Messages({ thread }: { thread: Thread }) {
   const out: ReactNode[] = []
   let prev = ''
   let lastAt = 0
+  /** the task the last line named: its next message or card needs no second line */
+  let lastRef = ''
+  // the app's own cards (a review, a stopped agent), each where it came up among the messages
+  const cards = registry.chatCards.flatMap((c) => c.cards(snap, thread)).sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity))
+  const cardsUntil = (at: number) => {
+    while (cards.length && (cards[0]!.at ?? Infinity) <= at) {
+      const c = cards.shift()!
+      out.push(<div key={`c:${c.key}`} style={{ display: 'contents' }}>{c.node}</div>)
+      prev = 'a'
+    }
+  }
   const stub: Chat = chat ?? { key: thread.chat, messages: [], cli: '' }
   for (const { msg: m, pending, failed } of rows) {
+    if (m.at) cardsUntil(m.at)
     const who = m.who === 'you' ? 'me' : 'a'
     const k = keyOf(m)
     if (m.at && (!lastAt || new Date(m.at).toDateString() !== new Date(lastAt).toDateString() || m.at - lastAt > QUIET)) out.push(<div key={`t:${k}`} className="time">{dayLabel(m.at)} {clock(m.at)}</div>)
@@ -239,21 +257,29 @@ function Messages({ thread }: { thread: Thread }) {
     }
     if (m.activity) out.push(<Did key={k} a={m.activity} />)
     else if (m.question) {
-      if (m.question.by && !thread.task) out.push(<TaskRef key={`r:${k}`} id={taskIdOf(snap, m.question.by.chat)} title={m.question.by.title ?? m.question.by.ref} />)
+      // a question from a task, shown in this chat: under a line naming the task (once), and it says where that task runs
+      const from = m.question.by && !thread.task ? taskIdOf(snap, m.question.by.chat) : null
+      if (from && from !== lastRef) out.push(<TaskRef key={`r:${k}`} id={from} title={m.question.by!.title ?? m.question.by!.ref} />)
+      if (from) lastRef = from
+      const place = (from && taskOf(snap, from)?.place) || thread.place
       if (m.question.title && !m.question.command && !m.question.plan && !m.question.parts?.length && m.question.sent === undefined && !m.question.closed) out.push(<div key={`q:${k}`} className={cx('b', gap && 'gap')}>{m.question.title}</div>)
-      out.push(<QuestionCard key={k} q={m.question} chat={thread.chat} place={thread.place} />)
+      out.push(<QuestionCard key={k} q={m.question} chat={m.question.by?.chat ?? thread.chat} place={place} />)
     } else if (m.secret) out.push(<SecretCard key={k} ask={m.secret} chat={thread.chat} />)
     else if (m.news || m.card) {
       const taskId = m.news?.task ?? m.card?.task
       const t = taskOf(snap, taskId)
-      if (t && !thread.task) out.push(<TaskRef key={`r:${k}`} id={t.id} title={t.name} />)
+      if (t && !thread.task && t.id !== lastRef) out.push(<TaskRef key={`r:${k}`} id={t.id} title={t.name} />)
+      if (t) lastRef = t.id
       const text = m.news?.text ?? m.card?.text ?? m.text ?? ''
       if (text) out.push(<Bubble key={k} msg={{ ...m, text }} chat={stub} thread={thread} gap={false} />)
     } else if (m.brief) out.push(<div key={k} className="ref"><I n="note" c="s16" /><span>{m.brief.label}</span></div>)
     else if (m.ended) out.push(<DoneRow key={k}>{m.text ?? 'Ended'}</DoneRow>)
     else if (m.error) out.push(<div key={k} className="ref c-red"><I n="warn" c="s16" /><span>{m.text}</span></div>)
     else if (m.file) out.push(<FileRow key={k} msg={m} chat={stub} gap={gap} />)
-    else if (m.text) out.push(<Bubble key={k} msg={m} chat={stub} thread={thread} gap={gap} pending={pending} failed={failed} />)
+    else if (m.text) {
+      lastRef = ''
+      out.push(<Bubble key={k} msg={m} chat={stub} thread={thread} gap={gap} pending={pending} failed={failed} />)
+    }
     for (const [i, p] of registry.messageParts.entries()) out.push(<p.View key={`${k}:p${i}`} msg={m} chat={stub} thread={thread} />)
     if (!m.activity) prev = who
   }
@@ -265,6 +291,7 @@ function Messages({ thread }: { thread: Thread }) {
         <Empty title={every ? 'Welcome to Shepherdr' : `Nothing in #${placeOf(snap, thread.place)?.name ?? ''} yet`}>Tell me what you want done{every ? ', here or in a space.' : ' here.'}</Empty>
       )}
       {out}
+      {cards.map((c) => <div key={`c:${c.key}`} style={{ display: 'contents' }}>{c.node}</div>)}
       {registry.chatTail.map((t, i) => <t.View key={i} chat={chat} thread={thread} />)}
       <div ref={end} />
     </>
