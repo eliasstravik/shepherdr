@@ -5,7 +5,6 @@
 // go into the box to edit; cancel drops it, also while it's writing.
 import * as V from '@core/voice.js'
 import { levelOf, meter, TALKING, type Sample } from './meter.ts'
-import { note } from './usage.ts'
 
 const { liveUrl, liveChunk, liveWords, base64, to16k, LIVE_TAIL, LIVE_WAIT } = V as any
 
@@ -190,7 +189,6 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
     },
   }
   current = self
-  note('feature', { type: 'dictation' })
   navigator.mediaDevices
     ?.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
     .then(async (stream) => {

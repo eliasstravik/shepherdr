@@ -75,6 +75,10 @@ export interface PlaceTab {
  *  space (its home folder, ~), always first under it and never removed: its coordinator also keeps an eye on the
  *  machine, and the main machine's on every machine. Spaces are the only places with a chat. */
 export interface Place {
+  /** 3.2: archived: out of the list (the filter shows it again), its schedules stopped, nothing deleted */
+  archived?: boolean
+  /** 3.2: its chat's own agent needs the person (it asks, waits at a prompt, or stopped): counts for the space */
+  needs?: boolean
   id: string
   /** nobody named it: Herdr names it after its folder (its Rename field starts empty, this name its placeholder) */
   unnamed?: boolean
@@ -303,6 +307,29 @@ export interface TaskAgent {
 }
 
 export interface Task {
+  /** 3.2, facts the status is worked out from (web/shared/view.ts), never guessed from a screen: */
+  /** the agent stopped: by the person (Stop), by an error or a crash, or at its plan's limit; why, in its own words */
+  stopped?: { by: 'you' | 'error' | 'limit'; why?: string }
+  /** what kind of block the agent reports (OSC 7501): none when it gives no kind */
+  blocked?: 'permission' | 'question' | 'auth' | 'prompt'
+  /** it waits for a Mac's one desktop, which another agent is using */
+  waitsDesktop?: boolean
+  /** done: its work was merged into the base branch */
+  merged?: boolean
+  /** done: a schedule's run that had nothing to do, or that only had something to say (posted in its space's chat) */
+  quiet?: 'nothing' | 'told'
+  /** done: a few words after "Done and merged" ("1 link fixed") */
+  doneNote?: string
+  /** the schedule whose run it is */
+  schedule?: string
+  /** since when it has needed the person (ms) */
+  needsAt?: number
+  /** the last merge failed: why, in one line */
+  mergeFailed?: string
+  /** it is in a git repository, on its own branch or worktree ("branch"), or changed the folder itself ("folder") */
+  repo?: 'branch' | 'folder'
+  /** the task it waits for, by title */
+  afterTitle?: string
   /** short name, as people say it: GTM-15 */
   id: string
   name: string
@@ -372,6 +399,17 @@ export interface Task {
 
 /** An automation as a project's Tasks lists it: its name, when it runs, the task it adds */
 export interface Automation {
+  /** 3.2: its id within its space's list, and the space it runs in */
+  id?: string
+  place?: string
+  /** when it last ran, and how that run ended, in a few words ("today 9:00 · nothing to do") */
+  last?: string
+  /** when it runs next, in a few words ("in 12 min") */
+  nextWords?: string
+  /** it runs once and then leaves the list */
+  once?: boolean
+  /** the agent its tasks run on, when not the space's own */
+  agent?: AgentPick
   name: string
   /** its trigger in words: "Monday to Friday at 9:00 (Stockholm)", "When a task is merged" */
   when: string
@@ -415,6 +453,8 @@ export interface Choice {
 }
 
 export interface Question {
+  /** 3.2: a permission request: the command (or what it wants to do) in the agent's own words; choice 0 allows once */
+  command?: string
   id: string
   title: string
   kind: 'Form' | 'Question' | 'Plan'
@@ -475,6 +515,10 @@ export interface MergeEvidence {
 
 /** an artifact: what an agent shows beyond words, kept in its place and updated as new versions */
 export interface Artifact {
+  /** 3.2: made as a task's proof: it stays on its task's card and thread until kept (not in Artifacts) */
+  proof?: boolean
+  /** 3.2: pinned to the top of Artifacts */
+  pinned?: boolean
   id: string
   title: string
   /** Shepherdr 3.1: recipe (recipe.json, drawn here as HTML) or gpui (a custom panel only the Herdr window runs: the
@@ -1211,6 +1255,12 @@ export interface PullRequest {
 export type WorktreeAsk = { task: string } & ({ what: 'dir'; path?: string } | { what: 'marks' } | { what: 'files' } | { what: 'file'; path: string } | { what: 'diff' } | { what: 'patch'; path: string } | { what: 'pr' })
 
 export interface Snapshot {
+  /** 3.2: what Settings shows, for everything and for each space that set its own */
+  config?: Config
+  /** 3.2: the root space's id: one agent in a home folder on the serving machine */
+  everything?: string
+  /** 3.2: warnings for the line above Everything's message box: a plan over 75%, a machine running low or out of reach */
+  warnings?: { id: string; kind: 'usage' | 'machine'; text: string }[]
   terminalTransport?: 'core'
   name: string
   /** Main machine's stable key; its human-facing name is in machines. */
@@ -1379,4 +1429,71 @@ export interface UpdateStatus {
   release?: string
   error?: string
   at: number
+}
+
+/* ---------- 3.2: the picker's lists, read from each agent's own catalog on a machine, never written into Shepherdr ---------- */
+
+/** a model an agent offers: its speeds (service tiers) where it has more than one, its provider where an agent has several */
+export interface CatalogModel {
+  id: string
+  name: string
+  group?: string
+  /** 'regular' first; also 'fast', 'ultrafast' */
+  speeds?: string[]
+  efforts?: string[]
+  defaultEffort?: string | null
+}
+
+/** an agent (a harness) herdr-core can run, on one machine */
+export interface CatalogAgent {
+  id: string
+  name: string
+  installed: boolean
+  /** why it can't be picked there, when it is missing */
+  why?: string
+  models: CatalogModel[]
+  /** the effort levels it has (none: no Effort switch) */
+  efforts: string[]
+  /** its permission modes, each with one line saying what it lets the agent do without asking (none: no row) */
+  perms: { id: string; label: string; about: string }[]
+  permDefault?: string
+  defaultModel?: string
+  defaultEffort?: string
+}
+
+export interface Catalog {
+  machine: string
+  agents: CatalogAgent[]
+}
+
+/* ---------- 3.2: settings, as the settings window shows them ---------- */
+
+/** what one level sets: everything's, or a space's own on top of it */
+export interface LevelConfig {
+  /** what chats, tasks and reviews run on */
+  agents: { Chats: AgentPick; Tasks: AgentPick; Reviews: AgentPick }
+  /** a second agent reviews each task before it is handed in */
+  review: boolean
+  /** when a finished task merges: when I mark it as done, when its checks pass, or right away */
+  merge: 'done' | 'checks' | 'now'
+  /** the agent attaches proof whenever there is something to show */
+  proof: boolean
+  /** how agents should work: added to every agent's prompt as written */
+  instructions: string
+}
+
+export interface Config {
+  all: LevelConfig
+  /** a space's own values, and which of them it set itself ("agents.Chats", "merge", …): the rest are Everything's */
+  spaces: Record<string, LevelConfig & { own: string[] }>
+  /** secrets by name (never their values): for every space, or one space */
+  secrets: { name: string; scope: string; at?: number }[]
+  /** every feature is a plugin: the optional ones and whether each is on */
+  plugins: { id: string; name: string; on: boolean; always?: boolean }[]
+  /** each agent subscription's use for its current windows */
+  plans: { name: string; windows: { name: string; used: number; resets?: string }[] }[]
+  /** the one command to run on a new machine to link it */
+  addMachine?: string
+  /** machines with a real screen whose desktop can be opened (Settings › Machines) */
+  desktops?: string[]
 }

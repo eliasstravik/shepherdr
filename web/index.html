@@ -7,13 +7,13 @@
     <meta name="description" content="Your agents, tasks and chats from a phone, tablet or desktop." />
     <meta name="theme-color" content="#ffffff" />
     <script>
-      /* the appearance picked on this device (src/theme.ts), on the page before the first paint: no flash of the other */
+      /* the theme picked on this device (src/prefs.ts), on the page before the first paint: no flash of the other */
       (function () {
-        var a = null
-        try { a = localStorage.getItem('shepherdr.appearance') } catch (e) {}
-        var dark = a === 'dark' || (a !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
-        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
-        document.querySelector('meta[name=theme-color]').content = dark ? '#0b0b0d' : '#ffffff'
+        var t = 'System'
+        try { t = (JSON.parse(localStorage.getItem('shepherdr.prefs') || '{}') || {}).theme || 'System' } catch (e) {}
+        if (t !== 'System') document.documentElement.dataset.theme = t.toLowerCase()
+        var dark = t === 'Dark' || (t === 'System' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.querySelector('meta[name=theme-color]').content = dark ? '#121212' : '#ffffff'
       })()
       /* a link's #part (#accept=SHEP-7), kept before the app's own address takes the bar */
       window.shepherdrLink = location.hash
@@ -50,8 +50,8 @@
     <link rel="apple-touch-startup-image" media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: light)" href="splash/440x956@3-light.png" />
     <link rel="apple-touch-startup-image" media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" href="splash/440x956@3-dark.png" />
   </head>
-  <body class="antialiased">
-    <div id="root" class="isolate"></div>
+  <body>
+    <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
