@@ -41,6 +41,7 @@ export async function exec(hub: Hub, argv: string[], on: string | null = null, t
 export const sh = (hub: Hub, script: string, args: string[], on: string | null) => exec(hub, ["sh", "-c", script, ...args], on);
 
 type List = any;
+const missingDoc = (e: unknown) => /not.?found|no.?such|missing/i.test(`${(e as any)?.kind ?? ""} ${(e as Error)?.message ?? ""}`);
 
 export class Model {
   private lists = new Map<string | null, List[]>();   // machine (null: here) -> its task lists
@@ -134,8 +135,10 @@ export class Model {
     const state = process.env.XDG_STATE_HOME || join(HOME, ".local", "state");
     if (!existsSync(join(state, "herdr-core", session, "core.json"))) return null;
     const client = await CoreClient.endpoint({ binary: process.env.SHEPHERDR_HC || "hc", ...(session !== "default" ? { session } : {}) });
-    try { return (await client.call<{ value: any }>("doc.get", { name: "herdr-app", ...(machine ? { on: machine } : {}) }, 8000)).value ?? null; }
-    finally { client.close(); }
+    try {
+      try { return (await client.call<{ value: any }>("doc.get", { name: "herdr-app", ...(machine ? { on: machine } : {}) }, 8000)).value ?? null; }
+      catch (e) { if (missingDoc(e)) return null; throw e; }
+    } finally { client.close(); }
   }
 
   legacyHistory: ((machine: string | null) => Promise<Record<string, { path: string; kind: string }>>) | null = null;
@@ -185,7 +188,10 @@ export class Model {
   private async carry() {
     if (this.carrying || !this.own?.ready()) return;
     const done: unknown = this.doc()[IMPORTED];
-    const todo = [null, ...this.machines].filter((m) => !(Array.isArray(done) && done.includes(m ?? "")));
+    const machines = [null, ...this.machines];
+    const todo = machines.filter((m) => !(Array.isArray(done) && done.includes(m ?? "")));
+    const historyDone = this.doc()["chat.history.imported"];
+    const historyTodo = machines.filter((m) => !(Array.isArray(historyDone) && historyDone.includes(m ?? "")));
     // Everything: the root space, one agent in the home folder on the serving machine. Once this computer's spaces
     // are carried over and none of them is the home folder, it is made (its agent starts with its first message).
     const own: any[] = Array.isArray(this.doc().spaces) ? this.doc().spaces : [];
@@ -198,23 +204,37 @@ export class Model {
         });
       } catch {} finally { this.carrying = false; }
     }
-    if (!todo.length) return;
+    if (!todo.length && !historyTodo.length) return;
     this.carrying = true;
     try {
       const docs = new Map<string | null, any>();
-      const history: Record<string, { path: string; kind: string }> = {};
-      await Promise.all(todo.map(async (m) => {
-        try {
-          const current = (await this.hub.call<{ value: any }>("doc.get", { name: "herdr-app", ...(m ? { on: m } : {}) }, 8000)).value ?? null;
-          // A missing copy does not mean the old session had no spaces. Read it before marking this machine done.
-          const old = current == null || Object.keys(current).length === 0 ? await this.oldSpaces(m) : current;
-          const prior = await this.oldHistory(m);
-          Object.assign(history, prior);
-          docs.set(m, old ?? {});
-        } catch { /* unavailable or uncertain: retry without marking it imported */ }
-      }));
-      // against the document as it is when written (a space made meanwhile stays)
-      if (docs.size) await this.own.update((v) => { const r = carryOver(v.spaces, v[IMPORTED], docs); return r ? { ...v, spaces: r.spaces, [IMPORTED]: r.imported, "chat.history": { ...history, ...(v["chat.history"] ?? {}) } } : v; });
+      const histories = new Map<string | null, Record<string, { path: string; kind: string }>>();
+      await Promise.all([
+        ...todo.map(async (m) => {
+          try {
+            let current: any = null;
+            try { current = (await this.hub.call<{ value: any }>("doc.get", { name: "herdr-app", ...(m ? { on: m } : {}) }, 8000)).value ?? null; }
+            catch (e) { if (!missingDoc(e)) throw e; }
+            const old = current == null || Object.keys(current).length === 0 ? await this.oldSpaces(m) : current;
+            docs.set(m, old ?? {});
+          } catch { /* unavailable or uncertain: retry without marking spaces imported */ }
+        }),
+        ...historyTodo.map(async (m) => {
+          try { histories.set(m, await this.oldHistory(m)); }
+          catch { /* a missing history never holds back the spaces; retry it separately */ }
+        }),
+      ]);
+      if (docs.size || histories.size) await this.own.update((v) => {
+        const r = carryOver(v.spaces, v[IMPORTED], docs);
+        const history = { ...(v["chat.history"] ?? {}) };
+        const marked = new Set<string>(Array.isArray(v["chat.history.imported"]) ? v["chat.history.imported"] : []);
+        for (const [m, old] of histories) {
+          if (marked.has(m ?? "")) continue;
+          for (const [key, value] of Object.entries(old)) if (!history[key]) history[key] = value;
+          marked.add(m ?? "");
+        }
+        return { ...v, ...(r ? { spaces: r.spaces, [IMPORTED]: r.imported } : {}), "chat.history": history, "chat.history.imported": [...marked] };
+      });
     } catch {} finally { this.carrying = false; }
   }
 

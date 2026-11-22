@@ -174,3 +174,33 @@ test("a missing copied document waits for the old session and imports it on retr
   expect(doc[IMPORTED]).toEqual([""]);
   expect(doc["chat.history"].sp1).toEqual({ path: "/old/session.jsonl", kind: "claude" });
 });
+
+test("history retries independently without hiding copied spaces", async () => {
+  const { Model } = await import("./model.ts");
+  const hub: any = { terminals: new Map(), on: () => () => {}, call: async (method: string) => method === "machine.list" ? { machines: [] } : { value: { spaces: [{ id: "sp1", name: "Old", folder: "/old" }] } } };
+  const m = new Model(hub, { put: () => {} } as any), doc: Record<string, any> = {};
+  m.doc = () => doc;
+  m.own = { ready: () => true, update: async (change) => Object.assign(doc, change(doc)) };
+  let available = false;
+  m.legacyHistory = async () => { if (!available) throw new Error("offline"); return { sp1: { path: "/old.jsonl", kind: "claude" } }; };
+  await m.refresh();
+  expect(doc.spaces).toMatchObject([{ id: "sp1" }]);
+  expect(doc["chat.history.imported"]).toEqual([]);
+  available = true;
+  await m.refresh();
+  expect(doc["chat.history"].sp1.path).toBe("/old.jsonl");
+  expect(doc["chat.history.imported"]).toEqual([""]);
+});
+
+test("a copied document reported not found is read from the old session", async () => {
+  const { Model } = await import("./model.ts");
+  const hub: any = { terminals: new Map(), on: () => () => {}, call: async (method: string) => { if (method === "machine.list") return { machines: [] }; throw Object.assign(new Error("document not found"), { kind: "not_found" }); } };
+  const m = new Model(hub, { put: () => {} } as any), doc: Record<string, any> = {};
+  m.doc = () => doc;
+  m.own = { ready: () => true, update: async (change) => Object.assign(doc, change(doc)) };
+  m.legacySpaces = async () => ({ spaces: [{ id: "sp1", name: "Old", folder: "/old" }] });
+  m.legacyHistory = async () => ({});
+  await m.refresh();
+  expect(doc.spaces).toMatchObject([{ id: "sp1", name: "Old" }]);
+  expect(doc[IMPORTED]).toEqual([""]);
+});
