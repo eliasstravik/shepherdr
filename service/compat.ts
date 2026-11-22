@@ -593,8 +593,11 @@ export class Compat {
       const row = this.rows.find((r) => `${taskId(r)}/worker` === v.chat);
       const home = this.spaceList.find((s) => !s.machine && s.folder === HOME)?.id;
       const rowSpace = row?.space || this.spaceList.find((s) => (s.machine ?? null) === (row?.machine ?? null) && s.folder === row?.folder)?.id;
-      if (key === v.chat || (space && row && (rowSpace === space || home === space)))
-        messages.push({ id: `voice-answer:${v.id}`, who: "you", text: v.text, at: v.at, byVoice: true });
+      if (key === v.chat || (space && row && (rowSpace === space || home === space))) {
+        const answer: Message = { id: `voice-answer:${v.id}`, who: "you", text: v.text, at: v.at, byVoice: true };
+        const next = messages.findIndex((m) => typeof m.at === "number" && m.at > v.at);
+        messages.splice(next < 0 ? messages.length : next, 0, answer);
+      }
     }
     // what the agent asks now, as cards at the end of its chat
     for (const a of addr ? this.asks?.of(addr) ?? [] : []) messages.push({ id: `ask:${a.id}`, who: "agent", at: a.at, question: this.question(a, key) });
