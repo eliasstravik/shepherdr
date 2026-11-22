@@ -445,10 +445,12 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   }
   if (b?.type === "earlier" && typeof b.chat === "string") {
     // the chat scrolled to its top ("Loading earlier…"): the log's page before what it shows
+    const current = compat.addrOf(b.chat);
+    const reader = current && compat.reader?.(current);
     const history = compat.historyOf(b.chat);
     const prior = history && compat.reader?.(history);
-    if (history && prior?.start) await (compat as any).earlier?.(history);
-    else if (compat.addrOf(b.chat)) await (compat as any).earlier?.(chat(b.chat));
+    if (current && reader?.start) await (compat as any).earlier?.(current);
+    else if (history && prior?.start) await (compat as any).earlier?.(history);
     return { ok: true };
   }
   if (b?.type === "keys" && typeof b.chat === "string" && Array.isArray(b.keys) && b.keys.length <= 32 && b.keys.every((k: unknown) => typeof k === "string" && k.length <= 40)) {

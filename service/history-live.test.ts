@@ -12,7 +12,7 @@ test("old chat appears before the new session, then stays when its assistant sta
   live.compat = {
     historyOf: () => "log:|claude|/old.jsonl", addrOf: () => address,
     freshChat: () => ({ key: "p:sp1", messages: [], cli: "claude", fresh: true }),
-    chat: (_: string, reader: any) => ({ key: "p:sp1", messages: reader.messages, cli: "claude", top: true }),
+    chat: (_: string, reader: any) => ({ key: "p:sp1", messages: reader.messages, cli: "claude", top: !reader.earlier, earlier: !!reader.earlier }),
   } as any;
   const ws: any = { data: {}, readyState: 1, send: (text: string) => sent.push(JSON.parse(text)) };
   (live as any).watch(ws, ["p:sp1"]);
@@ -20,6 +20,8 @@ test("old chat appears before the new session, then stays when its assistant sta
   expect(sent.at(-1).chat.messages.map((m: any) => m.id)).toEqual(["old", "history-boundary"]);
   address = "t1";
   (live as any).watch(ws, ["p:sp1"]);
-  callbacks.get("t1")!({ messages: [{ id: "new", who: "agent", text: "After" }] }, {});
+  callbacks.get("t1")!({ messages: [{ id: "new", who: "agent", text: "After" }], earlier: true }, {});
   expect(sent.at(-1).chat.messages.map((m: any) => m.id)).toEqual(["old", "history-boundary", "new"]);
+  expect(sent.at(-1).chat.earlier).toBe(true);
+  expect(sent.at(-1).chat.top).toBe(false);
 });

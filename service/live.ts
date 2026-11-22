@@ -86,7 +86,7 @@ export class Live {
     const old = ws.data.history?.get(key)?.chat;
     if (!old?.messages.length) return chat;
     return { ...chat, messages: [...old.messages, { id: "history-boundary", who: "agent", newSession: true }, ...chat.messages],
-      top: old.top, earlier: old.earlier };
+      top: !!old.top && !!chat.top, earlier: !!old.earlier || !!chat.earlier };
   }
 
   private sendChat(ws: WS, key: string, chat: Chat) {
