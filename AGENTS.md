@@ -159,3 +159,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Codex sandbox repros without an agent: `codex sandbox -c sandbox_mode='"workspace-write"' [-c sandbox_workspace_write.writable_roots=[...]] -- <cmd>` runs a command in the same bwrap+seccomp a worker gets (unix socket connect is refused there). (from SHEP-285)
 
 - Never pkill -f a pattern that appears in your own command line (e.g. a unittest name): it kills your shell; use TaskStop or kill by pid. (from SHEP-288)
+
+- A real carry-over try: `env -i` with `SHEPHERDR_FROM_SESSION=<old> SHEPHERDR_SESSION=<new>` throwaway sessions and a fake `claude` script first on PATH as the agent; `hc server stop` both and rm their `~/.local/state/herdr-core/<name>` after. (from SHEP-295)
