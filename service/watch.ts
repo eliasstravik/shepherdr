@@ -2,19 +2,14 @@
 // task workers):
 // - a CLI stopped on its own start screen (trust, theme, sign in): a card with its choices (core/screens.js), pressed
 //   only on the screen it was drawn from.
-// - a session that is gone ("No conversation found"): a new one starts with a short handover, once
-//   (core/chat-view.js lostMessage), unless a CLI runs there again a moment later.
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+// - a session that is gone ("No conversation found"): show a note and wait for the person to restart it.
 import type { Hub } from "./hub.ts";
-import { HOME } from "./paths.ts";
 import * as SC from "../core/screens.js";
 import * as CV from "../core/chat-view.js";
 import * as AG from "../core/agents.js";
-import { RESTART } from "./paths.ts";
 
 const { ScreenWatch, starting, cliOf, readScreen, screenText, pressKeys, SCREEN } = SC as any;
-const { LOST, lostMessage, shellWord, WORDS, sessionStarted, sessionFailed } = CV as any;
+const { LOST } = CV as any;
 const { freshArgv } = AG as any;
 type Run = (args: string[]) => Promise<{ code: number; stdout: string; stderr?: string }>;
 /** an agent to watch: its address, and its task's id when it is a task's worker */
@@ -80,37 +75,8 @@ export class AgentWatch {
     if (t.state !== "live" && (t.exit_code ?? 1) === 0) return;
     const screen = (await this.hc(["read", addr, "--lines", "40"]).catch(() => null))?.stdout ?? "";
     if (!LOST.test(screen.split("\n").slice(-30).join("\n"))) return;
-    // a moment for a CLI to come up there by itself (someone typed in its terminal): then only if none has
-    await Bun.sleep(20_000);
-    const now: any = this.hub.terminals.get(addr);
-    if (now?.state === "live" && cliOf(now)) return;
-    this.note(addr, WORDS.sessionGone);
-    try {
-      const named = /^([a-z][a-z0-9]*)-(\d+)(?:-|$)/.exec(t.name ?? "");
-      const ref = w.ref ?? (t.labels?.["herdr.task"] && named ? `${named[1].toUpperCase()}-${named[2]}` : null);
-      const tplFile = join(HOME, ".config", "herdr-core", "templates", "assistant.md");
-      const template = t.labels?.["herdr.role"] === "coordinator" && !addr.includes("/") && existsSync(tplFile) ? readFileSync(tplFile, "utf8") : null;
-      const msg = lostMessage({ ref, template });
-      if (t.state === "live") {
-        // hc send pastes the line into the shell and presses Enter
-        const r = await this.hub.send(addr, [...fresh, msg].map(shellWord).join(" "));
-        if (r.code !== 0) throw new Error((r.stderr ?? "").trim() || "It didn't go through.");
-      } else {
-        // herdr-task would resume the same gone session again: its task starts it anew
-        if (t.labels?.["herdr.task"]) throw new Error("ask the Assistant to resume its task.");
-        const pane = t.labels?.["herdr.chat"];
-        // (restart.sh keeps one with no chat pane in the background under its space, as the service starts it)
-        const p = Bun.spawn(["bash", RESTART, addr, JSON.stringify([...fresh, msg])], { stdout: "pipe", stderr: "pipe", stdin: "ignore",
-          env: { ...process.env, HERDR_RESTART_CHAT: pane ?? "", HERDR_RESTART_RESUME: "1" } });
-        const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
-        if ((await p.exited) !== 0 || !out.trim()) throw new Error(err.trim() || "The agent didn't restart.");
-      }
-      this.note(addr, sessionStarted);
-    } catch (e) {
-      this.note(addr, sessionFailed((e as Error).message));
-    }
-    // the window's note goes after 8 s
-    setTimeout(() => { this.notes.delete(addr); this.o.changed(); }, 8000);
+    // A lost session needs the person's decision. Never start a replacement behind their back.
+    this.note(addr, "The session could not be found. Restart it to continue.");
   }
 
   private note(addr: string, text: string) {
