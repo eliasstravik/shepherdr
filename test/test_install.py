@@ -1,5 +1,5 @@
-"""The installer against scratch roots (--root): install, run again, update with a changed file,
-clashes, --adopt, uninstall. Never touches the real home."""
+"""The installer against scratch roots (--root): install, run again, update with a changed file, the switch from a
+3.1 Herdr-window install, uninstall. Never touches the real home."""
 import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import re
 import json
@@ -9,11 +9,21 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from importlib.machinery import SourceFileLoader
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHEPHERDR = os.path.join(ROOT, "bin", "shepherdr")
 APP = ".config/herdr-app"
+SHARE = ".local/share/shepherdr"
+RECORD = f"{SHARE}/installed.json"
+OLD_RECORD = f"{APP}/data/shepherdr/installed.json"
 CI = os.environ.get("CI") == "true"
+UNIT = "Library/LaunchAgents/dev.shepherdr.service.plist" if sys.platform == "darwin" else ".config/systemd/user/shepherdr.service"
+WINDOW_31 = SourceFileLoader("window_3_1_46", os.path.join(ROOT, "test", "fixtures", "window-3.1.46.py")).load_module()
+
+
+def installer():
+    return SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
 
 
 def run(*args, ok=True, build=False):
@@ -40,13 +50,23 @@ def tree(top):
     return out
 
 
+def copy_source(dest):
+    """This checkout as another source folder (a release to come, or one gone by)."""
+    shutil.copytree(ROOT, dest, ignore=shutil.ignore_patterns(".git", "node_modules", "__pycache__"))
+    return dest
+
+
 # Shepherdr's own data (layout.py): an install makes its folders and the old paths' links; uninstall leaves the data.
 DATA_PLACES = (".config/shepherdr/", ".local/share/shepherdr/", ".local/state/shepherdr/", ".cache/shepherdr/", ".herdr/")
 
 
 class Install(unittest.TestCase):
+    """One kind of install (3.2): everything under .local/share/shepherdr, helper links in .local/bin, the role
+    instructions, the agents' hooks; in a Herdr app, only the Open Shepherdr button and its one key."""
+
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="shepherdr-test-")
+        # a home with the Herdr app, a mod and keys of the person's own, and Claude Code
         os.makedirs(os.path.join(self.root, APP, "mods", "changes"))
         with open(os.path.join(self.root, APP, "mods", "changes", "main.js"), "w") as f:
             f.write("// Herdr's own mod\n")
@@ -67,82 +87,146 @@ class Install(unittest.TestCase):
         os.makedirs(self.p(".codex"))
         out = run("install", "--root", self.root, "--yes").stdout
         self.assertRegex(out, r"files: \d+ new\n")
-        rec = json.load(open(self.p(APP, "data/shepherdr/installed.json")))
-        self.assertEqual(rec["version"], "3.1.46")
-        self.assertTrue(os.path.isfile(self.p(APP, "mods/tasks/bin/herdr-task")))
-        self.assertTrue(os.path.isfile(self.p(APP, "layouts/shepherdr.json")))
-        self.assertEqual(os.path.realpath(self.p(".local/bin/herdr-task")), os.path.realpath(self.p(APP, "mods/tasks/bin/herdr-task")))
-        # A key the person uses is kept (no terminal to ask in); free ones are added.
+        rec = json.load(open(self.p(RECORD)))
+        self.assertEqual(rec["version"], "3.2.0")
+        self.assertFalse(os.path.exists(self.p(OLD_RECORD)), "no record in the Herdr app any more")
+        self.assertTrue(os.path.isfile(self.p(SHARE, "mods/tasks/bin/herdr-task")))
+        self.assertEqual(os.path.realpath(self.p(".local/bin/herdr-task")), os.path.realpath(self.p(SHARE, "mods/tasks/bin/herdr-task")))
+        # In the Herdr app: the one button and nothing else of Shepherdr's (no layout, no lib/, core/, bin/).
+        self.assertEqual(sorted(os.listdir(self.p(APP, "mods"))), ["changes", "open-shepherdr"])
+        self.assertEqual(sorted(os.listdir(self.p(APP))), ["keys.json", "mods"])
+        # Its one key goes in because it was free; the person's keys stay as they were.
         keys = json.load(open(self.p(APP, "keys.json")))
-        self.assertEqual(keys["global"]["ctrl-k"], "mine.open")
-        self.assertEqual(keys["global"]["alt-1"], "space.select:1")
-        self.assertEqual(keys["layout:shepherdr"]["f2"], "tabs-tasks.rename-tab")
+        self.assertEqual(keys, {"global": {"ctrl-k": "mine.open", "alt-1": "space.select:1", "ctrl-shift-o": "mod.open:open-shepherdr"}})
+        self.assertEqual(rec["keys"], {"global ctrl-shift-o": {"value": "mod.open:open-shepherdr", "was": None, "added": True}})
+        # The agents' hooks run from Shepherdr's own folder.
         hooks = json.load(open(self.p(".claude/settings.json")))
         self.assertEqual(hooks["model"], "x")
-        self.assertIn("ask-hook.sh", json.dumps(hooks["hooks"]["PermissionRequest"]))
+        self.assertEqual(hooks["hooks"]["PermissionRequest"][0]["hooks"][0]["command"], f"sh '{self.p(SHARE)}/hooks/ask-hook.sh'")
+        self.assertEqual(hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"], f"sh '{self.p(SHARE)}/hooks/session-note.sh'")
+        for f in ("ask-hook.sh", "ask-end.py", "session-note.sh"):
+            self.assertTrue(os.path.isfile(self.p(SHARE, "hooks", f)), f)
         # Codex's approvals come to the chat's card too (SHEP-91)
         codex = json.load(open(self.p(".codex/hooks.json")))
-        self.assertIn("ask-hook.sh", json.dumps(codex["hooks"]["PermissionRequest"]))
+        self.assertIn("/hooks/ask-hook.sh", json.dumps(codex["hooks"]["PermissionRequest"]))
         # Helpers changed: the sync to other machines is held until doctor passes.
         self.assertTrue(os.path.exists(self.p(".herdr/sync-hold")))
         d = run("doctor", "--root", self.root)
         self.assertIn("whole", d.stdout)
         self.assertFalse(os.path.exists(self.p(".herdr/sync-hold")))
 
-        # Again: nothing changes, no hold.
+        # Again: nothing changes, no hold, no second hook.
         again = run("install", "--root", self.root, "--yes").stdout
         self.assertRegex(again, r"files: \d+ same\n", "a second run changes nothing")
         self.assertFalse(os.path.exists(self.p(".herdr/sync-hold")))
+        self.assertEqual(json.load(open(self.p(".claude/settings.json"))), hooks)
 
-        # A file the person changed: a template is kept with the new one beside it; a mod file Shepherdr didn't
-        # change is kept as it is; one Shepherdr changed too is replaced (theirs could break the new mod, #766), theirs
-        # to the backup folder, said.
-        mine = self.p(APP, "mods/toasts/main.js")
-        with open(mine, "a") as f:
-            f.write("// mine\n")
-        same = self.p(APP, "mods/toasts/ui.js")
-        with open(same, "a") as f:
-            f.write("// mine too\n")
+        # A role instruction the person changed is kept, with the new one beside it; a file changed inside Shepherdr's
+        # own folder is replaced (that folder is replaced whole), the changed copy backed up and said.
         tpl = self.p(".config/herdr-core/templates/worker.md")
         with open(tpl, "a") as f:
             f.write("mine\n")
+        own = self.p(SHARE, "hooks/session-note.sh")
+        with open(own, "a") as f:
+            f.write("# mine\n")
         src = tempfile.mkdtemp(prefix="shepherdr-src-")
         try:
-            shutil.copytree(ROOT, os.path.join(src, "s"), ignore=shutil.ignore_patterns(".git"))
-            s = os.path.join(src, "s")
-            for f_ in ("mods/toasts/main.js", "mods/jump/main.js"):
+            s = copy_source(os.path.join(src, "s"))
+            for f_ in ("templates/worker.md", "hooks/session-note.sh", "herdr/open-shepherdr/main.js"):
                 with open(os.path.join(s, f_), "a") as f:
-                    f.write("// release\n")
-            with open(os.path.join(s, "templates/worker.md"), "a") as f:
-                f.write("release\n")
+                    f.write("# release\n" if not f_.endswith(".js") else "// release\n")
             up = run("update", "--root", self.root, "--source", s).stdout
-            self.assertIn("1 replace", up)
-            self.assertTrue(open(mine).read().endswith("// release\n"), "Shepherdr's changed mod file goes in")
-            self.assertFalse(os.path.exists(mine + ".new"))
-            backup = re.search(r"yours is kept as (\S+)", up).group(1)
-            self.assertTrue(open(backup).read().endswith("// mine\n"), "the person's copy is in the backup")
-            self.assertIn("Shepherdr changed .config/herdr-app/mods/toasts/main.js since you edited it", up)
-            self.assertTrue(open(same).read().endswith("// mine too\n"), "a mod file Shepherdr didn't change stays the person's")
-            self.assertFalse(os.path.exists(same + ".new"))
             self.assertTrue(open(tpl).read().endswith("mine\n"))
             self.assertTrue(open(tpl + ".new").read().endswith("release\n"))
-            self.assertTrue(open(self.p(APP, "mods/jump/main.js")).read().endswith("// release\n"))
+            self.assertTrue(open(own).read().endswith("# release\n"))
+            backup = re.search(r"replaced \.local/share/shepherdr/hooks/session-note\.sh.*kept as (\S+)", up).group(1)
+            self.assertTrue(open(backup).read().endswith("# mine\n"), "the changed copy is in the backup")
+            self.assertTrue(open(self.p(APP, "mods/open-shepherdr/main.js")).read().endswith("// release\n"))
             d = run("doctor", "--root", self.root, ok=False).stdout
             self.assertIn("worker.md.new: merge it in", d)
         finally:
             shutil.rmtree(src)
 
-        # Uninstall: everything back as it was, except the mod and the template the person changed.
+        # Uninstall: everything back as it was, except the role instruction the person changed.
         run("uninstall", "--root", self.root)
         after = tree(self.root)
         left = sorted(set(after) - set(self.before))
-        self.assertTrue(all(x.startswith((f"{APP}/mods/toasts/", ".config/herdr-core/templates/worker.md")) or x.startswith(DATA_PLACES) for x in left), left)
+        self.assertTrue(all(x == ".config/herdr-core/templates/worker.md" or x.startswith(DATA_PLACES) for x in left), left)
         for k, v in self.before.items():
             if k.endswith(".json"):
                 self.assertEqual(json.loads(after[k]), json.loads(v), k)
             else:
                 self.assertEqual(after[k], v, k)
         self.assertFalse(os.path.lexists(self.p(".local/bin/herdr-task")))
+        self.assertFalse(os.path.exists(self.p(APP, "mods/open-shepherdr")))
+        self.assertFalse(os.path.exists(self.p(".codex/hooks.json")), "a hooks file it made goes with its hooks")
+        self.assertFalse(os.path.exists(self.p(SHARE, "service")))
+
+    def test_no_herdr_app_no_button(self):
+        """The Herdr app is optional: a home without it gets no folder there (not even for backups), and the hook's
+        own data folder (data/chat-asks, on every machine) doesn't count as the app."""
+        root = tempfile.mkdtemp(prefix="shepherdr-fresh-")
+        try:
+            os.makedirs(os.path.join(root, APP, "data", "chat-asks"))
+            out = run("install", "--root", root, "--yes").stdout
+            self.assertEqual(os.listdir(os.path.join(root, APP)), ["data"])
+            self.assertNotIn("Ctrl+Shift+O", out)
+            rec = json.load(open(os.path.join(root, RECORD)))
+            self.assertFalse(rec["button"])
+            self.assertFalse(rec.get("keys"))
+            self.assertTrue(os.path.isfile(os.path.join(root, SHARE, "herdr/open-shepherdr/main.js")), "kept in the source for a machine that has Herdr")
+            self.assertTrue(os.path.islink(os.path.join(root, ".local/bin/shepherdr")))
+            self.assertIn("whole", run("doctor", "--root", root).stdout)
+            run("uninstall", "--root", root)
+            self.assertFalse(os.path.exists(os.path.join(root, SHARE, "service")))
+            self.assertFalse(os.path.lexists(os.path.join(root, ".local/bin/herdr-task")))
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_the_button_never_takes_a_key_or_a_mod_that_is_someone_elses(self):
+        """Ctrl+Shift+O is only added when free; a mod already named open-shepherdr that isn't ours is left alone
+        (no button, no key) unless --adopt, which backs it up; uninstall puts it back."""
+        with open(self.p(APP, "keys.json"), "w") as f:
+            json.dump({"global": {"ctrl-shift-o": "mine.other"}}, f)
+        out = run("install", "--root", self.root, "--yes").stdout
+        self.assertEqual(json.load(open(self.p(APP, "keys.json"))), {"global": {"ctrl-shift-o": "mine.other"}})
+        self.assertIn('kept your key ctrl-shift-o = "mine.other"', out)
+        self.assertTrue(os.path.isfile(self.p(APP, "mods/open-shepherdr/main.js")), "the button is there, opened with a key of their own")
+        self.assertEqual(json.load(open(self.p(RECORD)))["keys"], {})
+        run("uninstall", "--root", self.root)
+        self.assertEqual(json.load(open(self.p(APP, "keys.json"))), {"global": {"ctrl-shift-o": "mine.other"}})
+        # someone else's mod by the button's name
+        os.makedirs(self.p(APP, "mods/open-shepherdr"))
+        with open(self.p(APP, "mods/open-shepherdr/main.js"), "w") as f:
+            f.write("// someone's own\n")
+        with open(self.p(APP, "keys.json"), "w") as f:
+            json.dump({}, f)
+        out = run("install", "--root", self.root, "--yes").stdout
+        self.assertIn("mods/open-shepherdr isn't Shepherdr's: left alone", out)
+        self.assertEqual(open(self.p(APP, "mods/open-shepherdr/main.js")).read(), "// someone's own\n")
+        self.assertEqual(json.load(open(self.p(APP, "keys.json"))), {})
+        self.assertIn("whole", run("doctor", "--root", self.root).stdout)
+        run("install", "--root", self.root, "--yes", "--adopt")
+        self.assertIn("Open Shepherdr", open(self.p(APP, "mods/open-shepherdr/main.js")).read())
+        self.assertEqual(json.load(open(self.p(APP, "keys.json")))["global"]["ctrl-shift-o"], "mod.open:open-shepherdr")
+        run("uninstall", "--root", self.root)
+        self.assertEqual(open(self.p(APP, "mods/open-shepherdr/main.js")).read(), "// someone's own\n")
+        self.assertEqual(json.load(open(self.p(APP, "keys.json"))), {})
+
+    def test_no_hooks(self):
+        out = run("install", "--root", self.root, "--yes", "--no-hooks").stdout
+        self.assertEqual(json.load(open(self.p(".claude/settings.json"))), {"model": "x"})
+        self.assertEqual(json.load(open(self.p(RECORD)))["hooks"], [])
+        self.assertNotIn("hook", run("doctor", "--root", self.root).stdout)
+        self.assertIn("done.", out)
+
+    def test_web_flag_is_the_same_install(self):
+        """`--web` (3.1's web-only install) is still accepted: every install is that one now."""
+        out = run("install", "--web", "--root", self.root, "--yes").stdout
+        self.assertNotIn("web-only", out)
+        self.assertTrue(os.path.isfile(self.p(APP, "mods/open-shepherdr/mod.json")))
+        self.assertIn("whole", run("doctor", "--root", self.root).stdout)
+        self.assertRegex(run("update", "--web", "--root", self.root, "--yes", "--source", ROOT).stdout, r"files: \d+ same\n")
 
     def test_install_moves_the_data_into_shepherdrs_own_folders(self):
         """SHEP-141: an install over a 3.1.26 home moves ~/.herdr's Shepherdr data into its own folders in one go, says
@@ -169,7 +253,7 @@ class Install(unittest.TestCase):
         doc = run("doctor", "--root", self.root, ok=False).stdout
         self.assertIn("data: Shepherdr's own folders (layout 2)", doc)
         self.assertIn("worktrees: 1 still in", doc)
-        self.assertNotIn("Shepherdr's data moved", run("update", "--root", self.root, "--yes").stdout)
+        self.assertNotIn("Shepherdr's data moved", run("update", "--root", self.root, "--yes", "--source", ROOT).stdout)
         # rollback, then the next update leaves it on ~/.herdr until `shepherdr migrate`
         back = run("migrate", "--root", self.root, "--rollback").stdout
         self.assertIn("back in ~/.herdr", back)
@@ -181,35 +265,53 @@ class Install(unittest.TestCase):
 
     def test_service_unit_and_files(self):
         """The service and the shared core land in .local/share/shepherdr; a scratch root gets the unit file only
-        (nothing is started), and uninstall takes both away."""
+        (nothing is started), and uninstall takes both away. Nothing of the window or the recipe viewer is shipped."""
         out = run("install", "--root", self.root, "--yes").stdout
         if "needs bun" in out:
             self.skipTest("bun isn't installed here")
-        self.assertTrue(os.path.isfile(self.p(".local/share/shepherdr/service/main.ts")))
-        self.assertFalse(any(f.endswith(".test.ts") for f in os.listdir(self.p(".local/share/shepherdr/service"))))
+        share = self.p(SHARE)
+        self.assertTrue(os.path.isfile(os.path.join(share, "service/main.ts")))
+        self.assertFalse(any(f.endswith(".test.ts") for f in os.listdir(os.path.join(share, "service"))))
+        rec = json.load(open(self.p(RECORD)))
+        for gone in ("lib/addons.json", "mods/artifacts/recipe-view.js", "mods/artifacts/markup.js", "mods/artifacts/core/recipe.js",
+                     "mods/coordinator/restart.sh", "web/dist/artifact-viewer.html", "keys.json", "layouts/shepherdr.json"):
+            self.assertNotIn(f"{SHARE}/{gone}", rec["files"], gone)
+        self.assertFalse([f for f in rec["files"] if f.startswith(f"{SHARE}/mods/") and "/bin/" not in f
+                          and f != f"{SHARE}/mods/artifacts/ARTIFACTS.md"], "of mods/, only the helpers' bin folders and the artifact guide")
         # every relative import the installed service runs resolves inside what was installed (bun can start it)
-        share = self.p(".local/share/shepherdr")
         for d, _, files in os.walk(share):
-            # the built page, and the helpers' files kept beside it (herdr-artifact's, run by Herdr, never by bun)
-            if "/web/dist" in d or "/mods/" in d:
+            if "/web/dist" in d or "/mods/" in d or "/herdr/" in d:
                 continue
             for f in files:
                 if not f.endswith((".ts", ".js")):
                     continue
                 for m in re.finditer(r'^import (?!type )[^;]*?from ["\'](\.{1,2}/[^"\']+)["\']', open(os.path.join(d, f)).read(), re.M):
                     self.assertTrue(os.path.isfile(os.path.normpath(os.path.join(d, m.group(1)))), f"{os.path.relpath(os.path.join(d, f), share)} imports {m.group(1)}, not installed")
-        unit = self.p("Library/LaunchAgents/dev.shepherdr.service.plist") if sys.platform == "darwin" else self.p(".config/systemd/user/shepherdr.service")
-        text = open(unit).read()
+        text = open(self.p(UNIT)).read()
         self.assertIn(self.p(".local/share/shepherdr/service/main.ts"), text)
         self.assertNotIn("funnel", text)
         run("uninstall", "--root", self.root)
-        self.assertFalse(os.path.exists(unit))
+        self.assertFalse(os.path.exists(self.p(UNIT)))
         self.assertFalse(os.path.exists(self.p(".local/share/shepherdr/service/main.ts")))
+
+    def test_helpers_run_from_shepherdrs_folder(self):
+        """herdr-task and herdr-artifact run from where the links lead, the artifact guide comes along (#735), and the
+        installed folder's own sync-shared finds layout.py beside it (doctor runs it)."""
+        run("install", "--root", self.root, "--yes")
+        share = self.p(SHARE)
+        env = {**os.environ, "HOME": self.root}
+        p = subprocess.run([sys.executable, os.path.join(share, "mods/tasks/bin/herdr-task"), "--help"], capture_output=True, text=True, env=env)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        p = subprocess.run([sys.executable, os.path.join(share, "mods/artifacts/bin/herdr-artifact"), "guide"], capture_output=True, text=True, env=env)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertTrue(p.stdout.strip())
+        p = subprocess.run([sys.executable, os.path.join(share, "bin/sync-shared"), "--check"], capture_output=True, text=True, env=env)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
 
     def test_port(self):
         """install --port (GitHub #635): the unit starts the service on it, the record keeps it for updates, 7788 puts the
         default back; a port out of range is refused."""
-        unit = self.p("Library/LaunchAgents/dev.shepherdr.service.plist") if sys.platform == "darwin" else self.p(".config/systemd/user/shepherdr.service")
+        unit = self.p(UNIT)
         out = run("install", "--root", self.root, "--yes", "--port", "7795").stdout
         if "needs bun" in out:
             self.skipTest("bun isn't installed here")
@@ -226,8 +328,7 @@ class Install(unittest.TestCase):
     def test_https_port(self):
         """install --https-port (GitHub #778): kept in the service's folder, which updates leave alone; 443 puts the
         default back; a port out of range is refused."""
-        from importlib.machinery import SourceFileLoader
-        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        sh = installer()
         self.assertEqual(sh.https_port(self.root), 443, "an install that never set one stays on 443")
         out = run("install", "--root", self.root, "--yes", "--https-port", "8443").stdout
         if "needs bun" in out:
@@ -244,99 +345,76 @@ class Install(unittest.TestCase):
         self.assertIn("65535", p.stdout + p.stderr)
 
     def test_update_retires_what_shepherdr_no_longer_ships(self):
-        """#895: an older release shipped a mod and a helper that the next one drops. The update removes the mod's folder
-        (its shared copy of lib/ui.js too, which doctor rejects) and the helper; what the person changed in them is in
-        the backup, and said. Doctor passes and the record forgets them."""
+        """#895: an older release shipped a helper and a role instruction that the next one drops. The update removes
+        them (and the folder one leaves empty); what the person changed in them is in the backup, and said. Doctor
+        passes and the record forgets them."""
         src = tempfile.mkdtemp(prefix="shepherdr-src-")
         try:
-            old = os.path.join(src, "old")
-            shutil.copytree(ROOT, old, ignore=shutil.ignore_patterns(".git", "node_modules"))
-            os.makedirs(os.path.join(old, "mods", "retired-tool"))
-            with open(os.path.join(old, "mods", "retired-tool", "main.js"), "w") as f:
-                f.write("// retired\n")
-            with open(os.path.join(old, "mods", "retired-tool", "mod.json"), "w") as f:
-                f.write('{"name": "retired-tool"}\n')
-            shutil.copy(os.path.join(old, "lib", "ui.js"), os.path.join(old, "mods", "retired-tool", "ui.js"))
+            old = copy_source(os.path.join(src, "old"))
             with open(os.path.join(old, "bin", "old-tool"), "w") as f:
                 f.write("#!/bin/sh\necho old\n")
             os.chmod(os.path.join(old, "bin", "old-tool"), 0o755)
-            with open(os.path.join(old, "lib", "COPIES"), "a") as f:
-                f.write("ui.js: retired-tool\n")
-            with open(os.path.join(old, "lib", "addons.json")) as f:
-                manifest = json.load(f)
-            manifest["core"]["mods"].append("retired-tool")
-            with open(os.path.join(old, "lib", "addons.json"), "w") as f:
-                json.dump(manifest, f, indent=2)
+            os.makedirs(os.path.join(old, "hooks", "older"))
+            with open(os.path.join(old, "hooks", "older", "gone.sh"), "w") as f:
+                f.write("#!/bin/sh\n")
+            with open(os.path.join(old, "templates", "retired.md"), "w") as f:
+                f.write("# retired\n")
             run("install", "--root", self.root, "--source", old, "--yes")
-            self.assertTrue(os.path.isfile(self.p(APP, "mods/retired-tool/ui.js")))
-            self.assertTrue(os.path.isfile(self.p(APP, "bin/old-tool")))
-            with open(self.p(APP, "mods/retired-tool/main.js"), "a") as f:
-                f.write("// mine\n")
-            with open(self.p(APP, "bin/old-tool"), "a") as f:
-                f.write("echo mine\n")
-            # the next release: ROOT (this checkout) no longer ships either of them
-            up = run("update", "--root", self.root, "--yes").stdout
-            self.assertFalse(os.path.exists(self.p(APP, "mods/retired-tool")), "the retired mod's folder is gone")
-            self.assertFalse(os.path.exists(self.p(APP, "bin/old-tool")), "the retired helper is gone")
-            self.assertFalse(os.path.exists(self.p(".local/share/shepherdr/bin/old-tool")), "and its copy under the app's own folder")
-            self.assertIn("removed mod retired-tool: Shepherdr no longer ships it", up)
-            self.assertIn("removed .config/herdr-app/bin/old-tool: Shepherdr no longer ships it", up)
-            backup = re.search(r"removed \.config/herdr-app/mods/retired-tool/main\.js: .*your changed copy is in (\S+)", up).group(1)
+            tool, tpl = self.p(SHARE, "bin/old-tool"), self.p(".config/herdr-core/templates/retired.md")
+            self.assertTrue(os.path.isfile(tool))
+            self.assertTrue(os.path.isfile(self.p(SHARE, "hooks/older/gone.sh")))
+            for path, words in ((tool, "echo mine\n"), (tpl, "mine\n")):
+                with open(path, "a") as f:
+                    f.write(words)
+            # the next release: ROOT (this checkout) no longer ships any of them
+            up = run("update", "--root", self.root, "--yes", "--source", ROOT).stdout
+            self.assertFalse(os.path.exists(tool), "the retired helper is gone")
+            self.assertFalse(os.path.exists(tpl))
+            self.assertFalse(os.path.exists(self.p(SHARE, "hooks/older")), "and the folder a retired file left empty")
+            backup = re.search(r"removed \.local/share/shepherdr/bin/old-tool: Shepherdr no longer ships it; your changed copy is in (\S+)", up).group(1)
             with open(backup) as f:
-                self.assertTrue(f.read().endswith("// mine\n"), "the person's change is in the backup")
-            self.assertFalse(os.path.exists(os.path.join(os.path.dirname(backup), "ui.js")), "Shepherdr's unchanged copy isn't backed up")
-            backup_tool = re.search(r"your changed copy is in (\S+)", re.search(r"removed \.config/herdr-app/bin/old-tool:.*", up).group(0)).group(1)
-            with open(backup_tool) as f:
-                self.assertTrue(f.read().endswith("echo mine\n"))
-            rec = json.load(open(self.p(APP, "data/shepherdr/installed.json")))
-            self.assertFalse([k for k in rec["files"] if "retired-tool" in k or k.endswith("old-tool")], "the record forgets them")
-            self.assertNotIn("retired-tool", rec["mods"])
+                self.assertTrue(f.read().endswith("echo mine\n"), "the person's change is in the backup")
+            backup = re.search(r"templates/retired\.md: Shepherdr no longer ships it; your changed copy is in (\S+)", up).group(1)
+            with open(backup) as f:
+                self.assertTrue(f.read().endswith("mine\n"))
+            rec = json.load(open(self.p(RECORD)))
+            self.assertFalse([k for k in rec["files"] if "retired" in k or k.endswith(("old-tool", "gone.sh"))], "the record forgets them")
             d = run("doctor", "--root", self.root).stdout
             self.assertNotIn("✗", d)
             self.assertNotIn("changed since install", d)
         finally:
             shutil.rmtree(src, ignore_errors=True)
 
-    def test_update_replaces_an_old_helper_copy_doctor_rejects(self):
-        """#905: an older helper without the SHEP block that doctor rejects is an old copy, not the person's edit: it is
-        backed up and Shepherdr's goes in, so doctor passes (and later updates aren't stuck on it)."""
-        helpers = {"bin/herdr-secret": f"{APP}/bin/herdr-secret", "mods/artifacts/bin/herdr-artifact": f"{APP}/mods/artifacts/bin/herdr-artifact"}
-        run("install", "--root", self.root, "--yes")
-        for src_rel, dst in helpers.items():
-            with open(self.p(dst), "rb") as f:
-                text = f.read().decode()
-            a = text.index("# ---- SHEP:")
-            b = text.index("# ---- end SHEP ----")
-            b = text.index("\n", b) + 1
-            with open(self.p(dst), "w") as f:       # the older copy: no SHEP block
-                f.write(text[:a] + text[b:])
-        self.assertIn("has no SHEP block", run("doctor", "--root", self.root, ok=False).stdout)
-        up = run("update", "--root", self.root, "--yes").stdout
-        for src_rel, dst in helpers.items():
-            with open(self.p(dst), "rb") as f, open(os.path.join(ROOT, src_rel), "rb") as g:
-                self.assertEqual(f.read(), g.read(), dst)
-            self.assertIn(f"replaced {dst}: an older Shepherdr's copy", up)
-        backup = re.search(r"replaced .*?kept as (\S+?)\.?$", up, re.M).group(1)
-        self.assertTrue(os.path.isfile(backup))
-        d = run("doctor", "--root", self.root).stdout
-        self.assertNotIn("✗", d)
-
     def test_update_says_loudly_when_the_install_is_not_whole(self):
-        """An update that goes in but leaves doctor failing says so at its end, with the ✗ lines and no 'done'."""
-        run("install", "--root", self.root, "--yes")
-        with open(self.p(APP, "mods/toasts/ui.js"), "a") as f:
-            f.write("// hand copy\n")
-        up = run("update", "--root", self.root, "--yes").stdout
-        self.assertIn("✗ shared lib copies differ", up)
-        self.assertIn("NOT DONE: the install isn't whole", up)
-        self.assertNotIn("  done. Next:", up)
-        run("doctor", "--root", self.root, ok=False)
+        """An update that goes in but leaves doctor failing says so at its end, with the ✗ lines and no 'done' (#905):
+        here a helper whose SHEP block isn't layout.py's."""
+        src = tempfile.mkdtemp(prefix="shepherdr-src-")
+        try:
+            s = copy_source(os.path.join(src, "s"))
+            helper = os.path.join(s, "bin", "herdr-secret")
+            text = open(helper).read()
+            a = text.index("# ---- SHEP:")
+            b = text.index("\n", text.index("# ---- end SHEP ----")) + 1
+            with open(helper, "w") as f:
+                f.write(text[:a] + text[b:])
+            up = run("install", "--root", self.root, "--yes", "--source", s).stdout
+            self.assertIn("✗ the helpers' paths differ: ", up)
+            self.assertIn("bin/herdr-secret has no SHEP block", up)
+            self.assertIn("NOT DONE: the install isn't whole", up)
+            self.assertNotIn("  done. Next:", up)
+            self.assertIn("has no SHEP block", run("doctor", "--root", self.root, ok=False).stdout)
+            self.assertTrue(os.path.exists(self.p(".herdr/sync-hold")), "the sync stays held")
+            # the fixed release goes in over it, and doctor passes
+            up = run("update", "--root", self.root, "--yes", "--source", ROOT).stdout
+            self.assertIn("  done. Next:", up)
+            self.assertNotIn("✗", run("doctor", "--root", self.root).stdout)
+        finally:
+            shutil.rmtree(src, ignore_errors=True)
 
     def test_doctor_says_why_not_shared(self):
         """doctor (GitHub #754): when tailscale serve refused the share, it's broken (not a note), in tailscale's own
         words with another port to use; a custom port is named."""
-        from importlib.machinery import SourceFileLoader
-        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        sh = installer()
         web = sh.service_file(self.root, "web.json")
         os.makedirs(os.path.dirname(web), exist_ok=True)
         why = "Port 443 on this machine's tailnet name is taken (a TCP forward to 127.0.0.1:9000). Pick another port: `shepherdr web https-port 8443`."
@@ -359,9 +437,8 @@ class Install(unittest.TestCase):
     def test_doctor_warns_when_github_checks_cant_be_read(self):
         """SHEP-179: a repo with tasks whose checks this machine's GitHub token can't read gets a warning naming the
         permissions to add; one it can read, or a list without tasks, gets none."""
-        from importlib.machinery import SourceFileLoader
         from unittest import mock
-        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        sh = installer()
         folder = sh.where_for(self.root).path("tasks")
         os.makedirs(folder, exist_ok=True)
         for slug, repo, tasks in (("a", "o/locked", [{"id": 1}]), ("b", "o/open", [{"id": 1}]), ("c", "o/empty", [])):
@@ -379,6 +456,22 @@ class Install(unittest.TestCase):
         self.assertIn("Checks: read", out[0])
         self.assertNotIn("Commit statuses", out[0])
 
+    def test_the_herdr_app_is_optional_and_hc_is_not(self):
+        """3.2 needs herdr-core (hc) and git; the Herdr app is never asked for, and the window's own tools (node, the
+        mic and speaker programs) are no longer named."""
+        from unittest import mock
+        sh = installer()
+        with mock.patch.object(sh.shutil, "which", lambda n: None):
+            bad, notes = sh.check_tools(True)
+            scratch_bad, scratch_notes = sh.check_tools(False)
+        self.assertTrue(any("herdr-core (hc" in x for x in bad), bad)
+        self.assertTrue(any("git" in x for x in bad), bad)
+        self.assertTrue(any("herdr-core (hc" in x for x in scratch_notes), "a scratch root only notes it")
+        self.assertFalse(any("hc" in x for x in scratch_bad))
+        words = "\n".join(bad + notes + scratch_notes)
+        for gone in ("herdr-app", "pw-record", "pw-play", "swiftc", "node"):
+            self.assertNotIn(gone, words)
+
     def test_worktrees_folder_gets_a_plain_package_json(self):
         """#1132: our package.json (type: module) sits above the task worktrees: an install puts a plain one in that
         folder so a worktree's repo with none of its own runs as CommonJS, as in its main checkout."""
@@ -391,7 +484,7 @@ class Install(unittest.TestCase):
             self.assertNotIn("type", json.load(f))
         with open(os.path.join(wt, "package.json"), "w") as f:
             f.write('{"mine": 1}')
-        run("update", "--root", self.root, "--yes")
+        run("update", "--root", self.root, "--yes", "--source", ROOT)
         with open(os.path.join(wt, "package.json")) as f:
             self.assertEqual(json.load(f), {"mine": 1})
 
@@ -400,8 +493,7 @@ class Install(unittest.TestCase):
         another app answering health there (GitHub #635)."""
         import threading
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-        from importlib.machinery import SourceFileLoader
-        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        sh = installer()
 
         def server(body):
             class H(BaseHTTPRequestHandler):
@@ -434,76 +526,30 @@ class Install(unittest.TestCase):
                 s.shutdown()
                 s.server_close()
 
-    def test_the_artifact_viewer_goes_with_the_artifacts_mod(self):
-        """GitHub #1214: herdr-artifact preview looks beside itself first; the built viewer is installed there with the
-        artifacts mod, so a machine without the Web add-on (or a sync) still previews. Not built: nothing to ship."""
-        from importlib.machinery import SourceFileLoader
-        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
-        src = tempfile.mkdtemp(prefix="shepherdr-src-")
-        try:
-            for top in ("lib", "mods", "core", "templates", "bin"):
-                shutil.copytree(os.path.join(ROOT, top), os.path.join(src, top), ignore=shutil.ignore_patterns("node_modules", "__pycache__"))
-            shutil.copy(os.path.join(ROOT, "package.json"), src)
-            want = (".config/herdr-app/mods/artifacts/viewer.html")
-            self.assertNotIn(want, [rel for _, rel, _ in sh.source_items(src)[2]])
-            os.makedirs(os.path.join(src, "web", "dist"))
-            page = os.path.join(src, "web", "dist", "artifact-viewer.html")
-            with open(page, "w") as f:
-                f.write("<!doctype html><title>viewer</title>")
-            got = [(g, path) for g, rel, path in sh.source_items(src)[2] if rel == want]
-            self.assertEqual(got, [("artifacts", page)])
-            # where herdr-artifact looks first: beside its bin/
-            art = open(os.path.join(ROOT, "mods/artifacts/bin/herdr-artifact"), encoding="utf-8").read()
-            self.assertIn('os.path.join(HERE, "..", "viewer.html")', art)
-        finally:
-            shutil.rmtree(src, ignore_errors=True)
-
-    def test_web_only(self):
-        """install --web: the service, the web app, herdr-task and the helpers under .local/share/shepherdr, linked from
-        .local/bin; nothing in herdr-app; herdr-task runs from there; uninstall takes it all back out."""
-        root = tempfile.mkdtemp(prefix="shepherdr-web-")
-        try:
-            run("install", "--web", "--root", root, "--yes", "--force")
-            share = os.path.join(root, ".local/share/shepherdr")
-            self.assertFalse(os.path.exists(os.path.join(root, APP)))
-            self.assertTrue(os.path.isfile(os.path.join(share, "service/main.ts")))
-            self.assertEqual(os.path.realpath(os.path.join(root, ".local/bin/herdr-task")), os.path.realpath(os.path.join(share, "mods/tasks/bin/herdr-task")))
-            self.assertTrue(os.path.isfile(os.path.join(share, "mods/artifacts/recipe-view.js")))
-            # SHEP-181: restarting an Assistant from the web needs no window layout
-            self.assertTrue(os.path.isfile(os.path.join(share, "mods/coordinator/restart.sh")))
-            p = subprocess.run([sys.executable, os.path.join(share, "mods/tasks/bin/herdr-task"), "--help"], capture_output=True, text=True)
-            self.assertEqual(p.returncode, 0, p.stderr)
-            # #735: the artifact guide comes along (agents on the machine serving the web app read it too)
-            p = subprocess.run([sys.executable, os.path.join(share, "mods/artifacts/bin/herdr-artifact"), "guide"], capture_output=True, text=True,
-                               env={**os.environ, "HOME": root})
-            self.assertEqual(p.returncode, 0, p.stderr)
-            self.assertIn("recipe", p.stdout)
-            run("uninstall", "--root", root)
-            self.assertFalse(os.path.exists(os.path.join(share, "service/main.ts")))
-            self.assertFalse(os.path.lexists(os.path.join(root, ".local/bin/herdr-task")))
-        finally:
-            shutil.rmtree(root, ignore_errors=True)
-
-    def test_web_pack_installs_another_machine(self):
-        """Serve from: what `shepherdr web install-on` sends (pack) installs web-only from itself, the installed folder
-        is a whole source to send on again, and uninstall puts back the helper it replaced."""
-        if not os.path.isfile(os.path.join(ROOT, "web", "dist", "index.html")):
-            self.skipTest("the web app isn't built in this checkout")
+    def test_pack_installs_another_machine(self):
+        """Serve from: what `shepherdr web install-on` sends (pack) installs from itself, the installed folder is a
+        whole source to send on again (the Herdr button and the hooks with it), and uninstall puts back the helper it
+        replaced. The script it runs there no longer refuses a machine with 3.1's window install: it switches it."""
         import io
         import tarfile
-        from importlib.machinery import SourceFileLoader
-        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        sh = installer()
+        self.assertNotIn("installed there: update it there", sh.INSTALL_THERE)
+        self.assertNotIn("--web", sh.INSTALL_THERE)
+        self.assertIn('install --yes --source "$d"', sh.INSTALL_THERE)
+        self.assertEqual(subprocess.run(["bash", "-n"], input=sh.INSTALL_THERE, capture_output=True, text=True).returncode, 0)
         root, src = tempfile.mkdtemp(prefix="shepherdr-there-"), tempfile.mkdtemp(prefix="shepherdr-src-")
         try:
             tarfile.open(fileobj=io.BytesIO(sh.pack(ROOT))).extractall(src)
+            self.assertTrue(sh.is_source(src))
             os.makedirs(os.path.join(root, ".local/bin"))
             with open(os.path.join(root, ".local/bin/herdr-task"), "w") as f:
                 f.write("#!/bin/sh\necho the old one\n")
-            run("install", "--web", "--root", root, "--source", src, "--yes", "--force")
-            share = os.path.join(root, ".local/share/shepherdr")
-            for f in ("install.sh", "bin/shepherdr", "templates/worker.md", "web/dist/index.html", "service/serve-from.ts", "core/host.js",
-                      "mods/artifacts/ARTIFACTS.md"):
+            run("install", "--root", root, "--source", src, "--yes", "--force")
+            share = os.path.join(root, SHARE)
+            for f in ("install.sh", "bin/shepherdr", "templates/worker.md", "service/serve-from.ts", "core/host.js",
+                      "mods/artifacts/ARTIFACTS.md", "hooks/ask-hook.sh", "herdr/open-shepherdr/mod.json", "service/restart.sh"):
                 self.assertTrue(os.path.isfile(os.path.join(share, f)), f)
+            self.assertTrue(sh.is_source(share))
             names = lambda b: sorted(tarfile.open(fileobj=io.BytesIO(b)).getnames())
             self.assertEqual(names(sh.pack(share)), names(sh.pack(ROOT)))
             run("uninstall", "--root", root)
@@ -516,8 +562,7 @@ class Install(unittest.TestCase):
         """SHEP-173: ElevenLabs' records showed calls cut (1006) a minute after each release: the update restarted the
         service under them. A call on: the unit stays, nothing restarts, and the service is told to start again once
         the call ends (restart-when-free). No call: it restarts as before."""
-        from importlib.machinery import SourceFileLoader
-        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        sh = installer()
         root = tempfile.mkdtemp(prefix="shepherdr-call-")
         ran = []
         saved = (sh.bun_path, sh.has_unit, sh.calls_on, sh.subprocess.run, sh.service_answers)
@@ -549,8 +594,7 @@ class Install(unittest.TestCase):
     def test_linked_unit_is_left_alone(self):
         """GitHub #1048: a Nix home-manager unit is a link into /nix/store. An update leaves it a link (no file written,
         none recorded, so uninstall never takes it), restarts the service without enabling it, and says so."""
-        from importlib.machinery import SourceFileLoader
-        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        sh = installer()
         if sys.platform == "darwin":
             self.skipTest("a systemd unit")
         root = tempfile.mkdtemp(prefix="shepherdr-nix-")
@@ -589,8 +633,7 @@ class Install(unittest.TestCase):
     def test_unit_path_has_hc(self):
         """GitHub #1048: the unit's PATH holds the folder hc was found in, wherever that is (a Nix profile, not
         ~/.local/bin); a tool linked into the Nix store goes on by its profile's folder, which outlives an upgrade."""
-        from importlib.machinery import SourceFileLoader
-        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        sh = installer()
         tmp = tempfile.mkdtemp(prefix="shepherdr-path-")
         old = os.environ["PATH"]
         try:
@@ -608,72 +651,43 @@ class Install(unittest.TestCase):
             os.environ["PATH"] = old
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_update_web_only(self):
-        """A web-only install updates web only (the record says so), and doctor says how; one whose source is gone says
-        that instead of updating from itself."""
+    def test_update_comes_from_where_it_was_installed(self):
+        """An update takes the source the record names, never the installed folder itself (a whole source too); one
+        whose source is gone says so, and doctor says how to update."""
         import io
         import tarfile
-        from importlib.machinery import SourceFileLoader
-        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
-        root, src = tempfile.mkdtemp(prefix="shepherdr-web-"), tempfile.mkdtemp(prefix="shepherdr-src-")
+        sh = installer()
+        src = tempfile.mkdtemp(prefix="shepherdr-src-")
         try:
-            run("install", "--web", "--root", root, "--yes", "--force")
-            share = os.path.join(root, ".local/share/shepherdr")
-            os.remove(os.path.join(share, "service/main.ts"))
-            out = run("update", "--root", root, "--yes", "--force").stdout
-            self.assertIn("web-only update", out)
-            self.assertTrue(os.path.isfile(os.path.join(share, "service/main.ts")))
-            self.assertFalse(os.path.exists(os.path.join(root, APP)), "a web-only update doesn't install the layout")
-            self.assertIn("to update:", run("doctor", "--root", root).stdout)
-            self.assertIn("shepherdr update", run("doctor", "--root", root).stdout)
+            run("install", "--root", self.root, "--yes")
+            os.remove(self.p(SHARE, "service/main.ts"))
+            out = run("update", "--root", self.root, "--yes").stdout
+            self.assertIn(f"update from {ROOT}", out)
+            self.assertTrue(os.path.isfile(self.p(SHARE, "service/main.ts")))
+            doc = run("doctor", "--root", self.root).stdout
+            self.assertIn("to update:", doc)
+            self.assertIn("shepherdr update", doc)
             # installed from a copy that's gone since: no update from the installed folder itself
             tarfile.open(fileobj=io.BytesIO(sh.pack(ROOT))).extractall(src)
-            run("install", "--web", "--root", root, "--source", src, "--yes", "--force")
+            run("install", "--root", self.root, "--source", src, "--yes")
             shutil.rmtree(src)
-            p = run("update", "--root", root, "--yes", "--force", ok=False)
+            installed = self.p(SHARE, "bin/shepherdr")
+            p = subprocess.run([sys.executable, installed, "update", "--root", self.root, "--yes", "--no-build"],
+                               capture_output=True, text=True, stdin=subprocess.DEVNULL)
             self.assertEqual(p.returncode, 1)
             self.assertIn("is gone", p.stderr)
-            self.assertIn("is gone", run("doctor", "--root", root).stdout)
-        finally:
-            shutil.rmtree(root, ignore_errors=True)
-            shutil.rmtree(src, ignore_errors=True)
-
-    def test_web_only_update_retires_what_it_no_longer_ships(self):
-        """The web-only install retires its files the same way: a template an older release shipped goes, and a changed
-        one is backed up and said; the record forgets it."""
-        src = tempfile.mkdtemp(prefix="shepherdr-src-")
-        root = tempfile.mkdtemp(prefix="shepherdr-web-")
-        try:
-            old = os.path.join(src, "old")
-            shutil.copytree(ROOT, old, ignore=shutil.ignore_patterns(".git", "node_modules"))
-            with open(os.path.join(old, "templates", "retired.md"), "w") as f:
-                f.write("# retired\n")
-            run("install", "--web", "--root", root, "--source", old, "--yes", "--force")
-            tpl = os.path.join(root, ".config/herdr-core/templates/retired.md")
-            self.assertTrue(os.path.isfile(tpl))
-            with open(tpl, "a") as f:
-                f.write("mine\n")
-            up = run("update", "--web", "--root", root, "--yes", "--force", "--source", ROOT).stdout
-            self.assertFalse(os.path.exists(tpl))
-            backup = re.search(r"templates/retired\.md: Shepherdr no longer ships it; your changed copy is in (\S+)", up).group(1)
-            with open(backup) as f:
-                self.assertTrue(f.read().endswith("mine\n"))
-            rec = json.load(open(os.path.join(root, ".local/share/shepherdr/installed.json")))
-            self.assertNotIn(".config/herdr-core/templates/retired.md", rec["files"])
-            self.assertIn("service/main.ts", " ".join(rec["files"]))
+            self.assertIn("is gone", run("doctor", "--root", self.root).stdout)
         finally:
             shutil.rmtree(src, ignore_errors=True)
-            shutil.rmtree(root, ignore_errors=True)
 
     def test_update_runs_the_new_installer(self):
         """`shepherdr update` is the installed (old) copy: after a release it hands over to the source's installer, so
         one run records the new version (SHEP-28 had to run it twice)."""
         src = tempfile.mkdtemp(prefix="shepherdr-src-")
         try:
-            s = os.path.join(src, "s")
-            shutil.copytree(ROOT, s, ignore=shutil.ignore_patterns(".git", "node_modules"))
+            s = copy_source(os.path.join(src, "s"))
             run("install", "--root", self.root, "--source", s, "--yes")
-            installed = self.p(APP, "bin/shepherdr")
+            installed = self.p(SHARE, "bin/shepherdr")
             self.assertTrue(os.path.isfile(installed))
             # the release: a new version in the source, the installed copy still the old one
             new = os.path.join(s, "bin/shepherdr")
@@ -685,7 +699,7 @@ class Install(unittest.TestCase):
                                capture_output=True, text=True, stdin=subprocess.DEVNULL)
             self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
             self.assertIn("Shepherdr 9.9.9 update", p.stdout)
-            self.assertEqual(json.load(open(self.p(APP, "data/shepherdr/installed.json")))["version"], "9.9.9")
+            self.assertEqual(json.load(open(self.p(RECORD)))["version"], "9.9.9")
             # now the same installer: it runs itself
             p = subprocess.run([sys.executable, installed, "update", "--root", self.root, "--yes", "--no-build"],
                                capture_output=True, text=True, stdin=subprocess.DEVNULL)
@@ -698,12 +712,14 @@ class Install(unittest.TestCase):
         p = run("update", "--root", self.root, "--yes", ok=False)
         self.assertEqual(p.returncode, 1)
         self.assertIn("isn't installed", p.stderr)
+        p = run("doctor", "--root", self.root, ok=False)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("isn't installed", p.stderr)
 
     def test_web_stale(self):
         """When the installer builds the web app: missing, or older than anything it's built from (not its outputs);
         a source without web/src (an installed folder) never."""
-        from importlib.machinery import SourceFileLoader
-        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
+        sh = installer()
         src = tempfile.mkdtemp(prefix="shepherdr-stale-")
         try:
             def put(rel, t):
@@ -753,6 +769,7 @@ class Install(unittest.TestCase):
             self.assertIn("the web app isn't built: building it", p.stdout)
             self.assertNotIn("serves no page", p.stdout)
             dist = os.path.join(root, ".local/share/shepherdr/web/dist")
+            self.assertFalse(os.path.exists(os.path.join(dist, "artifact-viewer.html")), "3.1's recipe viewer is no longer built or shipped")
 
             class Refs(HTMLParser):
                 found = []
@@ -788,99 +805,241 @@ class Install(unittest.TestCase):
             shutil.rmtree(clone, ignore_errors=True)
             shutil.rmtree(root, ignore_errors=True)
 
-    def test_clash_refuses_then_adopt(self):
-        own = self.p(APP, "mods/jump")
-        os.makedirs(own)
-        with open(os.path.join(own, "main.js"), "w") as f:
-            f.write("// someone's own jump\n")
-        p = run("install", "--root", self.root, "--yes", ok=False)
-        self.assertEqual(p.returncode, 1)
-        self.assertIn("mods/jump/main.js", p.stderr)
-        self.assertFalse(os.path.exists(self.p(APP, "mods/tasks")), "nothing is written on a clash")
-        run("install", "--root", self.root, "--yes", "--adopt")
-        backups = os.listdir(self.p(APP, ".shepherdr-backup"))
-        self.assertEqual(len(backups), 1)
-        saved = self.p(APP, ".shepherdr-backup", backups[0], APP, "mods/jump/main.js")
-        self.assertEqual(open(saved).read(), "// someone's own jump\n")
-        run("uninstall", "--root", self.root)
-        self.assertEqual(open(self.p(APP, "mods/jump/main.js")).read(), "// someone's own jump\n")
-
-    def test_fresh_root(self):
-        # A brand-new home: no Herdr folder, no mods/, no .local/bin yet.
-        root = tempfile.mkdtemp(prefix="shepherdr-fresh-")
-        try:
-            run("install", "--root", root, "--yes")
-            self.assertTrue(os.path.isfile(os.path.join(root, APP, "mods/tasks/mod.json")))
-            self.assertTrue(os.path.islink(os.path.join(root, ".local/bin/shepherdr")))
-            self.assertIn("whole", run("doctor", "--root", root).stdout)
-            run("uninstall", "--root", root)
-            self.assertFalse(os.path.exists(os.path.join(root, APP, "mods/tasks")))
-        finally:
-            shutil.rmtree(root, ignore_errors=True)
-
     def test_dry_run_writes_nothing(self):
-        run("install", "--root", self.root, "--dry-run")
+        out = run("install", "--root", self.root, "--dry-run").stdout
         self.assertEqual(tree(self.root), self.before)
+        self.assertIn("ctrl-shift-o opens Shepherdr", out)
 
 
-class LayoutBrandRow(unittest.TestCase):
-    """#1032: the sidebar's top row (layout block "brand") is Shepherdr's own, with the voice call button beside Search.
-    A layout from before, which the person's sizes made their own (kept on update), gets only that block changed."""
+class SwitchFromTheWindow(unittest.TestCase):
+    """3.2 replaces 3.1 in one hard switch. An install or update that finds 3.1's record (the Herdr-window install,
+    test/fixtures/window-3.1.46.py) waits for working tasks, takes out what 3.1 put in the Herdr app, leaves the
+    person's data and their own mods, keys and hooks, and goes on as the one install."""
 
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix="shepherdr-test-")
-        os.makedirs(os.path.join(self.root, APP))
-        self.src = tempfile.mkdtemp(prefix="shepherdr-src-")
+        self.root = tempfile.mkdtemp(prefix="shepherdr-31-")
+        self.old = WINDOW_31.build(self.root)
+        # the person's data, in the Herdr app's data/ and in ~/.herdr (3.1.26's places): never touched
+        self.data = {f"{APP}/data/chat-asks/req/t1.json": "{}", f"{APP}/data/backups/1/sidebar.json": '{"spaces": []}',
+                     f"{APP}/shared.json": '{"mine": 1}', ".herdr/vault.json": '{"secret": "kept"}'}
+        for rel, text in self.data.items():
+            os.makedirs(os.path.dirname(self.p(rel)), exist_ok=True)
+            with open(self.p(rel), "w") as f:
+                f.write(text)
+        self.tasks = self.p(".herdr/tasks/dev-shop.json")
+        os.makedirs(os.path.dirname(self.tasks))
+        self.set_tasks("running")
 
     def tearDown(self):
         shutil.rmtree(self.root, ignore_errors=True)
-        shutil.rmtree(self.src, ignore_errors=True)
 
-    @staticmethod
-    def brand(d):
-        return next(c for c in d["children"][0]["children"] if c["id"] == "brand")
+    def p(self, *rel):
+        return os.path.join(self.root, *rel)
 
-    def test_the_shipped_layout_uses_shepherdrs_brand_row(self):
-        d = json.load(open(os.path.join(ROOT, "layouts", "shepherdr.json")))
-        self.assertEqual(self.brand(d)["content"]["mod"], "workspace-chrome-shepherdr")
+    def set_tasks(self, state):
+        path = self.tasks if not os.path.islink(os.path.dirname(self.tasks)) else self.p(SHARE, "tasks/dev-shop.json")
+        with open(path, "w") as f:
+            json.dump({"folder": "/x/shop", "prefix": "SHOP", "tasks": [
+                {"id": 3, "title": "Fix the cart", "state": state}, {"id": 4, "title": "Old one", "state": "running", "archived": 5},
+                {"id": 5, "title": "Waits for you", "state": "ready"}, {"id": 6, "title": "Later", "state": "queued"}]}, f)
 
-    def test_an_older_layout_the_person_resized_gets_only_its_brand_row_moved(self):
-        old = os.path.join(self.src, "s")
-        shutil.copytree(ROOT, old, ignore=shutil.ignore_patterns(".git", "node_modules"))
-        lay = os.path.join(old, "layouts", "shepherdr.json")
-        d = json.load(open(lay))
-        self.brand(d)["content"]["mod"] = "workspace-chrome"
-        with open(lay, "w") as f:
-            f.write(json.dumps(d, indent=2) + "\n")
-        run("install", "--root", self.root, "--yes", "--source", old)
-        mine = os.path.join(self.root, APP, "layouts", "shepherdr.json")
-        d = json.load(open(mine))
-        d["children"][0]["size"] = {"px": 312}
-        with open(mine, "w") as f:
-            f.write(json.dumps(d, indent=2) + "\n")
-        up = run("update", "--root", self.root, "--source", ROOT).stdout
-        d = json.load(open(mine))
-        self.assertEqual(self.brand(d)["content"]["mod"], "workspace-chrome-shepherdr")
-        self.assertEqual(d["children"][0]["size"], {"px": 312}, "the person's sidebar width stays")
-        self.assertIn("the voice call button beside Search", up)
-        self.assertTrue(os.path.exists(mine + ".new"))
-        # Again: nothing more to move.
-        again = run("update", "--root", self.root, "--source", ROOT).stdout
-        self.assertNotIn("the voice call button beside Search", again)
+    def test_waits_for_working_tasks_then_switches(self):
+        # the person's own changes inside what 3.1 installed
+        with open(self.p(APP, "mods/toasts/main.js"), "a") as f:
+            f.write("// mine\n")
+        with open(self.p(APP, "mods/chat/notes.txt"), "w") as f:
+            f.write("mine\n")
+        lay = json.load(open(self.p(APP, "layouts/shepherdr.json")))
+        lay["children"][0]["size"] = {"px": 312}                       # Herdr saved their sidebar width
+        with open(self.p(APP, "layouts/shepherdr.json"), "w") as f:
+            json.dump(lay, f)
+        os.makedirs(self.p(APP, "mods/art-abc123"))                    # an artifact's mod, as 3.1's herdr-artifact wrote it
+        with open(self.p(APP, "mods/art-abc123/main.js"), "w") as f:
+            f.write("export default {}\n")
+        os.makedirs(self.p(APP, "bin/__pycache__"))
+        with open(self.p(APP, "bin/__pycache__/x.pyc"), "w") as f:
+            f.write("")
+        before = tree(self.root)
 
+        # (a) a task is working: the update says which and changes nothing
+        p = run("update", "--root", self.root, "--yes", "--source", ROOT, ok=False)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("1 task is still working on the old version", p.stderr)
+        self.assertIn("SHOP-3 Fix the cart", p.stderr)
+        self.assertNotIn("SHOP-4", p.stderr, "an archived task isn't working")
+        self.assertNotIn("SHOP-5", p.stderr, "nor one that waits for the person")
+        self.assertIn("--force", p.stderr)
+        self.assertEqual(tree(self.root), before, "nothing was changed")
+        dry = run("update", "--root", self.root, "--yes", "--source", ROOT, "--dry-run").stdout
+        self.assertIn("still working (the switch waits for them, or --force): SHOP-3 Fix the cart", dry)
+        self.assertIn("would take out its 28 mods, 1 artifact mod", dry)
+        self.assertEqual(tree(self.root), before, "a dry run writes nothing")
 
-class AudioTools(unittest.TestCase):
-    def test_doctor_names_the_mic_and_speaker_tools_per_platform(self):
-        """Linux names pw-record and pw-play; a Mac names Apple's command line tools (swiftc) instead."""
-        from importlib.machinery import SourceFileLoader
-        from unittest import mock
-        sh = SourceFileLoader("shepherdr_cli", SHEPHERDR).load_module()
-        for platform, want, not_want in (("linux", ["pw-record", "pw-play"], "swiftc"), ("darwin", ["swiftc"], "pw-record")):
-            with mock.patch.object(sh.sys, "platform", platform), mock.patch.object(sh.shutil, "which", lambda n: None):
-                notes = "\n".join(sh.check_tools(False)[1])
-            for name in want:
-                self.assertIn(f"optional: {name} isn't on the PATH", notes)
-            self.assertNotIn(not_want, notes)
+        # the task finished: the same update switches
+        self.set_tasks("done")
+        out = run("update", "--root", self.root, "--yes", "--source", ROOT).stdout
+        self.assertIn("Shepherdr 3.2.0 update", out)
+        self.assertIn("switching from Shepherdr 3.1.46 (the Herdr-window install)", out)
+        self.assertIn("removed what 3.1 put in the Herdr app: 28 mods, 1 artifact mod (kept in the backup)", out)
+        self.assertIn("3 files you changed are in the backup", out)
+        # (c) the last words: pick another layout
+        self.assertIn("pick another layout there (Ctrl+Shift+L) if Shepherdr's was selected", out)
+        backup = re.search(r"backup of what it replaced: (\S+)", out).group(1)
+        self.assertTrue(backup.startswith(self.p(SHARE, ".shepherdr-backup")))
+
+        # (b) what 3.1 put in the Herdr app is gone: only the person's mod, the button, their data
+        self.assertEqual(sorted(os.listdir(self.p(APP, "mods"))), ["changes", "open-shepherdr"])
+        self.assertEqual(open(self.p(APP, "mods/changes/main.js")).read(), "// Herdr's own mod\n")
+        for gone in ("layouts/shepherdr.json", "lib", "core", "bin", "data/shepherdr", ".shepherdr-stage"):
+            self.assertFalse(os.path.exists(self.p(APP, gone)), gone)
+        # what the person changed is in the backup: their edit, their own file, the layout with their sizes, the artifact mod
+        self.assertTrue(open(os.path.join(backup, APP, "mods/toasts/main.js")).read().endswith("// mine\n"))
+        self.assertEqual(open(os.path.join(backup, APP, "mods/chat/notes.txt")).read(), "mine\n")
+        self.assertEqual(json.load(open(os.path.join(backup, APP, "layouts/shepherdr.json")))["children"][0]["size"], {"px": 312})
+        self.assertTrue(os.path.isfile(os.path.join(backup, APP, "mods/art-abc123/main.js")))
+        self.assertFalse(os.path.exists(os.path.join(backup, APP, "mods/jump")), "a mod as Shepherdr shipped it isn't backed up")
+        # the keys 3.1 merged are out, the person's from before back (alt-1), theirs kept (ctrl-k); our one key is in
+        self.assertEqual(json.load(open(self.p(APP, "keys.json"))),
+                         {"global": {"ctrl-k": "mine.open", "alt-1": "space.select:1", "ctrl-shift-o": "mod.open:open-shepherdr"}})
+        # the old hook entries are replaced, not doubled; the person's own hook stays
+        claude = json.load(open(self.p(".claude/settings.json")))
+        self.assertEqual(claude["model"], "x")
+        cmds = [h["command"] for e in claude["hooks"]["PermissionRequest"] for h in e["hooks"]]
+        self.assertEqual(cmds, ["mine --ask", f"sh '{self.p(SHARE)}/hooks/ask-hook.sh'"])
+        self.assertEqual([h["command"] for e in claude["hooks"]["SessionStart"] for h in e["hooks"]], [f"sh '{self.p(SHARE)}/hooks/session-note.sh'"])
+        codex = open(self.p(".codex/hooks.json")).read()
+        self.assertNotIn("mods/chat", codex)
+        self.assertEqual(codex.count("/hooks/ask-hook.sh"), 1)
+        # the --guard link is gone; the helpers' links lead into Shepherdr's own folder
+        self.assertFalse(os.path.lexists(self.p(".local/bin/herdr-app")))
+        for name, target in (("herdr-task", "mods/tasks/bin/herdr-task"), ("shepherdr", "bin/shepherdr"), ("herdr-secret", "bin/herdr-secret")):
+            self.assertEqual(os.path.realpath(self.p(".local/bin", name)), os.path.realpath(self.p(SHARE, target)))
+        # what 3.1 kept in Shepherdr's folder and no longer ships is retired with it
+        for gone in ("lib", "mods/coordinator", "mods/artifacts/recipe-view.js", "mods/artifacts/core", "service/layout-scripts.ts"):
+            self.assertFalse(os.path.exists(self.p(SHARE, gone)), gone)
+        self.assertNotIn("3.1.46", open(self.p(SHARE, "bin/shepherdr")).read()[:200])
+        # (e) the new record is written, the old one gone; nothing of the window is in it
+        rec = json.load(open(self.p(RECORD)))
+        self.assertEqual(rec["version"], "3.2.0")
+        self.assertFalse(os.path.exists(self.p(OLD_RECORD)))
+        self.assertFalse([f for f in rec["files"] if f.startswith(APP) and "/mods/open-shepherdr/" not in f])
+        self.assertNotIn("mods", rec)
+        self.assertEqual(list(rec["keys"]), ["global ctrl-shift-o"])
+        # the person's data is as it was (moved into Shepherdr's own folders by the usual move, never lost)
+        for rel in (f"{APP}/data/chat-asks/req/t1.json", f"{APP}/data/backups/1/sidebar.json", f"{APP}/shared.json"):
+            self.assertEqual(open(self.p(rel)).read(), self.data[rel], rel)
+        self.assertEqual(json.load(open(self.p(".herdr/vault.json"))), {"secret": "kept"})
+        self.assertEqual(len(json.load(open(self.p(SHARE, "tasks/dev-shop.json")))["tasks"]), 4)
+        # (d) old artifacts are converted once, by the new herdr-artifact's own command when it has one
+        if b'"convert"' in open(self.p(SHARE, "mods/artifacts/bin/herdr-artifact"), "rb").read():
+            self.assertRegex(out, r"  artifacts: |the old artifacts weren't turned into pages")
+        self.assertIn("whole", run("doctor", "--root", self.root).stdout)
+        # again: a plain update, no second switch
+        again = run("update", "--root", self.root, "--yes", "--source", ROOT).stdout
+        self.assertNotIn("switching from", again)
+        self.assertNotIn("artifacts:", again)
+        self.assertRegex(again, r"files: \d+ same\n")
+
+        # uninstall: the helper 3.1 had set aside is back, the Herdr app as before Shepherdr
+        run("uninstall", "--root", self.root)
+        self.assertEqual(open(self.p(".local/bin/herdr-task")).read(), "#!/bin/sh\necho the old one\n")
+        self.assertEqual(json.load(open(self.p(APP, "keys.json"))), {"global": {"ctrl-k": "mine.open", "alt-1": "space.select:1"}})
+        self.assertEqual(sorted(os.listdir(self.p(APP, "mods"))), ["changes"])
+        self.assertFalse(os.path.exists(self.p(".codex/hooks.json")), "the hooks file 3.1 made for Codex goes with our hooks")
+        self.assertEqual(json.load(open(self.p(".claude/settings.json"))),
+                         {"model": "x", "hooks": {"PermissionRequest": [{"hooks": [{"type": "command", "command": "mine --ask"}]}]}})
+
+    def test_force_switches_while_tasks_work(self):
+        out = run("install", "--root", self.root, "--yes", "--source", ROOT, "--force").stdout
+        self.assertIn("switched while these tasks were working (--force): SHOP-3 Fix the cart", out)
+        self.assertEqual(json.load(open(self.p(RECORD)))["version"], "3.2.0")
+        self.assertFalse(os.path.exists(self.p(APP, "mods/tasks")))
+
+    def test_no_hooks_still_takes_the_old_hooks_out(self):
+        """--no-hooks adds none of ours, but 3.1's entries point at files the switch removed: they go either way."""
+        self.set_tasks("done")
+        run("install", "--root", self.root, "--yes", "--source", ROOT, "--no-hooks")
+        self.assertNotIn("ask-hook", open(self.p(".claude/settings.json")).read())
+        self.assertNotIn("session-note", open(self.p(".codex/hooks.json")).read() if os.path.exists(self.p(".codex/hooks.json")) else "")
+
+    def test_doctor_before_the_switch_says_to_update(self):
+        p = run("doctor", "--root", self.root, ok=False)
+        self.assertEqual(p.returncode, 1)
+        self.assertIn("Shepherdr 3.1.46 (the Herdr-window install)", p.stderr)
+        self.assertIn("one switch", p.stderr)
+
+    def test_uninstall_straight_from_the_window_install(self):
+        """3.2's uninstall on a machine never switched takes 3.1 out whole: the Herdr app as before Shepherdr."""
+        run("uninstall", "--root", self.root)
+        self.assertEqual(sorted(os.listdir(self.p(APP, "mods"))), ["changes"])
+        self.assertEqual(json.load(open(self.p(APP, "keys.json"))), {"global": {"ctrl-k": "mine.open", "alt-1": "space.select:1"}})
+        self.assertFalse(os.path.exists(self.p(OLD_RECORD)))
+        self.assertFalse(os.path.exists(self.p(SHARE, "service")))
+        self.assertFalse(os.path.exists(self.p(".config/herdr-core/templates/worker.md")))
+        self.assertEqual(open(self.p(".local/bin/herdr-task")).read(), "#!/bin/sh\necho the old one\n")
+        self.assertFalse(os.path.lexists(self.p(".local/bin/herdr-app")))
+        self.assertNotIn("mods/chat", open(self.p(".claude/settings.json")).read())
+        self.assertEqual(open(self.p(f"{APP}/data/chat-asks/req/t1.json")).read(), "{}")
+
+    def test_a_3_1_update_command_finds_this_checkout(self):
+        """3.1's installed `shepherdr update` only hands over to a checkout its own is_source() accepts: install.sh and
+        lib/addons.json. That marker stays in the repo (nothing reads it) so the documented update, git pull then
+        `shepherdr update`, reaches the 3.2 installer; and 3.2's own test no longer needs it."""
+        self.assertTrue(os.path.isfile(os.path.join(ROOT, "install.sh")))
+        self.assertEqual(json.load(open(os.path.join(ROOT, "lib", "addons.json")))["addons"], [])
+        self.assertEqual(sorted(os.listdir(os.path.join(ROOT, "lib"))), ["addons.json"])
+        sh = installer()
+        self.assertTrue(sh.is_source(ROOT))
+        src = tempfile.mkdtemp(prefix="shepherdr-src-")
+        try:
+            for f in ("install.sh", "bin/shepherdr", "service/main.ts"):
+                os.makedirs(os.path.dirname(os.path.join(src, f)), exist_ok=True)
+                open(os.path.join(src, f), "w").close()
+            self.assertTrue(sh.is_source(src), "no lib/addons.json needed")
+        finally:
+            shutil.rmtree(src, ignore_errors=True)
+
+    def test_a_3_1_web_only_install_switches_too(self):
+        """3.1's `install --web` (its record already in Shepherdr's folder): the same wait for working tasks, then a
+        plain update that retires what 3.2 no longer ships and keeps the helper it had set aside for uninstall."""
+        root = tempfile.mkdtemp(prefix="shepherdr-web31-")
+        try:
+            sh = installer()
+            P = lambda *rel: os.path.join(root, *rel)
+            files = {}
+            for rel in (f"{SHARE}/lib/addons.json", f"{SHARE}/mods/coordinator/restart.sh", f"{SHARE}/mods/artifacts/recipe-view.js",
+                        f"{SHARE}/service/main.ts", f"{SHARE}/bin/shepherdr"):
+                os.makedirs(os.path.dirname(P(rel)), exist_ok=True)
+                with open(P(rel), "w") as f:
+                    f.write(f"// 3.1.46 {rel}\n")
+                files[rel] = sh.sha_bytes(f"// 3.1.46 {rel}\n".encode())
+            backup = P(APP, ".shepherdr-backup", "20260101-120000")
+            os.makedirs(os.path.join(backup, ".local/bin"))
+            with open(os.path.join(backup, ".local/bin/herdr-task"), "w") as f:
+                f.write("#!/bin/sh\necho the old one\n")
+            os.makedirs(P(".local/bin"))
+            os.symlink(P(SHARE, "mods/tasks/bin/herdr-task"), P(".local/bin/herdr-task"))
+            with open(P(RECORD), "w") as f:
+                json.dump({"version": "3.1.46", "web": True, "files": files, "source": ROOT, "root": root, "backups": [backup],
+                           "links": {"herdr-task": P(SHARE, "mods/tasks/bin/herdr-task")}}, f)
+            os.makedirs(P(".herdr/tasks"))
+            with open(P(".herdr/tasks/a.json"), "w") as f:
+                json.dump({"folder": "/x", "prefix": "WEB", "tasks": [{"id": 1, "title": "Busy", "state": "running"}]}, f)
+            p = run("update", "--root", root, "--yes", ok=False)
+            self.assertIn("WEB-1 Busy", p.stderr)
+            out = run("update", "--root", root, "--yes", "--force").stdout
+            self.assertNotIn("switching from", out, "no window to take out")
+            for gone in ("lib", "mods/coordinator", "mods/artifacts/recipe-view.js"):
+                self.assertFalse(os.path.exists(P(SHARE, gone)), gone)
+            rec = json.load(open(P(RECORD)))
+            self.assertEqual(rec["version"], "3.2.0")
+            self.assertNotIn("web", rec)
+            self.assertNotIn("backups", rec)
+            self.assertFalse(os.path.exists(P(APP, "mods")), "no Herdr app here: no button")
+            run("uninstall", "--root", root)
+            self.assertEqual(open(P(".local/bin/herdr-task")).read(), "#!/bin/sh\necho the old one\n")
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
 
 
 # A stand-in for agent-browser's release binary: says its version, has Chrome once `install` ran (unless told it fails)

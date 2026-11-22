@@ -1,6 +1,6 @@
 #!/bin/sh
 # SessionStart hook (Claude Code's settings.json, Codex's hooks.json): inside Herdr only
-# ($HC_TERMINAL_ID), tells the agent how the chat's reactions travel (mods/chat log.js).
+# ($HC_TERMINAL_ID), tells the agent how the chat's reactions travel (core/chat-log.js).
 # An Assistant also gets its "Your settings" block; every agent (Assistant, task worker, automation
 # run, agent tab) gets Shepherdr's Reactions for its space: when and how to react, or never
 # (herdr-task _session-note, which notes on its terminal what it was told). Outside Herdr it says nothing.

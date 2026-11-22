@@ -1,0 +1,5 @@
+{
+  "about": "A marker, nothing more. Shepherdr 3.1's `shepherdr update` only takes a folder for a Shepherdr checkout when it holds lib/addons.json, and then hands over to that checkout's own installer (bin/shepherdr), which does the switch to 3.2. Nothing in 3.2 reads this file; it can go once no machine runs 3.1.",
+  "core": { "mods": [], "layouts": [] },
+  "addons": []
+}

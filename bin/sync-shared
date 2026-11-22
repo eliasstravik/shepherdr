@@ -1,34 +1,20 @@
 #!/usr/bin/env python3
-"""Keeps the mods' copies of shared modules equal to their one source in lib/ (or core/).
-
-A mod can only import files inside its own folder (Herdr refuses symlinks and ../ paths that
-resolve outside it), so a module several mods use is copied into each. lib/<file> is the source;
-lib/COPIES names the mods that carry a copy. Edit lib/<file>, never a copy, then run this.
-A name core/<file> is the shared core (Shepherdr 3.1: the logic the web app and the service use too): its
-source is core/<file> beside lib/, and each mod's copy is mods/<mod>/core/<file>.
-
-  bin/sync-shared                 copy every lib file into its mods
-  bin/sync-shared --check         change nothing; exit 1 if any copy differs from lib
-  bin/sync-shared --from <copy>   a copy was edited by hand: make it the source, then sync
-
-A copy that differs from both lib and what this last wrote there (lib/.last/) was edited by
-hand: it is never overwritten; the run fails and names it (keep its change with --from, or move
-the change into lib/<file>). A fresh checkout or worktree has no lib/.last: what git last
-committed of the source stands in for it (a copy equal to that is ours, not hand-edited).
+"""Keeps the one-file helpers' copy of Shepherdr's paths equal to its one source.
 
 The helpers that go to other machines as one file each (herdr-secret, herdr-artifact) carry a block of
 Shepherdr's paths between "# ---- SHEP:" and "# ---- end SHEP ----": the source is
-mods/tasks/bin/herdr_task/layout.py's PY, written in here too.
+mods/tasks/bin/herdr_task/layout.py's PY, written in here. Edit layout.py, never a block, then run this.
+
+  bin/sync-shared            write the block into each helper
+  bin/sync-shared --check    change nothing; exit 1 if a block differs from layout.py's PY (or is missing)
+
+(Until 3.2 this also copied lib/ and core/ modules into the Herdr window's mods; the window's mods are gone.)
 """
-import hashlib, json, os, shutil, subprocess, sys
+import os, sys
 
 HOME = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-LIB, MODS = os.path.join(HOME, "lib"), os.path.join(HOME, "mods")
-src_of = lambda name: os.path.join(HOME, name) if name.startswith("core/") else os.path.join(LIB, name)
-LAST = os.path.join(LIB, ".last")
-# A published artifact's mod (art-<id>, art-<id>--v<n>) is generated: herdr-artifact copies the markup helpers
-# (dirs.js, core/paths.js) into it as they were then. Those are frozen copies, not ones to sync (GitHub #1008).
-GENERATED_PREFIX = "art-"
+LAYOUT = os.path.join("mods", "tasks", "bin", "herdr_task", "layout.py")
+SHEP_BLOCKS = ["bin/herdr-secret", "mods/artifacts/bin/herdr-artifact"]
 
 
 def read(path):
@@ -39,38 +25,6 @@ def read(path):
         return None
 
 
-def committed(name):
-    """The source as git last committed it (HEAD), or None outside a checkout."""
-    rel = os.path.relpath(src_of(name), HOME)
-    try:
-        r = subprocess.run(["git", "-C", HOME, "show", f"HEAD:{rel}"], capture_output=True, timeout=10)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return r.stdout if r.returncode == 0 else None
-
-
-def ours():
-    """The mods Shepherdr installs (lib/addons.json), or None when it can't be read (then every mod counts). A mod
-    another layout put beside them may carry its own copies of these files: those aren't ours to list (GitHub #1179)."""
-    try:
-        with open(os.path.join(LIB, "addons.json")) as f:
-            a = json.load(f)
-        return set(a["core"]["mods"]) | {m for x in a.get("addons", []) for m in x.get("mods", [])}
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-
-
-def copies():
-    out = {}
-    with open(os.path.join(LIB, "COPIES")) as f:
-        for line in f:
-            line = line.split("#", 1)[0].strip()
-            if line:
-                name, mods = line.split(":", 1)
-                out[name.strip()] = mods.split()
-    return out
-
-
 def write(path, data):
     tmp = f"{path}.sync-{os.getpid()}"
     with open(tmp, "wb") as f:
@@ -78,24 +32,23 @@ def write(path, data):
     os.replace(tmp, path)
 
 
-SHEP_BLOCKS = ["bin/herdr-secret", "mods/artifacts/bin/herdr-artifact"]
-
-
 def shep_blocks(check):
     """The SHEP block in each one-file helper, as layout.py's PY says. Returns (bad, made)."""
     try:
         import importlib.util
-        spec = importlib.util.spec_from_file_location("shep_layout", os.path.join(MODS, "tasks", "bin", "herdr_task", "layout.py"))
+        sys.dont_write_bytecode = True
+        spec = importlib.util.spec_from_file_location("shep_layout", os.path.join(HOME, LAYOUT))
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         want = mod.PY
-    except (OSError, ImportError, SyntaxError) as e:
-        return [f"mods/tasks/bin/herdr_task/layout.py: {e}"], []
+    except (OSError, ImportError, SyntaxError, AttributeError) as e:
+        return [f"{LAYOUT}: {e}"], []
     bad, made = [], []
     for rel in SHEP_BLOCKS:
         path = os.path.join(HOME, rel)
         text = (read(path) or b"").decode()
         if not text:
+            bad.append(f"{rel} is missing")
             continue
         try:
             a = text.index("\n", text.index("# ---- SHEP:")) + 1
@@ -117,74 +70,16 @@ def shep_blocks(check):
 
 def main(argv):
     check = "--check" in argv
-    table = copies()
-    if "--from" in argv:
-        src = os.path.realpath(argv[argv.index("--from") + 1])
-        name = os.path.basename(src)
-        mod = os.path.basename(os.path.dirname(src))
-        if mod == "core":
-            name, mod = f"core/{name}", os.path.basename(os.path.dirname(os.path.dirname(src)))
-        if name not in table or mod not in table[name]:
-            sys.exit(f"sync-shared: {src} is not a copy listed in lib/COPIES")
-        shutil.copyfile(src, src_of(name))
-        print(f"{os.path.relpath(src_of(name), HOME)} <- {os.path.relpath(src, HOME)}")
-
-    bad, made, notes = [], [], []
-    own = ours()
-    for name, mods in table.items():
-        lib = read(src_of(name))
-        if lib is None:
-            bad.append(f"{os.path.relpath(src_of(name), HOME)} is missing")
-            continue
-        last = read(os.path.join(LAST, name))
-        if last is None:
-            last = committed(name)
-        for mod in mods:
-            path = os.path.join(MODS, mod, name)
-            rel = os.path.relpath(path, HOME)
-            if not os.path.isdir(os.path.join(MODS, mod)):
-                bad.append(f"{rel}: mods/{mod} is gone (remove it from lib/COPIES)")
-                continue
-            have = read(path)
-            if have == lib:
-                continue
-            if check:
-                bad.append(f"{rel} differs from lib/{name}")
-            elif have is None or have == last:
-                os.makedirs(os.path.dirname(path), exist_ok=True)
-                write(path, lib)
-                made.append(rel)
-            else:
-                bad.append(f"{rel} was edited by hand: keep it with `bin/sync-shared --from {rel}`, or move the change into lib/{name}")
-        if not check:
-            os.makedirs(os.path.dirname(os.path.join(LAST, name)), exist_ok=True)
-            write(os.path.join(LAST, name), lib)
-        # A copy made by hand in a mod lib/COPIES doesn't list (same name, same start).
-        head = lib.split(b"\n", 1)[0]
-        for mod in sorted(os.listdir(MODS)):
-            if mod.startswith(GENERATED_PREFIX):
-                continue
-            path = os.path.join(MODS, mod, name)
-            if mod not in mods and (read(path) or b"").split(b"\n", 1)[0] == head:
-                if own is None or mod in own:
-                    bad.append(f"mods/{mod}/{name} looks like a copy of lib/{name}: add {mod} to lib/COPIES")
-                else:
-                    notes.append(f"mods/{mod}/{name} looks like a copy of lib/{name}; {mod} isn't one of Shepherdr's mods, so it's left alone")
-
-    b2, m2 = shep_blocks(check)
-    bad += b2
-    made += m2
+    bad, made = shep_blocks(check)
     for rel in made:
         print(f"synced {rel}")
-    for n in notes:
-        print(f"note: {n}")
     if bad:
-        print("sync-shared: " + ("copies out of sync" if check else "not synced") + ":", file=sys.stderr)
+        print("sync-shared: " + ("out of sync" if check else "not synced") + ":", file=sys.stderr)
         for b in bad:
             print(f"  {b}", file=sys.stderr)
         sys.exit(1)
     if check:
-        print(f"sync-shared: all {sum(len(m) for m in table.values())} copies match lib/ and core/")
+        print(f"sync-shared: the SHEP block in all {len(SHEP_BLOCKS)} helpers matches layout.py")
 
 
 if __name__ == "__main__":

@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Shepherdr's installer: puts the Shepherdr layout, its mods and helpers into a Herdr app home.
+"""Shepherdr's installer: the service, the web app and the helpers, under Shepherdr's own folder.
 
-  shepherdr install    [--root DIR] [--adopt] [--guard] [--keys ask|keep|ours] [--no-hooks] [--dry-run] [--yes]
+  shepherdr install    [--root DIR] [--no-hooks] [--adopt] [--dry-run] [--yes] [--force]
                        [--port N]: the service's port on 127.0.0.1 when another app holds 7788 (updates keep it)
                        [--https-port N]: the tailnet HTTPS port the web app is shared on, when something else holds 443
-  shepherdr update     the same, from the checkout it was installed from (git pull it first); web only too
+                       (--web is still accepted: since 3.2 every install is that one)
+  shepherdr update     the same, from the checkout it was installed from (git pull it first)
   (a fresh clone has no web app built: install and update build it with Bun, installing Bun first when it's missing)
-  shepherdr install --web               web only: herdr-core, herdr-task, the helpers, the service and the web app
-                                        under .local/share/shepherdr (no herdr-app)
   shepherdr web serve-from <machine|here> [--take-link]   serve the web app from another machine linked over
                                         herdr-core (an always-on Mac mini or cloud VM), installing it there; here: back
   shepherdr web status                  which machine serves it, and its link
+  shepherdr web install-on <machine|here> [--force]   install or update Shepherdr on a machine linked over herdr-core
   shepherdr web https-port [N]          the tailnet HTTPS port this machine shares the web app on (default 443): another
                                         one when something else here holds 443; no N: the one now
   shepherdr secrets move-to <machine|here> [--restore]   the machine that keeps the secrets (the vault agents use by
@@ -22,25 +22,28 @@
   shepherdr version
 
 What goes where (each under --root, default your home):
-  .config/herdr-app/mods/<mod>          the add-ons' mods (lib/addons.json lists them), one swap per mod
-  .config/herdr-app/layouts/shepherdr.json, lib/, core/, bin/
-  .config/herdr-app/keys.json           our keys merged in: free ones added, a key you use asked about first
+  .local/share/shepherdr/               everything Shepherdr runs: the service (service/, core/, web/shared), the built
+                                        web app (web/dist), herdr-task (mods/tasks/bin), herdr-artifact
+                                        (mods/artifacts/bin), the helpers and this installer (bin/), the agents' hooks
+                                        (hooks/), the role instructions (templates/), the Herdr button (herdr/)
+  .local/share/shepherdr/installed.json what it installed (a sha256 per file), so running it again changes only what changed
+  .local/bin/{herdr-task,herdr-artifact,herdr-secret,herdr-browser,shepherdr}   links into that folder
   .config/herdr-core/templates/*.md     the Assistant's, worker's and reviewer's instructions
-  .local/bin/{herdr-task,herdr-artifact,herdr-secret,herdr-browser,shepherdr}   links into the above
-  .local/bin/herdr-app                  with --guard: a guard that refuses a window with another home
-  .local/share/shepherdr/               the Shepherdr service (service/, core/) and the built web app (web/dist)
   .config/systemd/user/shepherdr.service    Linux: keeps the service running (systemctl --user)
   Library/LaunchAgents/dev.shepherdr.service.plist   macOS: the same with launchd
   ~/.claude/settings.json, ~/.codex/hooks.json   the question-card hooks (not with --no-hooks)
+  .config/herdr-app/mods/open-shepherdr, and one key in .config/herdr-app/keys.json (Ctrl+Shift+O, only when it's
+                                        free): the "Open Shepherdr" button, only when the Herdr app is on this machine
 
-Never overwritten: a mod, layout or lib file that isn't ours (it refuses, naming each; --adopt backs
-them up and takes them over), a key you set (unless you say yes), a file you changed since the last
-install (the new copy goes beside it as <file>.new; a mod file Shepherdr changed too is replaced, yours backed up). Everything it replaces goes to
-.config/herdr-app/.shepherdr-backup/<time>/ first; uninstall puts it back. What it installed is
-recorded in .config/herdr-app/data/shepherdr/installed.json (a sha256 per file), so running it again
-changes only what changed. While it replaces a helper or template, a sync hold (sync-hold in
-Shepherdr's state folder, and .herdr/sync-hold for older helpers) keeps herdr-task from sending them
-to other machines until `shepherdr doctor` finds the install whole.
+Shepherdr's own folder is replaced whole on update. Never overwritten: a role instruction you changed (the new one
+goes beside it as <file>.new), a key you set, a file by the button's name that isn't ours (--adopt takes it over).
+What it replaces of yours goes to .local/share/shepherdr/.shepherdr-backup/<time>/ first. While it replaces a helper
+or template, a sync hold (sync-hold in Shepherdr's state folder, and .herdr/sync-hold for older helpers) keeps
+herdr-task from sending them to other machines until `shepherdr doctor` finds the install whole.
+
+From 3.1 (the Herdr-window layout and its mods): one switch. The update waits while tasks are working (it says which;
+--force switches anyway), then takes out what 3.1 put in the Herdr app (its mods, layout, lib/, core/, bin/, keys and
+hooks; a file you changed is backed up first), leaves your data alone and converts old artifacts to pages once.
 
 Shepherdr's own data (tasks, artifacts, settings, secrets, browsers, the service's files) lives in its
 own folders: ~/.config/shepherdr, ~/.local/share/shepherdr, ~/.local/state/shepherdr, ~/.cache/shepherdr
@@ -53,29 +56,29 @@ the old paths (mods/tasks/bin/herdr_task/layout.py):
 """
 
 import argparse
-import ctypes
-import ctypes.util
 import datetime
 import hashlib
 import json
 import os
 import pwd
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 import time
 
-VERSION = "3.1.46"
-HERDR_APP_MIN = "0.1.12"
+VERSION = "3.2.0"
 HC_MIN = "0.1.17"
 
 APP, BIN, TPL, HERDR = ".config/herdr-app", ".local/bin", ".config/herdr-core/templates", ".herdr"
-SHARE = ".local/share/shepherdr"   # the service and the web app
+SHARE = ".local/share/shepherdr"   # everything Shepherdr runs: the service, the web app, the helpers
 UNIT = ".config/systemd/user/shepherdr.service"
 PLIST = "Library/LaunchAgents/dev.shepherdr.service.plist"
 AGENT = "dev.shepherdr.service"
-RECORD = f"{APP}/data/shepherdr/installed.json"
+RECORD = f"{SHARE}/installed.json"
+# Where 3.1 and older (the Herdr-window install) kept theirs: found there, the install is switched over once
+OLD_RECORD = f"{APP}/data/shepherdr/installed.json"
 HOLD = f"{HERDR}/sync-hold"          # older helpers look here; this version's look in the state folder too
 
 
@@ -140,32 +143,33 @@ def move_data(r, a, home):
         say(f"  {line}")
     for n in res["notes"]:
         r.notes.append(n)
-# Helpers on the PATH: their name, and where the link leads (under the app home).
+# Helpers on the PATH: their name, and where the link leads (under Shepherdr's own folder). herdr-task and
+# herdr-artifact keep their 3.1 paths, so machines on 3.1 and 3.2 find each other's copies.
 LINKS = {"herdr-task": "mods/tasks/bin/herdr-task", "herdr-artifact": "mods/artifacts/bin/herdr-artifact",
          "herdr-secret": "bin/herdr-secret", "herdr-browser": "bin/herdr-browser", "shepherdr": "bin/shepherdr"}
 # Written by Herdr into each mod (editor types): never ours, never touched.
 GENERATED = {"gpui-kit.d.ts", "jsconfig.json"}
 SKIP = {"__pycache__", ".DS_Store"}
-# Layout blocks Herdr's mods point at whatever is shown now (a task's terminal, an opened artifact):
-# compared without them, so a layout in use still counts as unchanged.
+# 3.1's layout blocks that pointed at whatever was shown (a task's terminal, an opened artifact): the old layout is
+# compared without them, so one in use still counts as unchanged when the switch takes it out.
 LIVE_BLOCKS = ("tasks-thread-term", "artifacts-view-body")
-# Blocks an older Shepherdr layout filled with another mod: (layout, node id, old mod, new mod, why). A layout the person
-# (or Herdr, saving their sizes) changed is kept on update, so only this block's mod changes in it, in place.
-LAYOUT_MOVES = [
-    # The sidebar's top row: Herdr's own top bar has no voice call button; Shepherdr's has it beside Search (#1032).
-    ("shepherdr", "brand", "workspace-chrome", "workspace-chrome-shepherdr", "the voice call button beside Search"),
-]
-HOOKS = [  # (file under home, event, entry): the question and permission cards (the "needs" add-on)
+# The one thing Shepherdr puts in the Herdr app (when it's on this machine): a popup with an "Open Shepherdr" button
+# (herdr/open-shepherdr in the source), and one key that opens it, only when that key is free.
+BUTTON = "open-shepherdr"
+KEY = ("global", "ctrl-shift-o", f"mod.open:{BUTTON}")
+HOOKS = [  # (file under home, event, entry): the agents' question and permission cards
     (".claude/settings.json", "SessionStart",
-     {"matcher": "^(startup|resume|clear|compact)$", "hooks": [{"type": "command", "command": "sh '{app}/mods/chat/session-note.sh'", "timeout": 10}]}),
+     {"matcher": "^(startup|resume|clear|compact)$", "hooks": [{"type": "command", "command": "sh '{share}/hooks/session-note.sh'", "timeout": 10}]}),
     (".claude/settings.json", "PermissionRequest",
-     {"hooks": [{"type": "command", "command": "sh '{app}/mods/chat/ask-hook.sh'", "timeout": 1800}]}),
+     {"hooks": [{"type": "command", "command": "sh '{share}/hooks/ask-hook.sh'", "timeout": 1800}]}),
     (".codex/hooks.json", "SessionStart",
-     {"hooks": [{"type": "command", "command": "sh '{app}/mods/chat/session-note.sh'", "timeout": 10}]}),
+     {"hooks": [{"type": "command", "command": "sh '{share}/hooks/session-note.sh'", "timeout": 10}]}),
     # Codex's approvals on the chat's card too (SHEP-91); a task worker's own hook hands them on instead
     (".codex/hooks.json", "PermissionRequest",
-     {"hooks": [{"type": "command", "command": "sh '{app}/mods/chat/ask-hook.sh'", "timeout": 1800}]}),
+     {"hooks": [{"type": "command", "command": "sh '{share}/hooks/ask-hook.sh'", "timeout": 1800}]}),
 ]
+# The same hooks as 3.1 and older wrote them (in the Herdr app's chat mod): replaced by ours, never kept beside them
+OLD_HOOK = re.compile(r"sh '[^'\n]*/herdr-app/mods/chat/(session-note|ask-hook)\.sh'")
 
 
 class Stop(Exception):
@@ -240,26 +244,13 @@ def atomic_write(path, data, mode=None):
     os.replace(tmp, path)
 
 
-def exchange(a, b):
-    """Swaps two folders in one step (Linux renameat2, macOS renamex_np), so Herdr sees one change
-    per mod. Elsewhere: two renames, a moment apart."""
-    libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
-    if sys.platform.startswith("linux") and hasattr(libc, "renameat2"):
-        if libc.renameat2(-100, os.fsencode(a), -100, os.fsencode(b), 2) == 0:  # AT_FDCWD, RENAME_EXCHANGE
-            return
-    elif sys.platform == "darwin" and hasattr(libc, "renamex_np"):
-        if libc.renamex_np(os.fsencode(a), os.fsencode(b), 2) == 0:  # RENAME_SWAP
-            return
-    tmp = f"{b}.shepherdr-swap"
-    os.rename(b, tmp)
-    os.rename(a, b)
-    os.rename(tmp, a)
 
 
 # ---- the source ---------------------------------------------------------------------------------
 
 def is_source(d):
-    return bool(d) and os.path.isfile(os.path.join(d, "install.sh")) and os.path.isfile(os.path.join(d, "lib", "addons.json"))
+    """A folder to install from: a checkout, or an installed Shepherdr folder (a whole source too)."""
+    return bool(d) and all(os.path.isfile(os.path.join(d, f)) for f in ("install.sh", "bin/shepherdr", "service/main.ts"))
 
 
 def find_source(given, record):
@@ -345,68 +336,54 @@ def walk_files(top):
     return out
 
 
-def source_items(src, root=None):
-    """What the checkout installs: [(group, rel under root, source path)]. group: a mod's name,
-    or "layout", "lib", "bin", "template"."""
-    manifest = json.load(open(os.path.join(src, "lib", "addons.json")))
-    mods = list(manifest["core"]["mods"]) + [m for a in manifest["addons"] for m in a.get("mods", [])]
-    items = []
-    for m in mods:
-        top = os.path.join(src, "mods", m)
-        if not os.path.isdir(top):
-            raise Stop(f"lib/addons.json names mods/{m}, which isn't in {src}")
-        items += [(m, f"{APP}/mods/{m}/{f}", os.path.join(top, f)) for f in walk_files(top)]
-    # GitHub #1214: the artifact viewer (one built file) goes with the artifacts mod, beside herdr-artifact, so
-    # `herdr-artifact preview` works on every machine, with or without the Web add-on, and syncs on from there
-    viewer = os.path.join(src, "web", "dist", "artifact-viewer.html")
-    if "artifacts" in mods and os.path.isfile(viewer):
-        items.append(("artifacts", f"{APP}/mods/artifacts/viewer.html", viewer))
-    for name in manifest["core"]["layouts"]:
-        items.append(("layout", f"{APP}/layouts/{name}.json", os.path.join(src, "layouts", f"{name}.json")))
-    for f in walk_files(os.path.join(src, "lib")):
-        if not f.startswith(".last"):
-            items.append(("lib", f"{APP}/lib/{f}", os.path.join(src, "lib", f)))
-    for f in walk_files(os.path.join(src, "bin")):
-        items.append(("bin", f"{APP}/bin/{f}", os.path.join(src, "bin", f)))
-    # The shared core's source beside lib/, so the app's own bin/sync-shared finds it (mods carry copies).
-    for f in walk_files(os.path.join(src, "core")) if os.path.isdir(os.path.join(src, "core")) else []:
-        if not f.endswith(".test.js"):
-            items.append(("lib", f"{APP}/core/{f}", os.path.join(src, "core", f)))
-    for f in sorted(os.listdir(os.path.join(src, "templates"))):
-        if f.endswith(".md"):
-            items.append(("template", f"{tpl_rel(root)}/{f}", os.path.join(src, "templates", f)))
-    items += service_items(src)
-    return manifest, mods, items
-
-
-def service_items(src):
-    """The service (its TypeScript runs on Bun as it is), the shared core and the built web app; and what makes that
-    folder a source for a web-only install on another machine (Serve from: `shepherdr web install-on` packs it)."""
-    items = [("service", f"{SHARE}/package.json", os.path.join(src, "package.json")),
-             # which add-ons the web app leaves out while off (Settings › Window)
-             ("service", f"{SHARE}/lib/addons.json", os.path.join(src, "lib", "addons.json"))]
+def share_items(src):
+    """Everything that goes into Shepherdr's own folder: the service (its TypeScript runs on Bun as it is), the
+    shared core, the built web app, herdr-task, herdr-artifact, the helpers, the hooks, the role instructions, the
+    Herdr button and the installer. That folder is then a whole source to install another machine from (Serve from:
+    `shepherdr web install-on` packs it)."""
+    items = [("share", f"{SHARE}/{f}", os.path.join(src, f)) for f in ("package.json", "install.sh")]
     # the service, the shared core, and the web app's shared code the service runs too (alerts, types' helpers)
     for top in ("service", "core", "web/shared"):
         for f in walk_files(os.path.join(src, top)) if os.path.isdir(os.path.join(src, top)) else []:
             if not f.endswith((".test.ts", ".test.js")):
-                items.append(("service", f"{SHARE}/{top}/{f}", os.path.join(src, top, f)))
+                items.append(("share", f"{SHARE}/{top}/{f}", os.path.join(src, top, f)))
     dist = os.path.join(src, "web", "dist")
     for f in walk_files(dist) if os.path.isfile(os.path.join(dist, "index.html")) else []:
-        items.append(("service", f"{SHARE}/web/dist/{f}", os.path.join(dist, f)))
-    # herdr-task, herdr-artifact and the helpers, the role instructions and the installer: a web-only install links
-    # its helpers here; on any install the folder is a whole source to install another machine from
-    for top in ("mods/tasks/bin", "mods/artifacts/bin", "bin", "templates"):
-        for f in walk_files(os.path.join(src, top)):
+        if f != "artifact-viewer.html":   # 3.1's recipe viewer, left in an older build: artifacts are plain pages now
+            items.append(("share", f"{SHARE}/web/dist/{f}", os.path.join(dist, f)))
+    for top in ("mods/tasks/bin", "mods/artifacts/bin", "bin", "hooks", "herdr", "templates"):
+        for f in walk_files(os.path.join(src, top)) if os.path.isdir(os.path.join(src, top)) else []:
             if top != "templates" or f.endswith(".md"):
-                items.append(("service", f"{SHARE}/{top}/{f}", os.path.join(src, top, f)))
-    # the artifact guide too (`herdr-artifact guide`), for agents on a web-only machine
-    # and restart.sh, which the service runs to restart an Assistant from the web (service/layout-scripts.ts)
-    for f in ("mods/artifacts/recipe-view.js", "mods/artifacts/markup.js", "mods/artifacts/ARTIFACTS.md", "install.sh",
-              "mods/coordinator/restart.sh"):
-        items.append(("service", f"{SHARE}/{f}", os.path.join(src, f)))
-    # recipe-view.js imports it from beside itself
-    items.append(("service", f"{SHARE}/mods/artifacts/core/recipe.js", os.path.join(src, "core", "recipe.js")))
+                items.append(("share", f"{SHARE}/{top}/{f}", os.path.join(src, top, f)))
+    # the artifact guide (`herdr-artifact guide` reads it from beside its bin/)
+    guide = os.path.join(src, "mods", "artifacts", "ARTIFACTS.md")
+    if os.path.isfile(guide):
+        items.append(("share", f"{SHARE}/mods/artifacts/ARTIFACTS.md", guide))
     return items
+
+
+def source_items(src, root=None):
+    """What a source installs: [(group, rel under root, source path)]. group: "share" (Shepherdr's own folder,
+    replaced whole) or "template" (the person may have changed theirs: kept, the new one beside it)."""
+    items = share_items(src)
+    for f in sorted(os.listdir(os.path.join(src, "templates"))):
+        if f.endswith(".md"):
+            items.append(("template", f"{tpl_rel(root)}/{f}", os.path.join(src, "templates", f)))
+    return items
+
+
+def herdr_app_here(root):
+    """The Herdr app is on this machine (it's optional): its home holds what the app itself writes. data/ alone
+    doesn't count: the agents' question hook keeps its cards there on every machine."""
+    app = os.path.join(root, APP)
+    return any(os.path.exists(os.path.join(app, x)) for x in ("mods", "layouts", "keys.json")) \
+        or os.path.exists(os.path.join(root, ".local/share/herdr-app/herdr-app"))
+
+
+def button_items(src):
+    """The "Open Shepherdr" button, as a mod of the Herdr app."""
+    top = os.path.join(src, "herdr", BUTTON)
+    return [("button", f"{APP}/mods/{BUTTON}/{f}", os.path.join(top, f)) for f in walk_files(top)] if os.path.isdir(top) else []
 
 
 def bun_path():
@@ -435,7 +412,7 @@ def managed_unit(root):
 
 def unit_text(root, bun, port=None):
     """The user service that keeps Shepherdr's service running (Linux), or its launchd agent (macOS). port: install's
-    --port (SHEPHERDR_PORT; none: the service's own 7788). The window and the CLI read the port the service really took
+    --port (SHEPHERDR_PORT; none: the service's own 7788). The CLI reads the port the service really took
     from its service.json, so this is the only place it is set. SHEPHERDR_HOME and XDG_* as the installer saw them go
     along, so the service finds the same folders."""
     main = os.path.join(root, SHARE, "service", "main.ts")
@@ -498,7 +475,7 @@ def our_port(root):
     try:
         return int(json_file(service_file(root, "service.json"))["port"])
     except (KeyError, TypeError, ValueError):
-        rec = load_record(root) or json_file(os.path.join(root, WEB_RECORD)) or {}
+        rec = load_record(root) or old_record(root) or {}
         return rec.get("port") or DEFAULT_PORT
 
 
@@ -691,11 +668,14 @@ def install_service(r, rec, home):
 # ---- the record ---------------------------------------------------------------------------------
 
 def load_record(root):
-    try:
-        with open(os.path.join(root, RECORD)) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
+    rec = json_file(os.path.join(root, RECORD))
+    return rec if isinstance(rec, dict) else None
+
+
+def old_record(root):
+    """What a 3.1 (or older) Herdr-window install recorded, while it hasn't been switched over."""
+    rec = json_file(os.path.join(root, OLD_RECORD))
+    return rec if isinstance(rec, dict) else None
 
 
 def save_record(root, rec):
@@ -708,11 +688,11 @@ class Run:
     def __init__(self, root, dry):
         self.root, self.dry = root, dry
         self.stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        self.backup_dir = os.path.join(root, APP, ".shepherdr-backup", self.stamp)
+        self.backup_dir = os.path.join(root, SHARE, ".shepherdr-backup", self.stamp)
         n = 1
         while os.path.exists(self.backup_dir):
             n += 1
-            self.backup_dir = os.path.join(root, APP, ".shepherdr-backup", f"{self.stamp}-{n}")
+            self.backup_dir = os.path.join(root, SHARE, ".shepherdr-backup", f"{self.stamp}-{n}")
         self.backed = False
         self.notes = []
 
@@ -739,34 +719,6 @@ class Run:
             shutil.copy2(path, dest)
         return dest
 
-
-def move_layout_blocks(text, name):
-    """A layout's text with LAYOUT_MOVES applied to its blocks -> (new text or None when nothing moved, [why])."""
-    moves = [m for m in LAYOUT_MOVES if m[0] == name]
-    if not moves or text is None:
-        return None, []
-    try:
-        d = json.loads(text)
-    except ValueError:
-        return None, []
-    said = []
-
-    def walk(n):
-        if isinstance(n, dict):
-            for _, node, old, new, why in moves:
-                c = n.get("content")
-                if n.get("id") == node and isinstance(c, dict) and c.get("mod") == old:
-                    c["mod"] = new
-                    said.append(why)
-            for v in n.values():
-                walk(v)
-        elif isinstance(n, list):
-            for v in n:
-                walk(v)
-    walk(d)
-    if not said:
-        return None, []
-    return json.dumps(d, indent=2, ensure_ascii=False) + "\n", said
 
 
 def plan_files(r, rec, items, adopt):
@@ -797,233 +749,185 @@ def plan_files(r, rec, items, adopt):
     return actions, clashes
 
 
-# Recorded in the files, but written by their own steps (the service's unit or launch agent, the window's guard), not shipped
-MANAGED = (UNIT, PLIST, f"{BIN}/herdr-app")
+# Recorded in the files, but written by their own step (the service's unit or launch agent), not shipped
+MANAGED = (UNIT, PLIST)
 
 
-# The one-file helpers that carry a SHEP block (bin/sync-shared writes it; doctor rejects a copy without it or with another).
-SHEP_HELPERS = (f"{APP}/bin/herdr-secret", f"{APP}/mods/artifacts/bin/herdr-artifact")
-
-
-def shep_block(b):
-    """The SHEP block of a one-file helper (between its marker lines), or None when it has none."""
-    if b is None:
-        return None
-    text = b.decode(errors="replace")
-    try:
-        a = text.index("\n", text.index("# ---- SHEP:")) + 1
-        end = text.index("# ---- end SHEP ----")
-    except ValueError:
-        return None
-    return text[a:end]
-
-
-def old_helper(rel, disk, new):
-    """A kept helper copy that doctor rejects: an older Shepherdr's (not an edit of the person's): its SHEP block is
-    missing or not the one this release ships (#905)."""
-    return rel in SHEP_HELPERS and disk is not None and shep_block(disk) != shep_block(new)
-
-
-def retire_mod(r, mod, old_files, changed):
-    """A mod lib/addons.json no longer lists: its folder goes, with the shared copies and editor helpers in it (#895).
-    What the person changed or put in it is in this run's backup folder, and said. changed: files already backed up."""
-    top = f"{APP}/mods/{mod}"
-    if not os.path.isdir(r.p(top)):
-        return
-    kept = []
-    for d, dirs, names in os.walk(r.p(top)):
-        for n in names:
-            rel = os.path.relpath(os.path.join(d, n), r.root)
-            if rel in changed or n in SKIP or n in GENERATED or n.endswith(".pyc"):
-                continue
-            if rel in old_files and fsha(rel, read(r.p(rel))) == old_files[rel]:
-                continue   # as Shepherdr shipped it
-            kept.append(rel)
-    for rel in kept:
-        r.backup(rel)
-    if r.dry:
-        return
-    try:
-        shutil.rmtree(r.p(top))
-    except OSError as e:
-        raise Stop(f"can't remove {top} (Shepherdr no longer ships it): {e.strerror}. Fix that and run the update again.")
-    where = f" (your changes are in {os.path.join(r.backup_dir, top)})" if kept else ""
-    r.notes.append(f"removed mod {mod}: Shepherdr no longer ships it{where}")
-
-
-def apply_mod(r, mod, acts, rec, gone):
-    """Puts one mod's changes in place in one swap. gone: recorded files no longer shipped (backed up already if changed)."""
-    target = r.p(f"{APP}/mods/{mod}")
-    changes = [a for a in acts if a[2] in ("new", "update", "adopt", "keep", "replace", "old")] + gone
-    if not changes:
-        return
-    if r.dry:
-        return
-    stage_root = r.p(f"{APP}/.shepherdr-stage")
-    os.makedirs(stage_root, exist_ok=True)
-    stage = os.path.join(stage_root, mod)
-    shutil.rmtree(stage, ignore_errors=True)
-    exists = os.path.isdir(target)
-    if exists:
-        shutil.copytree(target, stage, symlinks=True)
-    else:
-        os.makedirs(stage)
-    adopted = any(a[2] == "adopt" for a in acts)
-    for group, rel, how, data, mode in acts:
-        sub = os.path.relpath(rel, f"{APP}/mods/{mod}")
-        dest = os.path.join(stage, sub)
-        if how == "keep":
-            # Shepherdr's copy is unchanged since the person's edit: theirs stays, nothing to merge
-            r.notes.append(f"kept your {rel} (Shepherdr hasn't changed it since)")
-        elif how == "replace":
-            dest_b = r.backup(rel)
-            atomic_write(dest, data, mode)
-            r.notes.append(f"Shepherdr changed {rel} since you edited it: the new one is in, yours is kept as {dest_b}"
-                           " (put your change back into the new one if you still want it)")
-        elif how == "old":
-            dest_b = r.backup(rel)
-            atomic_write(dest, data, mode)
-            r.notes.append(f"replaced {rel}: an older Shepherdr's copy that doctor rejects (no current SHEP block); "
-                           f"it is kept as {dest_b}")
-        elif how in ("new", "update", "adopt"):
-            atomic_write(dest, data, mode)
-    for rel in gone:
-        sub = os.path.relpath(rel, f"{APP}/mods/{mod}")
+def prune_dirs(r, rel):
+    """Removes the folders a removed file leaves empty, up to the ones that aren't ours to remove."""
+    stop = {os.path.realpath(r.p(x)) for x in ("", SHARE, APP, f"{APP}/mods", f"{APP}/layouts", f"{APP}/data", BIN, tpl_rel(r.root))}
+    d = os.path.dirname(r.p(rel))
+    while os.path.realpath(d) not in stop:
         try:
-            os.remove(os.path.join(stage, sub))
-        except FileNotFoundError:
-            pass
-    if exists:
-        if adopted:
-            rec.setdefault("replaced", {}).setdefault(f"{APP}/mods/{mod}", r.backup(f"{APP}/mods/{mod}"))
-        exchange(stage, target)
-        shutil.rmtree(stage)
-    else:
-        # mod.json comes with main.js: the folder appears whole (mods/ made first on a fresh home).
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        os.rename(stage, target)
+            os.rmdir(d)
+        except OSError:
+            return
+        d = os.path.dirname(d)
 
 
-def merge_keys(r, src, rec, mode, yes):
-    """Our keys into keys.json: free ones added, ours from before updated, one the person set
-    asked about (or by --keys). One write. -> the record's keys."""
-    ours = json.load(open(os.path.join(src, "keys.json")))
-    path = r.p(f"{APP}/keys.json")
-    text = read(path)
+def merge_key(r, rec):
+    """The one key Shepherdr adds to the Herdr app's keys.json (KEY: it opens the button), only when that key is
+    free: a key the person set is never replaced. -> the record's keys (what uninstall takes out again)."""
+    ctx, key, value = KEY
+    name = f"{ctx} {key}"
+    rel = f"{APP}/keys.json"
+    text = read(r.p(rel))
     try:
         have = json.loads(text) if text else {}
     except ValueError:
-        raise Stop(f"{path} isn't valid JSON: fix it first, Herdr can't read it either")
-    old = (rec or {}).get("keys", {})
-    out = dict(old)
+        have = None
+    if not isinstance(have, dict) or not isinstance(have.get(ctx, {}), dict):
+        r.notes.append(f"{rel} isn't valid JSON (Herdr can't read it either): left alone, no key opens Shepherdr's button")
+        return {}
+    cur = have.get(ctx, {}).get(key)
+    if cur == value:
+        return {name: (rec.get("keys") or {}).get(name) or {"value": value, "was": None, "added": False}}
+    if cur is not None:
+        r.notes.append(f"kept your key {key} = \"{cur}\": to open Shepherdr from Herdr, give \"{value}\" a key of your own in {rel}")
+        return {}
+    if r.dry:
+        say(f"  key     {rel}: {key} opens Shepherdr")
+        return {}
+    if text is not None:
+        r.backup(rel)
+    elif rel not in rec.setdefault("created", []):
+        rec["created"].append(rel)
+    have.setdefault(ctx, {})[key] = value
+    atomic_write(r.p(rel), (json.dumps(have, indent=2, ensure_ascii=False) + "\n").encode())
+    return {name: {"value": value, "was": None, "added": True}}
+
+
+def take_keys_out(r, rec):
+    """Shepherdr's keys out of keys.json (the record says which): one it added goes, one it took over gets the
+    person's back; a key the person changed since stays theirs."""
+    rel = f"{APP}/keys.json"
+    text = read(r.p(rel))
+    keys = rec.get("keys") or {}
+    if text is None or not keys:
+        return
+    try:
+        have = json.loads(text)
+    except ValueError:
+        have = None
+    if not isinstance(have, dict):
+        r.notes.append(f"{rel} isn't valid JSON: Shepherdr's keys stay in it, remove them by hand")
+        return
     changed = False
-    asked = sys.stdin.isatty() and not yes and mode == "ask"
-    for ctx, keys in ours.items():
-        for key, value in keys.items():
-            name = f"{ctx} {key}"
-            cur = have.get(ctx, {}).get(key)
-            if cur == value:
-                out.setdefault(name, {"value": value, "was": None, "added": False})
-                continue
-            mine = name in old and cur == old[name]["value"]
-            if cur is None or mine:
-                take = True
-            elif mode == "ours":
-                take = True
-            elif asked:
-                ans = input(f"keys.json: {ctx} {key} is \"{cur}\". Replace it with Shepherdr's \"{value}\"? [y/N] ")
-                take = ans.strip().lower() in ("y", "yes")
-            else:
-                take = False
-            if not take:
-                r.notes.append(f"kept your key {ctx} {key} = \"{cur}\" (Shepherdr's: \"{value}\"; --keys ours takes it)")
-                continue
-            was = old[name]["was"] if mine else cur
-            out[name] = {"value": value, "was": was, "added": was is None}
-            have.setdefault(ctx, {})[key] = value
-            changed = True
-    if changed and not r.dry:
-        if text is not None:
-            r.backup(f"{APP}/keys.json")
-        atomic_write(path, (json.dumps(have, indent=2, ensure_ascii=False) + "\n").encode())
-    return out, changed
+    for name, k in keys.items():
+        ctx, key = name.split(" ", 1)
+        if not isinstance(have.get(ctx), dict) or have[ctx].get(key) != k.get("value") or not (k.get("added") or k.get("was")):
+            continue
+        if k.get("was") is None:
+            have[ctx].pop(key, None)
+            if not have[ctx]:
+                del have[ctx]
+        else:
+            have[ctx][key] = k["was"]
+        changed = True
+    if not changed or r.dry:
+        return
+    r.backup(rel)
+    if not have and rel in rec.get("created", []):
+        os.remove(r.p(rel))
+    else:
+        atomic_write(r.p(rel), (json.dumps(have, indent=2, ensure_ascii=False) + "\n").encode())
 
 
-def link_helpers(r, rec):
-    app = r.p(APP)
+def link_helpers(r, rec, ours=()):
+    """The helpers on the PATH: links into Shepherdr's own folder. ours: where an older install's links led (they
+    are replaced); anything else by that name is set aside, and uninstall puts it back."""
     links = {}
+    old = {os.path.realpath(x) for x in ours}
     for name, target in LINKS.items():
-        rel, dest = f"{BIN}/{name}", os.path.join(app, target)
+        rel, dest = f"{BIN}/{name}", r.p(f"{SHARE}/{target}")
         path = r.p(rel)
         links[name] = dest
         if os.path.islink(path) and os.path.realpath(path) == os.path.realpath(dest):
             continue
         if r.dry:
-            say(f"  link {rel} -> {dest}")
+            say(f"  link    {rel} -> {dest}")
             continue
-        if os.path.lexists(path):
+        if os.path.islink(path) and os.path.realpath(path) in old:
+            os.remove(path)
+        elif os.path.lexists(path):
             r.backup(rel, move=True)
-            (rec.setdefault("replaced", {})).setdefault(rel, os.path.join(r.backup_dir, rel))
+            rec.setdefault("replaced", {}).setdefault(rel, os.path.join(r.backup_dir, rel))
         os.makedirs(os.path.dirname(path), exist_ok=True)
         os.symlink(dest, path)
     return links
 
 
-def install_guard(r, src, rec):
-    rel = f"{BIN}/herdr-app"
-    path, data = r.p(rel), read(os.path.join(src, "guard", "herdr-app"))
-    if read(path) == data:
-        return
-    real = os.path.join(r.root, ".local/share/herdr-app/herdr-app")
-    if not os.path.exists(real):
-        r.notes.append(f"--guard skipped: the real app isn't at {real} (the guard runs that one)")
-        return
-    if r.dry:
-        say(f"  guard {rel}")
-        return
-    if os.path.lexists(path):
-        r.backup(rel, move=True)
-        rec.setdefault("replaced", {}).setdefault(rel, os.path.join(r.backup_dir, rel))
-    atomic_write(path, data, 0o755)
-    rec.setdefault("files", {})[rel] = fsha(rel, data)
+def put_back(r, rec, only=None):
+    """What an install set aside to take a name (a helper's, an adopted file's) goes back where it was, when the
+    name is free again. only: just the names under these prefixes."""
+    for rel, saved in list((rec.get("replaced") or {}).items()):
+        if only is not None and not rel.startswith(only):
+            continue
+        if os.path.lexists(saved) and not os.path.lexists(r.p(rel)) and not r.dry:
+            os.makedirs(os.path.dirname(r.p(rel)), exist_ok=True)
+            os.rename(saved, r.p(rel))
+            say(f"  put back {rel}")
+        if not r.dry:
+            rec["replaced"].pop(rel, None)
 
 
-def add_hooks(r, rec):
-    app = r.p(APP)
-    done = []
+def set_hooks(r, rec, add):
+    """The agents' hooks in Claude Code's and Codex's settings. add True: ours go in (once); False: ours come out;
+    None (--no-hooks): neither. Every time, the entries a 3.1 install wrote (…/herdr-app/mods/chat/) come out: those
+    files are gone. -> the record's hooks."""
+    share = r.p(SHARE)
+    done = [] if add is not None else list(rec.get("hooks") or [])
     by_file = {}
     for f, event, entry in HOOKS:
-        by_file.setdefault(f, []).append((event, entry))
+        by_file.setdefault(f, []).append((event, json.loads(json.dumps(entry).replace("{share}", share))))
     for f, entries in by_file.items():
         path = r.p(f)
-        if not os.path.isdir(os.path.dirname(path)):
-            continue  # that CLI isn't installed here
         text = read(path)
+        if text is None and (not add or not os.path.isdir(os.path.dirname(path))):
+            continue  # nothing of ours there, or that CLI isn't installed here
         try:
             d = json.loads(text) if text else {}
         except ValueError:
+            d = None
+        if not isinstance(d, dict) or not isinstance(d.get("hooks", {}), dict):
             r.notes.append(f"hooks: {path} isn't valid JSON, left alone; add the hooks by hand (docs/install.md)")
             continue
-        changed = False
-        for event, entry in entries:
-            entry = json.loads(json.dumps(entry).replace("{app}", app))
-            cmd = entry["hooks"][0]["command"]
-            script = cmd.split("/mods/chat/")[-1]
-            lst = d.setdefault("hooks", {}).setdefault(event, [])
-            if any(script in h.get("command", "") and "/mods/chat/" in h.get("command", "") for e in lst for h in e.get("hooks", [])):
-                done.append([f, event, cmd])
+        hooks = d.setdefault("hooks", {})
+        mine = {e["hooks"][0]["command"] for _, e in entries}
+
+        def goes(group):
+            cmds = [h.get("command") or "" for h in (group.get("hooks") or []) if isinstance(h, dict)] if isinstance(group, dict) else []
+            return any(OLD_HOOK.fullmatch(c) or (add is False and c in mine) for c in cmds)
+        changed = added = False
+        for event, lst in list(hooks.items()):
+            if not isinstance(lst, list):
                 continue
-            lst.append(entry)
+            keep = [g for g in lst if not goes(g)]
+            if len(keep) != len(lst):
+                hooks[event], changed = keep, True
+            if not keep:
+                del hooks[event]
+        for event, entry in entries if add else []:
+            cmd = entry["hooks"][0]["command"]
+            lst = hooks.setdefault(event, [])
+            if not any(isinstance(h, dict) and h.get("command") == cmd for g in lst if isinstance(g, dict) for h in g.get("hooks") or []):
+                lst.append(entry)
+                changed = added = True
             done.append([f, event, cmd])
-            changed = True
-        if changed and not r.dry:
-            if text is not None:
-                r.backup(f)
-            else:
-                rec.setdefault("created", []).append(f)
+        if not hooks:
+            del d["hooks"]
+        if not changed or r.dry:
+            continue
+        if text is not None:
+            r.backup(f)
+        elif f not in rec.setdefault("created", []):
+            rec["created"].append(f)
+        if not d and not add and f in rec.get("created", []):
+            os.remove(path)
+        else:
             atomic_write(path, (json.dumps(d, indent=2) + "\n").encode())
-            if f.startswith(".codex"):
-                r.notes.append("Codex asks once to trust its new hook: say yes in its Hooks screen")
+        if added and f.startswith(".codex"):
+            r.notes.append("Codex asks once to trust its new hook: say yes in its Hooks screen")
     return done
 
 
@@ -1031,11 +935,8 @@ def add_hooks(r, rec):
 # herdr-browser owns it: which versions work, where Shepherdr's own copy goes, how it's fetched. Install, update and
 # doctor only ask it (--install, --status), as the installed copy, with the root's home.
 def browser_helper(root):
-    for rel in (f"{APP}/bin/herdr-browser", f"{SHARE}/bin/herdr-browser"):
-        p = os.path.join(root, rel)
-        if os.path.isfile(p):
-            return p
-    return None
+    p = os.path.join(root, SHARE, "bin", "herdr-browser")
+    return p if os.path.isfile(p) else None
 
 
 def browser_env(root):
@@ -1113,152 +1014,293 @@ def agent_browser_state(root):
 
 
 def check_tools(root_is_home):
-    """Herdr's versions (when it's here) and the programs Shepherdr needs. -> (problems, notes)."""
+    """The programs Shepherdr needs: herdr-core (hc) and git; the Herdr app is optional. -> (problems, notes)."""
     bad, notes = [], []
     if sys.version_info < (3, 8):
         bad.append("python3 3.8 or newer")
-    for name, want in (("herdr-app", HERDR_APP_MIN), ("hc", HC_MIN)):
-        exe = shutil.which(name)
-        if not exe:
-            (bad if root_is_home else notes).append(f"{name} {want} or newer isn't on the PATH")
-            continue
+    exe = shutil.which("hc")
+    if not exe:
+        (bad if root_is_home else notes).append(f"herdr-core (hc {HC_MIN} or newer) isn't on the PATH: install it first (https://herdr.dev)")
+    else:
         try:
             out = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=20).stdout
         except (OSError, subprocess.SubprocessError):
             out = ""
         have = out.split()[-1] if out.split() else ""
-        if version_tuple(have) < version_tuple(want):
-            (bad if root_is_home else notes).append(f"{name} is {have or 'unknown'}: Shepherdr {VERSION} needs {want} or newer")
-    for name in ("git",):
-        if not shutil.which(name):
-            bad.append(f"{name} isn't on the PATH")
+        if version_tuple(have) < version_tuple(HC_MIN):
+            (bad if root_is_home else notes).append(f"hc is {have or 'unknown'}: Shepherdr {VERSION} needs {HC_MIN} or newer")
+    if not shutil.which("git"):
+        bad.append("git isn't on the PATH")
     # agent-browser isn't here: Shepherdr installs its own (ensure_agent_browser), doctor says how it stands
-    optional = {"gh": "pull requests (tasks)", "node": "the task browser in the window",
-                "bun": "voice calls and dictation"}
-    # the window's mic and speaker: PipeWire on Linux; on a Mac its own audio, through a helper built with swiftc
-    if sys.platform == "darwin":
-        optional["swiftc"] = "the mic and speaker in the window: xcode-select --install"
-    else:
-        optional.update({"pw-record": "dictation and voice calls in the window", "pw-play": "voice calls in the window"})
+    optional = {"gh": "pull requests (tasks)", "tailscale": "the web app's private link", "jq": "the agents' question cards"}
     for name, what in optional.items():
         if not shutil.which(name):
             notes.append(f"optional: {name} isn't on the PATH ({what})")
     return bad, notes
 
 
+# ---- the switch from 3.1 (the Herdr-window install) ---------------------------------------------------
+# One hard switch: 3.2 has no layout, no window mods and no keys of its own in the Herdr app. An install that finds
+# 3.1's record (OLD_RECORD) takes out what 3.1 put in the Herdr app and goes on as a plain install. The person's
+# data is never touched: the app's data/, Shepherdr's own folders, settings, secrets, tasks.
+
+def working_tasks(root):
+    """The tasks a worker is on now (running, not archived), read from the task lists on disk: ["SHOP-3 Fix the
+    cart"]. A scratch root has none."""
+    w = where_for(root)
+    out, seen = [], set()
+    for folder in (w.path("tasks"), w.old("tasks")):
+        real = os.path.realpath(folder)
+        if real in seen or not os.path.isdir(folder):
+            continue
+        seen.add(real)
+        for f in sorted(os.listdir(folder)):
+            d = json_file(os.path.join(folder, f)) if f.endswith(".json") and not f.startswith(".") else None
+            if not isinstance(d, dict) or not isinstance(d.get("tasks"), list):
+                continue
+            for t in d["tasks"]:
+                if isinstance(t, dict) and t.get("state") == "running" and not t.get("archived"):
+                    out.append(f"{d.get('prefix') or 'TASK'}-{t.get('id')} {t.get('title') or ''}".strip())
+    return out
+
+
+def carry_old(rec, old):
+    """What of 3.1's record still stands after the switch: the files it put outside the Herdr app (Shepherdr's own
+    folder, the role instructions, the service's unit), its port, the helpers it set aside, the files it made."""
+    files = rec.setdefault("files", {})
+    for rel, sha in (old.get("files") or {}).items():
+        if not rel.startswith(f"{APP}/") and rel != f"{BIN}/herdr-app":
+            files.setdefault(rel, sha)
+    if old.get("port") and "port" not in rec:
+        rec["port"] = old["port"]
+    for rel, saved in (old.get("replaced") or {}).items():
+        if rel.startswith(f"{BIN}/") and rel != f"{BIN}/herdr-app":
+            rec.setdefault("replaced", {}).setdefault(rel, saved)
+    for f in old.get("created") or []:
+        if f not in rec.setdefault("created", []):
+            rec["created"].append(f)
+
+
+def leave_window(r, old):
+    """Takes out what a 3.1 install put in the Herdr app: its mods (and the art-<id> mods the old herdr-artifact
+    wrote), its layout, lib/, core/, bin/, the keys it merged into keys.json (the person's from before put back) and
+    the --guard link. A file the person changed, or put into one of those mods, is backed up first. The Herdr app
+    is left working with its own layouts and mods. The old hooks go in set_hooks, the old links in link_helpers."""
+    files = old.get("files") or {}
+    mods = sorted(set(old.get("mods") or {}) | {rel[len(f"{APP}/mods/"):].split("/")[0] for rel in files if rel.startswith(f"{APP}/mods/")})
+    mods = [m for m in mods if os.path.isdir(r.p(f"{APP}/mods/{m}"))]
+    try:
+        arts = sorted(d for d in os.listdir(r.p(f"{APP}/mods")) if d.startswith("art-") and os.path.isdir(r.p(f"{APP}/mods/{d}")))
+    except OSError:
+        arts = []
+    rest = sorted(rel for rel in files if rel.startswith(f"{APP}/") and not rel.startswith(f"{APP}/mods/")
+                  and rel != f"{APP}/keys.json" and read(r.p(rel)) is not None)
+    guard = f"{BIN}/herdr-app"
+    ours_guard = guard in files and fsha(guard, read(r.p(guard))) == files[guard]
+    say(f"  switching from Shepherdr {old.get('version') or '3.1'} (the Herdr-window install): "
+        f"{'would take' if r.dry else 'taking'} out its {len(mods)} mods"
+        + (f", {len(arts)} artifact mod{'s' if len(arts) != 1 else ''}" if arts else "") + f", its layout and {len(rest)} other files in {APP}, "
+        "its keys and its hooks; your data stays")
+    if r.dry:
+        return
+    kept = 0
+    for m in mods:
+        top = f"{APP}/mods/{m}"
+        for f in walk_files(r.p(top)):
+            rel = f"{top}/{f}"
+            if rel in files and fsha(rel, read(r.p(rel))) == files[rel]:
+                continue   # as Shepherdr shipped it
+            if f.endswith(".new") and rel[:-len(".new")] in files:
+                continue   # Shepherdr's newer copy, left beside a file the person kept
+            r.backup(rel)
+            kept += 1
+        try:
+            shutil.rmtree(r.p(top))
+        except OSError as e:
+            raise Stop(f"can't remove {top} (Shepherdr 3.2 has no window mods): {e.strerror}. Fix that and run this again.")
+    for d in arts:   # generated from the artifacts, which stay where they are (herdr-artifact convert makes them pages)
+        r.backup(f"{APP}/mods/{d}", move=True)
+    for rel in rest:
+        if fsha(rel, read(r.p(rel))) != files[rel]:
+            r.backup(rel)
+            kept += 1
+        os.remove(r.p(rel))
+        if os.path.isfile(r.p(rel) + ".new"):
+            os.remove(r.p(rel) + ".new")
+    # the folders that held only ours: caches and sync-shared's notes go with them; anything else stays, and is said
+    shutil.rmtree(r.p(f"{APP}/lib/.last"), ignore_errors=True)
+    shutil.rmtree(r.p(f"{APP}/.shepherdr-stage"), ignore_errors=True)
+    for top in ("lib", "core", "bin"):
+        for d, dirs, names in os.walk(r.p(f"{APP}/{top}"), topdown=False):
+            if os.path.basename(d) == "__pycache__":
+                shutil.rmtree(d, ignore_errors=True)
+                continue
+            for n in names:
+                if n in SKIP or n.endswith(".pyc"):
+                    os.remove(os.path.join(d, n))
+            try:
+                os.rmdir(d)
+            except OSError:
+                pass
+        if os.path.isdir(r.p(f"{APP}/{top}")):
+            r.notes.append(f"{APP}/{top} holds files that aren't Shepherdr's: left as it is")
+    take_keys_out(r, old)
+    if ours_guard:
+        os.remove(r.p(guard))
+    put_back(r, {"replaced": {k: v for k, v in (old.get("replaced") or {}).items() if k.startswith(f"{APP}/") or k == guard}})
+    r.notes.append(f"removed what 3.1 put in the Herdr app: {len(mods)} mods"
+                   + (f", {len(arts)} artifact mod{'s' if len(arts) != 1 else ''} (kept in the backup)" if arts else "")
+                   + ", the Shepherdr layout, lib/, core/, bin/, its keys and its hooks"
+                   + (f"; {kept} file{'s' if kept != 1 else ''} you changed {'are' if kept != 1 else 'is'} in the backup" if kept else ""))
+
+
+def forget_old_record(r):
+    """3.1's record goes once the new one is written (its folder too, when it held nothing else)."""
+    try:
+        os.remove(r.p(OLD_RECORD))
+        os.rmdir(os.path.dirname(r.p(OLD_RECORD)))
+    except OSError:
+        pass
+
+
+def convert_artifacts(r):
+    """Once, at the switch: the artifacts 3.1 kept (recipes, window panels) become plain pages, by the new
+    herdr-artifact's own `convert --all` when it has one. Never stops the install: a failure is a note."""
+    helper = r.p(f"{SHARE}/mods/artifacts/bin/herdr-artifact")
+    if b'"convert"' not in (read(helper) or b""):
+        return
+    if r.dry:
+        say("  artifacts: would turn the old ones into pages (herdr-artifact convert --all)")
+        return
+    try:
+        p = subprocess.run([sys.executable, helper, "convert", "--all"], capture_output=True, text=True,
+                           env=browser_env(r.root), stdin=subprocess.DEVNULL, timeout=900)
+        out = (p.stdout.strip() or p.stderr.strip()).splitlines()
+        line, ok = (out[-1] if out else ""), p.returncode == 0
+    except (OSError, subprocess.SubprocessError) as e:
+        line, ok = str(e), False
+    if ok:
+        say(f"  artifacts: {line}" if line else "  artifacts: converted")
+    else:
+        r.notes.append(f"the old artifacts weren't turned into pages ({line or 'herdr-artifact convert failed'}): "
+                       "`herdr-artifact convert --all` tries again")
+
+
 def cmd_install(a, update=False):
     root = os.path.realpath(a.root or real_home())
     home = root == os.path.realpath(real_home())
-    rec = load_record(root)
-    if update and not rec:
-        raise Stop(f"Shepherdr isn't installed under {root}: run install first")
-    src = find_source(a.source, rec)
     r = Run(root, a.dry_run)
+    rec = load_record(root) or {}
+    old = old_record(root)
+    if update:
+        # from where it was installed (a checkout, or Serve from's copy), never from the installed folder itself
+        if not rec and not old:
+            raise Stop(f"Shepherdr isn't installed under {root}: run ./install.sh first")
+        given = a.source or (rec or old).get("source")
+        if not a.source and (not is_source(given) or os.path.realpath(given) == os.path.realpath(r.p(SHARE))):
+            raise Stop(f"the Shepherdr it was installed from ({given}) is gone: clone it again and run "
+                       "./install.sh there, or pass --source <checkout>")
+        src = find_source(given, None)
+    else:
+        src = find_source(a.source, None)
     bad, notes = check_tools(home)
     if bad and not a.force:
         raise Stop("can't install yet:\n  " + "\n  ".join(bad) + "\n(--force installs anyway)")
-    if not os.path.isdir(r.p(APP)):
-        if home:
-            raise Stop(f"{r.p(APP)} isn't there: open Herdr once first, so it writes its home")
-        r.notes.append(f"{r.p(APP)} didn't exist: made (a scratch root)")
+    # From 3.1 or older (either kind of install): one hard switch. Tasks that are working finish on the old version first.
+    prev = (rec or old or {}).get("version")
+    switching = bool(prev) and version_tuple(prev)[:2] < (3, 2)
+    working = working_tasks(root) if switching else []
+    if working and not a.force and not a.dry_run:
+        raise Stop(f"Shepherdr {VERSION} replaces {prev} in one switch, and {len(working)} task{'s are' if len(working) != 1 else ' is'} "
+                   "still working on the old version:\n  " + "\n  ".join(working[:40])
+                   + "\nNothing was changed. Run this again once they finished or you stopped them (--force switches now).")
+    say(f"Shepherdr {VERSION} {'update' if update else 'install'} from {src}")
+    say(f"  into {root}{' (dry run: nothing is written)' if a.dry_run else ''}")
+    if working:
+        (say if a.dry_run else r.notes.append)(("  still working (the switch waits for them, or --force): " if a.dry_run else
+                                                 "switched while these tasks were working (--force): ") + ", ".join(working[:40]))
+    if getattr(a, "guard", False):
+        r.notes.append("--guard does nothing since 3.2: Shepherdr has no Herdr window to guard")
     build_web(r, src, home, a)
-    manifest, mods, items = source_items(src, root)
-    actions, clashes = plan_files(r, rec, items, a.adopt)
-    if clashes:
-        shown = "\n  ".join(clashes[:40]) + (f"\n  ... and {len(clashes) - 40} more" if len(clashes) > 40 else "")
-        raise Stop(f"these are someone else's (not installed by Shepherdr, and different):\n  {shown}\n"
-                   "Nothing was changed. Rename your own mods, or run with --adopt to back these up and take them over.")
-    old_files = (rec or {}).get("files", {})
-
-    def settle(g, rel, how, data, mode):
-        # A mod file the person changed that Shepherdr changed too since: theirs could no longer load with the rest of the
-        # new mod (#766), so Shepherdr's goes in and theirs to the backup folder, said in the notes.
-        if how == "keep" and g in mods and rel in old_files and old_files[rel] != fsha(rel, data):
-            how = "replace"
-        elif how == "keep" and old_helper(rel, read(r.p(rel)), data):
-            how = "old"
-        return (g, rel, how, data, mode)
-    actions = [settle(*x) for x in actions]
+    if old:
+        carry_old(rec, old)
+    # 3.1's web-only install kept whole backup folders; only the helpers it set aside are put back on uninstall
+    for b in rec.pop("backups", []):
+        for name in LINKS:
+            if os.path.lexists(os.path.join(b, BIN, name)):
+                rec.setdefault("replaced", {}).setdefault(f"{BIN}/{name}", os.path.join(b, BIN, name))
+    app = herdr_app_here(root)
+    actions, _ = plan_files(r, rec, source_items(src, root) + (button_items(src) if app else []), a.adopt)
+    # Shepherdr's own folder is replaced whole (a copy changed there is backed up); the button's name taken by
+    # someone else's mod is left alone unless --adopt
+    button = app and any(x[0] == "button" for x in actions)
+    if any(x[0] == "button" and x[2] == "clash" for x in actions):
+        button = False
+        r.notes.append(f"{APP}/mods/{BUTTON} isn't Shepherdr's: left alone, so Herdr gets no \"Open Shepherdr\" button (--adopt backs it up and takes it over)")
+    actions = [(g, rel, "replace" if g == "share" and how in ("keep", "clash", "adopt") else how, data, mode)
+               for g, rel, how, data, mode in actions if g != "button" or button]
+    old_files = rec.get("files", {})
     shipped = {x[1] for x in actions}
-    # Shipped before, not any more (a file, or a mod dropped from lib/addons.json): retired. Changed or not, it goes;
-    # a changed one is backed up first and said (#895: these stayed forever, and doctor then failed on them).
-    gone = [rel for rel in old_files if rel not in shipped and rel not in MANAGED and not rel.startswith(f"{APP}/keys")]
-    changed = {rel for rel in gone if read(r.p(rel)) is not None and fsha(rel, read(r.p(rel))) != old_files[rel]}
-    retired_mods = sorted({m for m in (rec or {}).get("mods", {}) if m not in mods}
-                          | {rel[len(f"{APP}/mods/"):].split("/")[0] for rel in gone if rel.startswith(f"{APP}/mods/")} - set(mods))
+    # Shipped before, not any more: retired. Changed or not, it goes; a changed one is backed up first and said (#895).
+    gone = [rel for rel in old_files if rel not in shipped and rel not in MANAGED]
     counts = {}
     for x in actions:
         counts[x[2]] = counts.get(x[2], 0) + 1
-    say(f"Shepherdr {VERSION} {'update' if update else 'install'} from {src}")
-    say(f"  into {root}{' (dry run: nothing is written)' if a.dry_run else ''}")
     say("  files: " + ", ".join(f"{n} {k}" for k, n in sorted(counts.items())) + (f", {len(gone)} removed" if gone else ""))
-    touches_tools = any(x[2] in ("new", "update", "adopt", "old", "replace") and (x[0] in ("template", "bin") or x[1].endswith(("/bin/herdr-task", "/bin/herdr-artifact"))
-                                                                  or "/bin/herdr_task/" in x[1]) for x in actions)
+    touches_tools = any(how in ("new", "update", "replace", "adopt") and (g == "template" or rel.startswith((f"{SHARE}/bin/", f"{SHARE}/mods/", f"{SHARE}/hooks/")))
+                        for g, rel, how, _, _ in actions)
     if a.dry_run:
         for g, rel, how, _, _ in actions:
             if how != "same":
                 say(f"  {how:7} {rel}")
         for rel in gone:
             say(f"  remove  {rel}")
-    if not a.dry_run:
-        for rel in sorted(changed):
-            dest = r.backup(rel)
-            r.notes.append(f"removed {rel}: Shepherdr no longer ships it; your changed copy is in {dest}")
     # The sync to other machines waits until doctor finds this whole.
     if touches_tools and not a.dry_run:
         for p in hold_paths(root):
             atomic_write(p, f"held by shepherdr {VERSION} install at {r.stamp}: run `shepherdr doctor`\n".encode())
         r.notes.append("the sync to other machines is held until `shepherdr doctor` finds the install whole")
-    rec = rec or {}
+    if old:
+        leave_window(r, old)
     files = dict(old_files)
-    # Mods: one swap each.
-    for m in mods:
-        acts = [x for x in actions if x[0] == m]
-        mg = [rel for rel in gone if rel.startswith(f"{APP}/mods/{m}/")]
-        apply_mod(r, m, acts, rec, mg)
-    for m in retired_mods:
-        if not r.dry:
-            retire_mod(r, m, old_files, changed)
-    # Everything else, file by file (none of it reloads a mod).
-    for g, rel, how, data, mode in actions:
-        if g in mods:
-            continue
-        if r.dry:
-            continue
-        if how == "adopt":
-            rec.setdefault("replaced", {}).setdefault(rel, r.backup(rel))
-        elif how == "update" and g == "template":
-            r.backup(rel)
+    for g, rel, how, data, mode in actions if not a.dry_run else []:
         if how == "keep":
             atomic_write(r.p(rel) + ".new", data, mode)
             r.notes.append(f"kept your {rel}; Shepherdr's is beside it as {os.path.basename(rel)}.new")
-            if g == "layout":
-                moved, said = move_layout_blocks(read(r.p(rel)), os.path.basename(rel)[:-len(".json")])
-                if moved is not None:
-                    atomic_write(r.p(rel), moved.encode(), mode)
-                    r.notes.append(f"  in your {rel}: {', '.join(said)} (only that block changed)")
-        elif how == "old":
-            dest_b = r.backup(rel)
+            continue
+        if how == "replace":
+            dest = r.backup(rel)
+            if rel in old_files:
+                r.notes.append(f"replaced {rel}, which was changed since the install (Shepherdr's own folder is replaced whole); "
+                               f"the changed copy is kept as {dest}")
+        elif how == "adopt":
+            rec.setdefault("replaced", {}).setdefault(rel, r.backup(rel, move=True))
+        elif how == "update" and g == "template":
+            r.backup(rel)
+        if how != "same":
             atomic_write(r.p(rel), data, mode)
-            r.notes.append(f"replaced {rel}: an older Shepherdr's copy that doctor rejects (no current SHEP block); "
-                           f"it is kept as {dest_b}")
-        elif how in ("new", "update", "adopt"):
-            atomic_write(r.p(rel), data, mode)
-    for rel in gone:
-        if not rel.startswith(f"{APP}/mods/") and not r.dry and os.path.lexists(r.p(rel)):
+        files[rel] = fsha(rel, data)
+    for rel in gone if not a.dry_run else []:
+        cur = read(r.p(rel))
+        if cur is not None and fsha(rel, cur) != old_files[rel]:
+            dest = r.backup(rel)
+            r.notes.append(f"removed {rel}: Shepherdr no longer ships it; your changed copy is in {dest}")
+        if cur is not None:
             try:
                 os.remove(r.p(rel))
             except OSError as e:
                 raise Stop(f"can't remove {rel} (Shepherdr no longer ships it): {e.strerror}. Fix that and run the update again.")
-    for g, rel, how, data, mode in actions:
-        if how != "keep":
-            files[rel] = fsha(rel, data)
-    for rel in gone:
+            prune_dirs(r, rel)
         files.pop(rel, None)
     rec["files"] = files
-    rec["mods"] = {m: True for m in mods}
-    rec["keys"], keys_changed = merge_keys(r, src, rec, a.keys, a.yes)
-    rec["links"] = link_helpers(r, rec)
+    rec["links"] = link_helpers(r, rec, list((rec.get("links") or {}).values()) + list(((old or {}).get("links") or {}).values()))
+    if button:
+        rec["keys"] = merge_key(r, rec)
+    elif rec.get("keys") and not a.dry_run:
+        take_keys_out(r, rec)
+        rec["keys"] = {}
+    rec["button"] = bool(button)
+    rec["hooks"] = set_hooks(r, rec, None if a.no_hooks else True)
     move_data(r, a, home)   # before the service starts again: it then finds the data where it now is
     set_port(a, rec)
     set_https_port(a, root)
@@ -1266,168 +1308,35 @@ def cmd_install(a, update=False):
     install_service(r, rec, home)
     say_web(root, home, a, started)
     ensure_agent_browser(r, home)
-    if a.guard:
-        install_guard(r, src, rec)
-    if not a.no_hooks:
-        rec["hooks"] = add_hooks(r, rec)
+    if switching:
+        convert_artifacts(r)
     rec.update({"version": VERSION, "source": src, "at": r.stamp, "root": root})
-    if a.dry_run:
-        say("  keys.json: " + ("would change" if keys_changed else "nothing to add"))
-    else:
-        save_record(r.root, rec)
-        shutil.rmtree(r.p(f"{APP}/.shepherdr-stage"), ignore_errors=True)
-    whole_bad = [] if a.dry_run else install_checks(r, rec)[0]
+    rec.pop("web", None)
+    rec.pop("mods", None)
+    whole_bad = []
+    if not a.dry_run:
+        save_record(root, rec)
+        if old:
+            forget_old_record(r)
+        whole_bad = install_checks(r, rec)[0]
     for n in r.notes + notes + addons_off_notes(root):
         say(f"  - {n}")
-    if not a.dry_run:
-        if r.backed:
-            say(f"  backup of what it replaced: {r.backup_dir}")
-        if whole_bad:
-            # loud: the files went in, but doctor would fail the install, and every later update would too (#905)
-            for x in whole_bad:
-                say(f"  ✗ {x}")
-            say("  NOT DONE: the install isn't whole. Fix the ✗ lines above, then run `shepherdr doctor`" + ("" if home else f" --root {root}") + ".")
-        else:
-            say("  done. Next: `shepherdr doctor`" + ("" if home else f" --root {root}") + ", then pick the Shepherdr layout in Herdr (Ctrl+Shift+L).")
-    return 0
-
-
-# ---- web only ----------------------------------------------------------------------------------
-# `install --web`: Shepherdr without the Herdr window. herdr-task, herdr-artifact, the helpers and the role
-# instructions, the service and the web app, all under .local/share/shepherdr (the links in .local/bin lead there);
-# what it installed is .local/share/shepherdr/installed.json. Agents' question cards come with the window's chat hooks,
-# so a web-only install has none: an agent asks in its terminal, which the web app shows live.
-WEB_RECORD = f"{SHARE}/installed.json"
-
-
-def web_items(src, root=None):
-    items = service_items(src)
-    for f in sorted(os.listdir(os.path.join(src, "templates"))):
-        if f.endswith(".md"):
-            items.append(("template", f"{tpl_rel(root)}/{f}", os.path.join(src, "templates", f)))
-    return items
-
-
-def cmd_install_web(a, update=False):
-    root = os.path.realpath(a.root or real_home())
-    home = root == os.path.realpath(real_home())
-    r = Run(root, a.dry_run)
-    try:
-        rec = json.load(open(r.p(WEB_RECORD)))
-    except (OSError, ValueError):
-        rec = {}
-    if update:
-        # from where it was installed (a checkout, or Serve from's copy), never from the installed folder itself
-        if not rec:
-            raise Stop(f"Shepherdr (web only) isn't installed under {root}: run ./install.sh --web first")
-        if not a.source and not is_source(rec.get("source")):
-            raise Stop(f"the Shepherdr it was installed from ({rec.get('source')}) is gone: clone it again and run "
-                       "./install.sh --web there, or pass --source <checkout>")
-        src = find_source(a.source or rec["source"], None)
-    else:
-        src = find_source(a.source, None)
-    if not shutil.which("hc") and home and not a.force:
-        raise Stop(f"herdr-core (hc {HC_MIN} or newer) isn't on the PATH: install it first (https://herdr.dev)")
-    files = dict(rec.get("files", {}))
-    say(f"Shepherdr {VERSION} web-only {'update' if update else 'install'} from {src}\n  into {root}{' (dry run: nothing is written)' if a.dry_run else ''}")
-    build_web(r, src, home, a)
-    n = 0
-    for _g, rel, path in web_items(src, root):
-        data, mode = read(path), os.stat(path).st_mode & 0o777
-        if read(r.p(rel)) == data:
-            files[rel] = fsha(rel, data)
-            continue
-        n += 1
-        if r.dry:
-            say(f"  write   {rel}")
-            continue
-        if os.path.exists(r.p(rel)) and rel not in files:
-            r.backup(rel)
-        atomic_write(r.p(rel), data, mode)
-        files[rel] = fsha(rel, data)
-    say(f"  files: {n} written")
-    # retired, as the herdr-app install does it: shipped before, not any more; a changed one is backed up first
-    shipped = {rel for _g, rel, _p in web_items(src, root)}
-    for rel in [x for x in files if x not in shipped and x not in MANAGED]:
-        cur = read(r.p(rel))
-        if cur is not None and fsha(rel, cur) != files[rel]:
-            dest = r.backup(rel)
-            r.notes.append(f"removed {rel}: Shepherdr no longer ships it; your changed copy is in {dest}")
-        if cur is not None and not r.dry:
-            try:
-                os.remove(r.p(rel))
-            except OSError as e:
-                raise Stop(f"can't remove {rel} (Shepherdr no longer ships it): {e.strerror}. Fix that and run the update again.")
-        if not r.dry:
-            files.pop(rel)
-    links = {}
-    for name, target in LINKS.items():
-        rel, dest = f"{BIN}/{name}", r.p(f"{SHARE}/{target}")
-        links[name] = dest
-        if os.path.islink(r.p(rel)) and os.path.realpath(r.p(rel)) == os.path.realpath(dest):
-            continue
-        if r.dry:
-            say(f"  link {rel} -> {dest}")
-            continue
-        if os.path.lexists(r.p(rel)):
-            r.backup(rel, move=True)
-        os.makedirs(os.path.dirname(r.p(rel)), exist_ok=True)
-        os.symlink(dest, r.p(rel))
-    rec.update({"files": files, "links": links, "version": VERSION, "source": src, "at": r.stamp, "root": root, "web": True})
-    # what this run replaced (an older herdr-task, the helpers…): uninstall puts it back
+    if a.dry_run:
+        return 0
     if r.backed:
-        rec["backups"] = [*rec.get("backups", []), r.backup_dir]
-    move_data(r, a, home)
-    set_port(a, rec)
-    set_https_port(a, root)
-    started = time.time()
-    install_service(r, rec, home)
-    say_web(root, home, a, started)
-    ensure_agent_browser(r, home)
-    if not a.dry_run:
-        atomic_write(r.p(WEB_RECORD), (json.dumps(rec, indent=2, sort_keys=True) + "\n").encode())
-    for x in r.notes:
-        say(f"  - {x}")
-    say("  done." + (f" Open the link the service prints (journalctl --user -u shepherdr) or {service_file(root, 'web.json')}." if not a.dry_run else ""))
-    return 0
-
-
-def cmd_uninstall_web(a, root):
-    r = Run(root, a.dry_run)
-    rec = json.load(open(r.p(WEB_RECORD)))
-    if root == os.path.realpath(real_home()) and not a.dry_run:
-        if sys.platform == "darwin":
-            subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{AGENT}"], capture_output=True)
-        elif not managed_unit(root):   # someone else's unit (#1048) is theirs to stop
-            subprocess.run(["systemctl", "--user", "disable", "--now", "shepherdr.service"], capture_output=True)
-    for name, dest in rec.get("links", {}).items():
-        p = r.p(f"{BIN}/{name}")
-        if os.path.islink(p) and os.path.realpath(p) == os.path.realpath(dest) and not a.dry_run:
-            os.remove(p)
-    for rel, sha in rec.get("files", {}).items():
-        if fsha(rel, read(r.p(rel))) == sha and not a.dry_run:
-            os.remove(r.p(rel))
-    # what the installs replaced, back where it was (the oldest copy of each)
-    for b in reversed(rec.get("backups", [])) if not a.dry_run else []:
-        for rel in walk_files(b) + [os.path.relpath(os.path.join(d, x), b) for d, ds, _ in os.walk(b) for x in ds if os.path.islink(os.path.join(d, x))]:
-            src, dest = os.path.join(b, rel), r.p(rel)
-            if os.path.lexists(dest) and not os.path.islink(dest) and rel.startswith(SHARE):
-                continue
-            if os.path.lexists(dest):
-                os.remove(dest)
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            os.rename(src, dest)
-            say(f"  put back {rel}")
-    if root == os.path.realpath(real_home()) and not a.dry_run:
-        restore_share(root)
-    if not a.dry_run:
-        os.remove(r.p(WEB_RECORD))
-        for d, _, _ in sorted(os.walk(r.p(SHARE)), reverse=True):
-            try:
-                os.rmdir(d)
-            except OSError:
-                pass
-    say(f"Shepherdr (web only) uninstalled from {root}{' (dry run)' if a.dry_run else ''}. Your data (`shepherdr where` listed it) stays.")
+        say(f"  backup of what it replaced: {r.backup_dir}")
+    if whole_bad:
+        # loud: the files went in, but doctor would fail the install, and every later update would too (#905)
+        for x in whole_bad:
+            say(f"  ✗ {x}")
+        say("  NOT DONE: the install isn't whole. Fix the ✗ lines above, then run `shepherdr doctor`" + ("" if home else f" --root {root}") + ".")
+        return 0
+    say("  done. Next: `shepherdr doctor`" + ("" if home else f" --root {root}")
+        + (", then open Shepherdr in a browser (`shepherdr web status` says its link)." if home else "."))
+    if rec.get("keys"):
+        say("  In Herdr, Ctrl+Shift+O opens the \"Open Shepherdr\" button.")
+    if old:
+        say("  Shepherdr's layout is gone from Herdr: pick another layout there (Ctrl+Shift+L) if Shepherdr's was selected.")
     return 0
 
 
@@ -1438,11 +1347,10 @@ def short(p):
     return "~" + p[len(h):] if p.startswith(h + "/") else p
 
 
-# GitHub #1091: the add-ons herdr-task obeys (since 3.1.35): one switched off stops work people may count on, so doctor
-# and update say so, with how to turn it back on.
+# GitHub #1091: herdr-task obeys the parts switched off (since 3.1.35): one switched off stops work people may count
+# on, so doctor and update say so, with how to turn it back on.
 ADDON_OFF_WORDS = {
     "machines": "Other machines is off: nothing syncs to other machines, and tell-assistant and assistants reach only this machine",
-    "autopilot": "Autopilot is off: no Assistant is woken on its schedule or by events",
 }
 
 
@@ -1452,7 +1360,7 @@ def addons_off_notes(root):
             off = (json.load(f).get("everywhere") or {}).get("off") or []
     except (OSError, ValueError, AttributeError):
         return []
-    return [f"add-on {ADDON_OFF_WORDS[x]} (turn it on in Settings › Window › Add-ons, or `herdr-task addons on {x}`)"
+    return [f"{ADDON_OFF_WORDS[x]} (`herdr-task addons on {x}` turns it on)"
             for x in ADDON_OFF_WORDS if isinstance(off, list) and x in off]
 
 
@@ -1541,9 +1449,9 @@ def update_hint(rec):
     if os.path.basename(src) == "shepherdr-src":
         return "to update: from the machine that installed it here, `shepherdr web install-on <this machine>`"
     if not is_source(src):
-        return f"to update: the Shepherdr it was installed from ({src}) is gone: clone it again and run ./install.sh" + (" --web" if rec.get("web") else "") + " there"
+        return f"to update: the Shepherdr it was installed from ({src}) is gone: clone it again and run ./install.sh there"
     pull = f"`git -C {src} pull --ff-only`, then " if os.path.exists(os.path.join(src, ".git")) else ""
-    return f"to update: {pull}`shepherdr update`" + (" (web only)" if rec.get("web") else "")
+    return f"to update: {pull}`shepherdr update`"
 
 
 def github_checks_check(root):
@@ -1591,8 +1499,8 @@ def github_checks_check(root):
 
 def install_checks(r, rec):
     """What makes an install whole, as doctor and the end of an install check it: each recorded file is there, the links
-    lead to it, the mods' shared copies match lib/ (sync-shared --check), herdr-task compiles, the layout and keys are
-    JSON. -> (bad, warn): bad fails the install; warn is said and goes on."""
+    lead to it, the one-file helpers carry layout.py's paths (sync-shared --check), herdr-task compiles, the hooks are
+    in. -> (bad, warn): bad fails the install; warn is said and goes on."""
     bad, warn = [], []
     for rel, sha in sorted(rec.get("files", {}).items()):
         have = read(r.p(rel))
@@ -1605,23 +1513,18 @@ def install_checks(r, rec):
         path = r.p(f"{BIN}/{name}")
         if not os.path.islink(path) or os.path.realpath(path) != os.path.realpath(dest):
             bad.append(f"link {BIN}/{name} doesn't lead to {dest}")
-    sync = r.p(f"{APP}/bin/sync-shared")
+    sync = r.p(f"{SHARE}/bin/sync-shared")
     if os.path.isfile(sync):
         p = subprocess.run([sys.executable, sync, "--check"], capture_output=True, text=True)
         if p.returncode != 0:
-            bad.append("shared lib copies differ: " + (p.stderr.strip() or p.stdout.strip()).replace("\n", "; "))
-    pkg = r.p(f"{APP}/mods/tasks/bin/herdr_task")
+            bad.append("the helpers' paths differ: " + (p.stderr.strip() or p.stdout.strip()).replace("\n", "; "))
+    pkg = r.p(f"{SHARE}/mods/tasks/bin/herdr_task")
     for f in sorted(os.listdir(pkg)) if os.path.isdir(pkg) else []:
         if f.endswith(".py"):
             try:
                 compile(read(os.path.join(pkg, f)), os.path.join(pkg, f), "exec")
             except SyntaxError as e:
                 bad.append(f"herdr-task doesn't compile: {e}")
-    for rel in ("layouts/shepherdr.json", "keys.json"):
-        try:
-            json.load(open(r.p(f"{APP}/{rel}")))
-        except (OSError, ValueError) as e:
-            bad.append(f"{APP}/{rel}: {e}")
     for f, event, cmd in rec.get("hooks", []):
         if cmd not in (read(r.p(f)) or b"").decode(errors="replace").replace("\\'", "'"):
             warn.append(f"hook missing in {f} ({event}): questions from that CLI won't reach the chat")
@@ -1632,34 +1535,16 @@ def cmd_doctor(a):
     root = os.path.realpath(a.root or real_home())
     home = root == os.path.realpath(real_home())
     rec = load_record(root)
-    if not rec and os.path.isfile(os.path.join(root, WEB_RECORD)):
-        # web only: its files and links, and where the web app is served from
-        rec = json.load(open(os.path.join(root, WEB_RECORD)))
-        r = Run(root, True)
-        bad = [f"missing: {rel}" for rel in sorted(rec.get("files", {})) if read(r.p(rel)) is None]
-        bad += [f"link {BIN}/{n} doesn't lead to {d}" for n, d in rec.get("links", {}).items()
-                if not os.path.islink(r.p(f"{BIN}/{n}")) or os.path.realpath(r.p(f"{BIN}/{n}")) != os.path.realpath(d)]
-        s_bad, s_notes = serve_check(root) if home else ([], [])
-        d_bad, d_notes = data_check(root)
-        bad += d_bad
-        s_notes = d_notes + s_notes
-        if home and has_unit(root):
-            up, why = service_answers(root)
-            s_bad += [] if up else [why]
-        say(f"Shepherdr {rec.get('version')} (web only) under {root} (from {rec.get('source')}, {rec.get('at')})")
-        for x in bad + s_bad:
-            say(f"  ✗ {x}")
-        ab = agent_browser_state(root)
-        cs = codex_sandbox_state(home)
-        for x in s_notes + ([ab] if ab else []) + ([cs] if cs else []) + [update_hint(rec)]:
-            say(f"  - {x}")
-        if not bad + s_bad:
-            say("  ✓ whole")
-        return 1 if bad + s_bad else 0
     if not rec:
+        old = old_record(root)
+        if old:
+            raise Stop(f"Shepherdr {old.get('version')} (the Herdr-window install) is under {root}: Shepherdr {VERSION} replaces it in one "
+                       f"switch. Run ./install.sh from a {VERSION} checkout (or `shepherdr update`) first.")
         raise Stop(f"Shepherdr isn't installed under {root}")
     r = Run(root, True)
     bad, warn = install_checks(r, rec)
+    if old_record(root):
+        warn.append(f"{OLD_RECORD} is still there (a 3.1 install's record): run the install again to finish the switch")
     t_bad, t_notes = check_tools(home)
     bad += t_bad
     if home:
@@ -1674,6 +1559,8 @@ def cmd_doctor(a):
         if has_unit(root):
             up, why = service_answers(root)
             bad += [] if up else [why]
+        else:
+            bad.append("the Shepherdr service isn't set up to run here (it needs bun, https://bun.sh): run the install again")
         t_notes += s_notes
     say(f"Shepherdr {rec.get('version')} under {root} (from {rec.get('source')}, {rec.get('at')})")
     for x in bad:
@@ -1700,114 +1587,80 @@ def cmd_doctor(a):
 
 def cmd_uninstall(a):
     root = os.path.realpath(a.root or real_home())
+    home = root == os.path.realpath(real_home())
     rec = load_record(root)
-    if not rec and os.path.isfile(os.path.join(root, WEB_RECORD)):
-        return cmd_uninstall_web(a, root)
-    if not rec:
+    old = old_record(root)
+    if not rec and not old:
         raise Stop(f"Shepherdr isn't installed under {root}")
     r = Run(root, a.dry_run)
-    kept = []
+    rec = rec or {}
+    links = dict(rec.get("links") or {})
+    if old:
+        # a 3.1 install (never switched, or left half-way): what it put in the Herdr app goes as at the switch
+        carry_old(rec, old)
+        links.update({k: v for k, v in (old.get("links") or {}).items() if k not in links})
+        rec.setdefault("hooks", old.get("hooks") or [])
+        leave_window(r, old)
     files = rec.get("files", {})
+    kept = []
     # The service stops first (only the real home's runs).
-    if root == os.path.realpath(real_home()) and not a.dry_run and (UNIT in files or PLIST in files):
+    if home and not a.dry_run:
         if sys.platform == "darwin":
             subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{AGENT}"], capture_output=True)
-        else:
+        elif not managed_unit(root):   # someone else's unit (#1048) is theirs to stop
             subprocess.run(["systemctl", "--user", "disable", "--now", "shepherdr.service"], capture_output=True)
-    # Mods: a folder holding only our unchanged files (and Herdr's generated ones) goes in one step.
-    for m in rec.get("mods", {}):
-        top = r.p(f"{APP}/mods/{m}")
-        if not os.path.isdir(top):
+    # Each file as Shepherdr left it goes; one changed since (a role instruction of yours) stays.
+    for rel, sha in sorted(files.items()):
+        cur = read(r.p(rel))
+        if cur is None:
             continue
-        mine = {rel for rel in files if rel.startswith(f"{APP}/mods/{m}/")}
-        changed = [rel for rel in mine if fsha(rel, read(r.p(rel))) not in (None, files[rel])]
-        extra = [f for f in walk_files(top) if f"{APP}/mods/{m}/{f}" not in mine and not f.endswith(".new")]
-        if changed or extra:
-            kept.append(f"{APP}/mods/{m} (yours too: {', '.join(sorted(changed + extra)[:4])})")
-            continue
-        if not a.dry_run:
-            r.backup(f"{APP}/mods/{m}", move=True)
-    for rel, sha in files.items():
-        if rel.startswith(f"{APP}/mods/") or rel == f"{BIN}/herdr-app":
-            continue
-        path = r.p(rel)
-        if fsha(rel, read(path)) == sha and not a.dry_run:
-            r.backup(rel, move=True)
-        elif read(path) is not None and fsha(rel, read(path)) != sha:
+        if fsha(rel, cur) != sha:
             kept.append(rel)
-    # Keys: ours removed, the person's from before put back.
-    path = r.p(f"{APP}/keys.json")
-    try:
-        have = json.loads(read(path) or b"{}")
-    except ValueError:
-        have = None
-    if have is not None:
-        for name, k in rec.get("keys", {}).items():
-            ctx, key = name.split(" ", 1)
-            if have.get(ctx, {}).get(key) != k["value"] or not (k.get("added") or k.get("was")):
-                continue
-            if k.get("was") is None:
-                have[ctx].pop(key, None)
-                if not have[ctx]:
-                    del have[ctx]
-            else:
-                have[ctx][key] = k["was"]
-        if not a.dry_run:
-            r.backup(f"{APP}/keys.json")
-            atomic_write(path, (json.dumps(have, indent=2, ensure_ascii=False) + "\n").encode())
-    # Links and the guard: ours removed, anything they replaced put back.
-    for name, dest in rec.get("links", {}).items():
+        elif not a.dry_run:
+            os.remove(r.p(rel))
+        if os.path.isfile(r.p(rel) + ".new") and not a.dry_run:   # Shepherdr's newer copy, left beside a kept file
+            os.remove(r.p(rel) + ".new")
+    # The button's folder in the Herdr app, when only Herdr's own editor files are left in it.
+    top = r.p(f"{APP}/mods/{BUTTON}")
+    if rec.get("button") and os.path.isdir(top) and not walk_files(top) and not a.dry_run:
+        shutil.rmtree(top)
+    take_keys_out(r, rec)
+    # Links: ours removed, anything they replaced put back.
+    for name, dest in links.items():
         p = r.p(f"{BIN}/{name}")
         if os.path.islink(p) and os.path.realpath(p) == os.path.realpath(dest) and not a.dry_run:
             os.remove(p)
-    g = r.p(f"{BIN}/herdr-app")
-    if f"{BIN}/herdr-app" in files and fsha("", read(g)) == files[f"{BIN}/herdr-app"] and not a.dry_run:
-        os.remove(g)
-    for rel, saved in rec.get("replaced", {}).items():
-        if os.path.lexists(saved) and not os.path.lexists(r.p(rel)) and not a.dry_run:
-            os.makedirs(os.path.dirname(r.p(rel)), exist_ok=True)
-            os.rename(saved, r.p(rel))
-    # Hooks: our entries out.
-    for f in {h[0] for h in rec.get("hooks", [])}:
-        p = r.p(f)
-        try:
-            d = json.loads(read(p) or b"{}")
-        except ValueError:
-            continue
-        for event, lst in list(d.get("hooks", {}).items()):
-            d["hooks"][event] = [e for e in lst if not any(f"{r.p(APP)}/mods/chat/" in h.get("command", "") for h in e.get("hooks", []))]
-            if not d["hooks"][event]:
-                del d["hooks"][event]
-        if d.get("hooks") == {}:
-            del d["hooks"]
-        if not a.dry_run:
-            r.backup(f)
-            if not d and f in rec.get("created", []):
-                os.remove(p)
-            else:
-                atomic_write(p, (json.dumps(d, indent=2) + "\n").encode())
+    put_back(r, rec)
+    set_hooks(r, rec, False)
     if not a.dry_run:
+        if home:
+            restore_share(root)
         for p in hold_paths(root):
             try:
                 os.remove(p)
             except FileNotFoundError:
                 pass
-        os.remove(r.p(RECORD))
+        for p in (r.p(RECORD), r.p(OLD_RECORD)):
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
         # the agent-browser Shepherdr installed for the task browser (not data: nothing of the person's is in it)
         shutil.rmtree(os.path.join(where_for(root).roots["data"], "agent-browser"), ignore_errors=True)
         # Folders that only held ours.
-        for rel in (f"{APP}/data/shepherdr", f"{APP}/bin", f"{APP}/lib", f"{APP}/core", SHARE):
+        for rel in (f"{APP}/data/shepherdr", SHARE):
             for d, _, _ in sorted(os.walk(r.p(rel)), reverse=True):
                 try:
                     os.rmdir(d)
                 except OSError:
                     pass
-    say(f"Shepherdr uninstalled from {root}{' (dry run)' if a.dry_run else ''}. Your data/, Shepherdr's data folders (`shepherdr where`) and your own changes stay.")
+    say(f"Shepherdr uninstalled from {root}{' (dry run)' if a.dry_run else ''}. Shepherdr's data folders (`shepherdr where` listed them) and your own changes stay.")
+    for n in r.notes:
+        say(f"  - {n}")
     for k in kept:
         say(f"  kept (changed or yours): {k}")
     if r.backed:
-        say(f"  everything removed is in {r.backup_dir}")
-    say("  In Herdr, switch to another layout (Ctrl+Shift+L) if Shepherdr's was showing.")
+        say(f"  what it set aside is in {r.backup_dir}")
     return 0
 
 
@@ -1830,8 +1683,7 @@ def restore_share(root):
 
 
 def web_source():
-    """A whole source for a web-only install: this machine's installed service folder (every 3.1.1 install keeps one),
-    else the checkout."""
+    """A whole source to install another machine from: this machine's installed Shepherdr folder, else the checkout."""
     share = os.path.join(real_home(), SHARE)
     if os.path.isfile(os.path.join(share, "install.sh")) and os.path.isfile(os.path.join(share, "web", "dist", "index.html")):
         return share
@@ -1842,14 +1694,14 @@ def web_source():
 
 
 def pack(src):
-    """The web-only install as one .tar.gz, laid out as its source (what service_items installs, by its own names)."""
+    """An install's source as one .tar.gz, laid out as a source (what share_items installs, by its own names)."""
     import io
     import tarfile
     buf = io.BytesIO()
     seen = set()
     with tarfile.open(fileobj=buf, mode="w:gz") as t:
-        for _g, rel, path in web_items(src):
-            name = rel[len(SHARE) + 1:] if rel.startswith(SHARE + "/") else os.path.relpath(path, src)
+        for _g, rel, path in share_items(src):
+            name = rel[len(SHARE) + 1:]
             if name in seen or not os.path.isfile(path):
                 continue
             seen.add(name)
@@ -1858,13 +1710,12 @@ def pack(src):
 
 
 # On the other machine (hc exec has a bare PATH there): Bun when missing (its own installer, into ~/.bun), the pack
-# unpacked as a source beside the service, then its own installer, web only.
+# unpacked as a source beside Shepherdr's folder, then its own installer (a 3.1 install there is switched over, as
+# here), then its doctor, which lets that machine's sync go again once the install is whole.
 INSTALL_THERE = r"""set -e
 export PATH="$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 command -v python3 >/dev/null || { echo "python3 isn't installed there" >&2; exit 3; }
 command -v hc >/dev/null || { echo "herdr-core (hc) isn't installed there" >&2; exit 3; }
-if [ -f "$HOME/.config/herdr-app/data/shepherdr/installed.json" ]; then
-  echo "Shepherdr's whole layout is installed there: update it there (./install.sh), then move again" >&2; exit 5; fi
 if ! command -v bun >/dev/null; then
   echo "installing Bun (bun.sh) there"
   curl -fsSL https://bun.sh/install | bash >/dev/null 2>&1 || { echo "couldn't install Bun there (https://bun.sh)" >&2; exit 4; }
@@ -1872,27 +1723,36 @@ fi
 d="$HOME/.local/share/shepherdr-src"
 rm -rf "$d.new"; mkdir -p "$d.new"; tar xzf - -C "$d.new"
 rm -rf "$d"; mv "$d.new" "$d"
-python3 "$d/bin/shepherdr" install --web --yes --source "$d"
+python3 "$d/bin/shepherdr" install --yes --source "$d" FLAGS
+python3 "$d/bin/shepherdr" doctor || echo "doctor found something to fix there (above)"
 """
 
 
+def install_args(**kw):
+    """install's options with their defaults, for an install started from another command."""
+    base = dict(cmd="install", root=None, source=None, dry_run=False, adopt=False, guard=False, keys="ask", no_hooks=False,
+                yes=True, force=False, web=False, port=None, https_port=None, no_build=False)
+    return argparse.Namespace(**{**base, **kw})
+
+
 def cmd_web_install_on(a):
-    """Installs (or updates) the web-only part on a machine linked over herdr-core; here: on this machine."""
+    """Installs (or updates) Shepherdr on a machine linked over herdr-core; here: on this machine."""
     if a.machine in ("here", None):
-        if load_record(real_home()) or os.path.isfile(os.path.join(real_home(), WEB_RECORD)):
+        if load_record(real_home()):
             say("Shepherdr's service is installed here.")
             return 0
-        a.source, a.root, a.dry_run, a.force = web_source(), None, False, False
-        return cmd_install_web(a)
+        return cmd_install(install_args(source=web_source(), force=a.force))
     src = web_source()
     body = pack(src)
     say(f"  sending Shepherdr {VERSION} ({len(body) // 1024} KB) to {a.machine}")
-    r = subprocess.run(["hc", "exec", "--on", a.machine, "--stdin", "--timeout", "600", "--", "sh", "-c", INSTALL_THERE],
+    script = INSTALL_THERE.replace(" FLAGS", " --force" if a.force else "")
+    r = subprocess.run(["hc", "exec", "--on", a.machine, "--stdin", "--timeout", "600", "--", "sh", "-c", script],
                        input=body, capture_output=True)
     for line in r.stdout.decode(errors="replace").splitlines():
         say(f"  {a.machine}: {line}")
     if r.returncode != 0:
-        raise Stop((r.stderr.decode(errors="replace").strip().splitlines() or [f"the install on {a.machine} failed"])[-1])
+        # every line: a switch from 3.1 that waits names the tasks still working there
+        raise Stop(r.stderr.decode(errors="replace").strip().replace("shepherdr: ", "", 1) or f"the install on {a.machine} failed")
     return 0
 
 
@@ -1974,7 +1834,7 @@ def cmd_where(a):
 
 def restart_service(root):
     """The service reads its folders when it starts: after a move or a rollback by hand, it starts again (when it
-    runs here). The window's mods and herdr-task's scheduler follow by themselves within a minute."""
+    runs here). herdr-task's scheduler follows by itself within a minute."""
     if os.path.realpath(root) != os.path.realpath(real_home()) or not has_unit(root):
         return
     if sys.platform == "darwin":
@@ -2039,21 +1899,14 @@ def hand_over(a, argv):
     if os.environ.get("SHEPHERDR_HANDED_OVER"):
         return
     root = os.path.realpath(a.root or real_home())
-    rec = load_record(root)
-    if a.web or (a.cmd == "update" and not rec):
-        try:
-            web = json.load(open(os.path.join(root, WEB_RECORD)))
-        except (OSError, ValueError):
-            web = {}
-        given = a.source or web.get("source")
-    else:
-        given = a.source
-    try:
-        src = find_source(given, rec) if given or rec else None
-    except Stop:
+    rec = load_record(root) or old_record(root) or {}
+    # an update comes from where it was installed; an install from the given source, else from this script's own
+    src = a.source or (rec.get("source") if a.cmd == "update" else None)
+    if not is_source(src):
         return
-    me, new = os.path.realpath(__file__), os.path.join(src or "", "bin", "shepherdr")
-    if not src or not os.path.isfile(new) or os.path.realpath(new) == me or read(new) == read(me):
+    src = os.path.realpath(src)
+    me, new = os.path.realpath(__file__), os.path.join(src, "bin", "shepherdr")
+    if not os.path.isfile(new) or os.path.realpath(new) == me or read(new) == read(me):
         return
     say(f"(the installer in {src} runs it: it's the newer one)")
     sys.stdout.flush()
@@ -2063,32 +1916,34 @@ def hand_over(a, argv):
 
 
 def main(argv):
-    ap = argparse.ArgumentParser(prog="shepherdr", description="Install, update, check or remove Shepherdr in Herdr.")
+    ap = argparse.ArgumentParser(prog="shepherdr", description="Install, update, check or remove Shepherdr.")
     sub = ap.add_subparsers(dest="cmd")
     for name in ("install", "update", "uninstall", "doctor"):
         c = sub.add_parser(name)
         c.add_argument("--root", help="install under this folder instead of your home (a scratch try: it mirrors "
-                                      ".config/herdr-app, .local/bin and .config/herdr-core/templates)")
+                                      ".local/share/shepherdr, .local/bin and .config/herdr-core/templates)")
         c.add_argument("--source", help="the Shepherdr checkout to install from (default: this script's, else the last one)")
         if name in ("install", "update", "uninstall"):
             c.add_argument("--dry-run", action="store_true", help="say what would change, change nothing")
         if name in ("install", "update"):
-            c.add_argument("--adopt", action="store_true", help="files by these names that aren't Shepherdr's: back them up and take them over")
-            c.add_argument("--guard", action="store_true", help="also put the herdr-app guard on the PATH (refuses a window with another home)")
-            c.add_argument("--keys", choices=["ask", "keep", "ours"], default="ask", help="a key you already use: ask (default; keep without a terminal), keep yours, or take ours")
+            c.add_argument("--adopt", action="store_true", help="a Herdr mod named open-shepherdr that isn't Shepherdr's: back it up and take it over")
             c.add_argument("--no-hooks", action="store_true", help="leave Claude Code's and Codex's settings alone")
-            c.add_argument("--yes", action="store_true", help="ask nothing (keys: keep yours unless --keys ours)")
-            c.add_argument("--force", action="store_true", help="install although a check failed")
-            c.add_argument("--web", action="store_true", help="web only: no herdr-app (the service, the web app, herdr-task and the helpers)")
+            c.add_argument("--yes", action="store_true", help="ask nothing (the installer asks nothing since 3.2)")
+            c.add_argument("--force", action="store_true", help="install although a check failed, or switch from 3.1 while tasks are working")
             c.add_argument("--port", type=int, help=f"the port Shepherdr's service listens on, on 127.0.0.1 (default {DEFAULT_PORT}; "
                                                     "kept for updates): when another app already uses it")
             c.add_argument("--https-port", type=int, help="the tailnet HTTPS port the web app is shared on (default 443; kept "
                                                           "for updates, `shepherdr web https-port` changes it): when something else here holds 443")
             c.add_argument("--no-build", action="store_true", help="install the web app as it is in the checkout: no build, even when it's missing or old")
+            # 3.1's options, still accepted (an older `shepherdr update` hands them on): every install is the web one now
+            c.add_argument("--web", action="store_true", help=argparse.SUPPRESS)
+            c.add_argument("--guard", action="store_true", help=argparse.SUPPRESS)
+            c.add_argument("--keys", choices=["ask", "keep", "ours"], default="ask", help=argparse.SUPPRESS)
     w = sub.add_parser("web", help="where the web app is served from (Serve from)")
     w.add_argument("action", choices=["serve-from", "status", "install-on", "https-port"])
     w.add_argument("machine", nargs="?", help="a machine linked over herdr-core (hc machine ls), or here; https-port: the port")
     w.add_argument("--take-link", action="store_true", help="that machine's /shepherdr is shared to something else: set it aside (moving away puts it back)")
+    w.add_argument("--force", action="store_true", help="install-on: switch that machine from 3.1 although tasks are working there")
     w.add_argument("--json", action="store_true")
     s = sub.add_parser("secrets", help="which machine keeps the secrets (Settings › Secrets › Kept on)")
     s.add_argument("action", choices=["move-to", "where"])
@@ -2111,13 +1966,7 @@ def main(argv):
     try:
         if a.cmd in ("install", "update"):
             hand_over(a, argv)
-        if a.cmd == "install":
-            return cmd_install_web(a) if a.web else cmd_install(a)
-        if a.cmd == "update":
-            # the kind the install record says: the whole layout, or web only (./install.sh --web)
-            root = os.path.realpath(a.root or real_home())
-            web = a.web or (not load_record(root) and os.path.isfile(os.path.join(root, WEB_RECORD)))
-            return cmd_install_web(a, update=True) if web else cmd_install(a, update=True)
+            return cmd_install(a, update=a.cmd == "update")
         if a.cmd == "uninstall":
             return cmd_uninstall(a)
         if a.cmd == "doctor":

@@ -1,11 +1,13 @@
-# Shepherdr 3.0's check on GitHub's runners, on every pull request to main and every push to main (a merge). A task
+# Shepherdr's check on GitHub's runners, on every pull request to main and every push to main (a merge). A task
 # waits for its pull request's run before it merges. A branch with no pull request can still be checked by hand:
 # gh workflow run check.yml --ref <branch>.
 #
-# One lean job (GitHub bills by the minute): the shared lib copies, every mod's JavaScript parsed, the TypeScript
-# helpers built, the service and web app typechecked, tested and built, the Python compiled, the repo's own rules (test_repo), the installer against throwaway roots
-# (test_install: install, again, update, clash, adopt, uninstall, dry run) and herdr-task's commands.
-# herdr-app check needs Herdr's window runtime, which a runner doesn't have: mods are checked on a person's machine.
+# One lean job (GitHub bills by the minute): the helpers' shared paths, the shared core's and the Herdr button's
+# JavaScript parsed, the service and web app typechecked, tested and built, the shell scripts parsed, the repo's own
+# rules (test_repo), the installer against throwaway roots (test_install: install, again, update, the switch from a
+# 3.1 window install, uninstall, dry run) and herdr-task's commands.
+# herdr-app check needs Herdr's window runtime, which a runner doesn't have: the one Herdr mod (herdr/open-shepherdr)
+# is only parsed here.
 name: Check
 
 on:
@@ -39,22 +41,17 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
-      - name: shared lib copies match lib/
+      - name: the helpers carry layout.py's paths (the SHEP block)
         run: python3 bin/sync-shared --check
-      - name: JavaScript parses
+      - name: JavaScript parses (the shared core, the Herdr button)
         run: |
           fail=0
-          for f in $(find mods lib core -name '*.js' 2>/dev/null); do
+          for f in core/*.js $(find herdr -name 'main.js'); do
             node --input-type=module --check < "$f" || { echo "::error file=$f::doesn't parse"; fail=1; }
           done
           exit $fail
-      - name: TypeScript helpers build
-        run: |
-          for f in $(find mods -name '*.ts'); do
-            bun build --no-bundle --target bun "$f" > /dev/null || exit 1
-          done
       - name: JSON parses
-        run: for f in keys.json layouts/*.json lib/addons.json lib/features.json $(find mods -name '*.json'); do python3 -m json.tool "$f" > /dev/null || exit 1; done
+        run: for f in package.json tsconfig.json web/plugins.json lib/addons.json $(find herdr -name '*.json'); do python3 -m json.tool "$f" > /dev/null || exit 1; done
       - name: service, shared core and web app (types, tests, build)
         run: |
           bun install --frozen-lockfile
@@ -64,9 +61,9 @@ jobs:
           bun run build
       - name: shell scripts parse
         # every script under plain bash (macOS's bash 3.2 is what people run; #908), and one whose first line says sh
-        # also under sh (dash here). test_repo's test_each_parses checks the same list.
+        # also under sh (dash here). test_repo's test_each_parses checks every shipped script the same way.
         run: |
-          for f in install.sh bin/herdr-browser guard/herdr-app $(find mods -name '*.sh'); do
+          for f in install.sh bin/herdr-browser hooks/*.sh $(ls service/restart.sh 2>/dev/null); do
             bash -n "$f" || { echo "::error file=$f::doesn't parse under bash"; exit 1; }
             case "$(head -1 "$f")" in *bash*) ;; *) sh -n "$f" || { echo "::error file=$f::doesn't parse under sh"; exit 1; } ;; esac
           done

@@ -1,4 +1,4 @@
-"""mods/chat/ask-hook.sh, the PermissionRequest hook of Claude Code and Codex (SHEP-91): every ask waits for the chat's
+"""hooks/ask-hook.sh, the PermissionRequest hook of Claude Code and Codex (SHEP-91): every ask waits for the chat's
 card, whether or not a chat shows the agent right now (a person on the web or a phone still gets it), and the terminal
 stays a way to answer. Runs the real script on a throwaway app home with a fake hc; never the real data/chat-asks."""
 import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
@@ -11,7 +11,7 @@ import time
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HOOK = os.path.join(ROOT, "mods", "chat", "ask-hook.sh")
+HOOK = os.path.join(ROOT, "hooks", "ask-hook.sh")
 REQ = {"tool_name": "Bash", "tool_input": {"command": "touch made.txt"}, "cwd": "/tmp/x", "transcript_path": ""}
 ALLOW = json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}})
 
