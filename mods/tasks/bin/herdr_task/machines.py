@@ -25,7 +25,7 @@ import sys
 import threading
 import time
 
-from .base import addon_off, APP_HOME, ASK_HOME, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, layout, now, PACKAGE, run, STORE, WHERE
+from .base import addon_off, APP_HOME, ASK_HOME, SESSION, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, layout, now, PACKAGE, run, STORE, WHERE
 from .news import news_send, send_or_hold, typing
 from .settings import TEMPLATES
 from .addons import off_note
@@ -77,8 +77,7 @@ def _local_stamp():
 
 
 def _core_dir():
-    return os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local", "state"), "herdr-core",
-                        os.environ.get("HC_SESSION") or "default")
+    return os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(HOME, ".local", "state"), "herdr-core", SESSION)
 
 
 def secrets_main_here():
@@ -92,10 +91,13 @@ def secrets_main_here():
                 return json.load(f)
         except (OSError, ValueError):
             return None
-    docs, core = js(os.path.join(_core_dir(), "docs.json")) or {}, js(os.path.join(_core_dir(), "core.json")) or {}
-    rec = ((docs.get("shepherdr.secrets") if isinstance(docs, dict) else None) or {}).get("value")
-    if isinstance(rec, dict) and rec.get("id"):
-        return isinstance(core, dict) and rec["id"] == core.get("id")
+    # Shepherdr's own session first (3.2), then the default one, where herdr-secret kept the record before: each
+    # session is a core of its own, with its own id, so the record is compared with the id of the session it is in.
+    for d in dict.fromkeys((_core_dir(), os.path.join(os.path.dirname(_core_dir()), "default"))):
+        docs, core = js(os.path.join(d, "docs.json")) or {}, js(os.path.join(d, "core.json")) or {}
+        rec = ((docs.get("shepherdr.secrets") if isinstance(docs, dict) else None) or {}).get("value")
+        if isinstance(rec, dict) and rec.get("id"):
+            return isinstance(core, dict) and rec["id"] == core.get("id")
     return os.path.isfile(WHERE.path("vault")) and not os.path.exists(WHERE.path("secret-remote"))
 
 
@@ -267,15 +269,19 @@ for l in x["links"]:
     out["links"][l["path"]] = st
 def main_here():
     # the record naming the machine that keeps the secrets ("shepherdr.secrets"), and this one's id
-    core = os.path.join(os.environ.get("XDG_STATE_HOME") or P(".local/state"), "herdr-core", "default")
-    try:
-        with open(os.path.join(core, "docs.json")) as f:
-            rec = (json.load(f).get("shepherdr.secrets") or {}).get("value") or {}
-        with open(os.path.join(core, "core.json")) as f:
-            me = json.load(f).get("id")
-    except Exception:
-        return False
-    return bool(rec.get("id")) and rec.get("id") == me
+    # in Shepherdr's own session there (3.2), else the default one, where herdr-secret kept it before
+    for name in dict.fromkeys((x.get("session") or "shepherdr", "default")):
+        core = os.path.join(os.environ.get("XDG_STATE_HOME") or P(".local/state"), "herdr-core", name)
+        try:
+            with open(os.path.join(core, "docs.json")) as f:
+                rec = (json.load(f).get("shepherdr.secrets") or {}).get("value") or {}
+            with open(os.path.join(core, "core.json")) as f:
+                me = json.load(f).get("id")
+        except Exception:
+            continue
+        if rec.get("id"):
+            return rec.get("id") == me
+    return False
 if x["op"] == "install" and not source:
     for t in x["touch"]:
         if t.get("unless_main") and main_here():
@@ -339,7 +345,8 @@ def _verdict(res):
 def sync_machine(machine, m, op="install", force=False):
     """Checks or installs the tools on one machine: {machine, state, details, ...}; state is
     current, drift (some file isn't: details say which and why), failed or unreachable."""
-    me = {"from": core_name(), "version": m["version"], "stamp": STAMP, "force": force, "links": m["links"], "touch": m["touch"]}
+    me = {"from": core_name(), "version": m["version"], "stamp": STAMP, "force": force, "links": m["links"], "touch": m["touch"],
+          "session": SESSION}
     bare = lambda f: {k: v for k, v in f.items() if k != "data"}
     try:
         res = _remote_python(machine, INSTALL, {**me, "op": "check", "files": [bare(f) for f in m["files"]]}, timeout=60)
@@ -428,8 +435,51 @@ def sync(names=None, op="install", force=False):
     return {"version": m["version"], "machines": rows}
 
 
+def adopt(dry=False):
+    """3.2: Shepherdr lives in its own herdr-core session, and each session keeps its own list of machines. The
+    machines the default session (the Herdr app's) links to are added to Shepherdr's session, each leading to
+    Shepherdr's own session on that machine (hc machine add --session), so `--on <machine>` and every hc call
+    through the link land there. The default session's list is only read, as a file: nothing in it changes.
+    A machine Shepherdr's session has already is left alone (one that leads to another session there is said).
+    Returns [{name, state: added | here | wrong-session | failed | would-add, ...}]."""
+    path = os.path.join(os.path.dirname(_core_dir()), "default", "machines.json")
+    try:
+        with open(path) as f:
+            theirs = json.load(f)
+    except (OSError, ValueError):
+        theirs = []
+    mine = {m.get("name"): m for m in (hc_json("machine", "ls") or {}).get("machines") or []}
+    out = []
+    for m in theirs if isinstance(theirs, list) else []:
+        name, target = (m or {}).get("name"), (m or {}).get("target")
+        if not name or not target or m.get("temporary"):
+            continue
+        if name in mine:
+            there = mine[name].get("session") or "default"
+            out.append({"name": name, "state": "here" if there == SESSION else "wrong-session", **({} if there == SESSION else {"session": there})})
+            continue
+        if dry:
+            out.append({"name": name, "state": "would-add"})
+            continue
+        how = ["--via", target] if m.get("via") else [target]
+        r = run(["hc", "machine", "add", *how, "--name", name, "--session", SESSION, "--json"])
+        out.append({"name": name, "state": "added"} if r.returncode == 0 else
+                   {"name": name, "state": "failed", "error": (r.stderr or r.stdout).strip()[-300:]})
+    return out
+
+
 def cmd_machines(args):
     from .output import say
+    if args.machines == "adopt":
+        rows = adopt(getattr(args, "dry_run", False))
+        words = {"added": "added", "here": "already here", "would-add": "would be added", "failed": "couldn't be added",
+                 "wrong-session": f"is here, but leads to another session there: remove and add it again with --session {SESSION}"}
+        say(args, {"session": SESSION, "machines": rows},
+            "\n".join(f"{x['name']}: {words[x['state']]}" + (f" ({x['error']})" if x.get("error") else "") for x in rows)
+            or "The default session links to no machines.")
+        if any(x["state"] == "failed" for x in rows):
+            raise SystemExit(1)
+        return
     if args.machines == "reach":
         return cmd_reach(args)
     if args.machines == "find":
@@ -563,6 +613,8 @@ PROBE = r'''
 import json, os, platform, shutil, socket, subprocess, sys, threading
 o = json.loads(sys.argv[1])
 H = os.path.expanduser("~")
+# Shepherdr's own herdr-core session on this machine (3.2): the one hc is in here, when it isn't the default one
+SESSION_THERE = os.environ.get("HC_SESSION") if os.environ.get("HC_SESSION") not in (None, "", "default") else "shepherdr"
 ''' + layout.PY + r'''
 def sh(argv, inp=None, timeout=20):
     try:
@@ -626,20 +678,15 @@ if hc:
                 continue
             if args or t.get("template") in ("assistant", "coordinator"):
                 seen[t["address"]] = t
-    # The spaces: the window's live list when a window here names some (`herdr-app ls`, as autopilot's window_spaces),
-    # else herdr-core's saved herdr-app document (docs.json), which a window may not have written since its last change.
+    # The spaces: herdr-core's shared document (docs.json) in Shepherdr's own session there (3.2: no window is asked).
     spaces = []
-    if shutil.which("herdr-app"):
-        live = js(sh(["herdr-app", "ls"], timeout=10)[1]) or {}
-        if isinstance(live, dict) and isinstance(live.get("spaces"), list):
-            spaces = [s for s in live["spaces"] if isinstance(s, dict) and s.get("id") and not s.get("machine")]
-    if not spaces:
-        docs = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(H, ".local/state"), "herdr-core", "default", "docs.json")
-        try:
-            with open(docs) as f:
-                spaces = ((json.load(f).get("herdr-app") or {}).get("value") or {}).get("spaces") or []
-        except Exception:
-            spaces = []
+    docs = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(H, ".local/state"), "herdr-core", SESSION_THERE, "docs.json")
+    try:
+        with open(docs) as f:
+            spaces = [s for s in ((json.load(f).get("herdr-app") or {}).get("value") or {}).get("spaces") or []
+                      if isinstance(s, dict) and s.get("id") and not s.get("machine")]
+    except Exception:
+        spaces = []
     me["spaces"] = [{"id": s.get("id"), "name": s.get("name"), "folder": s.get("folder"), "machine": s.get("machine"), "icon": s.get("icon")} for s in spaces]
     names = {s["id"]: s for s in me["spaces"]}
     me["assistants"] = []

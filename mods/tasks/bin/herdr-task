@@ -9,12 +9,17 @@ coordinators never clash.
 
 States: todo -> (queued ->) running -> ready (its agent said it's finished, with a summary: "looks
 done, your call"; a worktree task's work waits to merge, in a GitHub repo as a pull request) -> done,
-which only the person decides (Accept in the Tasks panel: `herdr-task accept`, merging first when
-there is something to merge). A started task waits as "queued" while the tasks
-it comes after aren't done or the folder already runs its maximum; `tick` starts it later.
-"Stopped" is not stored: a running task whose agents are all gone. Every agent started for a task
-carries the hc label herdr.task=<key> (key: <slug>#<id>), which is how it is found. A worktree
-task becomes done by itself once its branch or pull request is merged, wherever that happened.
+which only the person decides (Mark as done on its card: `herdr-task accept`, merging first when
+there is something to merge). A started task waits as "queued" only while the tasks it comes
+after aren't done (or its machine is too busy); `tick` starts it later. Any number run at once.
+Stopped: a running task the person stopped (`stop`: stopped_by "you"), or whose agent crashed, was
+cut off or hit its plan's limit (stopped_by "error" | "limit", stopped_why: one line). Nothing
+restarts an agent by itself: `resume` does, or the person's next message carries on. Every agent
+started for a task carries the hc label herdr.task=<key> (key: <slug>#<id>), which is how it is
+found. A worktree task becomes done by itself once its branch or pull request is merged.
+
+Everything runs in Shepherdr's own herdr-core session (HC_SESSION=shepherdr; herdr_task/base.py),
+never in the default one the Herdr app shows.
 """
 
 import os

@@ -132,6 +132,8 @@ class TemplatesFollowXdg(unittest.TestCase):
         """Every place that reads or writes the templates resolves the folder (the old fixed path only as a name)."""
         for rel in ("mods/chat/main.js", "mods/coordinator/main.js", "mods/coordinator/restart.sh", "mods/shepherdr-settings/main.js",
                     "service/spaces.ts", "service/serve-from.ts", "mods/tasks/bin/herdr_task/revive.py"):
+            if not os.path.isfile(os.path.join(ROOT, rel)):
+                continue  # 3.2: the window's mods are gone
             with open(os.path.join(ROOT, rel)) as f:
                 text = f.read()
             self.assertNotIn("$HOME/.config/herdr-core/templates/", text.replace('SHEP_TEMPLATES="$HOME/.config/herdr-core/templates"', "")
@@ -212,19 +214,20 @@ class AddonOffSays(unittest.TestCase):
         with open(os.path.join(ROOT, "lib", "addons.json")) as f:
             titles = {a["id"]: a["title"] for a in json.load(f)["addons"]}
         for k, v in addons.NAMES.items():
-            self.assertEqual(titles.get(k), v, k)
+            if k in titles:  # 3.2: the manifest is only a marker for 3.1's updater, and lists none
+                self.assertEqual(titles[k], v, k)
 
     def test_list_and_switch_in_the_settings_file(self):
-        r = self.herdr_task("addons", "--json", settings={"everywhere": {"off": ["machines", "autopilot"], "theme": "x"}})
+        r = self.herdr_task("addons", "--json", settings={"everywhere": {"off": ["machines", "browser"], "theme": "x"}})
         rows = {x["id"]: x["on"] for x in json.loads(r.stdout)["addons"]}
-        self.assertEqual((rows["machines"], rows["autopilot"]), (False, False), r.stderr)
+        self.assertEqual((rows["machines"], rows["browser"]), (False, False), r.stderr)
         r = self.herdr_task("addons", "on", "Other machines")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("Other machines is on now", r.stdout)
         with open(self.settings) as f:
             d = json.load(f)
-        self.assertEqual(d["everywhere"], {"off": ["autopilot"], "theme": "x"})
-        r = self.herdr_task("addons", "on", "autopilot")
+        self.assertEqual(d["everywhere"], {"off": ["browser"], "theme": "x"})
+        r = self.herdr_task("addons", "on", "browser")
         with open(self.settings) as f:
             self.assertNotIn("off", json.load(f)["everywhere"])
         r = self.herdr_task("addons", "on", "nope")
@@ -235,12 +238,6 @@ class AddonOffSays(unittest.TestCase):
         r = self.herdr_task("addons", "on", "machines", settings={"pushed_from": "herdr-app", "everywhere": {"off": ["machines"]}})
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("switch it there", r.stderr)
-
-    def test_autopilot_list_says_it_is_off(self):
-        r = self.herdr_task("autopilot", "list", settings={"everywhere": {"off": ["autopilot"]}})
-        self.assertIn("The Autopilot add-on is off on this machine", r.stdout.splitlines()[0], r.stderr)
-        r = self.herdr_task("autopilot", "list", "--json")
-        self.assertIn("herdr-task addons on autopilot", json.loads(r.stdout)["addon_off"])
 
     def test_tell_says_other_machines_is_off(self):
         from unittest import mock
@@ -278,11 +275,19 @@ class TaskSpaceByRepo(unittest.TestCase):
     def spaces(self, rows):
         from unittest import mock
         from herdr_task import launch
-        out = mock.Mock(stdout=json.dumps({"spaces": rows}), returncode=0)
-        for p in (mock.patch.object(launch, "run", lambda argv, **k: out),
+        # 3.2: the spaces come from herdr-core's shared document in Shepherdr's own session (no window is asked)
+        state = scratch(self)
+        docs = os.path.join(state, "herdr-core", "shepherdr")
+        os.makedirs(docs)
+        with open(os.path.join(docs, "docs.json"), "w") as f:
+            json.dump({"herdr-app": {"value": {"spaces": rows}}}, f)
+        asked = []
+        for p in (mock.patch.dict(os.environ, {"XDG_STATE_HOME": state}),
+                  mock.patch.object(launch, "run", lambda argv, **k: asked.append(argv)),
                   mock.patch.object(launch.shutil, "which", lambda n: "/x/herdr-app" if n == "herdr-app" else None)):
             p.start()
             self.addCleanup(p.stop)
+        self.addCleanup(lambda: self.assertEqual(asked, [], "a Herdr window was asked"))
         return launch
 
     def test_the_repos_space_not_the_callers(self):
@@ -303,11 +308,14 @@ class TaskSpaceByRepo(unittest.TestCase):
         self.assertEqual(launch.space_for_folder(os.path.join(root, "repo"), "sp2"), "sp2")
         self.assertIsNone(launch.space_for_folder(os.path.join(root, "repo"), None))  # two spaces in it: can't say
 
-    def test_no_window(self):
+    def test_no_document(self):
         from unittest import mock
         from herdr_task import launch
-        with mock.patch.object(launch.shutil, "which", lambda n: None):
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": scratch(self)}):
             self.assertIsNone(launch.space_for_folder("/x", "sp1"))
+            with self.assertRaises(launch.Fail):  # and no window's current space stands in for a caller's
+                with mock.patch.object(launch, "caller_labels", lambda: {}):
+                    launch.default_space()
 
 
 if __name__ == "__main__":

@@ -39,7 +39,6 @@ def beside_store(kind, name):
 LEGACY = os.path.join(HOME, ".config", "herdr-app", "data", "tasks")
 SHELLS = {"bash", "zsh", "fish", "sh", "dash", "ksh", "tcsh", "csh", "nu", "xonsh", "pwsh", "powershell", "elvish"}
 RANK = {"blocked": 4, "done": 3, "working": 2, "idle": 1}
-MAX_RUNNING = 10
 GH = os.environ.get("HERDR_TASK_GH") or "gh"
 # How often tick asks GitHub about a pull request (ms).
 PR_EVERY = 60000
@@ -71,7 +70,7 @@ def sync_held():
 
 # Shepherdr's add-ons (lib/addons.json): one the person switched off in Shepherdr settings >
 # Window is in Everywhere's "off" (the settings file, or HERDR_TASK_SETTINGS), and its
-# background work here stops (autopilot, browsers, the sync to other machines).
+# background work here stops (browsers, the sync to other machines).
 def addon_off(name):
     path = os.environ.get("HERDR_TASK_SETTINGS") or WHERE.path("settings")
     try:
@@ -112,10 +111,38 @@ def stop_note(kind, **fields):
         pass
 
 
+# ---- Shepherdr's own herdr-core session (3.2) --------------------------------------------------
+# Shepherdr's agents, tasks, scheduler and terminals live in a herdr-core named session of their own
+# (hc's HC_SESSION), never in the default one the Herdr app shows. So every hc this process runs, and
+# every program it starts (an agent's own herdr-task and hc calls, the scheduler, hc --on to another
+# machine) is in SESSION: the environment says so from here on. A terminal started in a session gets
+# HC_SESSION from its core, so an agent calling herdr-task or hc from inside lands in the same one.
+# SHEPHERDR_SESSION: another name (a test's throwaway core).
+SESSION = os.environ.get("SHEPHERDR_SESSION") or "shepherdr"
+# As herdr-task was called: None, "", "default" (a shell, the Herdr app's terminal) and SESSION are
+# taken into Shepherdr's session; any other is someone else's (a test's), and hc is refused (guard).
+CALLER_SESSION = os.environ.get("HC_SESSION")
+FOREIGN_SESSION = CALLER_SESSION not in (None, "", "default", SESSION)
+# Called from a terminal of another session (the default one): that terminal is nobody in Shepherdr's.
+FOREIGN_TERMINAL = False
+
+
+def session_socket(name):
+    return os.path.basename(name or "") == f"{SESSION}.sock"
+
+
+if not FOREIGN_SESSION:
+    os.environ["HC_SESSION"] = SESSION
+    if os.environ.get("HC_TERMINAL_SOCKET") and not session_socket(os.environ["HC_TERMINAL_SOCKET"]):
+        FOREIGN_TERMINAL = True
+        for _k in ("HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"):
+            os.environ.pop(_k, None)
+
+
 # ---- the real environment -------------------------------------------------------------------
-# With a changed HOME, HERDR_APP_HOME or another herdr-core session (a test's), herdr-app and hc
-# could still reach the person's real window and core and overwrite every machine's spaces. So
-# herdr-task then refuses to run them at all, with why (HERD-55).
+# With a changed HOME, HERDR_APP_HOME or another herdr-core session than Shepherdr's (a test's),
+# herdr-app and hc could still reach the person's real core and overwrite every machine's spaces.
+# So herdr-task then refuses to run them at all, with why (HERD-55).
 GUARDED = {"hc", "herdr-core", "herdr-app"}
 
 
@@ -135,10 +162,10 @@ def not_real():
     app = env.get("HERDR_APP_HOME")
     if app and not same(app, os.path.join(home, ".config", "herdr-app")):
         return f"HERDR_APP_HOME is {app}"
-    if env.get("HC_SESSION") not in (None, "", "default"):
-        return f"HC_SESSION is {env['HC_SESSION']}"
+    if env.get("HC_SESSION") != SESSION:
+        return f"HC_SESSION is {env.get('HC_SESSION') or 'not set'}, not Shepherdr's own ({SESSION})"
     sock = env.get("HC_SOCKET")
-    if sock and not any(same(sock, s) for s in (env.get("HC_TERMINAL_SOCKET"), f"/run/user/{os.getuid()}/herdr-core/default.sock") if s):
+    if sock and not session_socket(sock) and not (env.get("HC_TERMINAL_SOCKET") and same(sock, env["HC_TERMINAL_SOCKET"])):
         return f"HC_SOCKET is {sock}"
     return None
 
@@ -149,7 +176,8 @@ def guard(args):
     why = not_real() if name in GUARDED else None
     if why:
         raise Fail(f"refusing to run {name}: {why}. Run herdr-task with the real HOME, HERDR_APP_HOME, "
-                   "HC_SESSION and HC_SOCKET: changed ones can reach the real window and wipe its spaces.")
+                   f"and HC_SESSION unset or {SESSION} (SHEPHERDR_SESSION names another): changed ones can reach "
+                   "the real core and wipe its spaces.")
 
 
 def run(args, cwd=None, check=False, env=None):

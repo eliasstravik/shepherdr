@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import time
 
-from .base import Fail, git, HOME, MAX_RUNNING, WHERE
+from .base import Fail, git, HOME, WHERE
 from . import flags as FLAGS
 
 
@@ -29,10 +29,10 @@ TEMPLATES = os.environ.get("HERDR_TASK_TEMPLATES") or os.path.join(
     "herdr-core", "templates")
 OLD_INSTRUCTIONS = os.path.join(HOME, ".herdr", "instructions")
 ASSISTANT_TEMPLATES = ("assistant", "coordinator")  # "coordinator": Assistants started before the rename
-DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "must_fix": "major", "max_running": MAX_RUNNING, "worktrees": True,
+DEFAULTS = {"tasks": {"merge": "ask", "review_rounds": 0, "must_fix": "major", "worktrees": True,
                       "start_notes": "", "finish_notes": "", "archive_after": 7, "proof": True, "base": "", "branch": "",
                       "worktree_root": "", "setup": "", "accept_command": "", "claude_flags": [], "codex_flags": []},
-            "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {}, "backup": {},
+            "automations": {"enabled": True}, "worker": {}, "reviewer": {}, "coordinator": {},
             "agents": {"reactions": True, "suggestions": True, "feedback": True, "feedback_repo": "eliasstravik/shepherdr"}}
 LEVELS = ["blocker", "major", "minor"]
 
@@ -51,48 +51,6 @@ def read_settings():
     except (OSError, ValueError):
         return {}
     return d if isinstance(d, dict) else {}
-
-
-def autopilot_layers(d, space=None):
-    """(Everywhere's, the space's own) Autopilot in a settings file d: {every, events, heartbeat, direction},
-    each only when set. A space is found by its id on this machine (a pushed copy holds this
-    machine's spaces by their bare ids, as herdr-task names them)."""
-    def part(layer):
-        a = (layer or {}).get("autopilot") if isinstance(layer, dict) else None
-        return {k: v for k, v in a.items() if k in ("every", "events", "heartbeat", "direction") and v is not None} if isinstance(a, dict) else {}
-    return part(d.get("everywhere")), part((d.get("spaces") or {}).get(space) if space else None)
-
-
-def write_autopilot(space, values):
-    """Sets Autopilot fields at one level of the settings file (space None: Everywhere's); a value
-    None unsets it there, so it follows the level above again. Refused on a copy the window
-    pushed here: the window's machine holds the truth and would put its own back."""
-    d = read_settings()
-    if d.get("pushed_from"):
-        raise Fail("This machine's Shepherdr settings are a copy from the machine whose window sets them: change Autopilot in Settings there.")
-    if space:
-        layer = (d.setdefault("spaces", {})).setdefault(space, {})
-    else:
-        layer = d.setdefault("everywhere", {})
-    a = dict(layer.get("autopilot") or {})
-    for k, v in values.items():
-        if v is None:
-            a.pop(k, None)
-        else:
-            a[k] = v
-    if a:
-        layer["autopilot"] = a
-    else:
-        layer.pop("autopilot", None)
-    if space and not layer:
-        d["spaces"].pop(space, None)
-    d["version"] = 1
-    os.makedirs(os.path.dirname(SETTINGS), exist_ok=True)
-    tmp = f"{SETTINGS}.{os.getpid()}.tmp"
-    with open(tmp, "w") as f:
-        json.dump(d, f, indent=2)
-        f.write("\n")
-    os.replace(tmp, SETTINGS)
 
 
 def reactions_on(space=None, d=None):
@@ -123,6 +81,33 @@ def settings_layers(s, space=None):
     pick = (spaces.get(bare(space)) if space and (spaces.get(bare(space)) or {}).get("folder") == s.loc["folder"] else None) or (mine[0] if mine else None)
     machine = (d.get("machines") or {}).get(d.get("here") or LOCAL_MACHINE)
     return d.get("everywhere") or {}, machine or {}, pick or {}
+
+
+# ---- Instructions (3.2) ------------------------------------------------------------------------
+# Settings › Instructions: the person's own words for every agent, for everything
+# (settings.json "everywhere" -> "instructions") and per space ("spaces" -> <id> -> "instructions"). Thin layer:
+# they are prompts as written, added to every agent's brief or session (everything's first, then the space's).
+INSTRUCTIONS_HEAD = "Instructions from the person (Shepherdr settings › Instructions), as they wrote them:"
+
+
+def instructions_text(everywhere, own=None):
+    """The Instructions block from two settings layers (everything's, the space's own); "" when neither says any."""
+    words = [str(x.get("instructions") or "").strip() if isinstance(x, dict) and isinstance(x.get("instructions"), str) else ""
+             for x in (everywhere, own)]
+    if not any(words):
+        return ""
+    parts = [INSTRUCTIONS_HEAD]
+    if words[0]:
+        parts.append(words[0])
+    if words[1]:
+        parts.append(("For this space:\n" if words[0] else "") + words[1])
+    return "\n\n".join(parts) if words[0] and words[1] else "\n".join(parts)
+
+
+def instructions_part(s, space=None):
+    """A task's Instructions block: everything's, then those of the space it works for."""
+    everywhere, _, own = settings_layers(s, space)
+    return instructions_text(everywhere, own)
 
 
 def settings_for(s, space=None):
@@ -258,6 +243,13 @@ def worker_pick(s, task, space=None, agent=None):
     for k in ("model", "effort"):
         if task.get(k):
             pick[k] = task[k]
+    # 3.2: its own speed and permission mode (start or edit --speed / --permission), in its CLI's words
+    if task.get("speed") in SPEEDS:
+        pick["fast"] = SPEEDS[task["speed"]]
+    if task.get("perm"):
+        perm = perm_across(task["perm"], pick.get("agent") or agent_key(pick.get("argv") or ["claude"]))
+        if perm:
+            pick["perm"] = perm
     # #1222: its CLI's extra flags, the task's own else its space's (Settings › Tasks), those that still pass
     kind = pick.get("agent") or agent_key(pick.get("argv") or ["claude"])
     own = (task.get("flags") or {}).get(kind) if isinstance(task.get("flags"), dict) else None
@@ -270,7 +262,7 @@ def worker_pick(s, task, space=None, agent=None):
 def worker_argv(s, task, space=None, agent=None):
     """A task's agent when nobody gave an argv: worker_pick's."""
     pick = worker_pick(s, task, space, agent)
-    if pick.get("argv") and not (task.get("model") or task.get("effort")):
+    if pick.get("argv") and not any(task.get(k) for k in ("model", "effort", "speed", "perm")):
         return argv_for(pick)
     pick.pop("argv", None)
     pick.setdefault("agent", "claude")
@@ -300,7 +292,7 @@ def argv_model(argv):
 SETTINGS_HEAD = "Settings: (from herdr-task show; where the brief above says otherwise, it wins)"
 SET_BY = {"task": "set by the assistant for this task", "folder": "this folder's setting", "machine": "this machine's setting",
           "all": "your setting everywhere"}
-MERGE_WORDS = {"ask": "ask the person first: they accept it in the Tasks panel, which merges it",
+MERGE_WORDS = {"ask": "ask the person first: they mark it as done on its card, which merges it",
                "checks": "after checks: once you say ready, Herdr merges it when its checks pass",
                "auto": "on its own: once you say ready, Herdr merges it"}
 MUST_WORDS = {"blocker": "blocker", "major": "major and up (blocker, major)", "minor": "everything (blocker, major, minor)"}
@@ -313,9 +305,11 @@ SET_KEYS = {"review": "review", "brief.review": "review", "merge": "merge", "bri
             "reviewer_model": "reviewer_model", "reviewer-model": "reviewer_model",
             "reviewer_effort": "reviewer_effort", "reviewer-effort": "reviewer_effort",
             "proof": "proof", "brief.proof": "proof",
+            "speed": "speed", "task.speed": "speed", "fast": "speed", "permission": "perm", "permissions": "perm", "perm": "perm",
+            "task.permission": "perm",
             "flags": "flags", "task.flags": "flags", "extra-flags": "flags", "extra_flags": "flags"}
 # The Proof line (as Shepherdr's skill asks of its task agents), on and off.
-PROOF_WORDS = {"on": "show verifiable proof in one recipe artifact: each proof with a one-line caption, real and from this work now, "
+PROOF_WORDS = {"on": "show verifiable proof in one artifact: each proof with a one-line caption, real and from this work now, "
                      "plus a \"Not proven\" list; then say ready with --proof <its id>",
                "off": "not needed for this task: no proof artifact; say in your summary how you checked it"}
 MERGE_VALUES = {"ask": "ask", "ask me first": "ask", "ask first": "ask", "ask the person first": "ask", "wait": "ask",
@@ -323,6 +317,12 @@ MERGE_VALUES = {"ask": "ask", "ask me first": "ask", "ask first": "ask", "ask th
                 "auto": "auto", "on its own": "auto", "merge it": "auto", "at once": "auto"}
 MUST_VALUES = {"blocker": "blocker", "blockers": "blocker", "critical": "blocker", "major": "major",
                "minor": "minor", "trivial": "minor", "everything": "minor"}
+# A task's speed (the model's service tier) as argv_for's "fast", and every permission mode a CLI has.
+SPEEDS = {"regular": False, "fast": True, "ultrafast": "ultrafast"}
+SPEED_VALUES = {"regular": "regular", "standard": "regular", "normal": "regular", "off": "regular", "fast": "fast", "on": "fast",
+                "ultrafast": "ultrafast", "ultra-fast": "ultrafast", "ultra fast": "ultrafast"}
+PERM_VALUES = {"default": "manual", "ask": "manual", "accept edits": "acceptEdits", "accept-edits": "acceptEdits", "bypass": "bypassPermissions",
+               "full access": "full", "read only": "read-only", "readonly": "read-only"}
 EFFORTS = {"none", "minimal", "lowest", "low", "medium", "high", "xhigh", "max", "ultra"}
 ONOFF = {"on": "on", "yes": "on", "true": "on", "1": "on", "off": "off", "no": "off", "false": "off", "0": "off"}
 
@@ -332,12 +332,22 @@ def set_task(t, key, value, agent=None):
     the task's agent runs, whose extra flags `flags` sets (#1222; default: the task's own --agent, else claude)."""
     field = SET_KEYS.get(key.strip().lower())
     if not field:
-        raise Fail(f"--set takes review, review.rounds, review.mustFix, merge, proof, agent, model, effort, flags or reviewer settings, not {key!r}.")
+        raise Fail(f"--set takes review, review.rounds, review.mustFix, merge, proof, agent, model, effort, speed, permission, flags or reviewer settings, not {key!r}.")
     if field == "flags":
         set_flags(t, agent or t.get("agent") or "claude", value)
         return
     v = value.strip().strip("\"'").strip()
     sets = t.setdefault("set", {})
+    if field == "perm" and v:
+        # every mode by its own name ("default" is Claude Code's asking mode, not "Settings' again": "" is)
+        known = {m.lower(): m for ms in PERMS.values() for m in ms}
+        mode = PERM_VALUES.get(v.lower()) or known.get(v.lower())
+        if not mode:
+            raise Fail(f"permission is one of {', '.join(sorted(set(known.values()) | {'default'}))} (\"\": Settings' again).")
+        t["perm"] = mode
+        if not sets:
+            t.pop("set", None)
+        return
     if not v or v.lower() == "default":
         sets.pop(field, None)
         t.pop(field, None)
@@ -362,6 +372,10 @@ def set_task(t, key, value, agent=None):
         if low not in MERGE_VALUES:
             raise Fail('merge is "on its own", "after checks" or "ask me first".')
         sets[field] = MERGE_VALUES[low]
+    elif field == "speed":
+        if low not in SPEED_VALUES:
+            raise Fail("speed is regular, fast or ultrafast.")
+        t["speed"] = SPEED_VALUES[low]
     else:
         # Agents, models and efforts are the task's own fields (worker_pick reads them).
         if field in ("effort", "reviewer_effort") and low not in EFFORTS:
@@ -393,7 +407,7 @@ def set_opts(t, args, s=None, space=None):
     checked against the CLI it will run (its own --agent, else its space's Task agent)."""
     def cli():
         return (worker_pick(s, t, space or t.get("space")).get("agent") if s else None) or t.get("agent") or "claude"
-    for flag in ("agent", "model", "effort", "flags", "reviewer", "reviewer_model", "reviewer_effort"):
+    for flag in ("agent", "model", "effort", "speed", "permission", "flags", "reviewer", "reviewer_model", "reviewer_effort"):
         v = getattr(args, flag, None)
         if v is not None:
             set_task(t, flag, v, cli() if flag == "flags" else None)
@@ -710,7 +724,7 @@ def task_settings(s, t, space=None, argv=None, live=False):
     policy = sets.get("merge") or (k.get("merge") if k.get("merge") in MERGE_WORDS else "ask")
     m_by = "task" if "merge" in sets else by_layer(s, space, "tasks", "merge", policy, "ask")
     if here:
-        add("Merge", "nothing to merge: you work in the folder itself, and the person accepts it", policy, m_by)
+        add("Merge", "nothing to merge: you work in the folder itself, and the person marks it as done", policy, m_by)
     else:
         add("Merge", MERGE_WORDS[policy], policy, m_by)
         if t.get("base_set"):

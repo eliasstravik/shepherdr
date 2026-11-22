@@ -850,17 +850,20 @@ def mid_turn(s, task):
     return bool(mid_turn_agents(live_agents(key) + live_helpers(key), detail))
 
 
-def finish(s, task, even_if_busy=False):
+def finish(s, task, even_if_busy=False, quiet=False):
     """Done, its branch merged: removes the worktree and branch when nothing is left uncommitted
     there and no agent still works in it: none mid-turn (mid_turn()), and (unless the person merged
     from Herdr) none running at all. Else tidy_done() removes them once its agents ended."""
     task["state"], task["done_at"] = "done", now()
     for k in ("attention", "merge_requested", "queue", "queued_at", "merge_queued", "kept_open", "base_hold", "queue_fail",
-              "queue_out", "queue_refused", "dequeued"):
+              "queue_out", "queue_refused", "dequeued", "merge_failed", "merge_failed_at", "stopped_by", "stopped_why", "stopped_at",
+              "stopped_turns"):
         task.pop(k, None)
     s.dirty = True
     # The space's "When a task is accepted" command, in the background (after_accept.py): never waited on.
-    after_accept(s, task)
+    # quiet: a schedule's run that ended with nothing to review (ready --nothing / --told): nothing was accepted.
+    if not quiet:
+        after_accept(s, task)
     if not task.get("worktree") or mid_turn(s, task) or (not even_if_busy and any(agent_running(k) for k in live_agents(s.key(task)))):
         return
     remove_worktree(s, task)

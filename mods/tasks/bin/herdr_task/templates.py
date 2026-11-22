@@ -138,7 +138,9 @@ REVIEWER_SANDBOX = ("- A check that can't run in a read-only sandbox (Codex's): 
                     "in my sandbox:\", and your worker runs them and checks the output.\n")
 REVIEWER_MD_BEFORE_CLAUDE = REVIEWER_MD_BEFORE_SANDBOX + REVIEWER_SANDBOX
 # Since a Claude reviewer runs in don't-ask mode, which refuses any command that isn't read-only (#1181).
-REVIEWER_MD = REVIEWER_MD_BEFORE_CLAUDE.replace("- A check that can't run in a read-only sandbox (Codex's):", "- A check that can't run in a read-only sandbox (Codex's, or Claude's don't-ask mode, which refuses any command that isn't read-only, tests too):")
+REVIEWER_MD_BEFORE_PAGES = REVIEWER_MD_BEFORE_CLAUDE.replace("- A check that can't run in a read-only sandbox (Codex's):", "- A check that can't run in a read-only sandbox (Codex's, or Claude's don't-ask mode, which refuses any command that isn't read-only, tests too):")
+# Since 3.2 has no Herdr window (no `herdr-app check`): the example is a page that can't be published there.
+REVIEWER_MD = REVIEWER_MD_BEFORE_PAGES.replace("`herdr-app check` hangs there on the window's services", "`herdr-artifact publish` can't write its page there")
 
 
 # Earlier worker defaults: a file still saying one, unedited, gets today's.
@@ -185,7 +187,8 @@ def instructions(role):
         text = None
     if body is None or (role == "worker" and body.strip() in [x.strip() for x in OLD_WORKERS]) \
             or (role == "reviewer" and body.strip() in (REVIEWER_MD_BEFORE_SUBAGENT.strip(), REVIEWER_MD_BEFORE_FEEDBACK.strip(),
-                                                    REVIEWER_MD_BEFORE_SANDBOX.strip(), REVIEWER_MD_BEFORE_CLAUDE.strip())):
+                                                    REVIEWER_MD_BEFORE_SANDBOX.strip(), REVIEWER_MD_BEFORE_CLAUDE.strip(),
+                                                    REVIEWER_MD_BEFORE_PAGES.strip())):
         body = WORKER_MD if role == "worker" else REVIEWER_MD
     new = head + body.strip() + "\n"
     if text is None or new.strip() != text.strip():

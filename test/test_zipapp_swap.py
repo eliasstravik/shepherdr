@@ -129,7 +129,7 @@ class InstallsSwapInOneStep(unittest.TestCase):
         with mock.patch.object(cli, "run", run), mock.patch.object(cli, "STORE", store), \
                 mock.patch.object(cli, "sync_held", lambda: None), mock.patch.object(cli, "guard", lambda a: None), \
                 mock.patch.object(cli, "install_secret", lambda m: None), mock.patch.object(cli.subprocess, "run", write):
-            cli.remote_run("vm", ["autopilot", "list", "--json"])
+            cli.remote_run("vm", ["auto", "list", "--json"])
         files = [a for a in wrote if a[:3] == ["hc", "file", "write"]]
         self.assertEqual(len(files), 1)
         tmp = files[0][-1]

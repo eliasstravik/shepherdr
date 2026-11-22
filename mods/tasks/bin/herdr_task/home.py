@@ -51,8 +51,9 @@ OVERVIEW_OWN_EVENTS = ("needs-you", "failed", "accept-failed")
 
 
 def main_here():
-    """This is the main machine: the Herdr window lives here."""
-    return os.path.isdir(os.path.join(APP_HOME, "mods"))
+    """Whether a Herdr window lives here, whose round home_pass was. 3.2 has no window: never. (The home round
+    below only runs when a caller names who gets it: `home pass --to`.)"""
+    return False
 
 
 def read_settings():
@@ -219,15 +220,10 @@ def local_report(candidates=None, since=None, news_only=False):
     out = {"home": HOME, "at": now(), **link_facts()}
     real = os.path.realpath(HOME)
     space = next((sid for sid, folder in candidates or [] if folder and os.path.realpath(folder) == real), None)
-    if not space and candidates is not None and out["overview"]:
-        # A window here knows its own home space even when the asking window doesn't list it (#1029: the lead's).
-        r = run(["herdr-app", "ls"])
-        try:
-            own = json.loads(r.stdout).get("spaces") or [] if r.returncode == 0 else []
-        except ValueError:
-            own = []
-        space = next((s["id"].split("/")[-1] for s in own if not s.get("machine") and s.get("folder")
-                      and os.path.realpath(s["folder"]) == real), None)
+    if not space and candidates is not None:
+        # This machine knows its own home space even when the asker doesn't list it (#1029).
+        from .launch import core_spaces
+        space = next((s["id"] for s in core_spaces() if os.path.realpath(s["folder"]) == real), None)
     if space:
         out["space"], out["assistant"] = space, assistant_in(space)
     if since is not None:
@@ -397,11 +393,8 @@ def home_pass(report, force=False, only=None, to=None):
         return
     state["at"] = now()
     cfg = read_settings()
-    r = run(["herdr-app", "ls"])
-    try:
-        spaces = json.loads(r.stdout).get("spaces") or [] if r.returncode == 0 else []
-    except ValueError:
-        spaces = []
+    from .launch import core_spaces
+    spaces = core_spaces()
     from .machines import connected_machines
     linked = [m for m in connected_machines() if m.get("state") == "connected"]
     names = [None] + [m["name"] for m in linked]

@@ -16,7 +16,7 @@ import sys
 import time
 
 from .base import ASK_HOME, ENTRY, Fail, git, hc_json, now, run, WORKTREES
-from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, CLAUDE_PROFILE, REVIEW_TOOLS, codex_too_old, codex_update_words, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for
+from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, CLAUDE_PROFILE, REVIEW_TOOLS, codex_too_old, codex_update_words, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, instructions_part, keep_review, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
 from .github import finish, remote_of
@@ -535,15 +535,21 @@ def default_space():
     sp = labels.get("herdr.space") or labels.get("herdr.coordinator.space") or labels.get("herdr.task.space")
     if sp:
         return sp
-    if shutil.which("herdr-app"):
-        r = run(["herdr-app", "status"])
-        try:
-            sp = json.loads(r.stdout).get("space")
-        except ValueError:
-            sp = None
-        if sp and "/" not in sp:
-            return sp
     raise Fail("Which space? Pass --space <space id>.")
+
+
+def core_spaces():
+    """This machine's spaces as Shepherdr keeps them: [{id, folder, ...}] from herdr-core's shared document in
+    Shepherdr's own session (its docs.json, read as a file). 3.2 has no Herdr window to ask."""
+    from .base import SESSION
+    path = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state"),
+                        "herdr-core", SESSION, "docs.json")
+    try:
+        with open(path) as f:
+            spaces = ((json.load(f).get("herdr-app") or {}).get("value") or {}).get("spaces") or []
+    except (OSError, ValueError, AttributeError):
+        return []
+    return [x for x in spaces if isinstance(x, dict) and x.get("id") and "/" not in str(x["id"]) and not x.get("machine") and x.get("folder")]
 
 
 def _inside(path, top):
@@ -554,14 +560,10 @@ def _inside(path, top):
 def space_for_folder(folder, caller=None):
     """The space a task in `folder` (its repo) belongs to when no --space says (GitHub #1209): the caller's when its
     folder is in that repo, else the one space on this machine whose folder is, so its news goes to that space's
-    Assistant, not to the Assistant that happened to start it. None: the window can't say, or no single space."""
-    if not folder or not shutil.which("herdr-app"):
+    Assistant, not to the Assistant that happened to start it. None: no single space (core_spaces)."""
+    if not folder:
         return None
-    try:
-        spaces = [x for x in json.loads(run(["herdr-app", "ls"]).stdout).get("spaces") or []
-                  if x.get("id") and "/" not in x["id"] and not x.get("machine") and x.get("folder")]
-    except (Fail, ValueError, OSError, AttributeError):
-        return None
+    spaces = core_spaces()
     if caller and any(x["id"] == bare(caller) and _inside(x["folder"], folder) for x in spaces):
         return bare(caller)
     own = [x["id"] for x in spaces if _inside(x["folder"], folder)]
@@ -573,13 +575,8 @@ def tab_title(s, task):
 
 
 def name_tab(tab, title):
-    """Names a tab once Herdr has seen it (it appears when the agent's labels are read)."""
-    if not shutil.which("herdr-app"):
-        return False
-    for _ in range(60):
-        if run(["herdr-app", "do", "tab.rename", "--id", tab, "--name", title]).returncode == 0:
-            return True
-        time.sleep(0.1)
+    """3.2: there is no Herdr window, so no tab to name here (an agent started by an older version may still
+    carry a herdr.tab label): never named."""
     return False
 
 
@@ -597,14 +594,7 @@ def task_tabs(s, task):
 def retag_tabs(s):
     """After the prefix changes: each running task's tab starts with its new id. A name someone
     gave the tab is kept, only its old id ("#4", "HAT-4") swapped; elsewhere the id goes in front."""
-    names = {}
-    if shutil.which("herdr-app"):
-        try:
-            for sp in json.loads(run(["herdr-app", "ls"]).stdout).get("spaces", []):
-                for tb in sp.get("tabs", []):
-                    names[bare(tb["id"])] = tb.get("name") or ""
-        except ValueError:
-            pass
+    names = {}  # 3.2: no window to ask for the tabs' names
     pairs = []
     for t in s.data["tasks"]:
         for tab in task_tabs(s, t):
@@ -625,7 +615,7 @@ def closing_line(s, task, parent=None, argv=None):
     text = (f"When the work is {done}, run `{ht} ready {s.ref(task)} --folder {shlex.quote(s.loc['folder'])} "
             f"--summary \"<what the person now sees or can do, plain words, at most {SUMMARY_MAX} characters>\"` (optionally "
             f"`--details \"<a few short bullets in plain words, one per line: what changed for the person first, then how it was checked>\"`; with `--agents-md \"<one line>\"` when you learned something "
-            f"about setting up or testing this repo that its AGENTS.md lacks). The person accepts it from there; never mark it done yourself.")
+            f"about setting up or testing this repo that its AGENTS.md lacks). The person marks it as done from there; never mark it done yourself.")
     on, rounds = review_limits(s, task)
     if on:
         text += (f" Review is on: after each review round, record it on the commit it reviewed with `{ht} reviewed {s.ref(task)} "
@@ -682,7 +672,8 @@ def brief(s, task, parent=None, space=None, argv=None):
     body = "Your task, " + s.ref(task) + ":\n" + ((task.get("prompt") or "").strip() or task["title"])
     finish = notes_part("Before you say ready", notes(s, task, "finish", space))
     return "\n\n".join(x for x in [instructions("worker"), start, body, where_line(task), finish, closing_line(s, task, parent, argv),
-                                    settings_block(s, task, space, argv, live=True)] if x)
+                                    settings_block(s, task, space, argv, live=True),
+                                    instructions_part(s, space or task.get("space"))] if x)
 
 
 def handoff(s, task, prev, parent=None, argv=None):
@@ -697,6 +688,7 @@ def handoff(s, task, prev, parent=None, argv=None):
     lines.append(notes_part("Before you say ready", notes(s, task, "finish")))
     lines.append(closing_line(s, task, parent, argv))
     lines.append(settings_block(s, task, None, argv, live=True))
+    lines.append(instructions_part(s, task.get("space")))
     return "\n\n".join(x for x in lines if x)
 
 

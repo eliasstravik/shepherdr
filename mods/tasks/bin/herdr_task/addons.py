@@ -1,7 +1,7 @@
 """Add-ons from the command line (GitHub #1091): which are off, and a switch for each, as Settings › Add-ons has.
 
 Since 3.1.35 herdr-task obeys the add-ons switched off (Everywhere's "off" in the settings file: base.addon_off), so
-tell-assistant, assistants, autopilot and the sync say when one they need is off (off_note) instead of going quiet.
+tell-assistant, assistants and the sync say when one they need is off (off_note) instead of going quiet.
 A flip goes through this machine's Shepherdr service when it runs (it writes the settings file and the window's shared
 list together, as the web app's switch does); without one, straight into the settings file.
 """
@@ -16,7 +16,7 @@ from .settings import read_settings, SETTINGS
 
 # The add-ons herdr-task itself obeys, by their titles in lib/addons.json (test_other_machines checks they agree), so a
 # machine with only herdr-task (no lib/addons.json) can still say which one is off.
-NAMES = {"machines": "Other machines", "autopilot": "Autopilot", "browser": "Task browser", "chat": "Chat"}
+NAMES = {"machines": "Other machines", "browser": "Task browser", "chat": "Chat"}
 
 
 def manifest():
