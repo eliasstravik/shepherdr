@@ -33,10 +33,11 @@ test("a machine that wasn't reachable is carried over when it first connects; wh
   expect(later.spaces.map((s) => `${s.machine ?? ""}/${s.id}`)).toEqual(["/spnew", "/sp1", "/sp2", "vm/sp1"]);
 });
 
-test("a space already in the own list is not doubled, and a machine with no window document is just marked", () => {
+test("a space already in the own list is not doubled; another machine with no document yet is looked at again later", () => {
   const own = [{ id: "sp1", name: "renamed here", folder: "/home/someone/dev/demo", machine: null }];
   const r = carryOver(own, [], new Map<string | null, any>([[null, here], ["bare", null]]))!;
   expect(r.spaces.filter((s) => s.id === "sp1" && !s.machine)).toEqual([own[0]]);
   expect(r.spaces.length).toBe(2);
-  expect(r.imported).toEqual(["", "bare"]);
+  // its copy may still be on its way at the switch: not marked done with its spaces missing
+  expect(r.imported).toEqual([""]);
 });
