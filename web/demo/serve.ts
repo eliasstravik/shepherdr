@@ -23,10 +23,26 @@ const patchTask = (id: string, p: Partial<Task>) => each((snap) => { snap.tasks 
 const say = (key: string, m: Partial<Message>) => { (chats[key] ??= { key, messages: [], cli: 'claude', top: true }).messages.push({ id: `n${++n}`, who: 'agent', at: Date.now(), ...m } as Message); pushChat(key) }
 
 function action(a: Record<string, any>): unknown {
+  if (a.type === 'screen') {
+    if (a.op === 'handback' || a.op === 'skip') each((snap) => { const screen = snap.screens?.[a.key]; if (screen?.hands) screen.hands.settled = a.op === 'skip' ? 'skip' : 'done' })
+    return { ok: true }
+  }
   if (a.type === 'catalog') return { ok: true, catalog: catalog(a.machine) }
   if (a.type === 'send') {
     say(a.chat, { who: 'you', text: a.text, cid: a.cid })
-    setTimeout(() => say(a.chat, { text: a.chat.endsWith('/worker') ? "Thanks. I'll take that on board and carry on." : 'Got it. This demo only shows the screens: nothing is wired to a real agent.' }), 1200)
+    const text = String(a.text ?? '')
+    const place = a.chat.startsWith('p:') ? a.chat.slice(2).replace(':', '/') : EV
+    if (/add a task to /i.test(text)) {
+      const title = text.replace(/^.*?add a task to /i, '').replace(/,?\s*(?:and )?don['’]?t start it yet.*$/i, '').trim() || 'New task'
+      const later = /don['’]?t start|not yet/i.test(text), id = `DEMO-${++n}`
+      each((snap) => { snap.tasks = [...snap.tasks, { id, name: title, place, status: later ? 'todo' : 'work', state: later ? 'todo' : 'work', on: snap.places.find((p) => p.id === place)?.machine ?? snap.host, created: '', age: '', ...(later ? {} : { started: Date.now(), report: { msg: 'Just started' }, agent: { chat: `${id}/worker`, role: 'worker', cli: 'claude', status: 'work', running: true, age: '', note: '' } }) }] })
+      setTimeout(() => say(a.chat, { text: later ? `Added ${title} to Up next.` : `Started ${title}.` }), 500)
+    } else if (/remind me /i.test(text)) {
+      const id = `DEMO-S${++n}`, title = text.replace(/^.*?remind me to /i, '').replace(/\s+(?:on|every)\s+.*$/i, '').trim() || 'Reminder'
+      const when = /every\s+(.+)$/i.exec(text)?.[1] ?? /on\s+(.+)$/i.exec(text)?.[1] ?? 'Once'
+      each((snap) => { (snap.automations[place] ??= []).push({ id, name: title, place, when, what: text, on: true, next: [] }) })
+      setTimeout(() => say(a.chat, { text: `I'll remind you ${when}.` }), 500)
+    } else setTimeout(() => say(a.chat, { text: a.chat.endsWith('/worker') ? "Thanks. I'll take that on board and carry on." : 'Got it. This demo only shows the screens: nothing is wired to a real agent.' }), 1200)
     return { ok: true, at: Date.now() }
   }
   if (a.type === 'answer') {
@@ -45,7 +61,7 @@ function action(a: Record<string, any>): unknown {
   if (a.type === 'evidence') {
     const files: Record<string, [string, number, number][]> = { 'SHOP-12': [['src/search/index.ts', 42, 17], ['src/search/cache.ts', 58, 0], ['test/search.test.ts', 31, 2]], 'BLOG-10': [['content/about.md', 3, 3]] }
     const list = (files[a.task] ?? []).map(([path, added, removed]) => ({ path, added, removed }))
-    return { ok: true, evidence: { diff: list.length ? { files: list.length, added: 0, removed: 0, list } : undefined, checks: a.task === 'SHOP-12' ? { state: 'passed', text: 'checks passed' } : { state: 'none', text: '' } } }
+    return { ok: true, evidence: { diff: list.length ? { files: list.length, added: 0, removed: 0, list } : undefined, checks: a.task === 'SHOP-12' ? { state: 'passed', text: 'checks passed' } : a.task === 'BLOG-10' ? { state: 'passed', text: 'site builds' } : { state: 'none', text: '' } } }
   }
   const t = a.chat ? taskOf(a.chat) : undefined
   if (a.type === 'close' && t) return patchTask(t.id, { status: 'done', doneAt: Date.now() }), { ok: true }
@@ -121,6 +137,7 @@ Bun.serve<{ mode: 'normal' | 'empty' | 'down'; watch: string[] }, never>({
       const c = /(?:^|;\s*)demo-case=(\w+)/.exec(req.headers.get('cookie') ?? '')?.[1]
       return server.upgrade(req, { data: { mode: c === 'empty' || c === 'down' ? c : 'normal', watch: [] } }) ? undefined : new Response('no', { status: 400 })
     }
+    if (path === '/api/screen/shot') return new Response(Bun.file(shotFile(url.searchParams.get('key') ?? '')), { headers: { 'content-type': 'image/jpeg', 'cache-control': 'no-store' } })
     if (path === '/api/me') return Response.json({ login: 'sam', off: [] })
     if (path === '/api/action') return Response.json(action((await req.json()) as Record<string, any>) ?? { ok: true })
     if (path === '/api/upload') return Response.json({ path: `/tmp/demo/${Date.now()}`, name: 'file' })

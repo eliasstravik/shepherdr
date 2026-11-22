@@ -45,7 +45,9 @@ export function QuestionCard({ q, chat, place }: { q: Question; chat: string; pl
   const [picked, setPicked] = useState<number[]>([])
   const [answers, setAnswers] = useState<{ choice?: number; choices?: number[] }[]>([])
   const down = downLine(snap, place)
-  if (q.sent !== undefined) return <DoneRow>{q.command ? (q.sent === 0 ? 'You allowed this' : 'You declined this') : `You answered${q.said ? `: ${q.said}` : ''}`}</DoneRow>
+  if (q.sent !== undefined && q.command !== undefined) return <DoneRow>{q.sent === 0 ? 'You allowed this' : 'You declined this'}</DoneRow>
+  // an answered question: the answer shows as your message (the agent's reply follows it in the chat)
+  if (q.sent !== undefined) return <p className="b mine gap">{q.said || q.choices[q.sent]?.label || 'Answered'}</p>
   if (q.closed) return <DoneRow>{q.closed}</DoneRow>
   if (down) return down
   const say = async (body: Record<string, unknown>) => {

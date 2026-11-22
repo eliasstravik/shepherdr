@@ -145,10 +145,11 @@ function Open({ a, where }: { a: Artifact; where: 'pane' | 'middle' }) {
   const send = async () => {
     const t = note.trim()
     if (!t) return
+    // the note goes to the agent that made it, with the spot pointed at; if that agent is gone, to its space's chat.
+    // One that did not go through stays in the box, with its pin, to send again
+    if (!(await tryAct({ type: 'artifact-note', place: a.place, artifact: a.id, v, note: t, ...(pin ? { spot: pin } : {}) }, 'Sent to the agent that made it'))) return
     setNote('')
     setMarkup(false)
-    // the note goes to the agent that made it, with the spot pointed at; if that agent is gone, to its space's chat
-    await tryAct({ type: 'artifact-note', place: a.place, artifact: a.id, v, note: t, ...(pin ? { spot: pin } : {}) }, 'Sent to the agent that made it')
   }
   const back = where === 'middle' ? { label: 'Back', run: () => setUI({ artWide: false }) } : { label: 'Back to artifacts', run: () => setUI({ art: null }) }
   return (

@@ -184,6 +184,22 @@ function BrowserView({ k, drive, ring, send, state, onFrameRef }: { k: string; d
   )
 }
 
+/** The fictional day has a small interactive stand-in for its sign-in and desktop. */
+function DemoPicture({ k, drive, desktop }: { k: string; drive: boolean; desktop: boolean }) {
+  const [code, setCode] = useState('')
+  const [continued, setContinued] = useState(false)
+  const login = k.includes('SHOP-17') && !desktop
+  return <div className="scr" style={{ position: 'relative', aspectRatio: '8 / 5', background: '#fff' }}>
+    <img src={shotUrl(k, desktop ? 'd' : 'b')} alt={desktop ? 'Demo desktop' : 'Demo browser'} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+    {login && drive && !continued && <>
+      <input aria-label="Sign-in code" inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} style={{ position: 'absolute', left: '31.25%', top: '43.75%', width: '37.5%', height: '9%', fontSize: 'clamp(12px, 2vw, 26px)', padding: '0 1.5%', background: 'white', color: '#111', border: '1px solid #ccc', borderRadius: 8 }} />
+      <button type="button" aria-label="Continue" onClick={() => code && setContinued(true)} style={{ position: 'absolute', left: '31.25%', top: '55%', width: '37.5%', height: '9%', opacity: 0 }} />
+    </>}
+    {login && continued && <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#111', background: '#fff' }}>Signed in. You can hand back to the agent.</div>}
+    {!drive && <button type="button" className="veil" aria-label="Live view. Take over to click and type" onClick={() => notice('Take over to click and type')} />}
+  </div>
+}
+
 /* ---------- the desktop's live picture ---------- */
 
 /** A desktop, drawn by a screen client (VNC) through Shepherdr's own connection. On a phone: pinch to zoom, drag to
@@ -341,7 +357,7 @@ function ScreenPane() {
         </div>
       )}
       <div onPointerDown={bump} onKeyDown={bump}>
-        {src === 'b' ? <BrowserView k={k} drive={drive} ring={driving} send={send} state={state} onFrameRef={frame} /> : <DesktopView k={k} drive={drive} ring={driving} apiRef={desk} />}
+        {snap.demo ? <DemoPicture key={`${k}:${src}`} k={k} drive={drive} desktop={src === 'd'} /> : src === 'b' ? <BrowserView k={k} drive={drive} ring={driving} send={send} state={state} onFrameRef={frame} /> : <DesktopView k={k} drive={drive} ring={driving} apiRef={desk} />}
       </div>
     </PaneFrame>
   )

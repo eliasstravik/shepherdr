@@ -689,10 +689,16 @@ async function doAction(body: any): Promise<Response> {
     const sp = (model.spaces as any[]).find((x) => x.id === body.place);
     if (sp && body.on !== false) {
       const bare = String(sp.id).split("/").pop();
-      for (const r of (model.rows as any[]).filter((x) => x.section === "working" && (x.space ? x.space === sp.id : (x.machine ?? null) === (sp.machine ?? null) && x.folder === sp.folder)))
-        await act(hub, { type: "stop", chat: `${r.machine ? `${r.machine}:${r.ref}` : r.ref}/worker` }, compat).catch(() => null);
+      // a task that would not stop, or schedules that would not pause: said plainly, and the space stays as it is
+      const failed: string[] = [];
+      for (const r of (model.rows as any[]).filter((x) => x.section === "working" && (x.space ? x.space === sp.id : (x.machine ?? null) === (sp.machine ?? null) && x.folder === sp.folder))) {
+        const out: any = await act(hub, { type: "stop", chat: `${r.machine ? `${r.machine}:${r.ref}` : r.ref}/worker` }, compat).catch((e) => ({ ok: false, error: (e as Error).message }));
+        if (out?.ok === false) failed.push(r.title);
+      }
+      if (failed.length) return json({ ok: false, error: `Couldn't stop ${failed.map((t) => `“${t}”`).join(", ")}. Nothing was ${body.type === "space-remove" ? "removed" : "archived"}: stop ${failed.length === 1 ? "it" : "them"} first, or try again.` });
       // an archived or removed space's schedules stop
-      await Bun.spawn(["herdr-task", ...(sp.machine ? ["--on", sp.machine] : []), "auto", "pause", "--space", bare, "--all", "--folder", sp.folder, "--json"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" }).exited.catch(() => null);
+      const paused = await Bun.spawn(["herdr-task", ...(sp.machine ? ["--on", sp.machine] : []), "auto", "pause", "--space", bare, "--all", "--folder", sp.folder, "--json"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" }).exited.catch(() => 1);
+      if (paused !== 0) return json({ ok: false, error: `Couldn't stop its schedules. Nothing was ${body.type === "space-remove" ? "removed" : "archived"}: try again.` });
     } else if (sp && body.type === "space-archive") {
       await Bun.spawn(["herdr-task", ...(sp.machine ? ["--on", sp.machine] : []), "auto", "resume", "--space", String(sp.id).split("/").pop()!, "--all", "--folder", sp.folder, "--json"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" }).exited.catch(() => null);
     }

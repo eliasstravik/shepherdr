@@ -165,7 +165,8 @@ export function ReviewCard({ t, ctx }: { t: Task; ctx: 'chat' | 'thread' }) {
   const merging = t.status === 'merging' || !!t.accepting
   const where = branch ? 'On its own branch' : t.repo === 'folder' ? 'Changed in the folder, no branch' : 'Not a repo'
   const files = ev?.diff?.list ?? []
-  const checks = ev?.checks && ev.checks.state !== 'none' && ev.checks.state !== 'unknown' ? (ev.checks.state === 'passed' ? 'checks passed' : ev.checks.state === 'failed' ? 'checks failed' : 'checks running') : ''
+  // what its checks say, in their own words where they have some ("site builds")
+  const checks = ev?.checks && ev.checks.state !== 'none' && ev.checks.state !== 'unknown' ? (ev.checks.state === 'passed' ? ev.checks.text || 'checks passed' : ev.checks.state === 'failed' ? 'checks failed' : 'checks running') : ''
   const foldWords = files.length ? [`${files.length} ${files.length === 1 ? 'file' : 'files'} changed${branch ? '' : ' in the folder'}`, checks].filter(Boolean).join(' · ') : ''
   const proof = t.proof ?? (typeof ev?.proof === 'string' ? ev.proof : ev?.proof?.id)
   return (

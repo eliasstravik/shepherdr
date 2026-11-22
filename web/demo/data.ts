@@ -86,6 +86,7 @@ export function snapshot(mode: 'normal' | 'empty' | 'down' = 'normal'): Snapshot
   const empty = mode === 'empty'
   const down = mode === 'down'
   return {
+    demo: true,
     terminalTransport: 'core',
     name: 'Shepherdr',
     host: 'mac-mini',
