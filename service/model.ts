@@ -146,6 +146,11 @@ export class Model {
     if (!existsSync(join(state, "herdr-core", session, "core.json"))) return {};
     const client = await CoreClient.endpoint({ binary: process.env.SHEPHERDR_HC || "hc", ...(session !== "default" ? { session } : {}) });
     try {
+      if (machine) {
+        const { machines } = await client.call<{ machines: any[] }>("machine.list", {}, 8000);
+        const prior = machines.find((m) => m.name === machine);
+        if (prior && prior.state !== "connected") throw new Error("The old session's machine is offline");
+      }
       const { terminals } = await client.call<{ terminals: any[] }>("terminal.list", {}, 8000);
       const found: Record<string, { path: string; kind: string }> = {};
       for (const t of terminals) {
