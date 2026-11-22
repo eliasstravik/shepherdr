@@ -18,8 +18,9 @@
 :root[data-motion="reduced"] .tg i{transition:none}
 
 /* an agent's own logo */
-.logo.img{box-shadow:none}.logo.img img{display:block;width:16px;height:16px}
-:root:not([data-theme="light"]) .logo.img img{filter:none}
+.logo.img{box-shadow:none}.logo.img img{display:block;width:16px;height:16px;object-fit:contain}
+:root[data-theme="dark"] .logo.img.pi img{filter:invert(1)}
+@media(prefers-color-scheme:dark){:root:not([data-theme]) .logo.img.pi img{filter:invert(1)}}
 
 /* a bubble is a button where it has a menu; its words can still be selected when asked */
 .b{display:block;text-align:left;font:inherit;color:inherit;border:0}

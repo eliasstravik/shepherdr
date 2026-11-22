@@ -7,3 +7,7 @@ and mods/toasts (from Herdr's toast). The Herdr app is licensed under the Apache
 is in LICENSE-herdr. Those parts stay under that license.
 
 Some icons in the mods come from Lucide (https://lucide.dev, ISC license), as the Herdr app ships them.
+
+Agent marks in web/public/agents include icons from Lobe Icons (https://github.com/lobehub/lobe-icons,
+MIT; LICENSE-LobeHub.txt), Droid from Factory (https://github.com/Factory-AI/factory, Apache 2.0;
+LICENSE-Droid.txt), and Pi from badlogic/pi-mono (https://github.com/badlogic/pi-mono, MIT; LICENSE-Pi.txt).

@@ -551,13 +551,14 @@ const voiceIO: VoiceIO = {
   },
   async send(key, text) { await act(hub, { type: "send", chat: key, text, human: true }, compat); },
   async action(body) {
+    const answeredAt = Date.now();
     const r = await doAction(body);
     const text = await r.text();
     if (!r.ok) throw new Error(text.trim() || "That didn't go through.");
     let result: any;
     try { result = JSON.parse(text); } catch { result = { ok: true }; }
     if (result?.ok !== false && body.type === "answer" && body.byVoice === true && typeof body.question === "string" && typeof body.chat === "string" && typeof body.voiceAnswer === "string") {
-      const entry = { id: body.question, chat: body.chat, text: body.voiceAnswer.slice(0, 4000), at: Date.now() };
+      const entry = { id: body.question, chat: body.chat, text: body.voiceAnswer.slice(0, 4000), at: answeredAt };
       await store.update((v) => ({ ...v, "voice.answers": [...(Array.isArray(v["voice.answers"]) ? v["voice.answers"] as any[] : []).filter((x: any) => x.id !== entry.id), entry].slice(-200) })).catch(() => {});
       live.chats?.refreshAll();
     }
