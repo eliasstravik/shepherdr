@@ -85,7 +85,7 @@ function useLink(key: string, onFrame: (data: string, width: number) => void) {
 
 /** The page as the agent's browser draws it: the latest frame wins. Driving, your clicks, keys and touches go to it;
  *  on a phone, tapping it brings up the phone's own keyboard. */
-function BrowserView({ k, drive, send, state, onFrameRef }: { k: string; drive: boolean; send: (m: BrowserUp) => void; state: State | null; onFrameRef: React.MutableRefObject<(data: string, width: number) => void> }) {
+function BrowserView({ k, drive, ring, send, state, onFrameRef }: { k: string; drive: boolean; ring: boolean; send: (m: BrowserUp) => void; state: State | null; onFrameRef: React.MutableRefObject<(data: string, width: number) => void> }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const typed = useRef<HTMLInputElement>(null)
   const phone = useUI((u) => u.phone)
@@ -100,6 +100,8 @@ function BrowserView({ k, drive, send, state, onFrameRef }: { k: string; drive: 
     const b = bitmap.current
     if (!c || !b) return
     const dpr = devicePixelRatio || 1
+    // the box takes the picture's own shape, whatever size the pane has
+    c.style.aspectRatio = `${b.width} / ${b.height}`
     const w = c.clientWidth
     const h = Math.round((w * b.height) / b.width)
     if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
@@ -161,7 +163,7 @@ function BrowserView({ k, drive, send, state, onFrameRef }: { k: string; drive: 
   }
   const blank = !has && !state?.url
   return (
-    <div className={cx('scr', drive && 'drive', blank && 'idle')} tabIndex={drive ? 0 : -1} onKeyDown={(e) => { if (!drive || e.target !== e.currentTarget) return; const k1 = keyEvent(e.nativeEvent, 'keyDown'); if (k1) { e.preventDefault(); send(k1) } }} onKeyUp={(e) => { if (!drive || e.target !== e.currentTarget) return; const k1 = keyEvent(e.nativeEvent, 'keyUp'); if (k1) send(k1) }}>
+    <div className={cx('scr', ring && 'drive', blank && 'idle')} tabIndex={drive ? 0 : -1} onKeyDown={(e) => { if (!drive || e.target !== e.currentTarget) return; const k1 = keyEvent(e.nativeEvent, 'keyDown'); if (k1) { e.preventDefault(); send(k1) } }} onKeyUp={(e) => { if (!drive || e.target !== e.currentTarget) return; const k1 = keyEvent(e.nativeEvent, 'keyUp'); if (k1) send(k1) }}>
       <canvas
         ref={canvas}
         aria-label={drive ? 'Live view. Click and type' : 'Live view'}
@@ -186,7 +188,7 @@ function BrowserView({ k, drive, send, state, onFrameRef }: { k: string; drive: 
 
 /** A desktop, drawn by a screen client (VNC) through Shepherdr's own connection. On a phone: pinch to zoom, drag to
  *  pan, tap to click, long-press to right-click, and a keyboard button with the extra keys. */
-function DesktopView({ k, drive, apiRef }: { k: string; drive: boolean; apiRef: React.MutableRefObject<{ paste(t: string): void; shot(): string | null } | null> }) {
+function DesktopView({ k, drive, ring, apiRef }: { k: string; drive: boolean; ring: boolean; apiRef: React.MutableRefObject<{ paste(t: string): void; shot(): string | null } | null> }) {
   const host = useRef<HTMLDivElement>(null)
   const typed = useRef<HTMLInputElement>(null)
   const rfb = useRef<import('@novnc/novnc').default | null>(null)
@@ -219,7 +221,7 @@ function DesktopView({ k, drive, apiRef }: { k: string; drive: boolean; apiRef: 
   const KEYS: [string, number, string][] = [['esc', 0xff1b, 'Escape'], ['tab', 0xff09, 'Tab'], ['←', 0xff51, 'ArrowLeft'], ['↑', 0xff52, 'ArrowUp'], ['↓', 0xff54, 'ArrowDown'], ['→', 0xff53, 'ArrowRight']]
   return (
     <>
-      <div className={cx('scr', drive && 'drive')} style={{ aspectRatio: phone ? '4/3' : '16/10' }}>
+      <div className={cx('scr', ring && 'drive')} style={{ aspectRatio: phone ? '4/3' : '16/10' }}>
         <div ref={host} style={{ position: 'absolute', inset: 0 }} />
         {status && <div className="empty" style={{ position: 'absolute', inset: 0, padding: 24, alignContent: 'center' }}><span>{status}</span></div>}
         {!drive && <button type="button" className="veil" aria-label="Live view. Take over to click and type" onClick={() => notice('Take over to click and type')} />}
@@ -339,7 +341,7 @@ function ScreenPane() {
         </div>
       )}
       <div onPointerDown={bump} onKeyDown={bump}>
-        {src === 'b' ? <BrowserView k={k} drive={drive} send={send} state={state} onFrameRef={frame} /> : <DesktopView k={k} drive={drive} apiRef={desk} />}
+        {src === 'b' ? <BrowserView k={k} drive={drive} ring={driving} send={send} state={state} onFrameRef={frame} /> : <DesktopView k={k} drive={drive} ring={driving} apiRef={desk} />}
       </div>
     </PaneFrame>
   )

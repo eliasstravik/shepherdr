@@ -82,7 +82,8 @@ export const sessionOf = (key: string, name = safe(key)) =>
   name.length <= 32 ? `herdr-${name}` : `herdr-${name.slice(-20).replace(/^-+/, "")}-${createHash("sha256").update(key).digest("hex").slice(0, 8)}`;
 /** the name its files carry, as bin/herdr-browser and bin/herdr-desktop make it */
 export const nameOf = (w: Pick<Who, "task" | "space">) => (w.task ? safe(w.task) : `chat-${safe(w.space)}`);
-const bin = (name: string) => [join(HOME, ".local", "bin", name), join(HOME, ".config", "herdr-app", "bin", name)].find(existsSync) ?? name;
+// (a throwaway service names its own: SHEPHERDR_HERDR_BROWSER / SHEPHERDR_HERDR_DESKTOP, as SHEPHERDR_HC for hc)
+const bin = (name: string) => process.env[`SHEPHERDR_${name.toUpperCase().replace(/-/g, "_")}`] || ([join(import.meta.dir, "..", "bin", name), join(HOME, ".local", "bin", name)].find(existsSync) ?? name);
 
 export function createScreens(deps: Deps) {
   const root = deps.root ?? where().browser;
