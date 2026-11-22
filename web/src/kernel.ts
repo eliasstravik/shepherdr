@@ -702,7 +702,8 @@ export function go(place: string) {
     wide: false,
     artWide: false,
     search: false,
-    ...(ui.phone ? { pane: null, task: null, art: null } : ui.pane === 'tasks' ? { task: null } : {}),
+    // another space: the open task goes with the one it was opened in
+    ...(ui.phone ? { pane: null, task: null, art: null } : { task: null }),
     ...(ui.pane === 'screen' && ui.scr ? (ui.scr.key.startsWith('chat:') ? { scr: { key: `chat:${place}`, src: 'b' as const, drive: false } } : { pane: null }) : {}),
   }))
 }
