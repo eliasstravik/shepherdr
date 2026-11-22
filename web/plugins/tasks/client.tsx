@@ -231,7 +231,7 @@ function taskCards(snap: Snapshot, thread: Thread): { key: string; at?: number; 
   }
   const mine = tasksIn(snap, thread.place)
   return [
-    ...mine.filter(reviewing).map((t) => ({ key: `review:${t.id}`, at: t.needsAt ?? t.needsAtWas, node: <ReviewCard t={t} ctx="chat" /> })),
+    ...mine.filter(reviewing).map((t, i) => ({ key: `review:${t.id}`, at: snap.demo ? new Date().setHours(7, 30, 0, i + 1) : t.needsAt ?? t.needsAtWas, node: <ReviewCard t={t} ctx="chat" /> })),
     ...mine.filter(halted).map((t) => ({
       key: `stopped:${t.id}`,
       at: t.needsAt,
