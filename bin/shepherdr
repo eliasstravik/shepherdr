@@ -1295,8 +1295,15 @@ def cmd_install(a, update=False):
     switching = bool(prev) and version_tuple(prev)[:2] < (3, 2)
     working = (working_tasks(root) + remote_working_tasks(root)) if switching else []
     if working and not a.force and not a.dry_run:
-        raise Stop(f"Shepherdr {VERSION} replaces {prev} in one switch. These tasks are still working or machines couldn't be checked:\n  " + "\n  ".join(working[:40])
-                   + "\nNothing was changed. Run this again once they finished or you stopped them (--force switches now).")
+        unchecked = [x for x in working if x.endswith("cannot check its tasks") or x == "linked machines: cannot check their tasks"]
+        busy = [x for x in working if x not in unchecked]
+        parts = []
+        if busy:
+            parts.append(f"{len(busy)} task{'s are' if len(busy) != 1 else ' is'} still working on the old version:\n  " + "\n  ".join(busy[:40]))
+        if unchecked:
+            parts.append("Couldn't check these machines:\n  " + "\n  ".join(unchecked[:40]))
+        raise Stop(f"Shepherdr {VERSION} replaces {prev} in one switch. " + "\n".join(parts)
+                   + "\nNothing was changed. Try again once the tasks have finished and the machines can be checked (--force switches now).")
     say(f"Shepherdr {VERSION} {'update' if update else 'install'} from {src}")
     say(f"  into {root}{' (dry run: nothing is written)' if a.dry_run else ''}")
     if working:
