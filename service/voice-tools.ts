@@ -349,7 +349,7 @@ function lookSpaces(snap: Snapshot) {
     const rows = mine.map((p) => {
       const ts = snap.tasks.filter((t) => t.place === p.id && !t.archived);
       const n = (s: string) => ts.filter((t) => t.status === s).length;
-      const bits = [p.mode === "autopilot" || p.pilot?.on ? "Autopilot on" : "", n("need") ? `${n("need")} need you` : "", n("ready") ? `${n("ready")} ready` : "", n("work") ? `${n("work")} working` : ""].filter(Boolean);
+      const bits = [n("need") ? `${n("need")} need you` : "", n("ready") ? `${n("ready")} ready` : "", n("work") ? `${n("work")} working` : ""].filter(Boolean);
       return `${p.name}${p.home ? " (home)" : ""}${bits.length ? `: ${bits.join(", ")}` : ""}`;
     });
     out.push(`On ${machineSaid(snap, m.machine)}${m.status === "off" ? " (offline)" : ""}: ${rows.join("; ")}.`);
@@ -468,25 +468,6 @@ function lookNews(snap: Snapshot, count: number) {
   items.sort((a, b) => b.at - a.at);
   if (!items.length) return done("No news.");
   return done(`Latest first:\n${items.slice(0, count).map((x) => `${ago(x.at)}: ${x.text}.`).join("\n")}`);
-}
-
-function pilotLine(snap: Snapshot, p: Place) {
-  const a = p.pilot;
-  const on = a?.on ?? p.mode === "autopilot";
-  if (!on) return `${p.name}: Autopilot off.`;
-  const bits = [a?.inflight ? "waking now" : a?.pending ? "queued to wake" : a?.next_run ? `next wake ${inTime(a.next_run * (a.next_run < 1e12 ? 1000 : 1))}` : "", a?.blank ? "its heartbeat is still empty" : ""].filter(Boolean);
-  const last = a?.events?.length ? ` Latest: ${cut(a.events[a.events.length - 1], 140)}.` : "";
-  return `${p.name}: Autopilot on${bits.length ? `, ${bits.join(", ")}` : ""}.${last}`;
-}
-
-function lookAutopilot(snap: Snapshot, where: Where, id: unknown) {
-  if (id) {
-    const p = findSpace(snap, id, where);
-    if (!p) return fail(`I can't find a space called "${cut(String(id), 60)}".`);
-    return done(pilotLine(snap, p));
-  }
-  const on = snap.places.filter((p) => p.pilot?.on || p.mode === "autopilot");
-  return done(on.length ? `Autopilot is on in ${on.length} space${on.length === 1 ? "" : "s"}:\n${on.map((p) => pilotLine(snap, p)).join("\n")}` : "Autopilot is off in every space.");
 }
 
 function lookAutomations(snap: Snapshot, where: Where, id: unknown) {
@@ -618,14 +599,13 @@ export async function voiceTool(name: string, params: any, where: Where, io: Voi
         case "task": return await lookTask(io, snap, where, id);
         case "needs": return lookNeeds(snap);
         case "news": return lookNews(snap, p.count ? count : 8);
-        case "autopilot": return lookAutopilot(snap, where, id);
         case "automations": return lookAutomations(snap, where, id);
         case "settings": return lookSettings(snap, where, id, query);
         case "secrets": return lookSecrets(snap);
         case "artifacts": return lookArtifacts(snap, where, query, p.count ? count : 8);
         case "data": return await lookData(io, snap, where, id, typeof p.path === "string" ? p.path.slice(0, 300) : "", query);
       }
-      return fail(`look can read: here, chat, spaces, machines, tasks, task, needs, news, autopilot, automations, settings, secrets, artifacts, data.`);
+      return fail(`look can read: here, chat, spaces, machines, tasks, task, needs, news, automations, settings, secrets, artifacts, data.`);
     }
     if (name === "open") return open(snap, where, io, String(p.what ?? ""), id, typeof p.tab === "string" ? p.tab : "", query);
     if (name === "send") {
@@ -733,7 +713,7 @@ async function act(snap: Snapshot, where: Where, io: VoiceIO, p: any, id: string
   const key = typeof p.key === "string" ? p.key.trim().slice(0, 200) : "";
   const confirmed = p.confirmed === true;
   const TASK = ["accept", "start", "schedule", "unschedule", "stop", "resume", "done", "reopen", "delete", "pin", "unpin"];
-  const SPACE = ["autopilot_on", "autopilot_off", "autopilot_run", "rename_space", "remove_space"];
+  const SPACE = ["rename_space", "remove_space"];
   let ask = "", body: Record<string, unknown> | null = null, said = "";
   if (TASK.includes(action)) {
     const t = findTask(snap, id, where);
@@ -766,9 +746,6 @@ async function act(snap: Snapshot, where: Where, io: VoiceIO, p: any, id: string
     const sp = findSpace(snap, id, where);
     if (!sp) return fail(isHere(id) ? "Which space?" : `I can't find a space called "${cut(id, 60)}".`);
     switch (action) {
-      case "autopilot_on": ask = `Turn Autopilot on in ${sp.name}? Its Assistant then works on its own.`; body = { type: "mode", place: sp.id, mode: "autopilot" }; said = `Autopilot is on in ${sp.name}.`; break;
-      case "autopilot_off": ask = `Turn Autopilot off in ${sp.name}?`; body = { type: "mode", place: sp.id, mode: "regular" }; said = `Autopilot is off in ${sp.name}.`; break;
-      case "autopilot_run": ask = `Wake ${sp.name}'s Autopilot now?`; body = { type: "autopilot-run", place: sp.id }; said = `${sp.name}'s Autopilot wakes now.`; break;
       case "rename_space":
         if (!value) return fail("What should it be called?");
         ask = `Rename ${sp.name} to ${value}?`; body = { type: "rename", id: sp.id, name: value }; said = `Renamed it ${value}.`; break;
@@ -803,7 +780,7 @@ async function act(snap: Snapshot, where: Where, io: VoiceIO, p: any, id: string
     const a = isHere(id) && where.artifact ? snap.artifacts.find((x) => x.id === where.artifact) : snap.artifacts.find((x) => x.id === id) ?? (ws.length ? snap.artifacts.find((x) => ws.every((w) => x.title.toLowerCase().includes(w))) : null);
     if (!a) return fail(`I can't find an artifact like "${cut(id, 60)}".`);
     ask = `Delete the artifact "${cut(a.title, 80)}" and its versions?`; body = { type: "artifact-delete", place: a.place, artifact: a.id }; said = `Deleted "${cut(a.title, 80)}".`;
-  } else return fail(`act can do: ${["accept", "start", "schedule", "unschedule", "stop", "resume", "done", "reopen", "delete", "pin", "unpin", "autopilot_on", "autopilot_off", "autopilot_run", "rename_space", "remove_space", "setting", "forget_secret", "delete_artifact"].join(", ")}. Anything else goes to the space's Assistant with send.`);
+  } else return fail(`act can do: ${["accept", "start", "schedule", "unschedule", "stop", "resume", "done", "reopen", "delete", "pin", "unpin", "rename_space", "remove_space", "setting", "forget_secret", "delete_artifact"].join(", ")}. Anything else goes to the space's Assistant with send.`);
   if (!confirmed) return done(`Nothing changed yet. Ask the person: "${ask}" Only after a clear yes, call act again with confirmed true.`);
   const r = await io.action(body!);
   if (r && typeof r === "object" && r.ok === false) return fail(cut(String(r.error ?? "It didn't go through."), 300));

@@ -68,7 +68,7 @@ test("SHEP-255: an alert carries the task it is about: its chat's, or a task's h
 });
 
 // SHEP-243: each alert's buttons do the thing from the phone or the watch, in words that fit a watch
-const watch = (snap: any) => [...alertsOf(snap, new Set(), (c) => (c === "sp1" ? "Merged **SHEP-9**, all green.\n\nNext: the login page." : undefined)).values()];
+const watch = (snap: any) => [...alertsOf(snap, (c) => (c === "sp1" ? "Merged **SHEP-9**, all green.\n\nNext: the login page." : undefined)).values()];
 test("a ready task's alert offers Accept, the Tasks panel's Accept", () => {
   const [a] = watch({ places: [], tasks: [{ id: "m3:HERD-4", name: "Fix login", status: "ready", place: "sp1" }], needs: [], settings: [] });
   // one button: Chrome on Android hands every site button over as the last one's action

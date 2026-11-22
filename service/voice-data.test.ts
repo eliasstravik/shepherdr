@@ -26,15 +26,29 @@ test("every api/ path the web app fetches is a voice data source, or not data wi
   expect(missing).toEqual([]);
 });
 
+// 3.2: actions the new app's buttons send that the service does not answer yet (known, wired later): each a change,
+// none a read. One the service starts answering moves to WRITES (service/voice-data.ts), and this list shrinks.
+const WIRED_LATER = ["task-start", "task-move", "task-rename", "artifact-pin", "artifact-rename", "artifact-restore", "artifact-keep", "screen"];
+// read actions the service answers for a voice call's look (SOURCES) that the app itself no longer sends: its picker
+// reads the catalog instead
+const VOICE_ONLY = ["usage", "model-menu", "role-info", "template", "machine-hosts"];
+
 test("every action the web app sends is a voice data source (a read) or a change (WRITES)", () => {
   const types = readFileSync(join(ROOT, "web/shared/types.ts"), "utf8");
   const union = types.slice(types.indexOf("export type Action ="), types.indexOf("\n\n", types.indexOf("export type Action =")));
-  const sent = new Set([...[...union.matchAll(/type: '([a-z.-]+)'/g)].map((m) => m[1]), ...[...WEB.matchAll(/act\(\{\s*type:\s*'([a-z.-]+)'/g)].map((m) => m[1])]);
+  // the app's own sends: act({ type: … }) and tryAct({ type: … }) (web/src/kernel.ts), with or without a type argument
+  const app = new Set([...WEB.matchAll(/\b(?:act|tryAct)(?:<[^(]*>)?\(\s*\{\s*type:\s*'([a-z.-]+)'/g)].map((m) => m[1]));
+  expect(app.size).toBeGreaterThan(25);
+  const sent = new Set([...[...union.matchAll(/type: '([a-z.-]+)'/g)].map((m) => m[1]), ...app]);
   expect(sent.size).toBeGreaterThan(30);
-  const missing = [...sent].filter((t) => !served.has(`action:${t}`) && !NOT_DATA[`action:${t}`] && !WRITES.includes(t));
+  const missing = [...sent].filter((t) => !served.has(`action:${t}`) && !NOT_DATA[`action:${t}`] && !WRITES.includes(t) && !WIRED_LATER.includes(t));
   expect(missing).toEqual([]);
+  // what is wired later is something the app really sends, and not already filed as answered
+  for (const t of WIRED_LATER) expect({ t, sent: app.has(t), filed: WRITES.includes(t) || served.has(`action:${t}`) }).toEqual({ t, sent: true, filed: false });
   // a read is never also filed as only a change
-  for (const s of served) if (s.startsWith("action:")) expect(sent.has(s.slice(7)) || s === "action:usage").toBe(true);
+  for (const s of served) if (s.startsWith("action:")) expect(sent.has(s.slice(7)) || VOICE_ONLY.includes(s.slice(7))).toBe(true);
+  // nothing of what 3.2 dropped is still listed
+  for (const t of ["mode", "autopilot-run", "tab-new", "tab-close", "tab-rename", "tab-switch", "tab-move", "fork", "worktree"]) expect(WRITES.includes(t) || served.has(`action:${t}`)).toBe(false);
 });
 
 const now = Date.now();
@@ -46,11 +60,10 @@ const snap: any = {
       claude: { state: "signed-out", at: now - 60_000 } } } },
     { id: "m:mini", machine: "mini", name: "Mac mini", status: "idle" },
   ],
-  places: [{ id: "sp1", name: "demo", machine: "vm", chat: "p:sp1", mode: "regular", level: 2, status: "idle" }],
+  places: [{ id: "sp1", name: "demo", machine: "vm", chat: "p:sp1", level: 2, status: "idle" }],
   tasks: [{ id: "DEMO-7", name: "Make the widget blue", status: "ready", place: "sp1", summary: "The widget is blue", at: now, age: "", state: "", on: "", created: "" }],
   needs: [], automations: {}, artifacts: [{ id: "a9", title: "DEMO-7 · Proof", place: "sp1", v: 1, at: now }], asks: {},
   settings: [
-    { name: "Window", level: "all", rows: [{ label: "Usage insights", key: "addon.insights", value: "on", options: ["on", "off"] }] },
     { name: "Secrets", level: "all", rows: [], vault: [{ name: "DEMO_API_KEY", scope: "everywhere", where: "Everywhere" }] },
     { name: "Voice", level: "all", rows: [{ label: "Token", key: "voice.token", value: "sk-demo0000000000000000fake", token: "abc123fake" }] },
   ],

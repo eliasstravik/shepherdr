@@ -265,13 +265,13 @@ export const PUSH_TOPICS = [
   { id: 'ready', label: 'Ready for review', about: 'A task finished and waits for your Accept' },
   { id: 'done', label: 'Done', about: 'A task merged or closed' },
   { id: 'assistant', label: 'Messages from the Assistant', about: "A space's Assistant wrote in its chat" },
-  { id: 'autopilot', label: 'Autopilot updates', about: 'What an Assistant did when its Autopilot woke it' },
 ] as const
 export type PushTopic = (typeof PUSH_TOPICS)[number]['id']
 /** a device turned on now: what needs you (its questions among them) and a task ready for its Accept; never routine
  *  progress (SHEP-243) */
 export const DEFAULT_TOPICS: PushTopic[] = ['needs', 'ready']
-/** a device turned on before it could choose: what it got then */
+/** a device turned on before it could choose: what it got then. A stored choice that names a topic there no longer
+ *  is (3.1's 'autopilot') still loads: pushTopics keeps only the topics there are */
 export const LEGACY_TOPICS: PushTopic[] = ['needs', 'ready']
 export const pushTopics = (v: unknown): PushTopic[] => (Array.isArray(v) ? PUSH_TOPICS.map((t) => t.id).filter((id) => v.includes(id)) : [...LEGACY_TOPICS])
 

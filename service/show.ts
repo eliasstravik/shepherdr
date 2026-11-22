@@ -1,10 +1,8 @@
 // An agent shows the person an artifact (`herdr-artifact open <id>`, SHEP-99): it sets the core label herdr.show =
 // { id, at, artifact } on its own terminal, which this service hears at once, the agent here or on another machine (as
 // herdr-task alert's herdr.alert). Only the machine that serves the web app acts on it: the page the person used last,
-// while on screen, opens the artifact (what matters is where the person is, as a voice call's open). None on screen: the
-// Herdr window on the serving machine opens it, for an agent on another machine (one here opened it in this window
-// itself: herdr-artifact open runs herdr-app where there is one).
-import { TOOL } from "./artifacts.ts";
+// while on screen, opens the artifact (what matters is where the person is, as a voice call's open). None on screen:
+// nothing opens (the artifact is in its chat and under Artifacts all the same).
 
 export const SHOW = "herdr.show";
 /** an ask older than this is stale when heard (a service started late, a label left from before) */
@@ -43,13 +41,3 @@ export class Shows {
   }
 }
 
-/** herdr-artifact's words to open another machine's artifact in this machine's window, in a new tab. */
-export const windowArgs = (a: ShowAsk) => ["open", a.artifact, "--from", a.machine!, "--tab", "--json"];
-
-/** Opens another machine's artifact in the window here (no window: nothing). Not as an agent: no ask of its own. */
-export async function showInWindow(a: ShowAsk) {
-  if (!a.machine || !/^[\w.-]{1,64}$/.test(a.machine)) return;
-  const { HC_TERMINAL_ID: _t, ...env } = process.env;
-  const p = Bun.spawn([TOOL, ...windowArgs(a)], { env, stdout: "ignore", stderr: "ignore", stdin: "ignore" });
-  await p.exited;
-}

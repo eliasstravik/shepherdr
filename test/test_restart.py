@@ -1,4 +1,4 @@
-"""mods/coordinator/restart.sh for another machine's agent: it runs there, over hc (SHEP-107)."""
+"""service/restart.sh for another machine's agent: it runs there, over hc (SHEP-107)."""
 import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import json
 import os
@@ -15,7 +15,7 @@ def read(p):
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPT = os.path.join(ROOT, "mods", "coordinator", "restart.sh")
+SCRIPT = os.path.join(ROOT, "service", "restart.sh")
 
 # A fake hc: logs each call (and what came on stdin); `exec` answers as the other machine would, `machine ls` says
 # whether that machine is reachable.

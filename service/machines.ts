@@ -85,18 +85,14 @@ export class Machines {
     }
   }
 
-  /** The window's own reads (its shared "machines.stats"): the agents installed on each machine, which only it knows. */
-  windowStats: () => Record<string, any> | null = () => null;
-
   /** 2.1's health and limits for a machine (null: here), and `stats`: the reads as the window keeps them, which the web's
    *  machine header and popup read with core/machines.js, as the window's do. */
   of(m: string | null) {
     const got = this.stats.get(m);
     if (!got) return {};
     const s = m === null && this.voice ? { ...got, limits: { ...(got.limits ?? {}), elevenlabs: this.voice } } : got;
-    const agents = this.windowStats()?.[m ?? ""]?.agents;
     const stats = { at: s.at, ...(s.error ? { error: s.error } : {}), ...(s.limitsAt ? { limitsAt: s.limitsAt } : {}), hold: s.hold,
-      ...(s.health ? { health: s.health } : {}), ...(s.limits ? { limits: s.limits } : {}), ...(Array.isArray(agents) ? { agents } : {}) };
+      ...(s.health ? { health: s.health } : {}), ...(s.limits ? { limits: s.limits } : {}) };
     if (!s.health) return { stats };
     const health = { engine: "core", herdr: true, working: 0, held: 0, at: new Date(s.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       meters: healthMeters(s).map((x: any) => ({ name: x.name, pct: x.pct, detail: x.detail, level: x.level })) };

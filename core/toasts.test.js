@@ -45,11 +45,6 @@ test("kept and gone", () => {
   expect(SHOWN).toBe(3);
 });
 
-test("the window's toasts say the same words as these (mods/chat, lib/ui.js), and mods/toasts reads its rules here", () => {
-  expect(read("mods/chat/main.js")).toContain('st === "blocked" ? "Needs you" : "Finished"');
-  expect(read("lib/inbox.js")).toContain("· Needs you`");
-  expect(read("lib/ui.js")).toContain("`${name} Assistant` : \"Assistant\"");
-  expect(read("mods/toasts/main.js")).toContain('from "./core/toasts.js"');
-  expect(read("web/plugins/alerts/toasts.tsx")).toContain("@core/toasts.js");
+test("the service's alerts read their words here", () => {
   expect(read("service/push.ts")).toContain("../core/toasts.js");
 });

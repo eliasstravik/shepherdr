@@ -36,7 +36,4 @@ describe("a CLI's start screen, read the same by the window and the service", ()
     expect(sent).toEqual([["keys", "t1", "enter"]]);
     expect(store.get("t1")[0]).toMatchObject({ state: "answered", how: SCREEN.answered("Yes, proceed") });
   });
-  test("the window's chat watches with this core", () => {
-    expect(readFileSync(join(import.meta.dir, "..", "mods/chat/screens.js"), "utf8")).toContain('from "./core/screens.js"');
-  });
 });

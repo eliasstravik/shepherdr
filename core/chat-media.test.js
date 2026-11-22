@@ -1,8 +1,6 @@
-// SHEP-142: media an agent puts in its message shows in the chat (core/chat-view.js mediaIn), and an artifact's card
-// previews it (core/recipe.js preview)
+// SHEP-142: media an agent puts in its message shows in the chat (core/chat-view.js mediaIn)
 import { expect, test } from "bun:test";
 import { mediaIn, mediaKind } from "./chat-view.js";
-import { preview, problems } from "./recipe.js";
 
 test("a Markdown picture of a local file leaves the words and shows under them", () => {
   const r = mediaIn("Here is the new card:\n\n![after](/tmp/shots/after.png)\n\nLooks right?");
@@ -52,26 +50,3 @@ test("at most 12, and its kind by name", () => {
   expect(mediaKind("a.pdf")).toBe(null);
 });
 
-test("an artifact's preview: its cover, then its first pictures, then its first words", () => {
-  const recipe = {
-    recipe: 1,
-    cover: "cover.png",
-    blocks: [
-      { type: "heading", text: "Coverage" },
-      { type: "text", md: "**92%** of lines are covered.\n\nMore below." },
-      { type: "pair", before: { src: "before.png" }, after: { src: "after.png" } },
-      { type: "image", src: "chart.png" },
-      { type: "list", items: ["one", "two", "three", "four"] },
-    ],
-  };
-  expect(preview(recipe)).toEqual({ images: ["cover.png", "before.png", "after.png"], videos: [], lines: ["Coverage", "**92%** of lines are covered.", "one · two · three"] });
-  expect(preview(recipe, { chars: 16 }).lines).toEqual(["Coverage", "**92%**…"]);
-  expect(preview({ blocks: [] })).toEqual({ images: [], videos: [], lines: [] });
-});
-
-test("a cover must be a picture beside it", () => {
-  const r = { recipe: 1, cover: "c.png", blocks: [{ type: "text", md: "x" }] };
-  expect(problems(r, ["c.png"])).toEqual([]);
-  expect(problems({ ...r, cover: "../c.png" }, ["c.png"]).length).toBe(1);
-  expect(problems(r, ["d.png"]).length).toBe(1);
-});

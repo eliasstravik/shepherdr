@@ -8,7 +8,7 @@ import { dirname } from "node:path";
 import type { Hub } from "./hub.ts";
 import { where, writable } from "./paths.ts";
 import { sh } from "./model.ts";
-import { layoutScript } from "./layout-scripts.ts";
+import { RESTART } from "./paths.ts";
 import * as AG from "../core/agents.js";
 import { chatLabel } from "../core/spaces.js";
 import { kindOf } from "../core/chat-reader.js";
@@ -243,13 +243,10 @@ export class Agents {
       try { out = JSON.parse(r.out || "{}"); } catch {}
       if (r.code !== 0 || !out.terminal) throw new Error((r.err || r.out).trim() || "herdr-task switch failed");
       if (pane) await run([process.env.SHEPHERDR_HC || "hc", "label", out.terminal, `herdr.chat=${chatLabel(pane)}`, `herdr.chat.origin=${t.labels?.["herdr.chat.origin"] || addr}`]);
-      await run(["herdr-app", "do", "terminal.park", "--terminal", out.terminal]);
       this.used(pick);
       return out.terminal as string;
     }
-    const script = layoutScript("restart.sh");
-    if (!script) throw new Error("This install can't restart an Assistant: update Shepherdr on that machine.");
-    const p = Bun.spawn(["bash", script, addr, JSON.stringify(built.argv)], { stdout: "pipe", stderr: "pipe", stdin: "ignore",
+    const p = Bun.spawn(["bash", RESTART, addr, JSON.stringify(built.argv)], { stdout: "pipe", stderr: "pipe", stdin: "ignore",
       env: { ...process.env, HERDR_RESTART_CHAT: pane, ...(built.resume ? { HERDR_RESTART_RESUME: "1" } : {}) } });
     const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
     const next = out.trim().split("\n").pop();

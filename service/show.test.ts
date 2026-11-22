@@ -1,7 +1,7 @@
 // herdr-artifact open (SHEP-99): an agent's herdr.show label, here or on another machine, opens the artifact on the
 // page the person used last that's on screen; an ask set before the service started, or seen once, never shows again.
 import { expect, test } from "bun:test";
-import { Shows, showAsk, windowArgs, SHOW, SHOW_FRESH } from "./show.ts";
+import { Shows, showAsk, SHOW, SHOW_FRESH } from "./show.ts";
 import { Live } from "./live.ts";
 
 const NOW = 1_800_000_000_000;
@@ -44,8 +44,4 @@ test("no page on screen: nothing to show it on", () => {
   const live = new Live({ on() {} } as any, { on() {} } as any, () => null, "0");
   (live as any).pages.add(page(NOW, false).ws);
   expect(live.show("x-1")).toBe(false);
-});
-
-test("no page on screen, another machine's ask: this window opens it from there, in a tab", () => {
-  expect(windowArgs({ id: "a1", at: NOW, artifact: "how-to-group-tasks-fa0a", machine: "vm" })).toEqual(["open", "how-to-group-tasks-fa0a", "--from", "vm", "--tab", "--json"]);
 });

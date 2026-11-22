@@ -8,8 +8,8 @@ const snap: any = {
   host: "vm", name: "Shepherdr", user: "You",
   machines: [{ id: "m:vm", machine: "vm", name: "This computer", status: "idle", here: true }, { id: "m:mini", machine: "mini", name: "Mac mini", status: "off", unreachableSince: "14:02" }],
   places: [
-    { id: "sp1", name: "shepherdr", machine: "vm", chat: "p:sp1", mode: "autopilot", level: 2, status: "idle", pilot: { on: true, next_run: Math.round((now + 3600_000) / 1000), pending: false, inflight: false, events: ["Started SHEP-45"], blank: false } },
-    { id: "mini/sp2", name: "gtm", machine: "mini", chat: "p:mini:sp2", mode: "regular", level: 2, status: "idle" },
+    { id: "sp1", name: "shepherdr", machine: "vm", chat: "p:sp1", level: 2, status: "idle" },
+    { id: "mini/sp2", name: "gtm", machine: "mini", chat: "p:mini:sp2", level: 2, status: "idle" },
   ],
   tasks: [
     { id: "SHEP-45", name: "Voice calls can read and navigate", status: "work", place: "sp1", left: "2h", report: { msg: "Writing tests", progress: 65 }, agent: { chat: "SHEP-45/worker", role: "worker", cli: "claude", status: "work", age: "" }, at: now - 60_000, age: "", state: "", on: "", created: "" },
@@ -127,7 +127,7 @@ test("look task: by spoken id, number or 'this'; a Ready one with its checks", a
   expect(need.result).toContain("It waits for: Which list?");
 });
 
-test("look needs, news, spaces, machines, autopilot, automations", async () => {
+test("look needs, news, spaces, machines, automations", async () => {
   const needs = (await voiceTool("look", { what: "needs" }, web, io())).result;
   expect(needs).toContain("GTM 3 asks: Which list? (choices: Sweden, Norway)");
   expect(needs).toContain("SHEP 41, \"Model menu: Fast switch\", is ready for review");
@@ -135,13 +135,12 @@ test("look needs, news, spaces, machines, autopilot, automations", async () => {
   expect(news.split("\n")[1]).toContain("SHEP 50");
   expect(news).toContain("Alert, Memory at 91%");
   const spaces = (await voiceTool("look", { what: "spaces" }, web, io())).result;
-  expect(spaces).toContain("On This computer (vm): shepherdr: Autopilot on, 1 ready, 1 working.");
+  expect(spaces).toContain("On This computer (vm): shepherdr: 1 ready, 1 working.");
   expect(spaces).toContain("On Mac mini (offline): gtm: 1 need you.");
   expect((await voiceTool("look", { what: "machines" }, web, io())).result).toContain("Mac mini: offline since 14:02, 1 space, 0 tasks working.");
-  const pilot = (await voiceTool("look", { what: "autopilot" }, web, io())).result;
-  expect(pilot).toContain("Autopilot is on in 1 space");
-  expect(pilot).toMatch(/next wake in (60 minutes|1 hours)/);
-  expect((await voiceTool("look", { what: "autopilot", id: "gtm" }, web, io())).result).toBe("gtm: Autopilot off.");
+  // 3.2: no Autopilot to look at or switch
+  expect((await voiceTool("look", { what: "autopilot" }, web, io())).error).toBe(true);
+  expect((await voiceTool("act", { action: "autopilot_on", id: "shepherdr", confirmed: true }, web, io())).error).toBe(true);
   expect((await voiceTool("look", { what: "automations" }, web, io())).result).toContain("nightly (shepherdr): Every day at 2:00, adds \"Run the checks\", next Tomorrow 2:00.");
 });
 
@@ -206,10 +205,8 @@ test("act changes nothing until confirmed, then sends the web app's action", asy
   expect((await voiceTool("act", { action: "accept", id: "45", confirmed: true }, web, x)).error).toBe(true);
   await voiceTool("act", { action: "schedule", id: "this", value: "in 2 hours", confirmed: true }, web, x);
   expect(x.calls.pop()).toEqual({ type: "schedule", chat: "SHEP-45/worker", in: "2 hours" });
-  await voiceTool("act", { action: "autopilot_off", id: "here", confirmed: true }, web, x);
-  expect(x.calls.pop()).toEqual({ type: "mode", place: "sp1", mode: "regular" });
-  await voiceTool("act", { action: "autopilot_run", id: "shepherdr", confirmed: true }, web, x);
-  expect(x.calls.pop()).toEqual({ type: "autopilot-run", place: "sp1" });
+  await voiceTool("act", { action: "rename_space", id: "here", value: "sheep", confirmed: true }, web, x);
+  expect(x.calls.pop()).toEqual({ type: "rename", id: "sp1", name: "sheep" });
   await voiceTool("act", { action: "setting", key: "review", value: "On", confirmed: true }, web, x);
   expect(x.calls.pop()).toEqual({ type: "setting", key: "tasks.review", value: "on", place: "all" });
   expect((await voiceTool("act", { action: "setting", key: "review", value: "maybe", confirmed: true }, web, x)).result).toBe("Review can be: on, off.");
@@ -394,7 +391,7 @@ test("SHEP-261: a locked phone does all an unlocked one does: acts ask the same 
   const unlocked: Where = { ...web, locked: false, screen: true };
   const lx = io(), ux = io();
   for (const p of [{ action: "accept", id: "41" }, { action: "start", id: "50" }, { action: "stop", id: "45" }, { action: "done", id: "45" },
-    { action: "delete", id: "45" }, { action: "autopilot_on", id: "shepherdr" }, { action: "setting", key: "review", value: "on" }]) {
+    { action: "delete", id: "45" }, { action: "remove_space", id: "shepherdr" }, { action: "setting", key: "review", value: "on" }]) {
     // unconfirmed: the same "ask the person" as unlocked, nothing done
     const ask = await voiceTool("act", { ...p, confirmed: false }, locked, lx);
     expect(ask).toEqual(await voiceTool("act", { ...p, confirmed: false }, unlocked, ux));

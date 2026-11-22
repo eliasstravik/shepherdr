@@ -1,32 +1,13 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
-// who runs the background work: never both. A throwaway app home stands in for ~/.config/herdr-app.
-const home = mkdtempSync(join(tmpdir(), "shep-jobs-"));
-process.env.HERDR_APP_HOME = home;
+// who runs the background work: this service, always (3.2: no window takes it), unless SHEPHERDR_JOBS=off
 delete process.env.SHEPHERDR_JOBS;
-const { windowLeavesIt, agentMachines } = await import("./jobs.ts");
+const { jobsOn, agentMachines } = await import("./jobs.ts");
 
-test("no window installed: the service does it", () => {
-  expect(windowLeavesIt()).toBe(true);
-});
-test("Herdr with its own mods only (no Shepherdr layout, as an always-on box): the service does it", () => {
-  mkdirSync(join(home, "mods", "changes"), { recursive: true });
-  expect(windowLeavesIt()).toBe(true);
-});
-test("a 3.0 window (its tab bar never asks the service): the window keeps it", () => {
-  mkdirSync(join(home, "mods", "tabs-tasks"), { recursive: true });
-  mkdirSync(join(home, "data", "shepherdr"), { recursive: true });
-  writeFileSync(join(home, "data", "shepherdr", "installed.json"), "{}");
-  expect(windowLeavesIt()).toBe(false);
-});
-test("a 3.1 window (lib/service.js in its tab bar): it leaves the work to the service", () => {
-  writeFileSync(join(home, "mods", "tabs-tasks", "service.js"), "");
-  expect(windowLeavesIt()).toBe(true);
+test("the service runs the background work unless it is told not to", () => {
+  expect(jobsOn()).toBe(true);
   process.env.SHEPHERDR_JOBS = "off";
-  expect(windowLeavesIt()).toBe(false);
+  expect(jobsOn()).toBe(false);
   delete process.env.SHEPHERDR_JOBS;
 });
 

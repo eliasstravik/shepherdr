@@ -12,7 +12,7 @@ export type SourceArgs = { task?: string; place?: string; chat?: string; artifac
  *  (found from the look's id); rest: the path's rest is its own path (a file, a folder) instead of a drill into it.
  *  serves: the web app's reads it covers ("api:<path>" a GET, "action:<type>" a read action). */
 export const SOURCES: Record<string, { about: string; arg?: "task" | "task-or-space" | "space" | "chat" | "artifact" | "machine" | "role"; rest?: boolean; serves: string[] }> = {
-  insights: { about: "Usage insights: how the person has used Shepherdr (screens and time on them, actions, features, errors, asks), from this machine's private log (the add-on's own file; Settings shows its switch)", serves: ["log:usage.jsonl"] },
+  insights: { about: "Usage insights: how the person has used Shepherdr (screens and time on them, actions, features, errors, asks), from this machine's private log (its own file)", serves: ["log:usage.jsonl"] },
   evidence: { about: "a task's Accept card: commits, files, checks, proof", arg: "task", serves: ["action:evidence"] },
   changes: { about: "a task's or space's Changes: files changed, lines added and removed", arg: "task-or-space", serves: ["api:worktree"] },
   patch: { about: "one changed file's diff (path: the file)", arg: "task-or-space", rest: true, serves: ["api:worktree"] },
@@ -24,11 +24,9 @@ export const SOURCES: Record<string, { about: string; arg?: "task" | "task-or-sp
   model: { about: "what a chat's agent runs on (CLI, model, effort, speed) and its choices", arg: "chat", serves: ["action:restart-info", "action:model-menu"] },
   models: { about: "Settings › Agents' model menus: every CLI's models, levels, permission modes, pinned and recent models", serves: ["action:role-info"] },
   template: { about: "a role's instructions (Settings › Agents; id: assistant, worker, reviewer...)", arg: "role", serves: ["action:template"] },
-  agents: { about: "the agent CLIs a space can start in a new tab", arg: "space", serves: ["action:tab-agents"] },
-  worktree: { about: "a worktree space's state: uncommitted files, unpushed commits", arg: "space", serves: ["action:worktree"] },
   hosts: { about: "machines on the person's network that can be added", serves: ["action:machine-hosts"] },
   folders: { about: "a machine's folders, as New space browses them (path: the folder; id: the machine)", arg: "machine", rest: true, serves: ["api:folders", "api:newspace"] },
-  me: { about: "Shepherdr's version, who is signed in, the web app's link, add-ons off", serves: ["api:me"] },
+  me: { about: "Shepherdr's version, who is signed in, the web app's link, plugins off", serves: ["api:me"] },
 };
 
 /** The web app's reads that are not data to see, each with why (the guard test needs every one in SOURCES or here). */
@@ -41,19 +39,22 @@ export const NOT_DATA: Record<string, string> = {
   "api:file": "a picture or file sent in a chat, as bytes",
   "api:terminal": "a live terminal's raw screen: its agent's chat is look chat, and screen reads what the page shows",
   "api:browser": "a task's live browser video: screen reads what the page shows",
+  "api:screen": "an agent's browser, live (3.2's Screens): a picture, not data; screen reads what the page shows",
+  "api:desktop": "a machine's desktop, live (3.2's Screens): a picture, not data",
   "api:voice": "the call itself",
   "api:push": "this device's own notification subscription (the notification settings are in the snapshot's settings)",
   "api:commands": "the / picker's command list above the message box",
   "api:reach": "the # picker's spaces above the message box (the same spaces as the snapshot's places)",
   "api:machines": "Find machines (Settings › Machines): reading it lists hosts nobody linked, pressing it logs in to them; only the person starts it (#967)",
   "action:earlier": "a chat's older messages: look chat reads further back itself",
+  "action:catalog": "the picker's lists (a machine's agents and their models): look data's models has the same menus",
 };
 
 /** The web app's actions that change something (act, send or screen do them), not data to read. */
 export const WRITES = ["plugin", "limits-check", "send", "react", "secret", "secret-saved", "answer", "page-send", "page-note", "artifact-send",
-  "artifact-note", "artifact-say", "artifact-delete", "browser-notes", "mode", "autopilot-run", "setting", "accept", "close", "delete", "archive",
-  "reopen", "task-resume", "schedule", "stop", "stop-job", "steer", "pin", "rename", "order", "move", "section", "space-remove", "space-commit",
-  "assistant-close", "tab-new", "tab-close", "tab-rename", "tab-switch", "tab-move", "restart", "model-pin", "rewind", "fork", "handback", "held-drop",
+  "artifact-note", "artifact-say", "artifact-delete", "browser-notes", "setting", "config", "accept", "close", "delete", "archive",
+  "reopen", "task-resume", "schedule", "stop", "stop-job", "steer", "pin", "rename", "order", "move", "section", "space-remove", "space-archive", "space-commit",
+  "assistant-close", "restart", "model-pin", "rewind", "handback", "held-drop",
   "held-now", "read", "keys", "text", "dictation", "call", "machine-add", "machine-mac-open", "secrets-move", "serve-from", "pause", "usage",
   "automation", "effort", "model"];
 

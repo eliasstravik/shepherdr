@@ -3,29 +3,24 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// New space on another machine with the Herdr window (SHEP-56). A throwaway app home with spaces-chat (so the service
-// asks the window), and a herdr-app that answers space.new as the real window does (herdr-app src/window.rs new_space:
-// ids made with fresh_id_on, so another machine's come back as "<machine>/<id>"), never a real window.
+// New space (3.2: the spaces are the service's own list, the shared document's "spaces"; no Herdr window is asked).
+// A throwaway home for "vmb" on this disk, and a fake hc that records how the space's Assistant is started: never a
+// real herdr-core. Fake data only.
 const APP = mkdtempSync(join(tmpdir(), "shep-newspace-"));
-const BIN = join(APP, "bin"), CALLS = join(APP, "calls"), REPLY = join(APP, "reply");
-mkdirSync(join(APP, "mods", "spaces-chat"), { recursive: true });
+const BIN = join(APP, "bin"), CALLS = join(APP, "calls");
 mkdirSync(BIN);
-writeFileSync(join(BIN, "herdr-app"), `#!/bin/sh\necho "$*" >> "${CALLS}"\ncat "${REPLY}"\n`, { mode: 0o755 });
+writeFileSync(join(BIN, "hc"), `#!/bin/sh\necho "$*" >> "${CALLS}"\necho '{"address":"t9"}'\n`, { mode: 0o755 });
 // "vmb"'s home, on this disk: machine.exec runs there
 const VMB = join(APP, "vmb");
 mkdirSync(join(VMB, "crescendo"), { recursive: true });
 
 let SP: typeof import("./spaces.ts");
-const was = process.env.HERDR_APP_HOME;
+const was = process.env.SHEPHERDR_HC;
 beforeAll(async () => {
-  process.env.HERDR_APP_HOME = APP;
-  process.env.SHEPHERDR_HERDR_APP = join(BIN, "herdr-app");
+  process.env.SHEPHERDR_HC = join(BIN, "hc");
   SP = await import("./spaces.ts");
 });
-afterAll(() => {
-  delete process.env.SHEPHERDR_HERDR_APP;
-  if (was === undefined) delete process.env.HERDR_APP_HOME; else process.env.HERDR_APP_HOME = was;
-});
+afterAll(() => { if (was === undefined) delete process.env.SHEPHERDR_HC; else process.env.SHEPHERDR_HC = was; });
 
 // herdr-core with a linked "vmb": machine.exec runs the command here, with vmb's HOME
 const hub: any = {
@@ -39,48 +34,38 @@ const hub: any = {
 };
 const store = () => { const d: Record<string, any> = {}; return { d, value: (k: string) => d[k], set: async (k: string, v: unknown) => { d[k] = v; } }; };
 
-test("a space made on another machine keeps the window's id: no doubled machine", async () => {
-  writeFileSync(REPLY, JSON.stringify({ space: "vmb/sp9", tab: "vmb/tb9", terminal: "vmb/t3" }));
+test("a space made on another machine joins the list of spaces, named after its folder, with its icon and its Assistant", async () => {
   const s = store();
   const place = await SP.newSpace(hub, { machine: "vmb", path: "~/crescendo", icon: "🎵", store: s });
-  expect(place).toBe("vmb/sp9");
-  expect(readFileSync(CALLS, "utf8")).toContain(`space.new --folder ${VMB}/crescendo --name crescendo --machine vmb`);
+  expect(place).toMatch(/^vmb\/sp[0-9a-f]{32}$/);
+  const id = place.slice(4);
+  expect(s.d.spaces).toMatchObject([{ id, name: "crescendo", folder: `${VMB}/crescendo`, machine: "vmb" }]);
   // its icon on the id the sidebar knows it by
-  expect(s.d["spaces-chat"].icons).toEqual({ "vmb/sp9": "🎵" });
+  expect(s.d["spaces-chat"].icons).toEqual({ [place]: "🎵" });
+  // its Assistant, on its machine, in its folder, labelled for it
+  const call = readFileSync(CALLS, "utf8");
+  expect(call).toContain(`run --bg --keep --no-parent --on vmb --cwd ${VMB}/crescendo --label herdr.role=coordinator --label herdr.coordinator.space=${id} --label herdr.space=${id}`);
+  expect(existsSync(join(APP, "herdr-app-calls"))).toBe(false);
 });
 
-test("this computer's space keeps its plain id", () => {
-  expect(SP.placeId("sp4", null)).toBe("sp4");
-  expect(SP.placeId("vmb/sp4", "vmb")).toBe("vmb/sp4");
-  // an older window that answered unqualified
-  expect(SP.placeId("sp4", "vmb")).toBe("vmb/sp4");
+test("a missing folder is made; one more space is added after the ones there", async () => {
+  const s = store();
+  s.d.spaces = [{ id: "sp1", name: "demo", folder: "/srv/demo", machine: null }];
+  const place = await SP.newSpace(hub, { machine: "vmb", path: "~/fresh/one", store: s });
+  expect(existsSync(join(VMB, "fresh", "one"))).toBe(true);
+  expect(s.d.spaces.map((x: any) => SP.ownId(x))).toEqual(["sp1", place]);
+  await expect(SP.newSpace(hub, { machine: "vmb", path: "", store: s })).rejects.toThrow("Pick a folder.");
 });
 
-test("the window's own error reaches the dialog", async () => {
-  writeFileSync(REPLY, JSON.stringify({ error: "vmb's spaces haven't loaded yet" }));
-  await expect(SP.newSpace(hub, { machine: "vmb", path: "~/crescendo", store: store() })).rejects.toThrow("Herdr couldn't make it: vmb's spaces haven't loaded yet");
-  expect(existsSync(join(VMB, "crescendo"))).toBe(true);
-});
-
-test("the snapshot has the new space before the page is answered, once vmb's document has it", async () => {
+test("the snapshot has the new space before the page is answered", async () => {
   const { Model } = await import("./model.ts");
-  // vmb's document gets the space a moment after the window answers (its write still on its way)
-  let reads = 0;
-  const doc = (n: number) => ({ spaces: [{ id: "sp1", name: "api", folder: "/srv/api", tabs: [] }, ...(n > 1 ? [{ id: "sp9", name: "crescendo", folder: "/srv/crescendo", tabs: [] }] : [])] });
-  const fake: any = {
-    terminals: new Map(),
-    on: () => () => {},
-    async call(method: string, p: any) {
-      if (method === "doc.get") return { value: p.on === "vmb" ? doc(++reads) : { spaces: [] }, version: 1 };
-      throw new Error(method);
-    },
-  };
+  const fake: any = { terminals: new Map(), on: () => () => {}, async call(method: string) { throw new Error(method); } };
   const put: Record<string, any> = {};
   const m = new Model(fake, { put: (k: string, v: any) => { put[k] = v; } } as any);
-  (m as any).machines = ["vmb"];
+  const doc: Record<string, any> = { spaces: [{ id: "sp1", name: "api", folder: "/srv/api", machine: "vmb" }] };
+  m.doc = () => doc;
+  expect(await m.waitSpace("vmb/sp9")).toBe(false);
+  doc.spaces = [...doc.spaces, { id: "sp9", name: "crescendo", folder: "/srv/crescendo", machine: "vmb" }];
   expect(await m.waitSpace("vmb/sp9")).toBe(true);
-  expect(put.spaces.spaces.map((s: any) => s.id)).toContain("vmb/sp9");
-  expect(reads).toBeGreaterThan(1);
-  // one that never comes: answered anyway, after the wait
-  expect(await m.waitSpace("vmb/sp404", 700)).toBe(false);
+  expect(put.spaces.spaces.map((s: any) => s.id)).toEqual(["vmb/sp1", "vmb/sp9"]);
 });

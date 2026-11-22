@@ -8,15 +8,6 @@ export type Status = 'need' | 'ready' | 'merging' | 'work' | 'idle' | 'queued' |
 /** A chat's final segment is its role; the task ID may itself contain a machine qualifier. */
 export function taskChatId(chat: string) { const at = chat.lastIndexOf('/'); return at < 0 ? undefined : chat.slice(0, at) }
 
-/** regular, always the fallback: the coordinator does what the human asks; or Autopilot, a switch on top of it */
-export type Mode = 'regular' | 'autopilot'
-
-/** each mode, its name and what it means in a few words */
-export const MODES: [Mode, string, string][] = [
-  ['regular', 'Regular', 'Does what you ask'],
-  ['autopilot', 'Autopilot', 'Works on its own'],
-]
-
 /** the longest name a space can be given, as Slack's channels */
 export const NAME_MAX = 80
 
@@ -54,23 +45,6 @@ export function nameProblem(name: string, taken: string[] = []): string | undefi
   return undefined
 }
 
-/** what a tab's agent is doing, as Herdr's status: a spinner, needs you, done (a dot), or nothing */
-export type TabState = 'working' | 'blocked' | 'done' | 'idle'
-/** a space's tab other than its Assistant's (Shepherdr 3's tab bar) */
-export interface PlaceTab {
-  id?: string
-  name: string
-  named?: boolean
-  term: string
-  cli?: string
-  state?: TabState
-  where?: string
-  /** what its pane header calls it: "Claude Code", the program in front ("zsh"), else "Shell" */
-  prog?: string
-  /** the known agent it runs (the window's knownAgents key: "claude", "opencode", …): it can restart and switch */
-  agent?: string
-}
-
 /** A space: a folder on a machine with a name and its own coordinator, as herdr's spaces. Every machine has its home
  *  space (its home folder, ~), always first under it and never removed: its coordinator also keeps an eye on the
  *  machine, and the main machine's on every machine. Spaces are the only places with a chat. */
@@ -86,14 +60,6 @@ export interface Place {
   emoji?: string
   /** Shepherdr 3: the space is a git worktree of another (Remove worktree) */
   worktree?: boolean
-  /** Shepherdr 3: the space's other tabs (a terminal or an agent each), by name, with the key their terminal opens by;
-   *  as 3.0's tab bar: Herdr's tab id, whether a name was given, the agent CLI in it, its status and its folder */
-  tabs?: PlaceTab[]
-  /** Shepherdr 3: its Assistant's own tab, first in the tab bar (live: its agent runs) */
-  assistantTab?: { id?: string; name: string; named: boolean; state: TabState; live: boolean; cli?: string; agent?: string }
-  /** Shepherdr 3: its Autopilot as the Assistant's header shows it (this computer's spaces): on, its next wake, queued
-   *  (pending) or waking (inflight), its events, and blank: its heartbeat still unwritten */
-  pilot?: { on: boolean; next_run: number | null; pending: boolean; inflight: boolean; events: string[]; blank: boolean }
   /** its name, Slack-channel style ("my-project"), unique on its machine: the slug its links and commands use */
   name: string
   /** the machine it is on (its key: herdr's label for it) */
@@ -104,7 +70,6 @@ export interface Place {
    *  machine's home space, where there are more machines) */
   level: 0 | 1 | 2
   status: Status
-  mode: Mode
   /** chat key of this space's coordinator */
   chat: string
   /** its machine can't be reached: when it went quiet, as shown ("14:02") */
@@ -127,7 +92,7 @@ export interface Place {
   /** where its artifacts are kept (its repo's main folder, else its own) and that folder's name, as the window's
    *  Artifacts header ("~" at home) */
   store?: { folder: string; name: string; key?: string }
-  /** when something in its tabs last changed state (ms; Herdr's tab changed_at): Jump lists spaces newest first */
+  /** when its Assistant last changed state (ms) */
   changedAt?: number
   /** its repo's name and branch (null: detached), as the window's row */
   gitName?: string
@@ -654,8 +619,6 @@ export interface Message {
   /** 3.0's quiet line for an ask or start screen that closed: what it asked and how it went ("Run: npm test · Allowed
    *  in the chat") */
   ended?: string
-  /** an Autopilot wake's quiet line ("Autopilot woke · on schedule · checked, nothing new": core/chat-log.js pilotLine) */
-  pilot?: string
   /** the tasks your message mentions (#HAT-1), as 3.0's chips under it: a press opens the task */
   mentions?: { task: string; ref: string; title: string }[]
   at?: number
@@ -803,12 +766,10 @@ export interface ReplyQuote {
 /** One small update card Shepherdr posts in a project's coordinator chat. */
 export interface UpdateCard {
   id: string
-  /** the task it is about; none on a mode card */
+  /** the task it is about */
   task?: string
   /** the task's state when last updated */
   status?: TaskStatus
-  /** a mode card: the place's coordinator went on this mode (text: "on · works on its own"); an older one may say Manual */
-  mode?: Mode
   /** a few words on one line ("Started"), or a task's state and its summary ("Ready: Dark mode works"); a task has one
       such row in a chat, updated where it stands */
   text: string
@@ -864,28 +825,16 @@ export const machineName = (machines: Machine[] | undefined, machine?: string) =
 export const doneNewestFirst = <T extends Pick<Task, 'status' | 'doneAt'>>(ts: T[]): T[] =>
   [...ts.filter((t) => t.status !== 'done'), ...ts.filter((t) => t.status === 'done').sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0))]
 
-/** a mode's name: "Autopilot" */
-/** the row of a space's Autopilot settings that says why it can't run there */
-export const PILOT_BLOCKED = "Can't run"
-
 /** a typed /model: the words after it ('' for none); anything else: nothing. A CLI saves its own /model as the device's
  *  default for every later agent, so it never reaches one: it opens Restart, which changes this agent only */
 export const modelCommand = (text: string) => /^\/model(?:\s+([^]*))?$/i.exec(text.trim())?.[1]?.trim() ?? (/^\/model$/i.test(text.trim()) ? '' : undefined)
-
-export const modeName = (mode: Mode) => MODES.find(([m]) => m === mode)?.[1] ?? mode
-
-/** a mode card, Autopilot switched on or off: "Autopilot on · works on its own", "Autopilot off · does what you ask" */
-export function modeCard(id: string, mode: Mode): UpdateCard {
-  const what = MODES.find(([m]) => m === mode)?.[2] ?? ''
-  return { id, mode: 'autopilot', text: `${mode === 'autopilot' ? 'on' : 'off'} · ${what.toLowerCase()}` }
-}
 
 /** an update card as a message in the chat: its words are what a reaction or a reply quotes */
 export const cardMessage = (card: UpdateCard, at?: number): Message => ({
   id: card.id,
   who: 'agent',
   at,
-  text: `${card.task ?? (card.mode ? modeName(card.mode) : (card.health?.machine ?? card.red ?? ''))} ${card.text}`,
+  text: `${card.task ?? card.health?.machine ?? card.red ?? ''} ${card.text}`,
   card,
 })
 
@@ -1281,12 +1230,7 @@ export interface Snapshot {
   /** everything waiting on the human, oldest first, each once: what the Needs you view lists and every count counts */
   needs: Need[]
   settings: SettingSection[]
-  /** Settings › Window's look switches, as the window follows them: the space's tabs, worktree spaces in the sidebar,
-   *  bold unread spaces, red and green counts, the Tasks status filters, the space on task rows, subagents above the box */
-  look?: { tabs: boolean; worktrees: boolean; unread: boolean; red: boolean; green: boolean; filters: boolean; place: boolean; helpers: boolean }
-  /** Shepherdr 3: Herdr's side panels the tab bar offers beside Tasks (shared "workspace.panels": "files", "changes") */
-  panels?: string[]
-  /** the web app's plugins left out (their add-on is off in Settings › Window): a page started with others reloads */
+  /** the web app's plugins left out (switched off in Settings › Plugins): a page started with others reloads */
   off?: string[]
   /** a source like demo marks its data as fictional */
   demo?: boolean
@@ -1332,8 +1276,6 @@ export type Action =
   | { type: 'artifact-delete'; place: string; artifact: string }
   /** Mark up's notes from the shared browser, sent together into the task's chat */
   | { type: 'browser-notes'; cid?: string; chat: string; url: string; title?: string; viewport?: { w: number; h: number }; notes: BrowserNote[] }
-  | { type: 'mode'; place: string; mode: Mode; keepWorkers?: boolean }
-  | { type: 'autopilot-run'; place: string }
   /** a project's automation: pause or go on, run now, remove. Only agents add or change one, through the command. By
       its place, so another machine's goes there */
   | { type: 'automation'; cid?: string; place: string; op: 'pause' | 'resume' | 'run' | 'remove'; name: string }
@@ -1375,7 +1317,7 @@ export type Action =
       tasks and chat come back if it is added again; refused while one of its tasks is working */
   | { type: 'space-remove'; place: string }
   /** the sidebar's order, dragged by the human: the machines (under 'all'), or one machine's spaces
-      (under its id), or a section's (under its id: 'pinned' for Pinned), or the sections at the top ('sections') or in a
+      (under its id), or a section's (under its id), or the sections at the top ('sections') or in a
       machine ('sections:<machine id>'). Kept by the machine the screen talks to, never sent on to another */
   | { type: 'order'; under: string; ids: string[] }
   /** a space into a section, or back under its machine (to: the machine's id), before another there or last */
@@ -1384,7 +1326,7 @@ export type Action =
       machines); renamed with 'rename'. Kept as the order is */
   | { type: 'section'; op: 'new'; name: string; emoji?: string; machine?: string }
   | { type: 'section'; op: 'delete'; id: string }
-  /** the last section deleted, back in its place (its toast's Undo, as the window's) */
+  /** the last section deleted, back in its place (its toast's Undo) */
   | { type: 'section'; op: 'restore' }
   /** a machine's or space's name as it shows everywhere ('' gives it back its own); kept by the main machine (id,
       not place: never sent on to another), and nothing else changes: its folder, repo, herdr space and task ids stay */

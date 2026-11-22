@@ -15,6 +15,8 @@ export type Doc = { version: number; value: Record<string, unknown> };
 
 export class Store {
   doc: Doc = { version: 0, value: {} };
+  /** read at least once: until then `doc` is empty because nothing was read, not because nothing is kept */
+  loaded = false;
   private listeners = new Set<(d: Doc) => void>();
   /** the host's document as it is there (its words), when another machine serves */
   private raw: Doc | null = null;
@@ -47,6 +49,7 @@ export class Store {
     // another machine's version numbers aren't this one's: a move starts the count again
     const changed = d.version !== this.doc.version || on !== this.where;
     this.where = on;
+    this.loaded = true;
     this.raw = on ? { version: d.version, value } : null;
     this.doc = { version: d.version, value: on ? relocateDoc(value, this.host!.fromHost()) : value };
     if (changed) for (const fn of this.listeners) fn(this.doc);

@@ -19,16 +19,15 @@ How Shepherdr works:
 - A machine (this computer, a Mac mini, a VM) has spaces. A space is a project folder with its own Assistant: an AI agent the person talks to in the space's chat, which plans, writes task briefs, starts and checks tasks.
 - A task (an id like SHEP-45) is one piece of work done by its own coding agent, usually in its own branch. Its states: To do, Queued (waits for others), Scheduled (starts later), Working (with a status line and time left), Needs you (waits on the person's answer), Ready (finished, waits for the person to Review and Accept, which merges it), Done.
 - Review opens a Ready task's Accept card: its summary, changes, checks and proof. Accept merges it.
-- Autopilot: a space's Assistant wakes on a schedule and works on its own toward the space's direction (its heartbeat).
 - Needs you: everything waiting on the person: questions, Ready tasks, asks for a secret.
 - Artifacts are pages agents publish (proofs, reports). Secrets are kept by name: never read a value out, never ask for one by voice.
 
 Your tools:
-- look: read anything: where the call is and what is on screen, a chat (latest messages or a search), spaces, machines (with their health and Claude Code / Codex plan limits), tasks, one task, Needs you, news, Autopilot, automations, settings, secret names, artifacts.
+- look: read anything: where the call is and what is on screen, a chat (latest messages or a search), spaces, machines (with their health and Claude Code / Codex plan limits), tasks, one task, Needs you, news, automations, settings, secret names, artifacts.
 - look data sees everything the app shows, every panel, dialog, number and list: the app's live data and what panels read as they open (usage insights, a task's changes, pull request and checks, an artifact's content, model menus...). With no path it lists them all; a path drills into any item; query searches every value. If the other looks don't have it, look data does: never say you can't see something the app shows before you tried it.
 - open: show something in the person's app (the one the call runs in): a space, a task and its tab, the Tasks panel (filtered by state or words), Needs you, the Artifacts, Files or Changes panel, the space's terminal, an artifact, a Settings page, or a chat.
 - send: write in a chat as the person: any space's Assistant or a task's agent (by its name or id), or "here": the chat on screen.
-- act: change things directly (accept, start, schedule, stop, rename, Autopilot, settings...).
+- act: change things directly (accept, start, schedule, stop, rename, settings...).
 - screen: the person's screen itself, for anything the tools above can't do: look lists what is on it as numbered things (e12 button "Close"), then click, type, select, scroll, a key, back or close act on one, and its answer is the screen again.
 - call_view: the call's own view in the web app: full (the call fills the screen) or minimized (the app shows, the call in its bar). "Back to the call", "maximize the call", "full screen": call_view full. "Minimize the call", "hide the call": call_view minimized. Never screen for this.
 
@@ -59,7 +58,7 @@ Rules:
 - Before any act, or a screen click that deletes, merges, accepts, stops or can't be undone: say in a few words what it will do and ask. Set confirmed true only after a clear yes on this call; without one, use confirmed false (it changes nothing and says what to ask). Never type a secret or a password.
 - "Here", "this task", "this space": what the screen shows now (look with what "here" when unsure). "That one": what you just talked about.
 - Who to send to: the space or task the person names; else the one on screen; else the one you last sent to. If none fits or several do, ask which in a few words.
-- Making or planning things (a new task or space, a brief, an automation, Autopilot's direction, anything that takes judgment): send it to that space's Assistant in the person's words with every detail.
+- Making or planning things (a new task or space, a brief, an automation, anything that takes judgment): send it to that space's Assistant in the person's words with every detail.
 - Never wait on an agent: they take minutes. After a send, say only "Passed it to <name>." (the space's or task's name) and stop. Their reply comes later as an [Update].
 - Send without asking only when the person clearly asked you to. Never send greetings, chit-chat or talk about the call. Unsure if it's meant for an agent? Ask.
 - The person's ask comes first: when they just asked or told you something, answer that first. [Update]s that came in meanwhile wait until it is dealt with, then come briefly after. Never start a reply with an [Update].
@@ -78,16 +77,16 @@ const tool = (name, description, props, required = [], speech = "force") =>
     tool_call_sound: "typing", tool_call_sound_behavior: "auto", parameters: { type: "object", properties: props, required } });
 
 /** What a look can read, an open can show and an act can do (service/voice-tools.ts answers each). */
-export const LOOKS = ["here", "chat", "spaces", "machines", "tasks", "task", "needs", "news", "autopilot", "automations", "settings", "secrets", "artifacts", "data"];
+export const LOOKS = ["here", "chat", "spaces", "machines", "tasks", "task", "needs", "news", "automations", "settings", "secrets", "artifacts", "data"];
 export const OPENS = ["space", "task", "tasks", "needs", "artifacts", "files", "changes", "terminal", "artifact", "settings", "chat"];
 export const TABS = ["chat", "terminal", "pr", "browser", "review"];
 /** the call's own view (call_view): full screen or minimized */
 export const VIEWS = ["full", "minimized"];
 export const ACTS = ["accept", "start", "schedule", "unschedule", "stop", "resume", "done", "reopen", "delete", "pin", "unpin",
-  "autopilot_on", "autopilot_off", "autopilot_run", "rename_space", "remove_space", "setting", "forget_secret", "delete_artifact"];
+  "rename_space", "remove_space", "setting", "forget_secret", "delete_artifact"];
 
 export const TOOLS = [
-  tool("look", "Read Shepherdr: where the call is, a chat, spaces, machines (health, plan limits), tasks, a task's details, what needs the person, news, Autopilot, automations, settings, secret names, artifacts, and data: everything else the app shows anywhere. Answers in short sentences.", {
+  tool("look", "Read Shepherdr: where the call is, a chat, spaces, machines (health, plan limits), tasks, a task's details, what needs the person, news, automations, settings, secret names, artifacts, and data: everything else the app shows anywhere. Answers in short sentences.", {
     what: { type: "string", enum: LOOKS, description: "What to read. here: the call's context and what is on screen. chat: a chat's latest messages (or a search with query). tasks: a list (filter with id and query). task: one task's details, summary, proof and pull request. data: everything the app shows: no path lists every part; path drills in; query searches values." },
     id: PLACE,
     path: { type: "string", description: "data: where to read, a part then keys, ids or names, like \"machines/mini/stats/limits/codex\", \"insights\", \"changes\" (id: the task), \"file/README.md\" (id: the task or space)." },
@@ -280,12 +279,12 @@ export function batchLines(lines) {
 // ---- what the call is doing (SHEP-113) -------------------------------------------------------
 
 const LOOK_WORDS = { here: "looking at the screen", chat: "reading the chat", spaces: "checking spaces", machines: "checking machines",
-  tasks: "checking tasks", task: "reading the task", needs: "checking what needs you", news: "reading the news", autopilot: "checking Autopilot",
+  tasks: "checking tasks", task: "reading the task", needs: "checking what needs you", news: "reading the news",
   automations: "checking automations", settings: "reading settings", secrets: "checking secret names", artifacts: "checking artifacts", data: "looking it up" };
 const ACT_WORDS = { accept: "accepting the task", start: "starting the task", schedule: "scheduling the task", unschedule: "unscheduling the task",
   stop: "stopping the agent", resume: "resuming the agent", done: "marking it done", reopen: "reopening the task", delete: "deleting the task",
-  pin: "pinning the task", unpin: "unpinning the task", autopilot_on: "turning Autopilot on", autopilot_off: "turning Autopilot off",
-  autopilot_run: "waking Autopilot", rename_space: "renaming the space", remove_space: "removing the space", setting: "changing a setting",
+  pin: "pinning the task", unpin: "unpinning the task",
+  rename_space: "renaming the space", remove_space: "removing the space", setting: "changing a setting",
   forget_secret: "forgetting a secret", delete_artifact: "deleting the artifact" };
 
 /** What a tool call is doing, in a few plain words for the call's status ("checking tasks", "sending to shop"). */

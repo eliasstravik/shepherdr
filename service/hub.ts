@@ -1,5 +1,6 @@
 // The service's one link to herdr-core (hc connect): calls, plus the live event stream. When the core goes away
 // the link comes back by itself (0.5 s, 1, 2, then every 5 s) and everyone listening hears "reset".
+import { SESSION } from "./session.ts";
 import { CoreClient } from "./hc/client.ts";
 import type { CoreNotification, CoreTerminal } from "./hc/protocol.ts";
 
@@ -45,7 +46,7 @@ export class Hub {
     let delay = 500;
     for (;;) {
       try {
-        const c = await CoreClient.endpoint({ binary: this.binary });
+        const c = await CoreClient.endpoint({ binary: this.binary, ...(SESSION ? { session: SESSION } : {}) });
         const snap = await c.subscribe((n) => this.event(n));
         this.terminals = new Map(snap.terminals.map((t) => [t.address, t]));
         c.onDisconnect(() => { if (this.client === c) { this.client = null; this.up = false; this.emit({ type: "reset" }); void this.core(); } });

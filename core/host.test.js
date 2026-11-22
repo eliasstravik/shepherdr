@@ -116,3 +116,15 @@ test("a Kept on / Serve from pick of this computer is null, whichever way the pa
   expect(pickedMachine("here", undefined)).toBe(null);
   expect(pickedMachine("mac-mini", "m3")).toBe("mac-mini");
 });
+
+test("3.2: the service's own spaces and the carry-over's marker move with Serve from", () => {
+  const toMini = (m) => (m === null ? "m3" : m === "mac-mini" ? null : m === "gone" ? undefined : m);
+  const toLaptop = (m) => (m === null ? "mac-mini" : m === "m3" ? null : m === "lonely" ? undefined : m);
+  const spaces = [{ id: "sp1", name: "demo", folder: "/a", machine: null }, { id: "sp2", name: "x", folder: "/b", machine: "mac-mini" }, { id: "sp9", name: "y", folder: "/c", machine: "gone" }];
+  const there = relocate("spaces", spaces, toMini);
+  expect(there.map((s) => [s.id, s.machine])).toEqual([["sp1", "m3"], ["sp2", null]]);
+  expect(relocate("spaces.imported", ["", "mac-mini", "gone"], toMini)).toEqual(["m3", ""]);
+  // what the host has for a machine the writer can't name stays
+  expect(keepForeign("spaces", there, [{ id: "sp7", machine: "lonely" }, { id: "sp2", machine: null }], toLaptop)).toEqual([...there, { id: "sp7", machine: "lonely" }]);
+  expect(keepForeign("spaces.imported", ["m3", ""], ["lonely", ""], toLaptop)).toEqual(["m3", "", "lonely"]);
+});

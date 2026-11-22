@@ -20,7 +20,7 @@ type Out = {
  * What each push alert says, as the window's toasts (core/toasts.js): an agent that needs you, "HERD-4 · Needs you" or
  * "tt-repo Assistant · Needs you", why under it (an Assistant only by its space's Notify); a task whose agent finished,
  * ready to accept, "HERD-4 · Finished" under its name, a tap opening its Accept card; a task done; an Assistant's new
- * message (an Autopilot update when its Autopilot woke it: woke, the spaces whose wake was under way a moment ago).
+ * message ("New message").
  * Keyed so each goes once; each with its topic and space, which every device chooses by (Settings › Notifications).
  */
 /** a need's alert key: one per card or wait */
@@ -37,7 +37,7 @@ export function needAlert(snap: any, n: any): Out {
   return { title: watchTitle(T.toastTitle(who, T.NEEDS_YOU)), body: excerpt(T.needReason(n), WATCH_BODY), tag: n.task ?? n.chat, topic: "needs", place: n.place, waits: true, url: go, ...acts };
 }
 
-export function alertsOf(snap: any, woke: Set<string> = new Set(), said: (chat: string) => string | undefined = () => undefined): Map<string, Out> {
+export function alertsOf(snap: any, said: (chat: string) => string | undefined = () => undefined): Map<string, Out> {
   const now = new Map<string, Out>();
   for (const n of snap.needs ?? []) {
     if (snap.settings && !notifies(snap, { go: { place: n.place }, task: n.task ? true : undefined })) continue;
@@ -58,8 +58,7 @@ export function alertsOf(snap: any, woke: Set<string> = new Set(), said: (chat: 
     // its question already says so (Needs you)
     if ((snap.needs ?? []).some((n: any) => n.chat === p.chat)) continue;
     if (snap.settings && notifyOf(snap, p.id) === "Off") continue;
-    const pilot = woke.has(p.id) || (p.pilot?.on && (p.pilot.inflight || p.pilot.pending));
-    now.set(`msg:${p.chat}:${last}`, { title: T.toastTitle(T.assistantWho(p.name), pilot ? "Autopilot update" : "New message"), body: said(p.chat) || "Tap to read it.", tag: `msg:${p.chat}`, topic: pilot ? "autopilot" : "assistant", place: p.id, url: alertUrl({ place: p.id }), actions: [REPLY], reply: { chat: p.chat } });
+    now.set(`msg:${p.chat}:${last}`, { title: T.toastTitle(T.assistantWho(p.name), "New message"), body: said(p.chat) || "Tap to read it.", tag: `msg:${p.chat}`, topic: "assistant", place: p.id, url: alertUrl({ place: p.id }), actions: [REPLY], reply: { chat: p.chat } });
   }
   // an agent's own alert (herdr-task alert), as its toast: a task's always, an Assistant's by its space's Notify
   for (const a of snap.alerts ?? []) if (a.notify) now.set(`alert:${a.id}`, { title: a.title, body: a.body, tag: `alert:${a.id}`, topic: "needs", ...(a.place ? { place: a.place, url: alertUrl({ place: a.place }) } : {}) });

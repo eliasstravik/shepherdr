@@ -1,25 +1,20 @@
-// What the web app shows, built with the shared core from the same data the window reads: every machine's
-// spaces (Herdr's "herdr-app" documents), their Assistants and unread marks, and every task list (herdr-task's
-// files, through READ_LISTS) with each task's status from its live agents. Kept fresh from herdr-core's events,
-// the local task folder's changes, and a slow poll for other machines.
-import { watch, readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+// What the web app shows, built with the shared core: the spaces (the service's own list, the shared document's
+// "spaces"), their Assistants and unread marks, and every task list (herdr-task's files, through READ_LISTS) with each
+// task's status from its live agents. Kept fresh from herdr-core's events, the local task folder's changes, and a slow
+// poll for other machines.
+import { watch, existsSync } from "node:fs";
 import type { Hub } from "./hub.ts";
 import type { Live } from "./live.ts";
-import { HOME, settingsFile, where } from "./paths.ts";
-import { READ_LISTS, taskLists, fileIn } from "../core/tasklists.js";
+import { where } from "./paths.ts";
+import { READ_LISTS, taskLists } from "../core/tasklists.js";
+import { carryOver, IMPORTED } from "./carry-over.ts";
 import * as T from "../core/tasks.js";
 import { isHelper, subagentsOf } from "../core/chat-view.js";
 // The core is plain JavaScript; its defaults read as narrow types to TypeScript.
 const { place, refOf, taskKey, autoPrefix, reportOf, secondLine, leftOf, queueReason, machineOf } = T as any;
 import * as S from "../core/spaces.js";
-const { spacesFromDoc, sidebarOf, assistantOf, isUnread, inOrder, byMachineOrder, machineOrderOf } = S as any;
-import * as N from "../core/notify.js";
-const { spaceLevel } = N as any;
-import * as AP from "../core/autopilot.js";
-const { everywhereOf, pilotFor, levelOf, STARTER, currentBeat } = AP as any;
+const { sidebarOf, assistantOf, isUnread, inOrder, byMachineOrder, machineOrderOf } = S as any;
 
-const SHARED = join(HOME, ".config", "herdr-app", "shared.json");
 const SHELL = /^(ba|z|fi|da|k|tc|c)?sh$|^nu$|^pwsh$/;
 /** A shell's argv that runs a command (-c, -ic, -lic, --command), not a plain shell (herdr-task's runs_command()). */
 export function runsCommand(argv: unknown): boolean {
@@ -45,33 +40,32 @@ type List = any;
 
 export class Model {
   private lists = new Map<string | null, List[]>();   // machine (null: here) -> its task lists
-  private docs = new Map<string | null, any>();       // machine -> its herdr-app document
   private machines: string[] = [];                    // connected other machines
   private known: { name: string; state: string }[] = []; // every other machine, with its state (the sidebar's headers)
-  private shared: any = {};
   private timer: ReturnType<typeof setTimeout> | null = null;
   private settleTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Told each build: what the screen's snapshot is made from (compat.ts). */
   onBuild: ((b: { spaces: any[]; sections: any[]; rows: any[]; machines: string[]; known: { name: string; state: string }[]; automations: any[] }) => void) | null = null;
 
-  /** The service's shared document (the person's pins, sidebar and Notify, in step with the window: lib/bridge.js). */
+  /** The service's shared document (the spaces, the person's pins and the sidebar's groups and order). */
   doc: () => Record<string, any> = () => ({});
+  /** The shared document to write the carry-over into (service/carry-over.ts), set by main: ready() once it is read
+   *  and this machine is the one that keeps it. */
+  own: { ready(): boolean; update(change: (value: Record<string, any>) => Record<string, any>): Promise<unknown> } | null = null;
 
   constructor(private hub: Hub, private live: Live) {}
 
-  /** A shared value: the document's, else the window's own (a window not on 3.1 yet). */
-  value(key: string) { const d = this.doc(); return key in d ? d[key] : this.shared[key]; }
+  /** A shared value: the document's. */
+  value(key: string) { return this.doc()[key]; }
 
   start() {
     this.hub.on((e) => {
       if (e.type === "reset") void this.refresh();
-      else if (e.type === "doc" && (e as any).data?.name === "herdr-app") void this.readDocs();
       else if ("terminal" in e && e.terminal) this.soon();
     });
     const tasks = where().tasks;
-    if (existsSync(tasks)) watch(tasks, () => this.soon(() => Promise.all([this.readAutopilot(), this.readLists(null)]).then(() => {})));
-    if (existsSync(SHARED)) watch(SHARED, () => this.soon(() => this.readShared()));
+    if (existsSync(tasks)) watch(tasks, () => this.soon(() => this.readLists(null)));
     setInterval(() => void this.refresh(), 10_000);
     void this.refresh();
   }
@@ -83,7 +77,9 @@ export class Model {
   }
 
   spaces: any[] = [];
-  /** Each space folder's git, as the window's sidebar reads it: { name (the repo), linked (a worktree), repo }, null:
+  /** every task as last built (its folder, worktree and machine among them) */
+  rows: any[] = [];
+  /** Each space folder's git: { name (the repo), linked (a worktree), repo }, null:
    *  not a repo. Read once, then again each minute. */
   private git = new Map<string, { info: { name: string; linked: boolean; repo: string; branch?: string | null } | null; at: number }>();
   private async readGit(spaces: any[]) {
@@ -91,7 +87,7 @@ export class Model {
     await Promise.all(due.slice(0, 12).map(async (s) => {
       const key = `${s.machine ?? ""}|${s.folder}`;
       this.git.set(key, { info: this.git.get(key)?.info ?? null, at: Date.now() });
-      // as the window's sidebar reads it: its repo and its branch (reads only: nothing under .git is written)
+      // its repo and its branch (reads only: nothing under .git is written)
       const r = await exec(this.hub, ["sh", "-c", 'cd "$1" 2>/dev/null && git rev-parse --show-toplevel --path-format=absolute --git-common-dir 2>/dev/null && { git symbolic-ref --short -q HEAD 2>/dev/null || echo; }', "git", s.folder], s.machine ?? null, 20).catch(() => null);
       const [top, repo, head] = (r?.stdout ?? "").split("\n").map((l) => l.trim());
       const name = repo ? (repo.endsWith("/.git") ? repo.slice(0, -5) : repo.replace(/\.git$/, "")).split("/").pop()! : "";
@@ -109,16 +105,10 @@ export class Model {
   /** Builds again soon (something the snapshot shows changed outside: an ask). */
   rebuild() { this.soon(); }
 
-  /** A space just made (New space): its machine's spaces read again until it is among them (up to `ms`; another
-   *  machine's document can land a moment after the window answers), the snapshot built with it. Whether it showed. */
-  async waitSpace(id: string, ms = 4000) {
-    const end = Date.now() + ms;
-    for (;;) {
-      await this.readDocs();
-      this.build();
-      if (this.spaces.some((s) => s.id === id) || Date.now() >= end) return this.spaces.some((s) => s.id === id);
-      await new Promise((r) => setTimeout(r, 300));
-    }
+  /** A space just made (New space): the snapshot built with it now, not at the next event. Whether it showed. */
+  async waitSpace(id: string) {
+    this.build();
+    return this.spaces.some((s) => s.id === id);
   }
 
   private async refresh() {
@@ -128,89 +118,36 @@ export class Model {
       // every machine the window's sidebar lists, connected or not (a temporary one aside): an offline one reads "Offline"
       this.known = r.machines.filter((m) => !m.temporary).map((m) => ({ name: m.name, state: String(m.state ?? "") }));
     } catch {}
-    this.readShared();
-    await Promise.all([this.readAutopilot(), this.readDocs(), this.readLists(null), ...this.machines.map((m) => this.readLists(m))]);
+    await Promise.all([this.carry(), this.readLists(null), ...this.machines.map((m) => this.readLists(m))]);
     this.build();
   }
 
-  private autopilot: Record<string, any> = {};
-  /** Each other machine's Autopilot file (its ~/.local/share/shepherdr/tasks/.autopilot.json, read with its lists): its spaces' switches
-   *  and wakes, kept and woken there. */
-  private pilots = new Map<string, any>();
-  /** Shepherdr settings as this machine has them (each space's own Autopilot, another machine's by "vm/sp1"). */
-  private settings: any = {};
-  /** Autopilot as Everywhere has it on this machine (herdr-task's view: its schedule, events, heartbeat's words and
-   *  what wakes it in words) */
-  pilotEverywhere: any = { ...everywhereOf(null), words: STARTER };
-  private reading: Promise<void> | null = null;
-  /** Everywhere's Autopilot and each space's on this machine, as herdr-task tells it (what applies there, its own or
-   *  Everywhere's, its switch, next and last wake, progress, the heartbeat's words). One read at a time. */
-  readAutopilot() {
-    return this.reading ??= (async () => {
-      try { this.settings = JSON.parse(readFileSync(settingsFile(), "utf8")) ?? {}; } catch {}
-      try {
-        // this machine's own (--here: other machines' are read with their lists); a herdr-task from before --here lists only its own
-        const listed = async (args: string[]) => {
-          const p = Bun.spawn(["herdr-task", "autopilot", "list", ...args, "--json"], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
-          const text = await new Response(p.stdout).text();
-          return (await p.exited) === 0 ? text : null;
-        };
-        const out = JSON.parse((await listed(["--here"])) ?? (await listed([])) ?? "{}");
-        const e = out.everywhere ?? {};
-        // a herdr-task from before Settings kept the heartbeat gives only its file
-        const file = (f: string | null) => { try { return f && existsSync(f) ? currentBeat(readFileSync(f, "utf8")) : STARTER; } catch { return STARTER; } };
-        this.pilotEverywhere = { ...everywhereOf({ everywhere: e }), trigger: e.trigger ?? undefined, words: e.heartbeat_text ?? file(e.heartbeat ?? null) };
-        const list = Array.isArray(out.spaces) ? out.spaces : [];
-        this.autopilot = Object.fromEntries(list.map((a: any) => [a.space, a]));
-      } catch {}
-    })().finally(() => { this.reading = null; });
-  }
-
-  /** A space's Autopilot as herdr-task has it, when it has a record of it. */
-  pilotKnown(id: string) { return this.autopilot[id] ?? null; }
-
-  /** What applies in a space on this machine: its switch (off until herdr-task has a record of it), its schedule,
-   *  events and heartbeat's words (its own or Everywhere's). */
-  pilotOf(id: string) {
-    const cut = id.indexOf("/");
-    if (cut > 0) {
-      // another machine's: its own record there, what applies by this machine's settings (pushed to it as its own);
-      // with no heartbeat in Settings it works from its machine's file, made with the starter when switched on
-      const file = this.pilots.get(id.slice(0, cut)) ?? {};
-      const a = pilotFor({ ...file, spaces: { [id]: file.spaces?.[id.slice(cut + 1)] ?? {} } }, id, this.settings);
-      const words = currentBeat(levelOf(this.settings, id).heartbeat ?? levelOf(this.settings).heartbeat ?? STARTER);
-      return { ...a, words };
-    }
-    const a = this.autopilot[id] ?? pilotFor({ everywhere: this.pilotEverywhere }, id);
-    return { ...a, words: a.heartbeat_text ?? this.pilotEverywhere.words };
-  }
-
-  /** A space's Autopilot read again now (its switch flipped, or woken): this machine's, or its machine's lists. */
-  async readPilot(id: string) {
-    const cut = id.indexOf("/");
-    await (cut > 0 ? this.readLists(id.slice(0, cut)) : this.readAutopilot());
-    this.soon();
-  }
-
-  private readShared() {
-    try { this.shared = JSON.parse(readFileSync(SHARED, "utf8")); } catch {}
-  }
-
-  private async readDocs() {
-    await Promise.all([null, ...this.machines].map(async (m) => {
-      try {
-        const d = await this.hub.call<{ value: any }>("doc.get", { name: "herdr-app", ...(m ? { on: m } : {}) });
-        this.docs.set(m, d.value);
-      } catch {}
-    }));
-    this.soon();
+  private carrying = false;
+  /** The Herdr window's spaces, carried over once per machine (service/carry-over.ts): each machine not in the marker
+   *  yet has its "herdr-app" document read (this computer's, and every connected machine's: one that is offline now is
+   *  done when it first connects), its spaces go into the own list, and it is never read again. */
+  private async carry() {
+    if (this.carrying || !this.own?.ready()) return;
+    const done: unknown = this.doc()[IMPORTED];
+    const todo = [null, ...this.machines].filter((m) => !(Array.isArray(done) && done.includes(m ?? "")));
+    if (!todo.length) return;
+    this.carrying = true;
+    try {
+      const docs = new Map<string | null, any>();
+      await Promise.all(todo.map(async (m) => {
+        try { docs.set(m, (await this.hub.call<{ value: any }>("doc.get", { name: "herdr-app", ...(m ? { on: m } : {}) }, 8000)).value ?? null); }
+        // no such document there (a machine that never had the window): nothing to carry over; not reached: later
+        catch (e) { if (/not.?found|no.?such|missing/i.test(`${(e as any)?.kind ?? ""} ${(e as Error)?.message ?? ""}`)) docs.set(m, null); }
+      }));
+      // against the document as it is when written (a space made meanwhile stays)
+      if (docs.size) await this.own.update((v) => { const r = carryOver(v.spaces, v[IMPORTED], docs); return r ? { ...v, spaces: r.spaces, [IMPORTED]: r.imported } : v; });
+    } catch {} finally { this.carrying = false; }
   }
 
   private async readLists(m: string | null) {
     try {
       const r = await sh(this.hub, READ_LISTS, [], m);
       if (r.code !== 0) return;
-      if (m) this.pilots.set(m, fileIn(r.stdout, ".autopilot.json") ?? {});
       this.lists.set(m, taskLists(r.stdout).map((d: any) => ({ ...d, machine: m, prefix: d.prefix || autoPrefix(d.folder), tasks: Array.isArray(d.tasks) ? d.tasks : [] })));
     } catch {}
   }
@@ -257,18 +194,17 @@ export class Model {
       if (p.settles) settles = Math.min(settles, p.settles);
       const own = live.map((a) => (this.hub.terminals.get(a.address) as any)?.report).find((r) => typeof r?.progress === "number" && r.progress >= 0);
       const w = reportOf(task, p.section, own ? { pct: own.progress, msg: own.msg || null } : null);
-      const running = p.section === "queued" ? list.tasks.filter((x: any) => x.state === "running" && this.agentsOf(list, x).length).length : 0;
       const mine = live.filter((a) => a.role !== "reviewer" && a.role !== "helper");
       const worker = mine.find((a) => a.status === "blocked")?.address ?? mine[0]?.address ?? null;
       const last = task.agents?.[task.agents.length - 1];
       return {
         key: taskKey(list, task), ref: refOf(list, task), title: task.title, section: p.section, needs: p.needs,
-        sub: secondLine(p, w, p.section === "queued" ? queueReason(list, task, running) : null), left: leftOf(p, w), pct: w?.done ?? null,
-        // what its agent last said (core reportOf), as the window's task header shows it: working, and frozen while it
+        sub: secondLine(p, w, p.section === "queued" ? queueReason(list, task) : null), left: leftOf(p, w), pct: w?.done ?? null,
+        // what its agent last said (core reportOf): working, and frozen while it
         // needs the person
         said: w?.text ? { text: w.text, done: w.done ?? null, left: w.left ?? null, paused: !!w.paused } : null,
         machine: list.machine, folder: list.folder, slug: list.slug, id: task.id, list: list.name,
-        // the space whose Assistant started it (herdr-task keeps it): the window counts and lists it there
+        // the space whose Assistant started it (herdr-task keeps it): it is counted and listed there
         space: task.space ? (list.machine ? `${list.machine}/${task.space}` : task.space) : null,
         worker, archived: !!task.archived, pinned: pins.has(taskKey(list, task)),
         // 3.2: the facts the app works a status out from (service/next.ts enrich), as herdr-task keeps them
@@ -287,33 +223,28 @@ export class Model {
         logs: (Array.isArray(task.agents) ? task.agents : []).map((a: any) => a.log).filter((x: unknown) => typeof x === "string"),
       };
     }));
+    this.rows = rows;
     this.live.put("tasks", rows);
     // a task in its grace before Needs you (core GRACE_MS): built again the moment it ends, not up to 10 s later
     if (this.settleTimer) clearTimeout(this.settleTimer);
     this.settleTimer = settles < Infinity ? setTimeout(() => { this.settleTimer = null; this.soon(); }, Math.max(0, settles - Date.now()) + 50) : null;
 
     const bar = sidebarOf(this.value("spaces-chat"));
-    const seen = this.shared["chat.seen"] ?? {};
-    // the window's spaces (its herdr-app documents), and the service's own (a web-only install: no window)
-    const own = (Array.isArray(this.doc().spaces) ? this.doc().spaces : []).map((x: any) => ({ id: x.machine ? `${x.machine}/${x.id}` : x.id, machine: x.machine ?? null, name: x.name, folder: x.folder, tabs: [], own: true }));
-    const fromDocs = [null, ...this.machines].flatMap((m) => spacesFromDoc(this.docs.get(m), m));
-    // each machine's spaces in the order the person dragged them into (core/spaces.js inOrder), Herdr's for the rest
-    // and the machines in the order the person dragged them into (SHEP-153)
-    const spaces = byMachineOrder(inOrder([...fromDocs, ...own.filter((x: any) => !fromDocs.some((y: any) => y.id === x.id))], this.value("spaces-chat")?.order), machineOrderOf(this.value("spaces-chat"))).map((s: any, at: number) => {
+    // the spaces: the service's own list (shared "spaces"), each machine's in the order the person dragged them into
+    // (core/spaces.js inOrder), and the machines in the order the person dragged them into (SHEP-153)
+    const own = (Array.isArray(this.doc().spaces) ? this.doc().spaces : []).map((x: any) => ({ id: x.machine ? `${x.machine}/${x.id}` : x.id, machine: x.machine ?? null, name: x.name ?? "", folder: x.folder ?? "" }));
+    const spaces = byMachineOrder(inOrder(own, this.value("spaces-chat")?.order), machineOrderOf(this.value("spaces-chat"))).map((s: any, at: number) => {
       const k = assistantOf(s, terminals as any[]);
-      // a task belongs to the space that started it, else to the space in its folder (as the window's counts)
+      // a task belongs to the space that started it, else to the space in its folder
       const here = rows.filter((r) => !r.archived && (r.space ? r.space === s.id : (r.machine ?? null) === (s.machine ?? null) && r.folder === s.folder));
       return {
-        ...s, at, icon: bar.icons[s.id] ?? null, pinned: bar.pinned.includes(s.id),
-        // when something in its tabs last changed state (Herdr's tab changed_at: its terminals' status times), for
-        // Jump's newest-first spaces
-        changedAt: Math.max(0, ...(s.tabs ?? []).flatMap((t: any) => t.terminals ?? []).map((a: string) => Number((this.hub.terminals.get(a) as any)?.status_ms) || 0)),
+        ...s, at, icon: bar.icons[s.id] ?? null,
+        // when its Assistant last changed state (its terminal's status time)
+        changedAt: Number((k as any)?.status_ms) || 0,
         section: bar.sections.find((x: any) => (x.spaces ?? []).includes(s.id))?.id ?? null,
         assistant: k?.address ?? null, turn: (k as any)?.turn ?? 0, assistantStatus: (k as any)?.status?.state ?? null,
-        autopilot: this.pilotOf(s.id).on ? { next: this.pilotOf(s.id).next_run ?? null } : null,
         git: this.gitOf(s),
-        pilot: this.pilotOf(s.id),
-        unread: isUnread(k, seen) && spaceLevel(this.value("notify") ?? {}, s.id) !== "Off",
+        unread: isUnread(k),
         red: here.filter((r) => r.section === "needs").length + ((k as any)?.status?.state === "blocked" ? 1 : 0),
         green: here.filter((r) => r.section === "ready").length,
       };
@@ -321,7 +252,7 @@ export class Model {
     this.spaces = spaces;
     void this.readGit(spaces);
     this.live.put("spaces", { spaces, sections: bar.sections });
-    // each list's automations (herdr-task auto), with the folder and machine they belong to, for 3.0's Automations group
+    // each list's schedules (herdr-task auto), with the folder and machine they belong to
     const automations = lists.flatMap((l: any) => (Array.isArray(l.automations) ? l.automations : []).map((a: any) => ({ ...a, folder: l.folder, machine: l.machine ?? null, list: l.name })));
     this.onBuild?.({ spaces, sections: bar.sections, rows, machines: this.machines, known: this.known, automations });
   }
