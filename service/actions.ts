@@ -292,8 +292,10 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   if (b?.type === "section" && sh) {
     if (b.op === "new" && typeof b.name === "string" && b.name.trim()) {
       const machine = typeof b.machine === "string" && b.machine !== compat.host ? b.machine : null;
-      await sh.set("spaces-chat", withSection(bar(), { id: `sec-${Date.now().toString(36)}`, name: b.name.trim().slice(0, 60), machine, icon: typeof b.emoji === "string" ? b.emoji.slice(0, 16) : null }));
-      return { ok: true };
+      const id = `sec-${Date.now().toString(36)}`;
+      await sh.set("spaces-chat", withSection(bar(), { id, name: b.name.trim().slice(0, 60), machine, icon: typeof b.emoji === "string" ? b.emoji.slice(0, 16) : null }));
+      // its id as the list names it, so a space can be moved straight into it (Move to group › New group…)
+      return { ok: true, id: `s:${id}` };
     }
     if (b.op === "delete" && sec(b.id)) {
       // at once, kept for its toast's Undo (shared "spaces-chat.deleted")
@@ -488,12 +490,37 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (typeof b.cid === "string") compat.noteSend?.(addr, { cid: b.cid.slice(0, 80), text, files, at });
     return { ok: true, started: true, at };
   }
+  if (b?.type === "send" && typeof b.chat === "string" && b.chat.endsWith("/worker")) {
+    // a reply typed into a task whose agent is gone (Done, or stopped): herdr-task starts its agent again in the same
+    // thread with the reply, and the task goes back to Working
+    const t = compat.taskOf(b.chat.split("/")[0]), a = compat.addrOf(b.chat);
+    if (t && (!a || a.startsWith("log:") || hub.terminals.get(a)?.state !== "live")) {
+      const text = str(b.text ?? "", 100_000).trim();
+      if (!text) throw new Error("Nothing to send.");
+      const files = Array.isArray(b.attachments) ? b.attachments.filter((x: unknown) => typeof x === "string").slice(0, 50) : [];
+      const r = await task(["reply", t.ref, [text, ...files].join("\n\n")], t.folder, t.machine);
+      let out: any = null;
+      try { out = JSON.parse(r.stdout); } catch {}
+      if (r.code !== 0 || out?.error) throw new Error(out?.error || r.stderr.trim().split("\n").pop() || "Its agent didn't start.");
+      return { ok: true, started: true, at: Date.now() };
+    }
+  }
   if (b?.type === "send" && typeof b.chat === "string") {
     // what it replies to (the message by its id) and the tasks it mentions
     const a = chat(b.chat), r = compat.reader?.(a);
     const quoted = typeof b.reply === "string" ? r?.conv?.items?.find((x: any) => x.id === b.reply)?.text ?? null : null;
     const tags = mentionedIn(String(b.text ?? ""), compat.tasksFor(b.chat)).map((x: any) => taskTag(x, x.ref ?? `#${x.id}`)).join("");
     b = { ...b, addr: a, quote: quoted, tags };
+  }
+  else if (b?.type === "stop" && typeof b.chat === "string" && compat.taskOf(b.chat.split("/")[0])) {
+    // Stop on a task pauses its agent, like pressing Esc: it drops what it was doing and waits. herdr-task records
+    // that the person stopped it ("Stopped by you"); the next message carries on from there.
+    const t = compat.taskOf(b.chat.split("/")[0])!;
+    const r = await task(["stop", t.ref], t.folder, t.machine);
+    let out: any = null;
+    try { out = JSON.parse(r.stdout); } catch {}
+    if (r.code !== 0 || out?.error) return { ok: false, error: out?.error || r.stderr.trim().split("\n").pop() || "It didn't stop." };
+    return { ok: true };
   }
   else if ((b?.type === "stop" || b?.type === "steer") && typeof b.chat === "string") b = { ...b, addr: chat(b.chat) };
   else if (b?.type === "stop-job" && typeof b.chat === "string" && typeof b.job === "string") {
@@ -502,7 +529,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (!r || !b.job.startsWith("b:") || !(await r.stopJob(b.job.slice(2)))) throw new Error("It isn't running any more.");
     return { ok: true };
   }
-  else if ((b?.type === "close" || b?.type === "delete" || b?.type === "archive" || b?.type === "reopen" || b?.type === "task-resume" || b?.type === "schedule") && typeof b.chat === "string") {
+  else if ((b?.type === "close" || b?.type === "delete" || b?.type === "archive" || b?.type === "reopen" || b?.type === "task-resume" || b?.type === "schedule" || b?.type === "task-start" || b?.type === "task-move" || b?.type === "task-rename") && typeof b.chat === "string") {
     // a task's row menu: its chat key is "<task>/worker" (or 2.1's "/Agent")
     const t = compat.taskOf(b.chat.split("/")[0]);
     if (!t) throw new Error("That task isn't here any more.");
@@ -592,10 +619,44 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       return { ok: true, why: out?.why ?? null };
     }
     // the person's own calls on a task, as herdr-task makes them: done, removed, or back from the archive
-    case "close": case "delete": case "archive": case "reopen": {
-      if (b.type === "archive" && b.on !== false) throw new Error("Done tasks archive themselves: Settings › Tasks › Archive Done after.");
+    // Start task, from the dialog of one not started yet: on the agent picked there
+    case "task-start": {
       const { ref, folder, machine } = taskOf(b);
-      const r = await task([b.type === "close" ? "done" : b.type === "delete" ? "rm" : b.type === "reopen" ? "reopen" : "unarchive", ref], folder, machine);
+      const p = b.agent && typeof b.agent === "object" ? b.agent : {};
+      const word = (v: unknown) => (typeof v === "string" && /^[\w.\[\]:/-]{1,80}$/.test(v) ? v : null);
+      const args = ["start", ref, ...(word(p.agent) ? ["--agent", word(p.agent)!] : []), ...(word(p.model) ? ["--model", word(p.model)!] : []), ...(word(p.effort) ? ["--effort", word(p.effort)!] : []),
+        ...(p.fast ? ["--speed", p.fast === "ultrafast" ? "ultrafast" : "fast"] : []), ...(word(p.perm) ? ["--permission", word(p.perm)!] : [])];
+      const r = await task(args, folder, machine);
+      let out: any = null;
+      try { out = JSON.parse(r.stdout); } catch {}
+      if (r.code !== 0 || out?.error) return { ok: false, error: out?.error || r.stderr.trim().split("\n").pop() || "It didn't start." };
+      return { ok: true };
+    }
+    case "task-rename": {
+      const { ref, folder, machine } = taskOf(b);
+      const r = await task(["edit", ref, "--title", str(b.name, 200).trim()], folder, machine);
+      let out: any = null;
+      try { out = JSON.parse(r.stdout); } catch {}
+      if (r.code !== 0 || out?.error) return { ok: false, error: out?.error || r.stderr.trim().split("\n").pop() || "It wasn't renamed." };
+      return { ok: true };
+    }
+    // Move to another space: only before the task has started, and on the same machine
+    case "task-move": {
+      const { ref, folder, machine } = taskOf(b);
+      const to = compat.spaceOf(str(b.place, 200));
+      if (!to) throw new Error("That space isn't here any more.");
+      if ((to.machine ?? null) !== (machine ?? null)) return { ok: false, error: "A task can move to a space on the same machine. For another machine, ask in that space's chat to add it there." };
+      const bare = to.id.slice(to.id.lastIndexOf("/") + 1);
+      const r = await task(["edit", ref, "--space", bare, ...(to.folder !== folder ? ["--move-to", to.folder] : [])], folder, machine);
+      let out: any = null;
+      try { out = JSON.parse(r.stdout); } catch {}
+      if (r.code !== 0 || out?.error) return { ok: false, error: out?.error || r.stderr.trim().split("\n").pop() || "It didn't move." };
+      return { ok: true };
+    }
+    case "close": case "delete": case "archive": case "reopen": {
+      const { ref, folder, machine } = taskOf(b);
+      // archiving takes it out of the list without deleting it; Mark as done from the menu closes it without merging
+      const r = await task([b.type === "close" ? "done" : b.type === "delete" ? "rm" : b.type === "reopen" ? "reopen" : b.on === false ? "unarchive" : "archive", ref], folder, machine);
       let out: any = null;
       try { out = JSON.parse(r.stdout); } catch {}
       if (r.code !== 0 || out?.error) return { ok: false, error: out?.error || r.stderr.trim().split("\n").pop() || "herdr-task refused it." };

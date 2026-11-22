@@ -111,7 +111,7 @@ export class Model {
     return this.spaces.some((s) => s.id === id);
   }
 
-  private async refresh() {
+  async refresh() {
     try {
       const r = await this.hub.call<{ machines: any[] }>("machine.list", {});
       this.machines = r.machines.filter((m) => m.state === "connected").map((m) => m.name);

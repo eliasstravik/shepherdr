@@ -203,6 +203,8 @@ export interface Facts {
   /** an agent's own report (OSC 7501): its state and kind */
   reportOf: (address: string | null) => { state?: string; kind?: string } | null;
   config: Config;
+  /** every schedule as herdr-task keeps it (its list's folder and machine with it) */
+  schedules?: any[];
 }
 
 /** Adds what 3.2 shows to the snapshot the model made: Everything, home and archived spaces, each task's facts. */
@@ -242,9 +244,80 @@ export function enrich(snap: Snapshot, f: Facts): Snapshot {
       ...(after ? { afterTitle: after } : {}),
     };
   });
-  const automations: Record<string, Automation[]> = {};
-  for (const [key, list] of Object.entries(snap.automations ?? {}))
-    automations[key] = list.map((a: any) => ({ ...a, id: a.id ?? `${key}|${a.name}`, place: a.place ?? key }));
+  const automations = f.schedules ? schedulesOf(f.schedules, f.spaces, everything, (ref, machine) => snap.tasks.find((t) => t.id === (machine ? `${machine}:${ref}` : ref))) : {};
   const plans = f.config.plans;
   return { ...snap, places, tasks, automations, ...(everything ? { everything } : {}), config: f.config, warnings: warningsOf(snap, plans), off: offPlugins() };
+}
+
+/* ---------- schedules ---------- */
+
+const EVENT_WORDS: Record<string, string> = { added: "a task is added", ready: "a task is ready", failed: "a task fails", "needs-you": "a task needs you", merged: "a task is merged", stalled: "a task stalls", done: "a task is done", "checks-fail": "checks fail" };
+const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+const clock = (d: Date) => `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+
+/** when a schedule runs, in words: "Once · Fri 27 Nov 9:00", "Mondays 9:00", "When a task is merged" */
+export function whenWords(a: any): string {
+  const parts: string[] = [];
+  const e = a.every;
+  if (e?.kind === "once" && e.at) {
+    const d = new Date(String(e.at).replace(" ", "T"));
+    parts.push(Number.isNaN(d.getTime()) ? `Once · ${e.at}` : `Once · ${d.toLocaleDateString("en", { weekday: "short" })} ${d.getDate()} ${d.toLocaleDateString("en", { month: "short" })} ${clock(d)}`);
+  } else if (e?.text) parts.push(cap(String(e.text).trim()));
+  const events = (Array.isArray(a.on) ? a.on : []).map((x: string) => EVENT_WORDS[x] ?? x);
+  if (events.length) parts.push(`When ${events.join(" or ")}`);
+  return parts.join(", ") || (typeof a.when === "string" ? a.when : "");
+}
+
+/** "in 12 min", "in 9h", "tomorrow 7:30", "in 7 days" */
+export function nextWords(at: number | null | undefined, now = Date.now()): string {
+  if (!at || at <= now) return "";
+  const min = Math.round((at - now) / 60000);
+  if (min < 60) return `in ${Math.max(1, min)} min`;
+  const d = new Date(at), today = new Date(now);
+  const days = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) / 86400000);
+  if (days === 1) return `tomorrow ${clock(d)}`;
+  if (days > 1) return `in ${days} days`;
+  return `in ${Math.round(min / 60)}h`;
+}
+
+const ENDED: Record<string, string> = { nothing: "nothing to do", told: "told you", merged: "merged", done: "done", ready: "ready for review", working: "working", queued: "waiting to start", error: "did not start", removed: "its task was removed" };
+
+/** when it last ran and how that run ended: "today 9:00 · nothing to do" */
+export function lastWords(a: any, now = Date.now()): string {
+  const run = (Array.isArray(a.runs) ? a.runs : []).reduce((m: any, r: any) => (!m || (r?.at ?? 0) > m.at ? r : m), null);
+  const at = run?.at ?? a.last_run;
+  if (!at) return "";
+  const d = new Date(at), days = Math.round((new Date(now).setHours(0, 0, 0, 0) - new Date(at).setHours(0, 0, 0, 0)) / 86400000);
+  const day = days === 0 ? "today" : days === 1 ? "yesterday" : days < 7 ? d.toLocaleDateString("en", { weekday: "long" }) : `${d.getDate()} ${d.toLocaleDateString("en", { month: "short" })}`;
+  const how = run?.error ? "did not start" : ENDED[run?.ended] ?? "";
+  return `${day} ${clock(d)}${how ? ` · ${how}` : ""}`;
+}
+
+/** a schedule's id for the app: its machine, its list's folder and its own id there */
+export const scheduleId = (a: any) => `${a.machine ?? ""}|${a.folder}|${a.id}`;
+export function scheduleOf(id: string): { machine: string | null; folder: string; id: string } | null {
+  const [machine, folder, own] = String(id).split("|");
+  return folder?.startsWith("/") && own && /^[\w.-]{1,60}$/.test(own) && (!machine || /^[\w.-]{1,80}$/.test(machine)) ? { machine: machine || null, folder, id: own } : null;
+}
+
+/** Every schedule under its space: the one it was made for, else the one in its list's folder, else Everything. */
+export function schedulesOf(list: any[], spaces: any[], everything: string | undefined, taskOf: (ref: string, machine: string | null) => Task | undefined): Record<string, Automation[]> {
+  const out: Record<string, Automation[]> = {};
+  for (const a of list) {
+    const machine = a.machine ?? null;
+    const named = a.space ? spaces.find((s) => (s.machine ?? null) === machine && String(s.id).split("/").pop() === String(a.space).split("/").pop()) : null;
+    const s = named ?? spaces.find((x) => (x.machine ?? null) === machine && x.folder === a.folder);
+    const place = s?.id ?? everything ?? "";
+    const once = a.every?.kind === "once";
+    const runs = (Array.isArray(a.runs) ? a.runs : []).map((r: any) => ({ at: Number(r.at) || 0, ...(r.task ? { task: machine ? `${machine}:${r.task}` : String(r.task) } : {}), ...(r.error ? { error: String(r.error).slice(0, 200) } : {}) }));
+    const agent = a.agent && typeof a.agent === "object" && a.agent.agent ? a.agent : typeof a.agent === "string" ? { agent: a.agent } : undefined;
+    (out[place] ??= []).push({
+      id: scheduleId(a), place, name: String(a.title ?? a.id), when: whenWords(a), what: String(a.prompt ?? ""), on: !a.paused && !a.space_paused, next: [],
+      ...(a.next_run && !a.paused ? { nextAt: a.next_run, nextWords: nextWords(a.next_run) } : {}),
+      ...(lastWords(a) ? { last: lastWords(a) } : {}), ...(once ? { once: true } : {}), ...(runs.length ? { runs } : {}), ...(agent ? { agent } : {}),
+      ...(a.last_error ? { error: String(a.last_error.message ?? "") } : {}), machine,
+    });
+    void taskOf;
+  }
+  return out;
 }

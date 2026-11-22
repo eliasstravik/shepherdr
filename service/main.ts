@@ -27,7 +27,7 @@ import { Live } from "./live.ts";
 import { Model } from "./model.ts";
 import { checkFlags } from "./flags.ts";
 import type { Snapshot } from "../web/shared/types.ts";
-import { catalogOf, configOf, enrich, offPlugins, pluginOn, plansOf, setConfig } from "./next.ts";
+import { catalogOf, configOf, enrich, offPlugins, pluginOn, plansOf, scheduleOf, setConfig } from "./next.ts";
 import { ensureShell, type ShellAt } from "./shells.ts";
 import { record, deleteAll, note as noteUsage, followSwitch, isOn as insightsOn, logLines } from "./usage.ts";
 import { insightsSummary } from "./voice-data.ts";
@@ -347,7 +347,7 @@ const withNext = (snap: Snapshot, b: Parameters<NonNullable<typeof model.onBuild
     return { state: st?.state, kind: st?.kind ?? k.report?.kind };
   };
   const bar = model.value("spaces-chat") as any;
-  return enrich(snap, { spaces: b.spaces, rows: b.rows, archived: Array.isArray(bar?.archived) ? bar.archived : [], asked, reportOf, config });
+  return enrich(snap, { spaces: b.spaces, rows: b.rows, archived: Array.isArray(bar?.archived) ? bar.archived : [], asked, reportOf, config, schedules: pluginOn("schedules") ? b.automations : [] });
 };
 const pickFrom = (v: any) => (v?.agent ? { agent: String(v.agent), model: v.model ?? null, effort: v.effort ?? null, fast: v.fast === "ultrafast" ? "ultrafast" as const : !!v.fast, perm: v.perm ?? null } : null);
 /** where your own terminal starts: a space's folder, or a task's (its worktree when it has one), on its machine */
@@ -616,7 +616,52 @@ async function doAction(body: any): Promise<Response> {
       return json({ ok: true, catalog: catalogOf(machine ?? me?.host ?? "", (await compat.agents!.choices(machine)) as any[], { claude: check.claude !== "missing", codex: check.codex !== "missing" }) });
     } catch (err) { return json({ ok: false, error: (err as Error).message }); }
   }
+  // a schedule's own menu: Run now, Pause, Resume; Edit sends the new words to that space's agent, which sets the
+  // trigger exactly as when it is asked in a chat (if it can't make sense of them it says so there, and the schedule
+  // keeps running as before)
+  if (body?.type === "automation" && typeof body.id === "string") {
+    const at = scheduleOf(body.id);
+    if (!at) return json({ ok: false, error: "That schedule isn't here any more." });
+    const tool = async (args: string[]) => {
+      const p = Bun.spawn(["herdr-task", ...(at.machine ? ["--on", at.machine] : []), "auto", ...args, "--folder", at.folder, "--json"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+      const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
+      let j: any = null;
+      try { j = JSON.parse(out); } catch {}
+      if ((await p.exited) !== 0 || j?.error) throw new Error(j?.error ?? (err.trim().split("\n").pop()?.replace(/^herdr-task: /, "") || "The schedule didn't change."));
+    };
+    try {
+      if (body.op === "run") await tool(["run-now", at.id]);
+      else if (body.op === "pause") await tool(["pause", at.id]);
+      else if (body.op === "resume") await tool(["resume", at.id]);
+      else if (body.op === "edit") {
+        const sp = (model.spaces as any[]).find((x) => x.id === body.place);
+        if (!sp) throw new Error("Its space isn't here any more.");
+        const to = typeof body.to === "string" ? (model.spaces as any[]).find((x) => x.id === body.to) : null;
+        const word = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, 2000) : "");
+        const lines = [word(body.when) && `- when it runs: ${word(body.when)}`, word(body.what) && `- what to do: ${word(body.what)}`, to && `- its space: ${to.name}${to.machine ? ` on ${to.machine}` : ""} (${to.folder})`,
+          body.agent?.agent && `- the agent its tasks run on: ${[body.agent.agent, body.agent.model, body.agent.effort, body.agent.fast === "ultrafast" ? "ultrafast" : body.agent.fast ? "fast" : "", body.agent.perm].filter(Boolean).join(", ")}`].filter(Boolean);
+        if (!lines.length) return json({ ok: true });
+        const text = `Change the schedule “${word(body.name)}” (herdr-task auto id ${at.id}, in ${at.folder}):\n${lines.join("\n")}\nSet it with herdr-task auto edit. If you can't make sense of the words, say so here and leave the schedule as it is.`;
+        return json(await act(hub, { type: "send", chat: placeKey(sp.id), text, human: true, cid: `sched-${Date.now().toString(36)}` }, compat));
+      } else return json({ ok: false, error: "A schedule can't do that." });
+      void model.refresh();
+      return json({ ok: true });
+    } catch (err) { return json({ ok: false, error: (err as Error).message }); }
+  }
   // archive a space (out of the list, its schedules stopped, nothing deleted) or bring it back
+  if ((body?.type === "space-archive" || (body?.type === "space-remove" && body.stop)) && typeof body.place === "string") {
+    // the working tasks there are stopped first (the confirmation named them)
+    const sp = (model.spaces as any[]).find((x) => x.id === body.place);
+    if (sp && body.on !== false) {
+      const bare = String(sp.id).split("/").pop();
+      for (const r of (model.rows as any[]).filter((x) => x.section === "working" && (x.space ? x.space === sp.id : (x.machine ?? null) === (sp.machine ?? null) && x.folder === sp.folder)))
+        await act(hub, { type: "stop", chat: `${r.machine ? `${r.machine}:${r.ref}` : r.ref}/worker` }, compat).catch(() => null);
+      // an archived or removed space's schedules stop
+      await Bun.spawn(["herdr-task", ...(sp.machine ? ["--on", sp.machine] : []), "auto", "pause", "--space", bare, "--all", "--folder", sp.folder, "--json"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" }).exited.catch(() => null);
+    } else if (sp && body.type === "space-archive") {
+      await Bun.spawn(["herdr-task", ...(sp.machine ? ["--on", sp.machine] : []), "auto", "resume", "--space", String(sp.id).split("/").pop()!, "--all", "--folder", sp.folder, "--json"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" }).exited.catch(() => null);
+    }
+  }
   if (body?.type === "space-archive" && typeof body.place === "string") {
     const bar = { ...((model.value("spaces-chat") as any) ?? {}) };
     const was: string[] = Array.isArray(bar.archived) ? bar.archived : [];
