@@ -6,6 +6,7 @@ import { useState, type ReactNode } from 'react'
 import { choose, TELL, turnOn, useDeviceAlerts, WHY, type Tell } from '@plugins/alerts/device.ts'
 import type { Config, LevelConfig, Snapshot } from '@shared/types.ts'
 import { isEverything, machineWarn, placeOf, spaceLabel, unreachable } from '@shared/view.ts'
+import { copyText } from './copy.ts'
 import type { IconName } from './icons.ts'
 import { notice, registry, setUI, tryAct, useUI } from './kernel.ts'
 import { openDialog } from './overlay.tsx'
@@ -229,7 +230,7 @@ function addMachineDialog(snap: Snapshot) {
         <p>Run this on the machine that serves Shepherdr. The new machine shows here and in the list once it is linked.</p>
         <div className="code">
           <code>{cmd}</code>
-          <IB icon="copy" label="Copy" onClick={() => void navigator.clipboard?.writeText(cmd).then(() => notice('Copied'))} />
+          <IB icon="copy" label="Copy" onClick={(e) => void copyText(cmd, e.currentTarget).then((ok) => ok && notice('Copied'))} />
         </div>
         <div className="acts"><Btn onClick={close}>Close</Btn></div>
       </>

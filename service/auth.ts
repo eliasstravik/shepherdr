@@ -23,6 +23,15 @@ function pageLink(req: Request, socket: boolean) {
   return !/^\/api(\/|$)/.test(path);
 }
 
+/** A file of an artifact's page, read by the page itself. The page runs in a sandboxed frame with no origin of its
+ *  own (it cannot reach the app), so the browser marks what it loads as cross-site. Reads only, and only under a
+ *  page's own keyed address (service/artifacts.ts PAGE_PATH); the Tailscale login and host are still checked. */
+const PAGE_FILE = /^\/api\/artifacts\/[\w.-]{1,120}\/v\/\d{1,9}\/(?:on\/[\w.-]{1,64}\/)?k\/[\w-]{16,64}\/page\//;
+function pageFile(req: Request, socket: boolean) {
+  if (socket || (req.method !== "GET" && req.method !== "HEAD")) return false;
+  return PAGE_FILE.test(new URL(req.url).pathname.replace(/^\/shepherdr(?=\/)/, ""));
+}
+
 // asWrite: a GET checked as a write (the glance feed, SHEP-246: its stream with native=1 quiets that device's web push):
 // the origin and x-shepherdr: 1
 export function gate(req: Request, g: Gate, socket = false, peerTrusted = false, asWrite = false): Pass {
@@ -31,7 +40,7 @@ export function gate(req: Request, g: Gate, socket = false, peerTrusted = false,
   const login = h.get("tailscale-user-login");
   const write = socket || asWrite || !READS.has(req.method);
   if (req.method === "OPTIONS") return { ok: false, status: 403, why: "no cross-site requests" };
-  if (h.get("sec-fetch-site") === "cross-site" && !pageLink(req, socket)) return { ok: false, status: 403, why: "cross-site" };
+  if (h.get("sec-fetch-site") === "cross-site" && !pageLink(req, socket) && !pageFile(req, socket)) return { ok: false, status: 403, why: "cross-site" };
 
   if (login !== null) {
     if (!g.owner || !g.dns) return { ok: false, status: 503, why: "Tailscale isn't running here" };

@@ -45,7 +45,7 @@ import { browserRelay } from "./browser.ts";
 import { voiceCall, callToResume, callsOn, handOff, type ChatView } from "./voice.ts";
 import type { HearIO } from "./voice-hear.ts";
 import type { VoiceIO } from "./voice-tools.ts";
-import { Artifacts, artifactRoute } from "./artifacts.ts";
+import { Artifacts, artifactAction, artifactRoute } from "./artifacts.ts";
 import { TaskLogs } from "./task-logs.ts";
 import { Settings, onWritten, PUSH, pushBody, readSettings } from "./settings.ts";
 import { Secrets, SecretsHome } from "./secrets.ts";
@@ -592,6 +592,11 @@ const voiceIO: VoiceIO = {
 
 /** One of the web app's actions (an Action, POST /api/action), as the page sends it: a voice call's acts go here too. */
 async function doAction(body: any): Promise<Response> {
+  // an artifact's own actions: delete, rename, pin, restore a version, keep a proof, a note with its spot, an answer
+  if (typeof body?.type === "string" && body.type.startsWith("artifact-")) {
+    const done = await artifactAction(body).catch((e) => ({ ok: false, error: (e as Error).message }));
+    if (done) { void artifacts.read(); return json(done); }
+  }
   // 3.2's settings window: one value for everything ("all") or a space; null puts a space's row back (Reset)
   if (body?.type === "config" && typeof body.key === "string") {
     try {
