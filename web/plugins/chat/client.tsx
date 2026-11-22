@@ -287,6 +287,8 @@ function Messages({ thread }: { thread: Thread }) {
       out.push(<Bubble key={k} msg={m} chat={stub} thread={thread} gap={gap} pending={pending} failed={failed} />)
     }
     for (const [i, p] of registry.messageParts.entries()) out.push(<p.View key={`${k}:p${i}`} msg={m} chat={stub} thread={thread} />)
+    // In the fictional shop conversation the review follows the mock-up, before the later task messages.
+    if (snap.demo && !thread.task && m.artifact?.id === 'a-mock') cardsUntil(Infinity)
     if (!m.activity) prev = who
   }
   const empty = !rows.length && (!chat || chat.fresh || chat.notice === 'none' || chat.top !== false)
