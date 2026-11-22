@@ -185,17 +185,20 @@ function BrowserView({ k, drive, ring, send, state, onFrameRef }: { k: string; d
 }
 
 /** The fictional day has a small interactive stand-in for its sign-in and desktop. */
-function DemoPicture({ k, drive, desktop }: { k: string; drive: boolean; desktop: boolean }) {
+function DemoPicture({ k, drive, desktop, idle, onContinued }: { k: string; drive: boolean; desktop: boolean; idle: boolean; onContinued(): void }) {
   const [code, setCode] = useState('')
   const [continued, setContinued] = useState(false)
+  const [paid, setPaid] = useState(false)
   const login = k.includes('SHOP-17') && !desktop
   return <div className="scr" style={{ position: 'relative', aspectRatio: '8 / 5', background: '#fff' }}>
-    <img src={shotUrl(k, desktop ? 'd' : 'b')} alt={desktop ? 'Demo desktop' : 'Demo browser'} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+    {!idle && !desktop && <img src={shotUrl(k, 'b')} alt="Demo browser" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
+    {desktop && <div style={{ position: 'absolute', inset: 0, color: '#111', background: '#c8d4df', fontSize: 'clamp(10px, 1.5vw, 18px)' }}><div style={{ background: '#eee', padding: '1% 3%' }}>Simulator　 File　 Edit <span style={{ float: 'right' }}>9:41</span></div><div style={{ background: '#fff', margin: '8% auto', width: '60%', borderRadius: 8, overflow: 'hidden' }}><div style={{ background: '#eee', padding: '2% 4%' }}>● ● ●　 garden-app</div><div style={{ padding: '6%' }}><strong>Today</strong><p>Water the tomatoes <span style={{ float: 'right' }}>18:00</span></p><p>Feed the roses <span style={{ float: 'right' }}>19:30</span></p></div></div></div>}
+    {!login && !desktop && !idle && drive && <button type="button" onClick={() => setPaid(true)} style={{ position: 'absolute', left: '3.75%', top: '35%', width: '92.5%', height: '9%', background: '#141414', color: 'white', border: 0, borderRadius: 8, fontSize: 'clamp(12px, 2vw, 26px)' }}>{paid ? 'Paid' : 'Pay now'}</button>}
     {login && drive && !continued && <>
       <input aria-label="Sign-in code" inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} style={{ position: 'absolute', left: '31.25%', top: '43.75%', width: '37.5%', height: '9%', fontSize: 'clamp(12px, 2vw, 26px)', padding: '0 1.5%', background: 'white', color: '#111', border: '1px solid #ccc', borderRadius: 8 }} />
-      <button type="button" aria-label="Continue" onClick={() => code && setContinued(true)} style={{ position: 'absolute', left: '31.25%', top: '55%', width: '37.5%', height: '9%', opacity: 0 }} />
+      <button type="button" aria-label="Continue" onClick={() => { if (code) { setContinued(true); onContinued() } }} style={{ position: 'absolute', left: '31.25%', top: '55%', width: '37.5%', height: '9%', opacity: 0 }} />
     </>}
-    {login && continued && <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#111', background: '#fff' }}>Signed in. You can hand back to the agent.</div>}
+    {login && continued && <div style={{ position: 'absolute', inset: 0, color: '#111', background: '#fff', padding: '7% 12%', fontSize: 'clamp(12px, 2vw, 24px)' }}><strong>Invoices</strong>{[['October 2026', '€1,240.00'], ['September 2026', '€980.00'], ['August 2026', '€1,105.00']].map(([date, total]) => <div key={date} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #ddd', padding: '4% 0' }}><span>{date}</span><span>{total}</span></div>)}</div>}
     {!drive && <button type="button" className="veil" aria-label="Live view. Take over to click and type" onClick={() => notice('Take over to click and type')} />}
   </div>
 }
@@ -357,7 +360,7 @@ function ScreenPane() {
         </div>
       )}
       <div onPointerDown={bump} onKeyDown={bump}>
-        {snap.demo ? <DemoPicture key={`${k}:${src}`} k={k} drive={drive} desktop={src === 'd'} /> : src === 'b' ? <BrowserView k={k} drive={drive} ring={driving} send={send} state={state} onFrameRef={frame} /> : <DesktopView k={k} drive={drive} ring={driving} apiRef={desk} />}
+        {snap.demo ? <DemoPicture key={`${k}:${src}`} k={k} drive={drive} desktop={src === 'd'} idle={isIdle && src === 'b'} onContinued={() => setAddr('billing.example.com/invoices')} /> : src === 'b' ? <BrowserView k={k} drive={drive} ring={driving} send={send} state={state} onFrameRef={frame} /> : <DesktopView k={k} drive={drive} ring={driving} apiRef={desk} />}
       </div>
     </PaneFrame>
   )
