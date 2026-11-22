@@ -204,3 +204,26 @@ test("a copied document reported not found is read from the old session", async 
   expect(doc.spaces).toMatchObject([{ id: "sp1", name: "Old" }]);
   expect(doc[IMPORTED]).toEqual([""]);
 });
+
+test("an unrelated missing method never marks spaces imported", async () => {
+  const { Model } = await import("./model.ts");
+  const hub: any = { terminals: new Map(), on: () => () => {}, call: async (method: string) => { if (method === "machine.list") return { machines: [] }; throw Object.assign(new Error("Method not found"), { kind: "method_not_found" }); } };
+  const m = new Model(hub, { put: () => {} } as any), doc: Record<string, any> = {};
+  m.doc = () => doc;
+  m.own = { ready: () => true, update: async (change) => Object.assign(doc, change(doc)) };
+  m.legacyHistory = async () => ({});
+  await m.refresh();
+  expect(doc[IMPORTED]).toBeUndefined();
+});
+
+test("a machine absent from the old session has no old spaces", async () => {
+  const { Model } = await import("./model.ts");
+  const hub: any = { terminals: new Map(), on: () => () => {}, call: async (method: string) => method === "machine.list" ? { machines: [{ name: "vm", state: "connected" }] } : { value: null } };
+  const m = new Model(hub, { put: () => {} } as any), doc: Record<string, any> = {};
+  m.doc = () => doc;
+  m.own = { ready: () => true, update: async (change) => Object.assign(doc, change(doc)) };
+  m.legacySpaces = async (machine) => { if (machine) throw Object.assign(new Error("Unknown machine"), { kind: "machine_unknown" }); return null };
+  m.legacyHistory = async () => ({});
+  await m.refresh();
+  expect(doc[IMPORTED]).toContain('vm');
+});

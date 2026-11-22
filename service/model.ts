@@ -41,7 +41,7 @@ export async function exec(hub: Hub, argv: string[], on: string | null = null, t
 export const sh = (hub: Hub, script: string, args: string[], on: string | null) => exec(hub, ["sh", "-c", script, ...args], on);
 
 type List = any;
-const missingDoc = (e: unknown) => /not.?found|no.?such|missing/i.test(`${(e as any)?.kind ?? ""} ${(e as Error)?.message ?? ""}`);
+const missingDoc = (e: unknown) => ["not_found", "document_not_found", "doc_not_found"].includes(String((e as any)?.kind ?? ""));
 
 export class Model {
   private lists = new Map<string | null, List[]>();   // machine (null: here) -> its task lists
@@ -215,7 +215,11 @@ export class Model {
             let current: any = null;
             try { current = (await this.hub.call<{ value: any }>("doc.get", { name: "herdr-app", ...(m ? { on: m } : {}) }, 8000)).value ?? null; }
             catch (e) { if (!missingDoc(e)) throw e; }
-            const old = current == null || Object.keys(current).length === 0 ? await this.oldSpaces(m) : current;
+            let old = current;
+            if (current == null || Object.keys(current).length === 0) {
+              try { old = await this.oldSpaces(m); }
+              catch (e) { if ((e as any)?.kind === "machine_unknown") old = null; else throw e; }
+            }
             docs.set(m, old ?? {});
           } catch { /* unavailable or uncertain: retry without marking spaces imported */ }
         }),
