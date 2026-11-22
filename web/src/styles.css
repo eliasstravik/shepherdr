@@ -66,7 +66,8 @@ div.b[data-menu]{cursor:pointer}
 .tcap{caret-color:transparent}
 
 /* a live picture of a browser or a desktop */
-.scr canvas,.thumb canvas,.thumb img{display:block;width:100%;height:auto;background:#fff}
+.scr canvas{display:block;width:100%;height:auto;background:#fff}
+.thumb img{display:block;width:100%;aspect-ratio:16/8;object-fit:cover;object-position:top;background:#fff}
 .scr{touch-action:none}
 .scr.idle{aspect-ratio:16/10}
 .app.phone .scr.idle{aspect-ratio:4/3}
@@ -91,3 +92,6 @@ textarea.inp{height:auto;min-height:104px;padding:8px 12px;resize:vertical;font-
 .c-red{color:var(--red)}
 button:disabled{opacity:.5;cursor:default}
 .row.off{cursor:default}
+
+/* a dialog takes the keyboard when it opens, without a ring around the whole of it */
+.dlg:focus,.pop:focus,.win:focus,.scr:focus{outline:0}

@@ -118,7 +118,7 @@ export function snapshot(mode: 'normal' | 'empty' | 'down' = 'normal'): Snapshot
 let n = 0
 const a = (text: string, x: Partial<Message> = {}): Message => ({ id: `m${++n}`, who: 'agent', text, ...x })
 const me = (text: string, x: Partial<Message> = {}): Message => ({ id: `m${++n}`, who: 'you', text, ...x })
-const did = (at: number, rows: [string, string, string][]): Message => ({ id: `m${++n}`, who: 'agent', activity: { id: `a${n}`, at, end: at + 1000, steps: rows.length, rows: rows.map(([kind, text, x], i) => ({ key: `${n}:${i}`, kind: kind as 'run', text, steps: ['s'], ...(x.startsWith('+') ? { added: Number(x.slice(1).split(' ')[0]), removed: Number((x.split('−')[1] ?? '0')) || undefined } : {}) })) } })
+const did = (at: number, rows: [string, string, string][], summary?: string): Message => ({ id: `m${++n}`, who: 'agent', activity: { id: `a${n}`, at, end: at + 1000, steps: rows.length, ...(summary ? { summary } : {}), rows: rows.map(([kind, text, x], i) => ({ key: `${n}:${i}`, kind: kind as 'run', text, steps: ['s'], ...(x.startsWith('+') ? { added: Number(x.slice(1).split(' ')[0]), removed: Number((x.split('−')[1] ?? '0')) || undefined } : {}) })) } })
 const ask = (id: string, title: string, by: { ref: string; title: string; chat: string } | undefined, choices: string[], x: Record<string, unknown> = {}): Message => ({ id: `ask:${id}`, who: 'agent', question: { id, title, kind: 'Question', choices: choices.map((label) => ({ label })), to: '', ...(by ? { by } : {}), ...x } })
 
 const byPay = { ref: 'SHOP-14', title: 'Switch payment provider', chat: 'SHOP-14/worker' }
@@ -154,7 +154,7 @@ export const chats: Record<string, Chat> = Object.fromEntries(
     chat('NOTES-4/worker', [a('I read the three quotes in your notes folder and wrote up a comparison.')], opus),
     chat('vm:GARDEN-4/worker', permQ().map((x, i) => (i ? x : { ...x, suggest: 'Allow it once' })), gpt),
     chat('SHOP-17/worker', [a("I'm downloading October's invoices. The billing portal sent a sign-in code to your phone, so I need you for this one step.")], opus),
-    chat('SHOP-15/worker', [a('Started. Making the checkout button full width on phones.'), did(NOW - 8 * min, [['read', 'Read checkout.css', ''], ['edit', 'Edit checkout.css', '+6 −2'], ['run', 'Run bun test', 'passed'], ['edit', 'Edit checkout.test.ts', '+12']]), a('Changing the button now. About 10 minutes left.', { suggest: 'Show me a screenshot when it is done' })], opus, { working: true, doing: 'Changing the checkout button', live: { id: 'live', at: NOW, rows: [], steps: 0 } }),
+    chat('SHOP-15/worker', [a('Started. Making the checkout button full width on phones.'), did(NOW - 8 * min, [['read', 'Read checkout.css', ''], ['edit', 'Edit checkout.css', '+6 −2'], ['run', 'Run bun test', 'passed'], ['edit', 'Edit checkout.test.ts', '+12']], 'Ran 4 commands · edited 2 files'), a('Changing the button now. About 10 minutes left.', { suggest: 'Show me a screenshot when it is done' })], opus, { working: true, doing: 'Changing the checkout button', live: { id: 'live', at: NOW, rows: [], steps: 0 } }),
     chat('SHOP-16/worker', [a('Updating three packages. None are breaking changes.')], opus, { working: true, live: { id: 'live', at: NOW, rows: [], steps: 0 }, doing: 'Updating 3 packages' }),
     chat('vm:GARDEN-3/worker', [a('Reminders are built. Writing the tests now, about 20 minutes left.')], gpt, { working: true, live: { id: 'live', at: NOW, rows: [], steps: 0 }, doing: 'Writing tests' }),
   ].map((c) => [c.key, c]),

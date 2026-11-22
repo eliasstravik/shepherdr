@@ -302,19 +302,21 @@ const loading = new Set<string>()
 /** a task's id from its chat's key ("vm:SHOP-12/worker") */
 const taskIdOf = (snap: Snapshot, chatKey: string) => snap.tasks.find((t) => t.agent?.chat === chatKey)?.id ?? chatKey.replace(/\/[^/]+$/, '')
 
-/** the quiet line while the agent works, saying what it is doing; "…" while it writes */
+/** the quiet line while the agent works, saying what it is doing */
 function WorkingTail({ chat }: { chat: Chat | undefined }) {
-  if (!chat) return null
-  if (working(chat)) {
-    const now = chat.live?.now
-    return (
-      <div className="ref" role="status">
-        <I n="working" c="s16 c-working" />
-        <span>{chat.doing || now?.doing || now?.title || 'Working'}</span>
-      </div>
-    )
-  }
-  return typing(chat) ? <p className="b gap" aria-label="Writing">…</p> : null
+  if (!chat || !working(chat)) return null
+  const now = chat.live?.now
+  return (
+    <div className="ref" role="status">
+      <I n="working" c="s16 c-working" />
+      <span>{chat.doing || now?.doing || now?.title || 'Working'}</span>
+    </div>
+  )
+}
+
+/** "…" while it writes */
+function TypingTail({ chat }: { chat: Chat | undefined }) {
+  return chat && !working(chat) && typing(chat) ? <p className="b gap" aria-label="Writing">…</p> : null
 }
 
 /* ---------- the message box ---------- */
@@ -475,7 +477,7 @@ export default definePlugin({
   setup(reg) {
     reg.views.messages = Messages
     reg.views.box = Box
-    reg.chatTail.push({ order: 90, View: WorkingTail })
+    reg.chatTail.push({ order: 10, View: WorkingTail }, { order: 95, View: TypingTail })
   },
 })
 

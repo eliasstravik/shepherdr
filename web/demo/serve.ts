@@ -97,15 +97,8 @@ const PAGES: Record<string, string> = {
 }
 const page = (id: string) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{color-scheme:light dark}body{margin:0;padding:16px;font:16px/24px system-ui,sans-serif}h2{font-size:18px;margin:0 0 12px}.r{display:flex;justify-content:space-between;align-items:center;min-height:40px;border-top:1px solid #8883}.pay{margin-top:12px;height:40px;padding:0 12px;border:0;border-radius:8px;background:CanvasText;color:Canvas;font:inherit;font-weight:500}.l{height:8px;border-radius:4px;background:#8884;margin:12px 0}.bar{height:6px;border-radius:3px;background:#8886}.bar.g{background:#15803d}p{color:#737373;font-size:14px}</style>${PAGES[id] ?? `<h2>${artifacts.find((x) => x.id === id)?.title ?? id}</h2>${[92, 78, 85, 40, 88, 64].map((w) => `<div class="l" style="width:${w}%"></div>`).join('')}`}`
 
-/** a stand-in for the live picture of an agent's browser */
-function shot(key: string) {
-  const login = key.includes('SHOP-17')
-  const t = (x: number, y: number, text: string, size = 13, fill = '#171717', weight = 400) => `<text x="${x}" y="${y}" font-family="system-ui,sans-serif" font-size="${size}" font-weight="${weight}" fill="${fill}">${text}</text>`
-  const body = login
-    ? t(200, 70, 'Check your phone', 16, '#171717', 600) + t(200, 94, 'Enter the 6-digit code we sent you.', 12, '#525252') + '<rect x="200" y="108" width="240" height="34" rx="6" fill="#fff" stroke="#d4d4d4"/>' + t(212, 130, '000000', 13, '#a3a3a3') + '<rect x="200" y="152" width="240" height="34" rx="6" fill="#171717"/>' + t(292, 174, 'Continue', 13, '#fff', 500)
-    : t(24, 40, 'Your basket', 16, '#171717', 600) + '<path d="M24 56H616M24 96H616" stroke="#e5e5e5"/>' + t(24, 82, 'Garden gloves') + t(566, 82, '€12.00') + t(24, 122, 'Total') + t(566, 122, '€12.00') + '<rect x="24" y="140" width="592" height="34" rx="6" fill="#171717"/>' + t(294, 162, 'Pay now', 13, '#fff', 500)
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 ${login ? 260 : 320}"><rect width="640" height="320" fill="#fff"/>${body}</svg>`
-}
+/** a stand-in for the live picture of an agent's browser: one still frame */
+const shotFile = (key: string) => join(fileURLToPath(new URL('./shots/', import.meta.url)), key.includes('SHOP-17') ? 'login.jpg' : 'checkout.jpg')
 
 /** a stand-in for the picture taken of a page when it is published */
 function thumb(id: string, dark: boolean) {
@@ -121,11 +114,12 @@ Bun.serve<{ mode: 'normal' | 'empty' | 'down'; watch: string[] }, never>({
   async fetch(req, server) {
     const url = new URL(req.url)
     const path = url.pathname.replace(/^\/[\w-]+(?=\/api\/)/, '')
+    if (path === '/api/screen') return server.upgrade(req, { data: { mode: 'normal', watch: [], screen: url.searchParams.get('key') ?? '' } as any }) ? undefined : new Response('no', { status: 400 })
     if (path === '/api/ws') {
       const ref = new URL(req.headers.get('referer') ?? url).searchParams.get('case') ?? url.searchParams.get('case')
       return server.upgrade(req, { data: { mode: ref === 'empty' || ref === 'down' ? ref : 'normal', watch: [] } }) ? undefined : new Response('no', { status: 400 })
     }
-    if (path === '/api/screen/shot') return new Response(shot(url.searchParams.get('key') ?? ''), { headers: { 'content-type': 'image/svg+xml' } })
+    if (path === '/api/screen/shot') return new Response(Bun.file(shotFile(url.searchParams.get('key') ?? '')))
     if (path === '/api/me') return Response.json({ login: 'sam', off: [] })
     if (path === '/api/action') return Response.json(action((await req.json()) as Record<string, any>) ?? { ok: true })
     if (path === '/api/upload') return Response.json({ path: `/tmp/demo/${Date.now()}`, name: 'file' })
@@ -141,11 +135,19 @@ Bun.serve<{ mode: 'normal' | 'empty' | 'down'; watch: string[] }, never>({
     return new Response(Bun.file(join(dist, 'index.html')))
   },
   websocket: {
-    open(ws) {
+    async open(ws) {
+      const key = (ws.data as any).screen as string | undefined
+      if (key !== undefined) {
+        const known = state.normal.screens?.[key]
+        ws.send(JSON.stringify({ type: 'state', driver: 'agent', url: known?.b?.url ?? '', title: '', connected: true, viewport: { w: 1280, h: 800 } }))
+        if (known?.b) ws.send(JSON.stringify({ type: 'frame', data: Buffer.from(await Bun.file(shotFile(key)).arrayBuffer()).toString('base64'), metadata: { deviceWidth: 1280, deviceHeight: 800 } }))
+        return
+      }
       socks.add(ws as unknown as Sock)
       ws.send(JSON.stringify({ type: 'snapshot', snapshot: state[ws.data.mode] }))
     },
     message(ws, raw) {
+      if ((ws.data as any).screen !== undefined) return
       const msg = JSON.parse(String(raw)) as { type: string; chats?: string[] }
       if (msg.type === 'ping') return void ws.send(JSON.stringify({ type: 'pong' }))
       if (msg.type !== 'watch') return

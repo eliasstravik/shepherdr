@@ -299,7 +299,7 @@ export function List({ snap }: { snap: Snapshot }) {
   const f = ui.filter
   const ev = everything(snap)
   const machines = listOf(snap, f)
-  const FilterBtn = <IB icon="filter" label="Show which spaces" aria-haspopup="menu" onClick={(e) => filterMenu(e.currentTarget)} />
+  const FilterBtn = <IB icon="filter" label="Show which spaces" aria-haspopup="menu" data-marks="" onClick={(e) => filterMenu(e.currentTarget)} />
   const anyArchived = snap.places.some((p) => p.archived && !p.home)
   return (
     <>
