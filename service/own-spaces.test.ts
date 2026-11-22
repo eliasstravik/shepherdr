@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { withoutSpace } from "./spaces.ts";
 import { IMPORTED } from "./carry-over.ts";
+import { HOME } from "./paths.ts";
 
 const DIR = mkdtempSync(join(tmpdir(), "shep-own-"));
 const CALLS = join(DIR, "hc-calls");
@@ -143,10 +144,13 @@ test("the model carries the window's spaces over once per machine, then never re
   await refresh();
   expect(read).toEqual(["here", "vm"]);
   expect(doc[IMPORTED]).toEqual(["", "vm"]);
-  expect(put.spaces.spaces.map((s: any) => s.id).sort()).toEqual(["sp1", "vm/sp1"]);
+  // this computer's are carried over and none is the home folder: Everything, the root space, is made (once)
+  expect(doc.spaces.filter((s: any) => s.id === "home")).toMatchObject([{ id: "home", name: "Home", folder: HOME, machine: null }]);
+  expect(put.spaces.spaces.map((s: any) => s.id).sort()).toEqual(["home", "sp1", "vm/sp1"]);
   // removed since: it stays removed
   doc.spaces = doc.spaces.filter((s: any) => s.machine !== "vm");
   await refresh();
-  expect(put.spaces.spaces.map((s: any) => s.id)).toEqual(["sp1"]);
+  expect(put.spaces.spaces.map((s: any) => s.id).sort()).toEqual(["home", "sp1"]);
+  expect(doc.spaces.filter((s: any) => s.id === "home").length).toBe(1);
   expect(read).toEqual(["here", "vm"]);
 });

@@ -111,11 +111,11 @@ test("each alert carries its topic and space", () => {
   const a = [...alertsOf(snap).entries()].map(([k, v]) => [k, v.topic, v.place, v.title]);
   expect(a).toEqual([
     ["need:HERD-5/worker:q1", "needs", "sp1", "HERD-5 · Needs you"],
-    ["ready:HERD-4", "ready", "sp1", "HERD-4 · Finished"],
-    ["done:HERD-3", "done", "sp1", "HERD-3 · Done"],
-    ["msg:p:sp1:7", "assistant", "sp1", "tt-repo · New message"],
+    ["ready:HERD-4", "ready", "sp1", "Fix login · Ready for review"],
+    ["done:HERD-3", "done", "sp1", "Old one · Done"],
+    ["msg:p:sp1:7", "assistant", "sp1", "#tt-repo · New message"],
     // 3.2 has no Autopilot: a space's chat message is a New message, whatever an old snapshot says of a pilot
-    ["msg:p:sp2:3", "assistant", "sp2", "shop Assistant · New message"],
+    ["msg:p:sp2:3", "assistant", "sp2", "#shop · New message"],
   ]);
   // an Assistant's question is its Needs you alert, not a new message too
   const asks = { ...snap, needs: [{ id: "q2", chat: "p:sp1", place: "sp1", question: { kind: "Question", title: "Rerun CI?" } }] };

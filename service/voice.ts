@@ -221,7 +221,12 @@ export function voiceCall(hub: Hub, deps: CallDeps, first: Page) {
         if (!/pcm_16000/.test(meta.agent_output_audio_format ?? "pcm_16000")) return end("The voice agent speaks in a format the page can't play.");
         tell({ type: "state", state: "listening" });
       }
-      else if (m.type === "user_transcript") { turn.seen("user_transcript"); guard.seen("user_transcript"); tell({ type: "state", state: "thinking" }); }
+      else if (m.type === "user_transcript") {
+        turn.seen("user_transcript"); guard.seen("user_transcript"); tell({ type: "state", state: "thinking" });
+        // what it heard, for the caption line (nothing of a call is written into a chat)
+        const heard = m.user_transcription_event?.user_transcript;
+        if (typeof heard === "string" && heard.trim()) tell({ type: "heard", text: heard.trim().slice(0, 300) });
+      }
       else if (m.type === "agent_response") {
         turn.seen("agent_response");
         guard.seen("agent_response", m.agent_response_event?.agent_response);
