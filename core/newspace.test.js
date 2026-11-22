@@ -62,13 +62,8 @@ test("the field's list follows the typed path, as a shell completes one", () => 
   expect(N.matching(kids, "zz")).toEqual([]);
 });
 
-test("the window's New space and the web's read the same core", () => {
-  expect(read("mods/newspace/main.js")).toContain('from "./core/newspace.js"');
-  expect(read("web/plugins/places/add.tsx")).toContain("from '@core/newspace.js'");
+test("the service's New space reads this core", () => {
   expect(read("service/spaces.ts")).toContain('from "../core/newspace.js"');
-  // the dialog's height (lib/coordinator.js) counts as many suggestions as it shows
-  expect(read("lib/coordinator.js")).toContain(`export const NEWSPACE_SHOWN = ${N.SHOWN};`);
-  for (const w of ["New space", "Icon and folder", "Make it a git repo", "Create space"]) expect(read("web/plugins/places/add.tsx")).not.toContain(`'${w}'`);
 });
 
 test("Add machine: the ssh config's hosts, when it needs a terminal, its words", () => {
@@ -85,8 +80,6 @@ test("Add machine: the ssh config's hosts, when it needs a terminal, its words",
   expect(MA.terminalName("Me@Box.local")).toBe("add-me-box-local");
   expect([MA.WORDS.title, MA.WORDS.fromConfig, MA.WORDS.noHosts, MA.WORDS.orType, MA.WORDS.placeholder]).toEqual(
     ["Add machine", "From your ssh config", "Your ssh config lists no hosts", "Or type how ssh reaches it", "user@host"]);
-  expect(read("mods/machine-add-chat/main.js")).toContain('from "./core/machine-add.js"');
-  expect(read("web/src/screens/AddMachine.tsx")).toContain("from '@core/machine-add.js'");
   expect(read("service/actions.ts")).toContain('from "../core/machine-add.js"');
 });
 

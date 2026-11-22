@@ -1,11 +1,9 @@
-// New spaces from the web, and spaces without a Herdr window. With the window (Shepherdr's layout installed), a space
-// is the window's: it makes it (herdr-app do space.new), names it as New space does, and gives it its Assistant (new
-// spaces get one). A web-only install has no window: its spaces are the service's own list (the shared document's
-// "spaces"), each with an Assistant started here from the assistant template, labelled as the window labels one.
+// The spaces: the service's own list, the shared document's "spaces" ([{ id, name, folder, machine, at }], machine
+// null: the machine that keeps the document). A new one is added here and gets its Assistant, started from the
+// assistant template and labelled for its space; rename, remove and reorder change the same list (service/actions.ts).
 // Folders for the New space dialog are read on the space's machine (no hidden ones; a repo is a folder with .git); its
-// words and rules are core/newspace.js, the window's New space's too.
+// words and rules are core/newspace.js.
 import { existsSync } from "node:fs";
-import { join } from "node:path";
 import type { Hub } from "./hub.ts";
 import { HOME } from "./paths.ts";
 import { exec } from "./model.ts";
@@ -15,11 +13,27 @@ import { AGENT_PATH, cleanCommand } from "../core/clean-env.js";
 import { TEMPLATES_SH } from "../core/paths.js";
 import { argvFor, NAMES } from "../core/agents.js";
 
-export const withWindow = () => existsSync(join(process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app"), "mods", "spaces-chat"));
+/** A space's id as the app names it: another machine's is "<machine>/<id>". */
+export const ownId = (x: { id: string; machine?: string | null }) => (x.machine ? `${x.machine}/${x.id}` : x.id);
+
+/** The sidebar's own data (shared "spaces-chat") without a removed space: out of its group, its icon and its place in
+ *  its machine's order. Unchanged: the same object. */
+export function withoutSpace(bar: any, id: string) {
+  if (!bar || typeof bar !== "object") return bar;
+  const ordered = Object.values(bar.order ?? {}).some((l: any) => Array.isArray(l) && l.includes(id));
+  const has = (bar.pinned ?? []).includes(id) || (bar.icons && id in bar.icons) || (bar.sections ?? []).some((s: any) => (s.spaces ?? []).includes(id)) || ordered;
+  if (!has) return bar;
+  const icons = { ...(bar.icons ?? {}) };
+  delete icons[id];
+  return {
+    ...bar, icons,
+    ...(Array.isArray(bar.pinned) ? { pinned: bar.pinned.filter((x: string) => x !== id) } : {}),
+    ...(Array.isArray(bar.sections) ? { sections: bar.sections.map((s: any) => (s.spaces ?? []).includes(id) ? { ...s, spaces: s.spaces.filter((x: string) => x !== id) } : s) } : {}),
+    ...(ordered ? { order: Object.fromEntries(Object.entries(bar.order).map(([k, l]: [string, any]) => [k, Array.isArray(l) ? l.filter((x: string) => x !== id) : l])) } : {}),
+  };
+}
 
 async function run(cmd: string[]) {
-  // the window's herdr-app: SHEPHERDR_HERDR_APP in tests (as service/actions.ts)
-  if (cmd[0] === "herdr-app" && process.env.SHEPHERDR_HERDR_APP) cmd = [process.env.SHEPHERDR_HERDR_APP, ...cmd.slice(1)];
   if (cmd[0] === "hc" && process.env.SHEPHERDR_HC) cmd = [process.env.SHEPHERDR_HC, ...cmd.slice(1)];
   const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
@@ -62,7 +76,7 @@ export async function newSpaceInfo(hub: Hub, machine: string | null, at: string 
   return { home, recent, start: NS.startFolder(at, recent, home) };
 }
 
-/** The template to start an Assistant from on machine (null: here): as the window's chat (mods/chat startAgent), a
+/** The template to start an Assistant from on machine (null: here): a
  *  one-off copy, removed by done() once it has started, whose command first clears a parent Claude Code session's
  *  markers the holder may carry (SHEP-86, core/clean-env.js), then execs it: hc runs a template's command under sh -c,
  *  and where sh is dash (Debian, Ubuntu) the shell would stay the terminal's program, so no chat would know its CLI.
@@ -96,15 +110,10 @@ export async function execTemplate(hub: Hub, name: string, machine: string | nul
 /** One word of a command line for sh, quoted only when it needs it (as mods/chat's). */
 export const shellWord = (a: string) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `'${String(a).replace(/'/g, "'\\''")}'`);
 
-/** The web's id for the space the window made: Herdr already answers another machine's as "<machine>/<id>" (its
- *  ids are qualified, as its tabs'); kept as it is, never "<machine>/<machine>/<id>" (SHEP-56: the page then waited
- *  for a space that never came). */
-export const placeId = (space: string, machine: string | null) => (!machine || space.startsWith(`${machine}/`) ? space : `${machine}/${space}`);
-
-/** Makes a space at path on machine (null: here), as the window's New space (mods/newspace, coordinator.js
- *  createSpace): a missing folder is made, makeRepo makes a folder outside git a repo (main, an empty first commit), it
- *  is named as Herdr names it ("Home" at home, else its repo's or folder's name; unnamed: left to follow its folder, as
- *  a worktree's), and `icon` is kept as the sidebar's Rename keeps it. */
+/** Makes a space at path on machine (null: here): a missing folder is made, makeRepo makes a folder outside git a repo
+ *  (main, an empty first commit), it is named after where it is ("Home" at home, else its repo's or folder's name;
+ *  unnamed: left to follow its folder), and `icon` is kept as the sidebar's Rename keeps it. It joins the list of
+ *  spaces (shared "spaces") and its Assistant starts from the assistant template. Returns its id. */
 export async function newSpace(hub: Hub, opts: { machine: string | null; path: string; name?: string; unnamed?: boolean; makeRepo?: boolean; icon?: string | null; pick?: ((space: string) => any) | null; store: { value(k: string): any; set(k: string, v: unknown): Promise<unknown> } }) {
   const { machine } = opts;
   if (!opts.path || opts.path.includes("\0")) throw new Error("Pick a folder.");
@@ -126,23 +135,10 @@ export async function newSpace(hub: Hub, opts: { machine: string | null; path: s
   }
   const name = (opts.name || NS.placeName(abs, top, home)).slice(0, 80);
   const iconOf = (id: string) => (opts.icon ? opts.store.set("spaces-chat", SP.withIcon(opts.store.value("spaces-chat"), id, opts.icon)) : null);
-  if (withWindow()) {
-    const r = await run(["herdr-app", "do", "space.new", "--folder", abs, ...(opts.unnamed ? [] : ["--name", name]), ...(machine ? ["--machine", machine] : [])]);
-    let out: any = {};
-    try { out = JSON.parse(r.out || "{}"); } catch {}
-    if (out.error) throw new Error(`Herdr couldn't make it: ${out.error}`);
-    if (r.code !== 0 || !out.space) throw new Error("A new space opens in the Herdr window: it needs the window open.");
-    const place = placeId(String(out.space), machine);
-    await iconOf(place);
-    return place;
-  }
-  // no window: the service's own space, and its Assistant from the assistant template
   const id = `sp${crypto.randomUUID().replace(/-/g, "")}`;
   const list = Array.isArray(opts.store.value("spaces")) ? opts.store.value("spaces") : [];
-  await opts.store.set("spaces", [...list, { id, name, folder: abs, machine, at: Date.now() }]);
+  await opts.store.set("spaces", [...list, { id, name: opts.unnamed ? "" : name, folder: abs, machine, at: Date.now() }]);
   await iconOf(machine ? `${machine}/${id}` : id);
-  // Settings › Window › Assistant in new spaces off: it opens without one
-  if (opts.store.value("coordinator.auto") === false) return machine ? `${machine}/${id}` : id;
   const t = await execTemplate(hub, "assistant", machine, opts.pick?.(machine ? `${machine}/${id}` : id) ?? null);
   await run(["hc", "run", "--bg", "--keep", "--no-parent", ...(machine ? ["--on", machine] : []), "--cwd", abs,
     "--label", "herdr.role=coordinator", "--label", `herdr.coordinator.space=${id}`, "--label", `herdr.space=${id}`, t.name]);

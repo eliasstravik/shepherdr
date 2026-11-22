@@ -32,7 +32,9 @@ export function keyBytes(keys: string[]): string | null {
 }
 type Socket = { send(data: Uint8Array | string): void; close(): void; buffered(): number };
 
-export function terminalBridge(hub: Hub, address: string, ws: Socket) {
+/** own: your own shell (service/shells.ts). The page is its only viewer, so the terminal takes the page's size
+ *  (a `resize` message); an agent's terminal keeps its own size whoever watches. */
+export function terminalBridge(hub: Hub, address: string, ws: Socket, own = false) {
   let ended = false, opened = false, pending = 0, last = 0, repainting = false, watches = 0;
   let stream: Stream | undefined, typist: { stream: Stream; cols: number; rows: number } | undefined;
   let shown: { cols: number; rows: number } | undefined, idle: ReturnType<typeof setTimeout> | undefined;
@@ -66,6 +68,7 @@ export function terminalBridge(hub: Hub, address: string, ws: Socket) {
 
   async function type(bytes: Uint8Array) {
     const { cols, rows } = live()!;
+    if (own && typist) { typist.stream.input(bytes); return; }
     if (typist?.cols !== cols || typist.rows !== rows) {
       stopTyping();
       const core = await hub.core();
@@ -73,7 +76,7 @@ export function terminalBridge(hub: Hub, address: string, ws: Socket) {
       typist = mine;
     }
     typist.stream.input(bytes);
-    clearTimeout(idle); idle = setTimeout(stopTyping, 2000);
+    clearTimeout(idle); if (!own) idle = setTimeout(stopTyping, 2000);
   }
 
   return {
@@ -93,6 +96,16 @@ export function terminalBridge(hub: Hub, address: string, ws: Socket) {
           const bytes = keyBytes(m.keys);
           if (bytes !== null) await type(new TextEncoder().encode(bytes));
           else await hub.call("terminal.keys", { terminal: address, keys: m.keys });
+        } else if (m.type === "resize" && own && Number.isSafeInteger(m.cols) && Number.isSafeInteger(m.rows) && m.cols >= 20 && m.cols <= 400 && m.rows >= 5 && m.rows <= 200) {
+          // attached as the one who types, at the page's size: the program is told its new size
+          stopTyping();
+          const core = await hub.core();
+          const mine: NonNullable<typeof typist> = { cols: m.cols, rows: m.rows, stream: await core.attach(address, { data() {}, close() { if (typist === mine) typist = undefined; } }, m.cols, m.rows) };
+          typist = mine;
+          (mine.stream as any).resize?.(m.cols, m.rows);
+          clearTimeout(idle);
+          await new Promise((r) => setTimeout(r, 60));
+          if (moved()) await watch();
         } else if (m.type !== "resize") return fail();
         if (!ended) ws.send(JSON.stringify({ type: "ack", id: m.id }));
       }).catch(fail).finally(() => { pending--; });

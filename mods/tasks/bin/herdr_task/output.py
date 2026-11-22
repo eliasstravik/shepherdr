@@ -5,7 +5,7 @@ import json
 from .base import now
 from .agents import (
     agent_running, asking, detail, live_helpers, ask_reason, held_ask, last_words, own_line, own_work, OUT_OF_ROUNDS, status_word, STATUSES,
-    task_status,
+    stopped_facts, task_status,
 )
 from .queues import waiting_ext, waiting_for
 
@@ -24,6 +24,10 @@ def view(s, task, live=None):
         k = next((k for k in running if status_word(k) == "blocked"), None) or next((k for k in running if asking(k)), None)
         st = k.get("status") if k and isinstance(k.get("status"), dict) else {}
         v["why"] = own_line(task, k and k["address"]) or (ask_reason(task, k["address"], held_ask(k["address"]), st.get("kind"), st.get("msg")) if k else v["why"])
+    # Stopped (3.2): who or what stopped it, and why in one line; never a stale one from the stored task.
+    for k in ("stopped_by", "stopped_why", "stopped_at", "stopped_turns"):
+        v.pop(k, None)
+    v.update(stopped_facts(task, v["status"], v["needs"], v["why"]))
     if v["needs"] == "reply":
         # Refused ready with its rounds used up (review_refusal): the Assistant can add one.
         v["why"] = own_line(task) or (OUT_OF_ROUNDS if task.get("review_out") else None) or last_words(task)

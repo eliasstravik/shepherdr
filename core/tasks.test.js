@@ -73,11 +73,12 @@ describe("a task's status (as herdr-task's task_status)", () => {
 });
 
 test("why a queued task waits", () => {
-  const l = list([{ id: 1, state: "running" }, { id: 2, state: "queued", after: [1] }, { id: 3, state: "queued" }], { config: { max_running: 1 } });
-  expect(queueReason(l, l.tasks[1], 1)).toBe("after X-1");
-  expect(queueReason(l, l.tasks[2], 1)).toBe("Waits: 1 task is running here");
-  expect(queueReason(l, { id: 4, state: "queued", held: "vm-a's memory is 92% full" }, 0)).toBe("Waits: vm-a's memory is 92% full");
-  expect(queueReason(l, { id: 4, state: "queued" }, 0)).toBe("Starts soon");
+  const l = list([{ id: 1, state: "running" }, { id: 2, state: "queued", after: [1] }, { id: 3, state: "queued" }]);
+  expect(queueReason(l, l.tasks[1])).toBe("after X-1");
+  // 3.2: nothing waits for room, however many run in its folder (a stored tasks.max_running is ignored)
+  expect(queueReason({ ...l, config: { max_running: 1 } }, l.tasks[2])).toBe("Starts soon");
+  expect(queueReason(l, { id: 4, state: "queued", held: "vm-a's memory is 92% full" })).toBe("Waits: vm-a's memory is 92% full");
+  expect(queueReason(l, { id: 4, state: "queued" })).toBe("Starts soon");
 });
 
 test("what the agent last said, with minutes from its very first estimate", () => {

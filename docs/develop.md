@@ -1,82 +1,84 @@
 # Develop
 
 ```text
-layouts/shepherdr.json   the layout (two live blocks shipped blank: tasks-thread-term, artifacts-view-body)
-mods/<name>/             the 28 mods, installed as they are (names fixed: data/<mod> state follows them)
-lib/                     shared modules, one source each; bin/sync-shared copies them into the mods in lib/COPIES
-lib/addons.json          the add-ons: mods, blocks, keys, helpers, needs, web plugins (docs/addons.md)
-lib/features.json        every feature: its Herdr side, its web side and its shared logic (CI checks all three)
-core/                    the logic the mods and the service share (plain JS; copied into mods by bin/sync-shared)
-service/                 the always-on service (Bun): the web app's API, background work, tailnet sharing (docs/web.md)
-web/                     the web app (React, Vite, Tailwind; 2.1's design): src/, plugins/, shared/
-bin/shepherdr            the installer (install, update, uninstall, doctor); ./install.sh runs it
-bin/                     herdr-secret, herdr-browser, herdr-browser-view, sync-shared (installed to the app's bin/)
+web/src/                 the app's shell: kernel.ts (the places, the store, the link), App.tsx, list, picker, settings
+web/plugins/<name>/      the features, each a plugin (docs/plugins.md); web/plugins.json lists them
+web/shared/              what the page and the service share: types.ts, view.ts (the status rules), alerts
+web/demo/                the demo (serve.ts, data.ts) and live.ts, a go-between for a throwaway service
+service/                 the always-on service (Bun): the app's API, background work, tailnet sharing (docs/web.md)
+core/                    plain JavaScript the service and the page share
 mods/tasks/bin/          herdr-task (entry) and its herdr_task package
-mods/tasks/bin/herdr_task/layout.py   where Shepherdr's data lives, and the move there from ~/.herdr (the one source)
-core/paths.js, lib/dirs.js            the same paths for the service, the web app and the window's mods
-mods/artifacts/bin/      herdr-artifact
-templates/               assistant.md, worker.md, reviewer.md (herdr-core templates)
-guard/herdr-app          the window guard (--guard)
-keys.json                Shepherdr's keys, merged into the person's
+mods/tasks/bin/herdr_task/layout.py   where Shepherdr's data lives (the one source); core/paths.js says the same
+mods/artifacts/          herdr-artifact (bin/) and ARTIFACTS.md, the guide agents read
+bin/shepherdr            the installer (install, update, uninstall, doctor); ./install.sh runs it
+bin/                     herdr-secret, herdr-browser, herdr-desktop, sync-shared
+herdr/open-shepherdr/    the one Herdr mod: an "Open Shepherdr" button
+hooks/                   the agents' question and permission hooks
+templates/               assistant.md, worker.md, reviewer.md: the agents' instructions (herdr-core templates)
+lib/addons.json          a marker 3.1's `shepherdr update` looks for; nothing reads it
 test/                    python tests: repo rules, the installer in throwaway roots, herdr-task
-scripts/parity.py        a scratch install against this machine's live Herdr home, file by file
-RECIPE.md, preview.png   the herdr.dev listing (repo topic herdr-layout)
 ```
+
+`herdr-task` and `herdr-artifact` keep their 3.1 paths under `mods/`, so machines on 3.1 and 3.2 find each other's
+copies.
 
 ## Rules
 
-- Edit `lib/<file>` or `core/<file>`, never a mod's copy, then run `bin/sync-shared`; `bin/sync-shared --check` must pass.
-- A new mod: add it to an add-on in `lib/addons.json` (the tests fail otherwise), write its `mod.json` before or
-  with `main.js`, and list it in `lib/COPIES` for each shared module it imports.
-- Nothing personal: no absolute home paths (use `home()`, `appHome()`, `$HOME`), no machine or account names, no
-  live terminal or artifact ids in the layout. `test/test_repo.py` checks.
-- Version: `VERSION` in `bin/shepherdr`, the top of `CHANGELOG.md`, `RECIPE.md` and the README say the same.
+- A new feature is a plugin: [Plugins](plugins.md).
+- Behaviour is words, not code. A setting reaches an agent as a line in its brief or its instructions. Shepherdr's
+  code never judges work.
+- No model in the status path: a status comes from the agent's report and plain facts (`web/shared/view.ts`).
+- The app never says Assistant, worker or coordinator. It says Shepherdr, Everything, space, task, schedule.
+- Nothing personal: no absolute home paths, no machine or account names. `test/test_repo.py` checks.
+- Version: `VERSION` in `bin/shepherdr`, `package.json`, the top of `CHANGELOG.md` and the README say the same.
 
-## Where data lives (SHEP-141)
+## Where data lives
 
-- Shepherdr's data is in its own folders ([Install](install.md), Where your data lives). Never write a `~/.herdr/...`
-  path in new code: Python reads `layout.Where().path(kind)` (herdr-task: `base.WHERE`), the service `where()` from
-  `service/paths.ts`, a mod `dirs()` from `lib/dirs.js`, a one-file helper (herdr-secret, herdr-artifact) its SHEP
-  block (`bin/sync-shared` writes it from `layout.py`). A script run on another machine starts with `SH` (core/paths.js
-  or layout.py) and uses `$SHEP_TASKS`, `$SHEP_SETTINGS`, ...: right on a machine moved or not yet.
-- A new kind of data: add it to `KINDS` in `layout.py` and `core/paths.js` (test/test_layout.py checks they agree),
-  then `bin/sync-shared`.
+- Shepherdr's data is in its own folders ([Install](install.md)). Never write a `~/.herdr/...` path in new code.
+  Python reads `layout.Where().path(kind)` (herdr-task: `base.WHERE`), the service `where()` from `service/paths.ts`,
+  a one-file helper (herdr-secret, herdr-artifact) its SHEP block, which `bin/sync-shared` writes from `layout.py`.
+- A new kind of data: add it to `KINDS` in `layout.py` and `core/paths.js` (`test/test_layout.py` checks they agree),
+  then run `bin/sync-shared`.
 - Tests never touch the real folders: herdr-task moves nothing when `HERDR_TASK_STORE`, `HERDR_TASK_SETTINGS` or
-  `SHEPHERDR_NO_MIGRATE` is set; `test/test_layout.py` builds throwaway homes (`layout.migrate(home=..., env={})`).
-  `shepherdr --root <scratch>` ignores `SHEPHERDR_HOME` and `XDG_*`.
+  `SHEPHERDR_NO_MIGRATE` is set. `shepherdr --root <scratch>` ignores `SHEPHERDR_HOME` and `XDG_*`.
 
 ## Checks
 
-Quick, fine on any machine (seconds):
+Quick, fine on any machine:
 
 ```bash
-bin/sync-shared --check
-python3 -m unittest discover -s test            # herdr-task's command test runs only on CI
-for f in $(find mods lib core -name '*.js'); do node --input-type=module --check < "$f"; done
-bun test service core web && bunx tsc --noEmit -p . && (cd web && bunx vite build)   # the service and the web app
+python3 bin/sync-shared --check
+for f in core/*.js herdr/open-shepherdr/main.js; do node --input-type=module --check < "$f"; done
+bun install --frozen-lockfile && bun web/build-plugins.ts
+bunx tsc --noEmit -p . && bun test service core web && bun run build
+for f in install.sh bin/herdr-browser bin/herdr-desktop hooks/*.sh service/restart.sh; do bash -n "$f"; done
+python3 -m unittest discover -s test
 ```
 
-The web app against your live data: `bun service/main.ts` (stop the installed service first: it holds port 7788),
-then open the tailnet link. Never on a changed `HOME` or `HERDR_APP_HOME`.
+GitHub runs these on every pull request to main and after each merge (`.github/workflows/check.yml`), and then
+installs into a new throwaway home: dry run, install, doctor, uninstall.
 
-GitHub runs these and more on every pull request (`.github/workflows/check.yml`). `herdr-app check <mod folder>`
-needs the window's runtime and runs a mod's `init()` for real (it can reach the live app): only on a person's
-machine, and never for `shepherdr-settings` (its init pushes settings to other machines).
+## Looking at the app
 
-## Parity check (a machine that runs these mods by hand)
+The demo, with a fictional day and no service:
 
 ```bash
-./install.sh --root /tmp/shep-try --yes          # into a scratch root holding a fresh Herdr home
-python3 scripts/parity.py /tmp/shep-try          # every difference with the live ~/.config/herdr-app
+bun run build
+bun web/demo/serve.ts [port]      # then open it; ?case=empty and ?case=down show those states
 ```
 
-Never point `--root` at the real home for a try, and never start Herdr or herdr-task with a changed `HOME` or
-`HERDR_APP_HOME`: a window or scheduler on another home can overwrite every machine's spaces.
+A real service that touches nothing of yours. It keeps your real HOME but its own herdr-core session and its own
+folders:
 
-## The herdr.dev listing (at release, with the person's yes)
+```bash
+SHEPHERDR_SESSION=try HC_SESSION=try SHEPHERDR_PORT=7801 SHEPHERDR_WEB=off SHEPHERDR_DATA=<scratch> \
+  HERDR_TASK_STORE=<scratch> HERDR_TASK_SETTINGS=<scratch file> SHEPHERDR_NO_MIGRATE=1 bun service/main.ts
+bun web/demo/live.ts 7801 <scratch>/token 7802      # a page in front of it, on 127.0.0.1:7802
+```
 
-- The repo root is the listed layout folder: `layouts/shepherdr.json`, `mods/`, `RECIPE.md`, `preview.png`,
-  `keys.json`. herdr.dev reads the recipe's title and first paragraph.
-- Repo topics: add `herdr-layout` (the listing), keep `herdr` and `shepherdr`, and drop `herdr-plugin` (the
-  terminal-plugin card; `herdr-plugin.toml` is gone from main, 2.1 stays installable from `v2.1`).
-- Tag `v3.0.0` and the GitHub release only after the person says yes; patch bumps after that.
+Put wrapper scripts for `herdr-task` and `herdr-artifact` first on the PATH, so they run this checkout's copies with
+the same variables. A page can't use the service on 127.0.0.1 by itself, so `live.ts` stands between them and adds
+the token.
+
+Never run the service or herdr-task on a changed `HOME`: a scheduler on another home can overwrite every machine's
+spaces.

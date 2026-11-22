@@ -7,11 +7,12 @@ import type { Me } from "./tailscale.ts";
 
 import type { Chats, Watcher } from "./chats.ts";
 import type { Compat } from "./compat.ts";
+import type { Chat } from "../web/shared/types.ts";
 
 // A page's socket: the chats it follows (by 2.1's chat key), each with the terminal and the watcher it holds.
 type WS = ServerWebSocket<{ who: string; keys?: string[]; chats?: Map<string, { addr: string; watcher: Watcher }>; push?: string | null; visible?: boolean; seen?: number; from?: string | null;
   /** the fresh chats it was sent (an Assistant that hasn't started), as sent; when a followed chat's agent went; the timer that looks again */
-  fresh?: Map<string, string>; left?: Map<string, number>; freshTimer?: ReturnType<typeof setTimeout> | null }>;
+  history?: Map<string, { addr: string; watcher: Watcher; chat?: Chat }>; current?: Map<string, Chat>; fresh?: Map<string, string>; left?: Map<string, number>; freshTimer?: ReturnType<typeof setTimeout> | null }>;
 
 /** how long an Assistant must be gone before its chat says what a new one would start on: a restart ends one and
  *  starts another a moment later, and the chat shouldn't flicker in between */
@@ -67,6 +68,7 @@ export class Live {
     this.pages.delete(ws);
     this.visibleNow();
     for (const w of ws.data.chats?.values() ?? []) this.chats?.unwatch(w.addr, w.watcher);
+    for (const w of ws.data.history?.values() ?? []) this.chats?.unwatch(w.addr, w.watcher);
     if (ws.data.freshTimer) clearTimeout(ws.data.freshTimer);
   }
 
@@ -80,16 +82,42 @@ export class Live {
     for (const ws of this.pages) if (ws.getBufferedAmount() < 1 << 20) ws.send(text);
   }
 
+  private combined(ws: WS, key: string, chat: Chat): Chat {
+    const old = ws.data.history?.get(key)?.chat;
+    if (!old?.messages.length) return chat;
+    return { ...chat, messages: [...old.messages, { id: "history-boundary", who: "agent", newSession: true }, ...chat.messages],
+      top: !!old.top && !!chat.top, earlier: !!old.earlier || !!chat.earlier };
+  }
+
+  private sendChat(ws: WS, key: string, chat: Chat) {
+    if (ws.readyState === 1) ws.send(JSON.stringify({ type: "chat", chat: this.combined(ws, key, chat) }));
+  }
+
   /** The chats a page has open now (2.1 sends their keys): followed until it closes them. */
   private watch(ws: WS, keys: string[]) {
     const chats = this.chats, compat = this.compat;
     if (!chats || !compat) return;
     ws.data.keys = keys;
+    ws.data.history ??= new Map();
+    ws.data.current ??= new Map();
+    const histories = new Map(keys.slice(0, 40).map((k) => [k, compat.historyOf(k)]).filter((x): x is [string, string] => !!x[1]));
+    for (const [k, h] of ws.data.history) if (histories.get(k) !== h.addr) { chats.unwatch(h.addr, h.watcher); ws.data.history.delete(k); }
+    for (const [k, addr] of histories) if (!ws.data.history.has(k)) {
+      const watcher: Watcher = (reader, t) => {
+        const h = ws.data.history?.get(k);
+        if (!h) return;
+        h.chat = compat.chat(k, reader, t);
+        const current = ws.data.current?.get(k) ?? compat.freshChat(k);
+        if (current) this.sendChat(ws, k, current);
+      };
+      ws.data.history.set(k, { addr, watcher });
+      chats.watch(addr, watcher);
+    }
     const want = new Map<string, string>();
     for (const k of keys.slice(0, 40)) { const a = compat.addrOf(k); if (a) want.set(k, a); }
     ws.data.chats ??= new Map();
     for (const [k, w] of ws.data.chats) if (want.get(k) !== w.addr) {
-      chats.unwatch(w.addr, w.watcher); ws.data.chats.delete(k);
+      chats.unwatch(w.addr, w.watcher); ws.data.chats.delete(k); ws.data.current?.delete(k);
       if (!want.has(k)) (ws.data.left ??= new Map()).set(k, Date.now());
     }
     this.fresh(ws, keys.slice(0, 40).filter((k) => !want.has(k)));
@@ -97,8 +125,10 @@ export class Live {
       if (ws.data.chats.has(k)) continue;
       let sent = "";
       const watcher: Watcher = (reader, t) => {
-        const text = JSON.stringify({ type: "chat", chat: compat.chat(k, reader, t) });
-        if (text !== sent && ws.readyState === 1) { sent = text; ws.send(text); }
+        const chat = compat.chat(k, reader, t);
+        ws.data.current!.set(k, chat);
+        const text = JSON.stringify(this.combined(ws, k, chat));
+        if (text !== sent && ws.readyState === 1) { sent = text; this.sendChat(ws, k, chat); }
       };
       ws.data.chats.set(k, { addr, watcher });
       chats.watch(addr, watcher);
@@ -120,7 +150,7 @@ export class Live {
       ws.data.left?.delete(k);
       const chat = compat?.freshChat?.(k);
       if (!chat) { sent.delete(k); continue; }
-      const text = JSON.stringify({ type: "chat", chat });
+      const text = JSON.stringify({ type: "chat", chat: this.combined(ws, k, chat) });
       if (sent.get(k) !== text && ws.readyState === 1) { sent.set(k, text); ws.send(text); }
     }
   }

@@ -131,7 +131,7 @@ self.addEventListener('notificationclick', (e) => {
   n.close()
   const then = (p) => e.waitUntil(p.then(refresh))
   if (e.action === 'later') return
-  if (e.action === 'accept' && d.accept) return then(act({ type: 'accept', task: d.accept.task }).then((r) => said(n, r, 'Accepted ✓', n.body)))
+  if (e.action === 'accept' && d.accept) return then(act({ type: 'accept', task: d.accept.task }).then((r) => said(n, r, 'Done ✓', n.body)))
   if (/^\d+$/.test(e.action) && d.answer)
     return then(act({ type: 'answer', chat: d.answer.chat, question: d.answer.question, choice: Number(e.action), fromAlert: true }).then((r) => said(n, r, 'Answered ✓', label)))
   if (e.action === 'reply' && d.reply && typeof e.reply === 'string' && e.reply.trim()) {

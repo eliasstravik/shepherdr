@@ -1,5 +1,5 @@
-"""Tick: one pass over the tasks (start queued ones, finish merged ones, retry cut turns, hand a
-task whose CLI can't go on to its backup)."""
+"""Tick: one pass over the tasks (start queued ones, finish merged ones, note the ones whose agent
+stopped: nothing restarts an agent by itself)."""
 
 import fcntl
 import json
@@ -11,27 +11,26 @@ import time
 from .base import Fail, git, guard, hc_json, now, PR_EVERY, run, SHELLS, STORE, stop_note
 from .settings import machine_name, worker_argv
 from .agents import (
-    agent_log, agent_running, busy_again, detail, held_ask, last_question, live_agents, mid_turn_agents, own_work, ready_turns,
-    status_word,
+    agent_log, agent_running, busy_again, carried_on, clear_stopped, detail, error_words, GONE, held_ask, last_question, live_agents,
+    mid_turn_agents, own_work, ready_turns, starting, status_word,
     task_status,
 )
-from .provider import NUDGE, provider_cut, provider_error, PROVIDER_WAITS
-from .sessions import find_lost_logs, refresh_sessions, session_of
+from .provider import provider_cut, provider_error
+from .sessions import find_lost_logs, refresh_sessions
 from .github import (already_merged, BEHIND, CHECKS_NEVER, checks_missing, checks_since, drop_branch, merge_checks, expected_checks, finish, github, merged_here, needs_approval, note_checks, pr_for_branch, pr_merged, pr_pending, pr_problem,
                      pr_view, pr_wait, queue_dropped_why, queue_entry, queue_merge, queue_refusal, unqueue, tidy_done, tidy_due, update_main, watch_main)
 from .launch import default_space
 from .store import locate, read_list, Store, store_files
-from .queues import machine_hold, refresh_ext, running_count, set_hold, waiting_ext, waiting_for
+from .queues import machine_hold, refresh_ext, set_hold, waiting_ext, waiting_for
 from .archive import archive_pass
 from .browsers import browser_pass
 from .output import progress_clock, say
-from .commands import back_to_work, begin, merge_now, MERGE_FAILED
-from .news import news_pass, typing
-from .takeover import cant_go_on, takeover
+from .commands import back_to_work, begin, merge_failed, merge_now, merge_waits, MERGE_FAILED
+from .news import news_pass
 from .ghnews import held_by_base, main_pass, pr_deliver, pr_news
 from .systemic import dropped, systemic_pass
 from .scheduler import SCHEDULER
-from .revive import NEEDS_RESUME, revive_pass
+from .revive import record_pass
 
 
 PR_WAIT_EVERY = 20000  # how often a pull request whose checks still run is read again (ms)
@@ -223,11 +222,17 @@ def facts(s, t, report):
                 else:
                     t.pop("attention_head", None)
                 t.pop("merge_queued", None)
+                if t.get("auto_merge"):
+                    # it was to merge by itself (or the person marked it as done): a failed merge, its agent's to
+                    # fix (pr_news hands it the conflict or the failed check)
+                    t["merge_failed"], t["merge_failed_at"] = problem, now()
                 report["attention"].append(t["id"])
             elif t.get("attention", "").startswith(("Checks failing", "It conflicts", "The pull request was closed", MERGE_FAILED, BEHIND)) \
                     or (t.get("attention") == CHECKS_NEVER and missing != "never"):
                 t.pop("attention")
                 t.pop("attention_head", None)
+                t.pop("merge_failed", None)
+                t.pop("merge_failed_at", None)
         if t["state"] == "ready" and t.get("auto_merge") and missing == "never" and not t.get("attention"):
             # Checks that should have started never did: it doesn't merge by itself (the person's Accept still can).
             t["attention"], t["attention_at"] = CHECKS_NEVER, now()
@@ -325,7 +330,7 @@ def settle_back(s, t, report):
     branch where it said ready, nothing uncommitted, no question asked, no work of its own left
     running (SHEP-133). Else it stays Working, and Needs you once its agent stays quiet."""
     b = t.get("back") or {}
-    if t["state"] != "running" or not b.get("auto") or t.get("attention") or t.get("retry"):
+    if t["state"] != "running" or not b.get("auto") or t.get("attention") or t.get("stopped_by"):
         return False
     wt = t.get("worktree") if t.get("mode") == "worktree" else None
     if not wt or not t.get("head") or not os.path.isdir(wt):
@@ -351,8 +356,8 @@ def settle_back(s, t, report):
 
 def due_pass(s, report):
     """Scheduled tasks whose time has come (SHEP-38), a time passed while the machine was off too, join
-    the queue in the order they were due: the queue below starts them (after their --after tasks,
-    when there's room), each once."""
+    the queue in the order they were due: the queue below starts them (after their --after tasks),
+    each once."""
     for t in s.data["tasks"]:
         if t["state"] == "scheduled" and (t.get("scheduled_for") or 0) <= now():
             t["state"], t["queued_at"] = "queued", t.get("scheduled_for") or now()
@@ -361,26 +366,10 @@ def due_pass(s, report):
             report.setdefault("due", []).append(s.ref(t))
 
 
-def revive_attention(s, t, needed):
-    """#1080: a Working task whose agent a restart left a plain shell says it needs a resume (revive.needs_resume);
-    that word goes once its agent runs again (a resume, a switch) or the task is no longer Working."""
-    why = needed.get(s.key(t)) if t["state"] == "running" else None
-    has = (t.get("attention") or "").startswith(NEEDS_RESUME)
-    if why and not t.get("attention"):
-        t["attention"], t["attention_at"] = why + ".", now()
-        s.dirty = True
-    elif has and not why and (t["state"] != "running" or any(agent_running(k) for k in live_agents(s.key(t)))):
-        t.pop("attention", None)
-        t.pop("attention_at", None)
-        s.dirty = True
-
-
 def tick_store(s, report):
     """One folder's turn: Ready tasks back at work are Working again, merged tasks become done,
-    auto-merges go when they can, and queued tasks start while there's room."""
-    needed = {x["task"]: x["why"] for x in report.get("revive_needed") or []}
+    auto-merges go when they can, and queued tasks start once what they wait for is done."""
     for t in s.data["tasks"]:
-        revive_attention(s, t, needed)
         if t["state"] == "ready":
             back_pass(s, t, report)
         elif t["state"] == "running" and (t.get("back") or {}).get("auto"):
@@ -393,19 +382,22 @@ def tick_store(s, report):
                 except Exception as e:  # never stops the tick
                     report.setdefault("github_error", []).append(f"{s.ref(t)}: {e}")
             if t["state"] == "ready" and t.get("auto_merge") and t.get("pr") and not t.get("attention") and t.get("_pr_fresh"):
-                if not merge_now(s, t):
+                err = merge_now(s, t)
+                if not err:
                     report["done"].append(t["id"])
+                elif not merge_waits(err):
+                    # 3.2 (step 37): a merge that fails goes back to its agent, in every mode
+                    report.setdefault("merge_failed", []).append({"task": s.ref(t), "why": err, "to": merge_failed(s, t, err)})
             t.pop("_pr_fresh", None)
     due_pass(s, report)
     queued = sorted((t for t in s.data["tasks"] if t["state"] == "queued"), key=lambda t: t.get("queued_at") or 0)
-    n = running_count(s) if queued else 0
     budget = [3]  # other machines asked this pass, at most
     for t in queued:
         waits = bool(waiting_for(s, t))
         if not waits:
             refresh_ext(s, t, budget=budget)
             waits = bool(waiting_ext(t))
-        if waits or n >= s.max_running():
+        if waits:
             if t.pop("held", None):  # waits for something else now
                 s.dirty = True
             continue
@@ -426,7 +418,6 @@ def tick_store(s, report):
             t["attention"] = f"Couldn't start: {e}"
             s.dirty = True
             continue
-        n += 1
         report["started"].append({"folder": s.loc["folder"], "id": t["id"], "ref": s.ref(t), "terminal": a["address"]})
     if s.data.get("systemic"):
         try:
@@ -609,104 +600,68 @@ def memory_guard(report):
     os.replace(tmp, GUARD_FILE)
 
 
-RETRIES = os.path.join(STORE, ".retries.json")
-STALE_CUT_MS = 30 * 60000
+# ---- stopped, never restarted (3.2, step 38) ----------------------------------------------------
+# An agent that crashes, is cut off by its provider or hits its plan's limit is never started again by
+# Shepherdr on its own, and a cut turn is never told to carry on. Its task is Stopped instead: the facts
+# stopped_by ("error" | "limit"; "you" is the person's own Stop, herdr-task stop) and stopped_why (one
+# plain line) are kept on the task, where every list of tasks shows them, and it counts as Needs you.
+# A message to its agent, `resume` or `switch` clears them.
+YOU_GRACE_MS = 15000  # after the person's Stop, its agent may read working a moment longer
 
 
-def retry_one(row, k, log, report):
-    """One agent's provider retry: the row it has now (None: no cut). The row is
-    {address, role, space, log, cut, tries, reason, due | over, nudged}."""
-    addr = k["address"]
-    cut = provider_cut(log) if log else None
-    if not cut:
+def stopped_now(s, t, mine):
+    """(by, why) for a Working task whose agent can't go on by itself, or None: no agent of its own runs
+    (crashed, its terminal gone or left a plain shell), it reports an error, or its log ends on a turn its
+    provider cut off (out of allowance: its plan's limit)."""
+    running = [k for k in mine if agent_running(k)]
+    if not running:
+        return None if starting(t) else ("error", GONE)
+    workers = [k for k in running if (k.get("labels") or {}).get("herdr.role") != "reviewer"]
+    if not workers or any(status_word(k) == "working" for k in workers):
         return None
-    if not row or row.get("cut") != cut["id"]:
-        # One that ended long before Herdr first saw it is left to the person (old news).
-        if (not row or not row.get("cut")) and cut.get("at") and now() - cut["at"] > STALE_CUT_MS:
-            return {**(row or {}), "address": addr, "log": log, "cut": cut["id"], "stale": True}
+    for k in workers:
+        if held_ask(k["address"]):
+            continue
+        if status_word(k) == "error":
+            return "error", error_words([k])
+        if not agent_log(t, k["address"]):
+            refresh_sessions(s, t, [k])
+        log = agent_log(t, k["address"])
+        cut = provider_cut(log) if log else None
+        if not cut:
+            continue
         f = provider_error(cut["text"], cut["code"], cut["status"])
-        wait = f["passing"] and cut["tries"] <= len(PROVIDER_WAITS) and PROVIDER_WAITS[cut["tries"] - 1]
-        labels = k.get("labels") or {}
-        row = {"address": addr, "role": labels.get("herdr.role") or "worker", "space": labels.get("herdr.space"),
-               "log": log, "cut": cut["id"], "tries": cut["tries"],
-               "reason": f"{f['reason']}, still after {cut['tries']} tries" if f["passing"] and not wait else f["reason"],
-               "at": now(), **({"due": now() + wait * 60000} if wait else {"over": True})}
-        report["retries"].append({"address": addr, "reason": row["reason"], "tries": row["tries"], "over": bool(row.get("over"))})
-    # Not into words the person is writing to it (HERD-71): the next round tries again.
-    if row.get("due") and row["due"] <= now() and status_word(k) != "working" and not typing(addr, k):
-        r = run(["hc", "send", addr, NUDGE.format(row["reason"].lower())])
-        if r.returncode == 0:
-            row = {**row, "nudged": now()}
-            row.pop("due")
-    return row
+        words = " ".join(str(cut.get("text") or "").split())
+        why = f["reason"] + (f": {words[:160]}" if words and words.lower() != f["reason"].lower() else "")
+        if status_word(k) == "blocked" and f["passing"]:
+            continue  # it asks the person something: theirs to answer
+        return ("limit" if f["reason"].startswith("Out of allowance") else "error"), why
+    return None
 
 
-def retry_pass(report):
-    """Provider retries for every live coordinator and task worker here: a turn its provider cut
-    off (its own log says so) gets "carry on" after 1, 2, 4 and 8 minutes; the fifth cut, or an
-    error waiting can't fix, needs the person. Rows live in .retries.json; a task's row is also on
-    the task (its "retry"), which its status reads. Reviewers are left alone, as are agents that
-    work, ask (a card Herdr holds) or were written to since (their log no longer ends on the cut)."""
-    report.setdefault("retries", [])
-    try:
-        with open(RETRIES) as f:
-            old = json.load(f)
-    except (OSError, ValueError):
-        old = {}
-    rows = {}
-    for k in (hc_json("ls", "--label", "herdr.role=coordinator") or {}).get("terminals", []):
-        if k.get("state") != "live" or "/" in k["address"] or held_ask(k["address"]):
-            continue
-        k = detail(k)
-        k["labels"] = dict(k.get("labels") or {}, **{"herdr.role": "coordinator"})
-        if not agent_running(k) or status_word(k) == "blocked":
-            continue
-        pid = (k.get("foreground") or {}).get("pid")
-        was = old.get(k["address"]) or {}
-        log = was.get("log") if was.get("pid") == pid and was.get("log") else (session_of(pid)[1] if pid else None)
-        row = retry_one(was or None, k, log, report)
-        if row:
-            rows[k["address"]] = {**row, "pid": pid}
-        elif pid and log:
-            rows[k["address"]] = {"address": k["address"], "pid": pid, "log": log}
+def stopped_pass(report):
+    """Keeps stopped_by and stopped_why on every Working task here (see above), and takes them off once its
+    agent is at work again. Reviewers are left alone. Also logs the moment a task's agents are all gone."""
+    report.setdefault("stopped", [])
     for path in store_files():
         d = read_list(path)
         if not d or not os.path.isdir(d.get("folder") or ""):
             continue
-        tasks = [t for t in d.get("tasks") or [] if t.get("state") == "running" or t.get("retry")]
-        if not tasks:
+        if not any(t.get("state") == "running" or t.get("stopped_by") or t.get("retry") for t in d.get("tasks") or []):
             continue
         with Store(locate(d["folder"])) as s:
             for t in s.data["tasks"]:
+                if t.pop("retry", None) is not None:  # an older version's provider retry: no longer made
+                    s.dirty = True
                 if t["state"] != "running":
-                    if t.pop("retry", None):
+                    if clear_stopped(t):
                         s.dirty = True
                     continue
                 mine = [detail(k) for k in live_agents(s.key(t))]
-                want = None
-                for k in mine:
-                    if (k.get("labels") or {}).get("herdr.role") == "reviewer" or not agent_running(k) or held_ask(k["address"]):
-                        continue
-                    if not agent_log(t, k["address"]):
-                        refresh_sessions(s, t, [k])
-                    log = agent_log(t, k["address"])
-                    # Blocked waits for the person, unless its log ends on what only the backup gets past.
-                    if status_word(k) == "blocked" and not cant_go_on(log):
-                        continue
-                    b = t.get("backup") or {}
-                    if b.get("state") == "started" and b.get("from_address") == k["address"]:
-                        continue  # the agent its backup took over from, still ending
-                    row = retry_one(old.get(k["address"]), k, log, report)
-                    if row and row.get("over") and not row.get("stale"):
-                        row = takeover(s, t, k, row, log, report)
-                    if row:
-                        row["task"] = f"{s.loc['folder']}#{t['id']}"
-                        rows[k["address"]] = row
-                    if row and not row.get("stale"):
-                        want = {x: row[x] for x in ("address", "reason", "tries", "due", "over") if x in row}
+                running = [k for k in mine if agent_running(k)]
                 # SHEP-189: a running task whose agents were all running and now are not has gone
                 # "stopped". Logged once at the moment it happens: which terminals, what Herdr saw.
-                up = any(agent_running(k) and (k.get("labels") or {}).get("herdr.role") != "reviewer" for k in mine)
+                up = any((k.get("labels") or {}).get("herdr.role") != "reviewer" for k in running)
                 if t.get("alive") and not up:
                     from .machine import sample
                     h = sample()
@@ -717,18 +672,23 @@ def retry_pass(report):
                 if bool(t.get("alive")) != up:
                     t["alive"] = up
                     s.dirty = True
-                if (t.get("retry") or None) != want:
-                    if want:
-                        t["retry"] = want
-                    else:
-                        t.pop("retry", None)
-                    s.dirty = True
-                progress_clock(s, t, task_status(t, [k for k in mine if agent_running(k)])[0])
-    if rows != old:
-        tmp = f"{RETRIES}.{os.getpid()}.tmp"
-        with open(tmp, "w") as f:
-            json.dump(rows, f)
-        os.replace(tmp, RETRIES)
+                if t.get("stopped_by") == "you":
+                    # theirs until its agent takes a new turn (their next message carries on)
+                    if now() - (t.get("stopped_at") or 0) > YOU_GRACE_MS and carried_on(t, running):
+                        clear_stopped(t)
+                        s.dirty = True
+                else:
+                    want = stopped_now(s, t, mine)
+                    have = (t.get("stopped_by"), t.get("stopped_why")) if t.get("stopped_by") else None
+                    if want != have:
+                        if want:
+                            t["stopped_by"], t["stopped_why"] = want
+                            t.setdefault("stopped_at", now())
+                            report["stopped"].append({"task": s.ref(t), "by": want[0], "why": want[1]})
+                        else:
+                            clear_stopped(t)
+                        s.dirty = True
+                progress_clock(s, t, task_status(t, running)[0])
 
 
 def cmd_tick(args):
@@ -741,21 +701,21 @@ def cmd_tick(args):
     except OSError:
         say(args, {"busy": True}, "Another tick is running.")
         return
-    report = {"started": [], "done": [], "attention": [], "fired": [], "retries": []}
+    report = {"started": [], "done": [], "attention": [], "fired": []}
     if getattr(args, "machine", None) or getattr(args, "hold", None):
         try:
             set_hold(args.machine, json.loads(args.hold) if args.hold else None)
         except ValueError:
             pass
     try:
-        # First: an Assistant or worker the core gave a plain shell (a crash, a reboot) gets its agent back.
-        revive_pass(report)
+        # Each running agent's session noted on its terminal (the chat reads it); nothing is started again.
+        record_pass(report)
     except Exception as e:  # never stops the queue
-        report["revive_error"] = str(e)
+        report["record_error"] = str(e)
     try:
-        retry_pass(report)
+        stopped_pass(report)
     except Exception as e:  # never stops the queue
-        report["retry_error"] = str(e)
+        report["stopped_error"] = str(e)
     try:
         archive_pass(report, args.folder)
     except Exception as e:  # never stops the queue

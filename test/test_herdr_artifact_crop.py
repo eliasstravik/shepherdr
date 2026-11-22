@@ -1,6 +1,5 @@
 """herdr-artifact cuts pictures with nothing else installed (#1054): a stock machine may have no ImageMagick and no PIL.
-`crop` and the window's Mark up (crop_shot) read and write PNG in plain Python; the guide no longer sends agents to
-`magick`. The test PNGs are written here with every row filter PNG has, so the reader's unfiltering is checked."""
+`crop` reads and writes PNG in plain Python; the guide never sends agents to `magick`. The test PNGs are written here with every row filter PNG has, so the reader's unfiltering is checked."""
 import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import importlib.machinery
 import importlib.util
@@ -140,21 +139,6 @@ class Crop(unittest.TestCase):
         got = A.png_read(p)
         self.assertEqual((got[0], got[1], len(got[3])), (w, h, h))
         self.assertLess(time.time() - t, 2.0)
-
-    def test_the_window_mark_up_cuts_and_outlines_without_imagemagick(self):
-        shot, out = os.path.join(self.dir, "win.png"), os.path.join(self.dir, "spot.png")
-        write_png(shot, 40, 30, 3, lambda x, y: (255, 255, 255))
-        app = os.path.join(self.dir, "app")
-        os.makedirs(app)
-        with open(os.path.join(app, "window.json"), "w") as f:
-            json.dump({"bounds": [0, 0, 20, 15]}, f)  # a 2x shot
-        with mock.patch.object(A, "APP", app), mock.patch.object(A.shutil, "which", return_value=None):
-            self.assertTrue(A.crop_shot(shot, [2, 2, 15, 10], [4, 4, 10, 8], out))
-        w, h, ch, rows = A.png_read(out)
-        self.assertEqual((w, h), (30, 20))
-        blue = bytes((0x2F, 0x81, 0xF7))
-        self.assertEqual(bytes(rows[4][4 * 3:5 * 3]), blue)    # the outline's corner, at the spot (2x)
-        self.assertEqual(bytes(rows[10][10 * 3:11 * 3]), b"\xff\xff\xff")  # inside it: untouched
 
     def test_the_guide_needs_no_imagemagick(self):
         with open(A.GUIDE) as f:

@@ -1,4 +1,4 @@
-"""Provider errors: a turn the model's provider cut off, and whether to retry it."""
+"""Provider errors: a turn the model's provider cut off, in a few words (it is never retried by itself: 3.2)."""
 
 import datetime
 import re
@@ -7,12 +7,10 @@ from .agents import fit, from_person, log_tail, REASONS
 
 
 # ---- provider errors ------------------------------------------------------------------------
-# A turn cut off by the model's provider is no question for the person: Herdr waits and tells
-# the agent to carry on after PROVIDER_WAITS minutes; only when the fifth try is cut off too (or
-# the error is one waiting can't fix) does it need them. As Shepherdr's provider-error.ts: the
-# CLI's own log says what cut it off (its code and HTTP status where it has them, else its words).
+# A turn cut off by the model's provider stops its task (tick.stopped_pass): the CLI's own log says what
+# cut it off (its code and HTTP status where it has them, else its words), as Shepherdr's provider-error.ts.
+# Until 3.1 Herdr told the agent to carry on after a wait; from 3.2 only the person restarts or writes to it.
 
-PROVIDER_WAITS = [1, 2, 4, 8]
 CODE_PASSING = {"server_overloaded": "Provider overloaded", "overloaded": "Provider overloaded", "overloaded_error": "Provider overloaded",
                 "model_cap": "Model at capacity", "http_connection_failed": "Connection dropped",
                 "response_stream_connection_failed": "Connection dropped", "response_stream_disconnected": "Connection dropped",
@@ -55,9 +53,7 @@ def provider_error(words, code="", status=0):
     return {"passing": True, "reason": told} if told else {"passing": False, "reason": "Provider error"}
 
 
-# Herdr's carry-on message; its words also mark it in the log, so a cut after it counts as another try.
-NUDGE = ("Your last turn was cut off by the model's provider ({}). "
-         "Carry on where you left off within your existing authorization.")
+# An older version's carry-on message: its words mark it in a log, so it never counts as the person's.
 NUDGE_MARK = "cut off by the model's provider"
 
 

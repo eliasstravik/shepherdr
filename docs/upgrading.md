@@ -1,6 +1,6 @@
 # Upgrading
 
-## From 3.0.x
+## From 3.1 to 3.2
 
 ```bash
 git pull --ff-only
@@ -8,72 +8,68 @@ shepherdr update
 shepherdr doctor
 ```
 
-A web-only install (`./install.sh --web`) updates the same way: `shepherdr update` reads what was installed and
-updates web only. `shepherdr doctor` says how this install updates. The web app is rebuilt when it's out of date.
+3.2 replaces 3.1 in one switch. There is no time with both. A web-only 3.1 install switches the same way.
 
-Only files Shepherdr put there and you haven't changed are replaced; yours stay, with the new copy beside them as
-`.new`. A mod file you changed that Shepherdr changed too is the exception: your copy could stop the new mod from
-loading, so Shepherdr's goes in and yours goes to the backup folder (the update says where). Each mod is swapped in one step, so Herdr reloads it once. Agents keep running in herdr-core. Until
-`shepherdr doctor` passes, the sync to other machines waits (`a sync hold (`sync-hold` in `~/.local/state/shepherdr`)`).
+What the update does, in order:
 
-## Shepherdr's data moves to its own folders (3.1.27)
+1. It waits while tasks are working. It names them and changes nothing. Run it again once they finished or you
+   stopped them. `--force` switches anyway.
+2. It builds the app. A build that fails stops the update before anything is changed.
+3. It takes out what 3.1 put in the Herdr app: its mods, its layout, `lib/`, `core/`, `bin/`, its keys and its
+   hooks. A file you changed there goes to the backup folder first, and the update says where. Shepherdr's own files
+   go in `~/.local/share/shepherdr`.
+4. It carries your spaces, groups and linked machines into Shepherdr's own herdr-core session, and removes 3.1's
+   scheduler from the default one. `herdr-task carry-over` tries again when a machine couldn't be reached.
+5. It starts the service and prints the app's link.
+6. It converts old artifacts to pages, once. `herdr-artifact convert --all` tries again if that failed.
 
-The first `shepherdr update` to 3.1.27 (or the first herdr-task run of it on another machine, once the sync brought
-it there) moves Shepherdr's data out of `~/.herdr` into its own folders ([Install](install.md), Where your data
-lives), once per machine. It says so in one line; there is nothing to do. `shepherdr doctor` and `shepherdr where`
-say where everything is.
+Then, in Herdr, pick another layout (Ctrl+Shift+L) if Shepherdr's was selected. Where the Herdr app is installed it
+gets one "Open Shepherdr" button (Ctrl+Shift+O, when that key is free).
 
-- **What moves:** tasks, artifacts, settings, the secrets vault and its mark, task browsers (their sign-ins with them),
-  the web service's files, the tools stamp, cli-check and machine-hold. On the same disk each is one rename, so nothing
-  is copied. On another disk (`XDG_*` or `SHEPHERDR_HOME` there), a file (settings, the vault) is copied, checked and
-  swapped, the old copy kept as `<old>.pre-layout2`; a folder (tasks, artifacts, browsers) stays where it is and the
-  new path links to it. A folder you linked elsewhere yourself (artifacts on a bigger disk) stays there.
-- **What doesn't:** task worktrees. Git keeps their absolute paths, and agents, editors and logs know them by it, so a
-  running task keeps its worktree in `~/.herdr/worktrees` until it's done; new tasks get theirs in the new folder.
-  `~/.herdr` itself and Herdr's own worktree dialog's checkouts there stay too.
-- **Old paths keep working:** each moved one is a link to its new place (`~/.herdr/tasks` →
-  `~/.local/share/shepherdr/tasks`), so a window not reloaded yet, an older helper, a path in an old brief or artifact,
-  and another machine still on an older Shepherdr (which reads `$HOME/.herdr/...` there over herdr-core) all find
-  the same data. An older writer that replaces a link with a file is taken in by the next herdr-task run.
-- **Several machines:** each one moves its own data when it updates; until then the others read and write it in its
-  old place, and an updated machine's commands find each machine's data wherever it is. The sync hold
-  (`shepherdr doctor`) still keeps new helpers from spreading before this machine's install is whole.
-- **Safe to stop:** the move takes a lock, and `LAYOUT` (in `~/.local/share/shepherdr`) is written last. A crash or a
-  power cut halfway leaves every old path working, and the next run finishes it. Running it again changes nothing.
-  It doesn't move by itself on a network disk (NFS, SMB): `shepherdr migrate --force` does, when no other machine
-  uses that home.
-- **Rolling back:** `shepherdr migrate --rollback` moves everything back to `~/.herdr`, where an older Shepherdr finds
-  it as it left it (with what was added since), and this version stays on `~/.herdr` until you run `shepherdr migrate`
-  again. To go back to an older release: roll back first, then install that release.
-- **When the links go:** never by themselves. Once every machine runs 3.1.27 or later (`herdr-task machines` lists
-  them), `shepherdr migrate --cleanup-legacy --yes` removes the links and any `.pre-layout2` copies. Until then they
-  stay.
+What carries over:
+
+- Spaces. Sections become groups.
+- Tasks in every state, and schedules (3.1's automations).
+- Settings and secrets. Settings with no row in the new window still apply ([Settings](settings.md)).
+- Each chat's history. It shows above a "New session" line once its agent starts again.
+
+What does not:
+
+- Autopilot. Ask for a repeating schedule instead.
+- Tasks at once. A task starts the moment it is asked to.
+- Automatic retry. An agent that stopped stays stopped until you press Restart.
+- Pinned spaces, per-space Notify, tabs, the Files and Changes panels, usage insights.
+- Your own changes to Shepherdr's window mods and layout. They are in the backup folder.
+
+Shepherdr's agents now run in a herdr-core session of their own. They no longer show in the Herdr app.
+
+Other machines: a machine that only runs tasks gets the new helpers by itself once `shepherdr doctor` passes here. A
+machine that serves the app, or had its own 3.1 install, is switched with `shepherdr web install-on <machine>`
+(`--force` there too).
+
+## Later updates
+
+The same three commands. Shepherdr's own folder is replaced whole. An instructions file you changed stays, with the
+new one beside it as `.new`. Agents keep running in herdr-core. Until `shepherdr doctor` passes, the sync to other
+machines waits.
+
+## Data from before 3.1.27
+
+A Shepherdr older than 3.1.27 kept its data in `~/.herdr`. The first install or update moves it into Shepherdr's own
+folders ([Install](install.md)), once per machine, and leaves links at the old paths. Task worktrees stay where they
+are until their tasks are done.
+
+```bash
+shepherdr where                           # every path, and whether the move is done
+shepherdr migrate --rollback              # everything back to ~/.herdr, for an older Shepherdr
+shepherdr migrate --cleanup-legacy --yes  # remove the old links, once every machine is updated
+```
 
 ## From 2.1 or 2.0
 
-3.0 is a new build inside the Herdr app; 2.x was a web app (2.1) or a terminal-herdr plugin (2.0). Nothing carries
-over: 2.x's data in `~/.shepherdr` stays where it is, and 3.0 never reads or changes it. 2.1 lives on on the `v2.1`
-branch and 2.0 on `v2.0`, each with its own README; don't pull main into them or update them from main.
+2.x was a web app (2.1) or a terminal-herdr plugin (2.0). Nothing carries over: 2.x's data in `~/.shepherdr` stays
+where it is, and 3.x never reads or changes it. 2.1 lives on on the `v2.1` branch and 2.0 on `v2.0`, each with its own
+README. Don't pull main into them or update them from main.
 
-To move to 3.0: install the Herdr app, then [Install](install.md). Stop 2.1 (`shepherdr stop` from your 2.1
-checkout) when you no longer want it; both can run side by side, but they're separate task lists.
-
-## Moving a machine that already runs these mods by hand
-
-A machine whose `~/.config/herdr-app` already holds these mods (they were built there before 3.0) is moved over
-like this, with nothing lost:
-
-1. Dry run: `./install.sh --root <scratch>` into a scratch folder that holds a fresh Herdr home, then compare it
-   with your Herdr folder file by file ([Develop](develop.md), parity check). Every difference must be intended.
-2. Make sure the helper and template hashes match the repo's, so the sync pushes nothing by surprise.
-3. Back up `~/.config/herdr-app` (whole), `~/.config/herdr-core`, `~/.herdr`, the `herdr*` items in `~/.local/bin`,
-   `~/.claude/settings.json`, `~/.codex/config.toml` and `~/.codex/hooks.json`.
-4. Close the window (agents keep running in herdr-core), move `~/.config/herdr-app` aside as
-   `~/.config/herdr-app.pre-3.0`, start Herdr once so it writes a fresh home, close it.
-5. `./install.sh --guard`, then bring back your state from `.pre-3.0`: `data/`, `shared.json`, `view.json`,
-   `seen.json`, `window.json`, `settings.json`, `keys.json`, `secrets/`. Set `"layout": "shepherdr"` in `shared.json`
-   (the layout was `main-tasks` before 3.0) and rename `layout:main-tasks` to `layout:shepherdr` in `keys.json`.
-6. Open the window, `shepherdr doctor`, and check: no errors in `herdr-app status`, the same tasks, chats and artifacts.
-
-Going back: close the window, move `~/.config/herdr-app` aside and `~/.config/herdr-app.pre-3.0` back, and restore
-the links, templates and CLI settings from the backup.
+To move to 3.2: install herdr-core, then [Install](install.md). Stop 2.1 (`shepherdr stop` from your 2.1 checkout)
+when you no longer want it.

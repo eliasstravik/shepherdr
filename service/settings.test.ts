@@ -1,4 +1,3 @@
-import * as APc from "../core/autopilot.js";
 import { expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,10 +16,9 @@ test("the Tasks rows say the window's words, and a change keeps the rest of the 
   const tasks = s.sections("https://box/shepherdr/").find((x) => x.name === "Tasks" && x.level === "all")!;
   expect(tasks.rows.find((r) => r.key === "tasks.merge")).toMatchObject({ value: "On Accept", options: ["On Accept", "After checks pass", "Right away"] });
   s.set("tasks.merge", "After checks pass");
-  s.set("tasks.max_running", "40");
   s.set("tasks.proof", "Off");
   const f = JSON.parse(readFileSync(file, "utf8"));
-  expect(f.everywhere.tasks).toEqual({ merge: "checks", max_running: 10, proof: false });
+  expect(f.everywhere.tasks).toEqual({ merge: "checks", proof: false });
   expect(f.everywhere.machine).toEqual({ start_load: 2 });
   expect(f.spaces.sp1.folder).toBe("/x");
   expect(() => s.set("tasks.merge", "Whenever")).toThrow();
@@ -84,47 +82,24 @@ test("Branch names (#570): Everywhere's or a space's own pattern, checked before
   expect(JSON.parse(readFileSync(file, "utf8")).spaces.sp6.tasks).toBeUndefined();
 });
 
-test("Autopilot: Everywhere's unless a space sets its own, kept with the rest and sent to its machine", async () => {
-  const { pushBody } = await import("./settings.ts");
+test("3.2: Autopilot, Tasks at once and the add-ons' switches are gone; what a file still keeps of them is ignored, never an error", () => {
+  const f = JSON.parse(readFileSync(file, "utf8"));
+  f.everywhere = { ...f.everywhere, autopilot: { every: "every 60 minutes", events: ["ready"] }, off: ["web", "voice", "autopilot"], tasks: { ...f.everywhere.tasks, max_running: 3 } };
+  f.spaces = { ...f.spaces, sp4: { folder: "/web", autopilot: { direction: "Launch the shop" } } };
+  writeFileSync(file, JSON.stringify(f));
   const s = new Settings();
   s.start();
-  const web = { id: "sp4", name: "web", machine: null, folder: "/web" }, api = { id: "pi/sp5", name: "api", machine: "pi", folder: "/api" };
-  const pilot = { everywhere: { every: "every 60 minutes", events: ["ready"], words: "Keep it green." } };
-  s.set("autopilot.every", "weekdays 9:00", "pi/sp5", api);
-  s.set("autopilot.heartbeat", "Only the API.", "pi/sp5", api);
-  s.set("autopilot.events", "merged,ready", "all");
-  let f = JSON.parse(readFileSync(file, "utf8"));
-  expect(f.spaces["pi/sp5"].autopilot).toEqual({ every: "weekdays 9:00", heartbeat: "Only the API." });
-  expect(f.everywhere.autopilot).toEqual({ events: ["ready", "merged"] });
-  expect(JSON.parse(pushBody(f, "pi")).spaces.sp5.autopilot.every).toBe("weekdays 9:00");
-  const page = (level: string) => s.sections(null, [web, api], ["pi"], "box", pilot).find((x) => x.name === "Autopilot" && x.level === level)!;
-  const row = (level: string, key: string) => page(level).rows.find((r) => r.key === key)!;
-  expect(row("pi/sp5", "autopilot.every")).toMatchObject({ value: "weekdays 9:00", inherits: { value: "Every hour", from: "Everywhere" } });
-  expect(row("pi/sp5", "autopilot.events")).toMatchObject({ value: "ready,merged", from: "Everywhere" });
-  expect(row("sp4", "autopilot.every")).toMatchObject({ value: "every 60 minutes", from: "Everywhere" });
-  expect(row("sp4", "autopilot.heartbeat")).toMatchObject({ value: "Keep it green." });
-  expect(row("all", "autopilot.every").others).toEqual([{ id: "pi/sp5", name: "api" }]);
-  expect(() => s.set("autopilot.events", "lunch", "all")).toThrow();
-  // a space's Direction: one line; empty, none (Everywhere's page has no Direction row)
-  s.set("autopilot.direction", "  Launch the\n  shop ", "sp4", web);
-  expect(JSON.parse(readFileSync(file, "utf8")).spaces.sp4.autopilot).toEqual({ direction: "Launch the shop" });
-  expect(row("sp4", "autopilot.direction")).toMatchObject({ value: "Launch the shop", text: true });
-  expect(row("all", "autopilot.direction")).toBeUndefined();
-  s.set("autopilot.direction", "", "sp4", web);
-  expect(JSON.parse(readFileSync(file, "utf8")).spaces.sp4.autopilot).toBeUndefined();
-  // an earlier version's starter in Settings shows as today's
-  s.set("autopilot.heartbeat", APc.OLD_STARTERS[0], "sp4", web);
-  expect(row("sp4", "autopilot.heartbeat").value).toBe(APc.STARTER);
-  s.set("autopilot.heartbeat", null, "sp4", web);
-  expect(page("all").about).toContain("push the project forward");
-  expect(page("all").about).toContain("never asking you");
-  // Reset: back to Everywhere's
-  s.set("autopilot.every", null, "pi/sp5", api);
-  s.set("autopilot.heartbeat", null, "pi/sp5", api);
-  f = JSON.parse(readFileSync(file, "utf8"));
-  expect(f.spaces["pi/sp5"].autopilot).toBeUndefined();
-  // without its add-on, no page
-  expect(s.sections(null, [web], [], "box", null).some((x) => x.name === "Autopilot")).toBe(false);
+  const web = { id: "sp4", name: "web", machine: null, folder: "/web" };
+  const all = s.sections(null, [web], [], "box");
+  expect([...new Set(all.map((x) => x.name))]).toEqual(["Agents", "Tasks", "Machines", "Web"]);
+  expect(all.flatMap((x) => x.rows).some((r) => /^(autopilot|window|addon|notify)|max_running/.test(r.key))).toBe(false);
+  // they can't be set any more, and a change of something else keeps the old values in the file as they were
+  expect(() => s.set("autopilot.every", "weekdays 9:00", "all")).toThrow("can't be changed");
+  expect(() => s.set("tasks.max_running", "4", "all")).toThrow("can't be changed");
+  s.set("tasks.proof", "On", "sp4", web);
+  const after = JSON.parse(readFileSync(file, "utf8"));
+  expect(after.everywhere.autopilot).toEqual({ every: "every 60 minutes", events: ["ready"] });
+  expect(after.spaces.sp4).toMatchObject({ autopilot: { direction: "Launch the shop" }, tasks: { proof: true } });
 });
 
 test("machine limits: percents on the page, the file's own units, and this computer as local", () => {
@@ -195,7 +170,7 @@ test("Agents and Tasks say the window's words: the model button, Other CLI, Must
   expect(agents.rows[2]).toMatchObject({ value: "Other CLI (Codex)", agent: { unset: true, other: false } });
   const tasks = s.sections(null).find((x) => x.name === "Tasks" && x.level === "all")!;
   expect(tasks.rows.some((r) => r.key === "tasks.must_fix")).toBe(false);
-  expect(tasks.rows.find((r) => r.key === "tasks.max_running")).toMatchObject({ hint: C.ABOUT["tasks.max_running"], steps: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"] });
+  expect(tasks.rows.some((r) => r.key === "tasks.max_running")).toBe(false);
   const web = s.sections({ on: true, link: "https://box/shepherdr/", why: null }).find((x) => x.name === "Web")!;
   expect(web.rows.map((r) => r.label)).toEqual(["Shepherdr on the web", "Link"]);
   expect(web.rows[0].hint).toBe("On, private to your tailnet.");

@@ -214,18 +214,17 @@ export function holdingItems(items, truth) {
   });
 }
 
-// Why a queued task waits: the tasks it comes after that aren't done, else the folder is full.
-// running: how many of the list's tasks run with a live agent now.
-export function queueReason(list, task, running) {
+// Why a queued task waits: the tasks it comes after that aren't done, else its machine is too busy. Nothing waits
+// for room (3.2: no limit on how many tasks run at once).
+export function queueReason(list, task) {
   const byId = new Map(list.tasks.map((x) => [x.id, x]));
   const wait = (task.after ?? []).filter((i) => byId.has(i) && byId.get(i).state !== "done");
   // Another folder's or machine's task (herdr-task --after WEB-2, vm-b:HAT-12): its state as
   // herdr-task last read it ("gone": removed, it holds nothing up).
   const ext = (task.after_ext ?? []).filter((x) => !["done", "gone"].includes(x.state)).map((x) => x.ref);
   if (wait.length || ext.length) return `after ${[...wait.map((i) => refOf(list, { id: i })), ...ext].join(", ")}`;
-  // In plain words, as herdr-task's queue_reason: the folder's limit, else its machine too busy
-  // (herdr-task tick's "held": "vm-a's memory is 92% full", HERD-40).
-  if (running >= (list.config?.max_running ?? 10)) return `Waits: ${running === 1 ? "1 task is" : `${running} tasks are`} running here`;
+  // In plain words, as herdr-task's queue_reason: its machine too busy (herdr-task tick's "held": "vm-a's memory is
+  // 92% full", HERD-40).
   return task.held ? `Waits: ${task.held}` : "Starts soon";
 }
 

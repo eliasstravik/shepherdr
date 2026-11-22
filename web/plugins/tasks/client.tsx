@@ -1,782 +1,418 @@
-// Tasks, as Shepherdr 3's Tasks panel (mods/tasks): every task on every machine, grouped by the toggle under the search
-// box (kept on this device, SHEP-182). Status, the default: what needs the person first (Needs you, Ready), then Working,
-// Queued and the rest, each row saying its machine and space, Done hidden behind its count at the end. Place: each
-// machine, its spaces inside it, every status mixed (a row's icon says which). Pinned tasks first in both. Each group
-// folds. ⋯ narrows it all to the space picked. A Ready row has Review. A row's menu only pins it (core/menus.js taskMenu,
-// the window's too); the Assistant does the rest. Done tasks archive themselves: the Archived row at the bottom opens them.
-import clsx from 'clsx'
-import { openAccept, useAccepting } from '@client/screens/Accept.tsx'
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react'
-import {
-  archivedIn,
-  closeTask,
-  definePlugin,
-  DONE_OPEN,
-  keepTasks,
-  matches,
-  filteredGroups,
-  setThisSpace,
-  inList,
-  tasksIn,
-  filterOf,
-  getState,
-  listView,
-  openTask,
-  openSplit,
-  panesHere,
-  splitClick,
-  pinTask,
-  placeOf,
-  scheduleTask,
-  registry,
-  setFilter,
-  setGroup,
-  setUI,
-  toggleAllDone,
-  toggleShut,
-  shownGroups,
-  taskOf,
-  useSnap,
-  useStore,
-  useUI,
-  type GroupBy,
-  type ListView,
-  type TaskGroup,
-} from '@client/kernel.ts'
-import { keysMoved } from '@client/focus.ts'
-import {
-  ArchivedIcon,
-  BackIcon,
-  CheckIcon,
-  ClockIcon,
-  DownIcon,
-  Empty,
-  FilterBox,
-  HashIcon,
-  ic,
-  IconButton,
-  List,
-  Menu,
-  MenuItem,
-  MenuLabel,
-  MenuSeparator,
-  Meta,
-  MonitorIcon,
-  MoreIcon,
-  NextIcon,
-  PinTaskIcon,
-  PlayIcon,
-  Primary,
-  RoundButton,
-  rowClass,
-  ServerIcon,
-  TaskDot,
-  UnpinIcon,
-  XIcon,
-  field,
-} from '@client/ui.tsx'
-import { needsYou, type Waiting } from '@shared/needs-you.ts'
-import { doneNewestFirst, machineName, type Automation, type Machine, type Place, type Snapshot, type Task } from '@shared/types.ts'
-import { useFlip } from '@client/motion.ts'
-import { Dialog, RowMenu, useRowMenu, type RowMenuState } from '@client/rowmenu.tsx'
-import * as CF from '@core/confirm.js'
-import * as MN from '@core/menus.js'
-import * as TK from '@core/tasks.js'
-import * as ND from '@core/needs.js'
+// Tasks: the pane with Now (Needs you, Working, Up next, Done, Archived) and Scheduled, a task opened as a thread
+// (back, title, Terminal, Screen, its menu, expand, its own reply box), the review card wherever it comes up, the
+// Start task dialog for one not started yet, and a task's menu.
+import { useEffect, useState, type ReactNode } from 'react'
+import { PaneFrame, placeholderOf } from '@client/App.tsx'
+import { renameDialog } from '@client/list.tsx'
+import { definePlugin, getState, go, has, notice, openTask, registry, setUI, togglePane, tryAct, act, useSnap, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
+import { confirm, openDialog, openMenu } from '@client/overlay.tsx'
+import { AgentField, pickFor, type Pick } from '@client/picker.tsx'
+import { edge } from '@client/resize.ts'
+import { Btn, Cnt, cx, Empty, Hd, I, IB } from '@client/ui.tsx'
+import type { MergeEvidence, Snapshot, Task } from '@shared/types.ts'
+import { isEverything, machineLabel, needsCount, nowGroups, onBranch, placeDown, spaceLabel, spacesOf, statusWord, taskChat, taskLine, taskRef, taskWhen, tasksIn, tstate, whereWords, type TaskState } from '@shared/view.ts'
+import { DoneRow } from '@plugins/chat/cards.tsx'
 
-// the window's words for a row (core/tasks.js, core/needs.js): every second line starts with a capital and is at most
-// 40 characters, cut at a word (the whole of it in the row's label); an automation's next run as "9:00", "Tue 9:00", "Nov 12 9:00"
-const capital = TK.capital as (s: string) => string
-const fit = ND.fit as (s: string) => string
-const day = TK.day as (ms: number) => string
-const STATUS = TK.STATUS as Record<string, string>
-/** a task's id as its row shows it: its list's ref, without the machine ("SHEP-7"; the machine is in where it is) */
-const refOf = (id: string) => id.slice(id.lastIndexOf(':') + 1)
+const ST: Record<TaskState | 'sched', [Parameters<typeof I>[0]['n'], string]> = { ask: ['ask', 'c-ask'], ready: ['ready', 'c-ready'], working: ['working', 'c-working'], next: ['next', 'c-mute'], done: ['check', 'c-mute'], archived: ['check', 'c-mute'], sched: ['clock', 'c-mute'] }
 
-/** the window's automation mark (mods/tasks/repeat.svg, lucide's repeat) */
-function RepeatIcon({ className }: { className?: string }) {
-  return (
-    <svg aria-hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <path d="m17 2 4 4-4 4" />
-      <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
-      <path d="m7 22-4-4 4-4" />
-      <path d="M21 13v1a4 4 0 0 1-4 4H3" />
-    </svg>
-  )
+/** a task's status mark: colour only for status (green ready, blue working, amber needs you, red stopped) */
+export function StatusIcon({ t, dim, c }: { t: Task; dim?: boolean; c?: string }) {
+  const s = tstate(t)
+  const [n, col] = ST[s]
+  return <I n={n} c={cx(c, dim ? 'c-mute' : t.stopped && t.stopped.by !== 'you' && s === 'ask' ? 'c-red' : col)} />
 }
 
-/**
- * A task, with one line under its title (taskLine). Working, its pie fills with the % done its agent reported and the time
- * left sits short under it ("2h"); Ready, Review sits at the row's end.
- */
-function TaskRow({ t, ix, where }: { t: Task; ix: number; where?: string[] }) {
-  // the open task, or the focused pane's in split view
-  const sel = useUI((u) => u.task === t.id || (panesHere(u)[u.split.pane]?.kind === 'task' && panesHere(u)[u.split.pane].id === t.id))
-  const kb = useUI((u) => u.kb && !u.task && u.cur === ix)
-  // its menu (Pin or Unpin) on a right click, or a finger held on it, as the window's right click (not an archived
-  // task's: archived ones drop out of Pinned)
-  const menu = useRowMenu()
-  const busy = useAccepting(t.id) || !!t.accepting
-  // Review (opens the Accept card) at a Ready row's end, soft as the chat header's Review: one per Ready row, so never the
-  // filled look; "Accepting…" while its accept runs
-  const accept =
-    t.status === 'ready' && !t.archived ? (
-      <button type="button" disabled={busy} onClick={() => openAccept(t.id)}
-        className="press-dim pointer-events-auto relative z-1 h-6 shrink-0 rounded-full bg-bubble px-2.5 text-[0.75rem] font-medium whitespace-nowrap text-fg after:absolute after:-inset-x-1 after:-inset-y-2.5 enabled:hover:bg-sel disabled:opacity-60 phone:px-3 phone:text-[0.8125rem]">
-        {busy ? 'Accepting…' : 'Review'}
-      </button>
-    ) : null
-  return (
-    <Line
-      flip={t.id}
-      sel={sel}
-      kb={kb}
-      // its pie: the % done, while it works; an archived one is a done task's check
-      glyph={<TaskDot s={t.archived ? 'done' : t.status} w={t.archived || !t.report ? undefined : { ...t.report, eta: undefined }} />}
-      ref_={refOf(t.id)}
-      title={t.name}
-      sub={t.sub}
-      // Scheduled (SHEP-38): its time until it starts ("6h") in the same place, counted live, in grey
-      left={t.archived ? undefined : t.status === 'work' ? t.left : t.status === 'scheduled' && t.startsAt ? (TK.untilShort as (ms: number) => string)(t.startsAt) : undefined}
-      leftQuiet={t.status === 'scheduled'}
-      dim={t.status === 'done'}
-      where={where?.join(' · ')}
-      action={accept}
-      // with ⌘ (Ctrl off a Mac), beside the focused pane in split view
-      onOpen={(e) => !menu.held() && (splitClick(e) ? openSplit({ kind: 'task', id: t.id }) : openTask(t.id))}
-      menu={t.archived ? undefined : menu}
-    >
-      {menu.open && !t.archived ? <TaskMenu t={t} menu={menu} /> : null}
-    </Line>
-  )
+/* ---------- a task's menu ---------- */
+
+/** open a task: one not started yet opens its Start dialog instead of an empty thread */
+export function open(t: Task) {
+  if (tstate(t) === 'next') return startDialog(t)
+  openTask(t.id)
 }
 
-/**
- * One row, as the window's (mods/tasks line()). Three parts, each with one job:
- * - the glyph, level with the title, and under it, level with the second line, the time left ("2h", "<1m": short, in the
- *   working colour, centred on the glyph; wider than it, it overflows evenly, so the column and the titles never move);
- * - the text: the title owns the first line; under it one quiet line read left to right, never pushed apart: the
- *   task's id (dim, monospace), what it says now (why it needs you, what its agent does: at most 40 characters, the
- *   whole of it in the row's label), then where it is after a dot, whole or not at all (it gives way first);
- * - the end, centred on the row (in a narrow list, at the second line's end): the one thing to act on or watch:
- *   Review or an automation's next run (`meta`).
- * A row with nothing under its title is one line. `tip`: more for its button's label only (an automation's error).
- */
-function Line({ flip, sel = false, kb = false, glyph, ref_, title, sub, left, leftQuiet, dim, meta, where, action, tip, onOpen, menu, children }: {
-  flip?: string; sel?: boolean; kb?: boolean; glyph: ReactNode; ref_?: string; title: string; sub?: string; left?: string; leftQuiet?: boolean; dim?: boolean; meta?: string
-  where?: string; action?: ReactNode; tip?: string; onOpen?: (e: MouseEvent) => void; menu?: RowMenuState; children?: ReactNode
-}) {
-  const said = sub ? capital(sub) : undefined
-  const shown = said ? fit(said) : undefined
-  // the rows under the title: REF · where (always, the same on every status), then the status line on its own line
-  const second = !!(ref_ || where)
-  const rows = 1 + (second ? 1 : 0) + (shown ? 1 : 0)
-  const two = rows > 1
-  const statusRow = second ? 'row-start-3' : 'row-start-2'
-  const end = action ?? (meta ? <span className="shrink-0 text-[0.75rem] whitespace-nowrap text-fg3 tabular-nums phone:text-[0.8125rem]">{meta}</span> : null)
-  return (
-    <li data-flip={flip} className={clsx(rowClass(sel, kb), 'group @container relative p-0! select-none [-webkit-touch-callout:none]', menu?.open && !sel && 'bg-hover')} {...(menu?.press ?? {})}>
-      {/* the whole row opens it: one button stretched under it; Review sits over it, a button of its own */}
-      {onOpen ? (
-        <button
-          type="button"
-          aria-current={sel || undefined}
-          aria-label={`${ref_ ? `${ref_} ` : ''}${title}${said ? `, ${said}` : ''}${left ? (leftQuiet ? `, in ${left}` : `, ${left} left`) : ''}${meta ? `, ${meta}` : ''}${tip ? `, ${tip}` : ''}`}
-          onClick={onOpen}
-          className="absolute inset-0 cursor-pointer rounded-[inherit] outline-none keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--focus)]"
-        />
-      ) : null}
-      {/* what the row shows is said by its button's label: only Review is read on its own. A grid: the glyph, the title
-          and the end on the first line (the end centred on the row); in a narrow list (a phone, a tablet's panel) the
-          end sits at the second line's end, so the title has the whole first line */}
-      <div className={clsx('pointer-events-none relative grid min-h-[inherit] w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 px-2 phone:px-3', two && 'gap-y-0.5 py-2')}>
-        <span aria-hidden className="col-start-1 row-start-1 grid h-5 w-3.5 place-items-center phone:h-6 phone:w-4">{glyph}</span>
-        {/* the time left under the glyph, as tall as the second line so it sits level with it */}
-        {two && left ? (
-          <span aria-hidden className={clsx('col-start-1 row-start-2 flex h-5 w-3.5 items-center justify-center font-mono text-[0.6875rem] font-semibold whitespace-nowrap tabular-nums phone:h-6 phone:w-4 phone:text-[0.75rem]', leftQuiet ? 'text-fg3' : 'text-work-fg')}>{left}</span>
-        ) : null}
-        <span aria-hidden={!!onOpen} className={clsx('col-start-2 row-start-1 min-w-0 truncate text-[0.875rem]/5 phone:text-base/6', dim ? 'text-fg2' : 'text-fg', two && '@max-[24rem]:col-end-4')}>{title}</span>
-        {second ? (
-          <span aria-hidden={!!onOpen} className="col-start-2 row-start-2 flex h-5 min-w-0 items-center gap-1.5 phone:h-6 text-[0.75rem]/4 phone:h-6 phone:text-[0.8125rem]/5">
-            {ref_ ? <span className="shrink-0 font-mono text-[0.6875rem] text-fg3 phone:text-[0.75rem]">{ref_}</span> : null}
-            {ref_ && where ? <span aria-hidden className="shrink-0 text-fg3">·</span> : null}
-            {/* where it is: its machine and space, whole as long as the row has room */}
-            {where ? <span className="min-w-0 truncate text-fg3">{where}</span> : null}
-          </span>
-        ) : null}
-        {shown ? (
-          <span aria-hidden={!!onOpen} className={clsx('col-start-2 flex h-5 min-w-0 items-center text-[0.75rem]/4 phone:h-6 phone:text-[0.8125rem]/5', statusRow)}>
-            <span className="min-w-0 truncate text-fg2">{shown}</span>
-          </span>
-        ) : null}
-        {end ? <span className={clsx('col-start-3 row-start-1 flex items-center', two && (rows === 3 ? 'row-span-3' : 'row-span-2'), two && '@max-[24rem]:row-span-1 @max-[24rem]:row-start-2')}>{end}</span> : null}
-      </div>
-      {children}
-    </li>
-  )
-}
-
-type MenuEntry = { id?: string; label?: string; icon?: string; heading?: string; sep?: boolean; at?: string; in?: string; typed?: boolean }
-const OTHER = MN.SCHEDULE_OTHER as { placeholder: string; label: string; button: string }
-
-/** A task's one menu, in its row's ⋯ and its chat's, as 3.0's (core/menus.js taskMenu): Pin or Unpin; a task not started
- *  yet also Start later (SHEP-38): a few times, or one typed in herdr-task's words (Other time…), and a scheduled one
- *  Start now and Unschedule. What herdr-task refuses (a time it doesn't know) shows under it, the menu kept open. */
-function TaskActions({ task: t, close }: { task: Task; close: () => void }) {
-  const [typing, setTyping] = useState(false)
-  const [text, setText] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-  const go = async (when: Parameters<typeof scheduleTask>[1]) => {
-    setBusy(true)
-    setError(null)
-    const r = await scheduleTask(t, when).catch((e: Error) => ({ ok: false, error: e.message }))
-    setBusy(false)
-    if (r?.ok === false) setError(r.error ?? "Couldn't schedule it.")
-    else close()
-  }
-  const items = (MN.taskMenu as (o: object) => MenuEntry[])({ pinned: !!t.pinned, status: t.archived ? null : t.status })
-  return (
-    <>
-      {items.map((it, i) => {
-        if (it.sep) return <MenuSeparator key={`sep${i}`} />
-        if (it.heading) return <MenuLabel key={it.heading}>{t.status === 'scheduled' && t.sub ? `${it.heading} · ${capital(t.sub)}` : it.heading}</MenuLabel>
-        if (it.id === 'schedule')
-          return <MenuItem key={it.label} disabled={busy} icon={<ClockIcon className={ic} />} onClick={() => void go(it.in ? { in: it.in } : { at: it.at })}>{it.label}</MenuItem>
-        if (it.id === 'schedule-other')
-          return typing ? (
-            <div key="other">
-            <form className="flex items-center gap-2 px-2 py-1 phone:px-3" onSubmit={(e) => { e.preventDefault(); if (text.trim()) void go({ at: text }) }}>
-              <input name="when" aria-label={OTHER.label} autoFocus placeholder={OTHER.placeholder} value={text} disabled={busy}
-                onChange={(e) => { setText(e.target.value); setError(null) }}
-                className={clsx(field, 'h-7 min-w-0 flex-1 rounded-md bg-bg px-2 text-[0.8125rem] max-sm:text-base/6 phone:h-9')} />
-              <button type="submit" disabled={busy || !text.trim()} className="press-dim h-7 shrink-0 rounded-md bg-bubble px-2.5 text-[0.75rem] font-medium text-fg enabled:hover:bg-sel disabled:opacity-40 phone:h-9 phone:px-3 phone:text-[0.8125rem]">{OTHER.button}</button>
-            </form>
-            {/* what herdr-task refused, under the field, never widening the menu */}
-            {error ? <p role="alert" className="w-0 min-w-full px-2 pb-1.5 text-[0.75rem]/4 text-need-fg phone:px-3 phone:text-[0.8125rem]/5">{error}</p> : null}
-            </div>
-          ) : (
-            <MenuItem key="other" disabled={busy} icon={<ClockIcon className={ic} />} onClick={() => setTyping(true)}>{it.label}</MenuItem>
-          )
-        if (it.id === 'start-now') return <MenuItem key="now" disabled={busy} icon={<PlayIcon className={ic} />} onClick={() => void go({ now: true })}>{it.label}</MenuItem>
-        if (it.id === 'unschedule') return <MenuItem key="off" disabled={busy} icon={<XIcon className={ic} />} onClick={() => void go({ off: true })}>{it.label}</MenuItem>
-        if (it.id === 'done') return <MenuItem key="done" icon={<CheckIcon className={ic} />} onClick={() => { close(); setMarking(t) }}>{it.label}</MenuItem>
-        return (
-          <MenuItem key={it.label} icon={t.pinned ? <UnpinIcon className={ic} /> : <PinTaskIcon className={ic} />} onClick={() => { close(); void pinTask(t, !t.pinned).catch(() => undefined) }}>
-            {it.label}
-          </MenuItem>
-        )
-      })}
-      {error && !typing ? <p role="alert" className="w-0 min-w-full px-2 pt-1 pb-1.5 text-[0.75rem]/4 text-need-fg phone:px-3 phone:text-[0.8125rem]/5">{error}</p> : null}
-    </>
-  )
-}
-
-/** #1157: Mark done…, asked first (its words core/confirm.js MARK_DONE): done as it is, nothing merged */
-let marking: Task | null = null
-const markListeners = new Set<() => void>()
-function setMarking(t: Task | null) {
-  marking = t
-  for (const l of markListeners) l()
-}
-
-function ConfirmDone() {
-  const t = useSyncExternalStore(
-    (l) => {
-      markListeners.add(l)
-      return () => void markListeners.delete(l)
+function del(t: Task) {
+  confirm({
+    title: 'Delete this task?',
+    body: `“${t.name}” is removed from Shepherdr and its agent is stopped. Its branch and files are left alone.`,
+    ok: 'Delete',
+    danger: true,
+    run: async () => {
+      if (await tryAct({ type: 'delete', chat: taskChat(t), force: true }) && getState().ui.task === t.id) setUI({ task: null, wide: false })
     },
-    () => marking,
-  )
-  return t ? <DoneBox key={`${t.place}:${t.id}`} t={t} /> : null
+  })
 }
 
-function DoneBox({ t }: { t: Task }) {
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const go = async () => {
-    setBusy(true)
-    setError(null)
-    const r = await closeTask(t).catch((e: Error) => ({ ok: false, error: e.message }))
-    setBusy(false)
-    if (r?.ok === false) return setError(r.error || "Couldn't mark it done.")
-    setMarking(null)
-  }
-  return (
-    <Dialog
-      title={CF.MARK_DONE.title(t.id)}
-      safe
-      onCancel={() => setMarking(null)}
-      buttons={
-        <Primary disabled={busy} onClick={go}>
-          {CF.MARK_DONE.verb}
-        </Primary>
-      }
-    >
-      <p>{CF.MARK_DONE.detail}</p>
-      {t.branch ? <p className="mt-1.5">{CF.MARK_DONE.branch(t.branch)}</p> : null}
-      {error ? <p role="alert" className="mt-1.5 text-need-fg">{error}</p> : null}
-    </Dialog>
-  )
+/** A task's menu, on its row and in its thread: Reply, Open task, Show in #space, Show screen, Move to (only before it
+ *  has started), Mark as done, Rename, Stop, Switch to terminal, then Archive and Delete. */
+export function taskMenu(anchor: Element, t: Task, where: 'row' | 'thread') {
+  const snap = getState().snap
+  if (!snap) return
+  const s = tstate(t)
+  const th = where === 'thread'
+  const chat = taskChat(t)
+  const every = isEverything(snap, t.place)
+  const extra = registry.taskMenu.flatMap((m) => m.rows(t, where))
+  const rows: MenuRow[] = [
+    ...(th ? [] : [
+      // Reply opens it with the reply box ready to type in
+      { icon: 'reply' as const, label: 'Reply', run: () => { open(t); setTimeout(() => document.querySelector<HTMLTextAreaElement>(`textarea[data-box="${CSS.escape(chat)}"]`)?.focus(), 60) } },
+      { icon: 'chat' as const, label: 'Open task', run: () => open(t) },
+    ]),
+    { icon: every ? 'layers' : 'hash', label: `Show in ${spaceLabel(snap, t.place)}`, run: () => go(t.place) },
+    ...extra.filter((r) => r.label === 'Show screen'),
+    ...(s === 'next' ? [{ icon: 'folder' as const, label: 'Move to', sub: spacesOf(snap).filter((p) => p.id !== t.place && !p.archived).map((p) => ({ label: `#${p.name}`, run: () => void tryAct({ type: 'task-move', chat, place: p.id }) })) }] : []),
+    // from the menu it closes without merging: "Done · not merged" for a task on its own branch
+    ...(s !== 'done' && s !== 'archived' ? [{ icon: 'check' as const, label: 'Mark as done', run: () => void tryAct({ type: 'close', chat, force: true }) }] : []),
+    { icon: 'pen', label: 'Rename', run: () => renameDialog(t.name, (name) => tryAct({ type: 'task-rename', chat, name })) },
+    // Stop pauses the agent, like pressing Esc: it drops what it was doing and waits
+    ...(s === 'working' ? [{ icon: 'stop' as const, label: 'Stop', run: () => void tryAct({ type: 'stop', chat }) }] : []),
+    ...extra.filter((r) => r.label !== 'Show screen'),
+    { icon: 'archive', label: t.archived ? 'Unarchive' : 'Archive', line: true, run: () => { void tryAct({ type: 'archive', chat, on: !t.archived }); if (!t.archived && getState().ui.task === t.id) setUI({ task: null, wide: false }) } },
+    { icon: 'bin', label: 'Delete', danger: true, run: () => del(t) },
+  ]
+  openMenu(anchor, rows, { label: t.name })
 }
 
-/** The row's menu: the task's own (Pin or Unpin) */
-function TaskMenu({ t, menu }: { t: Task; menu: RowMenuState }) {
-  const Actions = registry.views.taskActions ?? TaskActions
-  return (
-    <RowMenu menu={menu} label={t.id}>
-      <Actions task={t} close={menu.close} />
-    </RowMenu>
-  )
-}
+/* ---------- a task not started yet ---------- */
 
-/** where a task is, as its row says it: its machine and space, each only where neither the view nor its group's
- *  heading says it ("vm-str · gtm") */
-function whereOf(snap: Snapshot, t: Task, names: TaskGroup['names']) {
-  const p = placeOf(snap, t.place)
-  // the machine is the task's own (t.on), not its space's: a task whose space isn't listed falls back to the home
-  // space, on the main machine, and would show that machine's name
-  const m = names.machine ? machineName(snap.machines, t.on) : undefined
-  // Settings › Window › Show space on task rows off: no place on the right
-  if (snap.look?.place === false) return []
-  return [m, names.project ? (t.listName || p.name) : undefined].filter((x): x is string => !!x)
-}
-
-/** a list's automations: snap.automations holds them by place id (a list no space works in: by its own key, in
- *  every list but one narrowed to places) */
-function autosIn(snap: Snapshot, chips: string[]) {
-  return Object.entries(snap.automations ?? {}).filter(([k]) => inList(snap, chips, k)).flatMap(([, v]) => v)
-}
-
-/** a task in Needs you as its row shows it: one there for its agent's alert (working all the same) shows red, with the
- *  alert's words */
-function waitingRow(t: Task, ws: Waiting[]): Task {
-  const w = ws.find((x) => x.task === t.id)
-  if (w?.type !== 'alert' || !w.alert) return t
-  const cut = w.alert.title.indexOf(' · ')
-  return { ...t, status: 'need', sub: fit(cut < 0 ? w.alert.title : w.alert.title.slice(cut + 3)) }
-}
-
-/** a task the search finds, as the window's (mods/tasks found()): by its id, title, status line or pull request's
- *  number, or where it is: its space or list, and machine */
-function found(snap: Snapshot, t: Task, q: string) {
-  const p = placeOf(snap, t.place)
-  return matches(q, refOf(t.id), t.name, t.sub, t.report?.msg, t.pr && `#${t.pr.number}`, t.listName, p.name, machineName(snap.machines, t.on))
-}
-
-/** what an automation's row says of where it is: its machine (with more than one) and space, whatever the grouping,
- *  as the Automations group sits under no machine or space heading (core/tasks.js autoWhere) */
-function autoWhere(snap: Snapshot, a: Automation) {
-  if (snap.look?.place === false) return undefined
-  return (TK.autoWhere as (m: string, s?: string, multi?: boolean) => string | null)(machineName(snap.machines, a.machine || snap.host), a.listName, multiMachine(snap)) ?? undefined
-}
-
-/** an automation set off by another folder's task events (--from): by what and where ("On merges in vm-b · shepherdr") */
-function autoFrom(snap: Snapshot, a: Automation) {
-  const f = a.from
-  return f ? (TK.fromLine as (e: string[], w: string) => string)(f.events, `${machineName(snap.machines, f.machine || snap.host)} · ${f.place}`) : undefined
-}
-
-/** An automation (herdr-task auto), as the window's row (mods/tasks autoRow): its mark, its name (no id), when it runs
- *  next at the first line's end; on the second line why it won't run as planned (Didn't start, the error in its
- *  label; Paused), else what sets it off from another folder (--from). A tap opens the task it added last. Only agents
- *  add or change automations. */
-function AutoRow({ a, where, from }: { a: Automation; where?: string; from?: string }) {
-  return (
-    <Line
-      glyph={<RepeatIcon className={clsx('size-3.5', a.error ? 'text-need' : 'text-fg3')} />}
-      title={a.name}
-      dim={!a.on}
-      sub={a.error ? (a.failed === 'from' ? a.error : "Didn't start") : !a.on ? 'Paused' : from}
-      meta={a.nextAt ? day(a.nextAt) : undefined}
-      where={where}
-      tip={a.error}
-      onOpen={a.task ? () => openTask(a.task!) : undefined}
-    />
-  )
-}
-
-/** The toggle under the search box: group by status or by place (SHEP-182), kept on this device */
-function ByToggle() {
-  const by = useUI((u) => u.groups)
-  const opt = (k: GroupBy, label: string) => (
-    <button key={k} type="button" role="radio" aria-checked={by === k} onClick={() => setGroup(k)}
-      className="press inline-flex h-6 items-center rounded-full px-3 text-[0.75rem] text-fg2 hover:text-fg aria-checked:bg-sel aria-checked:text-fg coarse:h-8 phone:h-8 phone:px-4 phone:text-[0.875rem]">
-      {label}
-    </button>
-  )
-  return (
-    <div role="radiogroup" aria-label="Group by" className="flex items-center gap-0.5 px-2.5 pt-2 phone:px-3.5">
-      <span className="pr-1.5 text-[0.75rem] text-fg3 phone:text-[0.875rem]">Group by</span>
-      {opt('status', 'Status')}
-      {opt('place', 'Place')}
-    </div>
-  )
-}
-
-function TaskList(_: { placeId: string }) {
-  const snap = useSnap()!
-  const view = useStore((s) => listView(s.ui, snap))
-  const key = view.key
-  const by = useUI((u) => u.groups)
-  const allDone = useUI((u) => u.allDone)
-  const shut = useUI((u) => u.shut)
-  const archived = useUI((u) => u.archived === key)
-  const here = useUI((u) => u.thisSpace && view.chips.length === 1 && view.chips[0] === u.place)
-  const q = useUI((u) => filterOf(u, view.search, 'tasks'))
-  const place = placeOf(snap, getState().ui.place)
-  // a task moving to another group glides there; a new one fades in; what a filter, Show more or a fold leaves just shows
-  const list = useRef<HTMLDivElement>(null)
-  useFlip(list, `${key}|${by}|${q}|${allDone.join()}|${shut.join()}`)
-  // headings stay on screen while their group scrolls under the search field (it is sticky too): --stick is its height
-  useLayoutEffect(() => {
-    const el = list.current
-    const box = el?.parentElement?.querySelector<HTMLElement>('[data-filter]')
-    if (!el || !box) return
-    const seen = new ResizeObserver(() => el.style.setProperty('--stick', `${box.offsetHeight}px`))
-    seen.observe(box)
-    return () => seen.disconnect()
-  }, [archived])
-  if (archived) return <ArchivedList list={view} />
-  const loaded = !!snap.places.length || !!snap.tasks.length
-  // what the search field holds: only what matches it shows, in its group (the window's matches())
-  // Needs you, one rule for every view (SHEP-250): only tasks (SHEP-255), in its group (kernel taskGroups)
-  const ws = needsYou(snap)
-  const live = tasksIn(snap, view).filter((t) => !q || found(snap, t, q))
-  const autos = autosIn(snap, view.chips).filter((a) => !q || matches(q, a.name, a.listName, a.machine ? machineName(snap.machines, a.machine) : undefined))
-  const footer = q ? null : registry.tasksFooter.map((F, i) => <F key={i} place={place} list={view} />)
-  // searching, Done and archived tasks are in it too, each group whole and open, folded shut or not
-  const groups = q
-    ? filteredGroups(snap, view, '', { groups: by }).map((g) => keepTasks(g, (t) => found(snap, t, q))).filter((g) => g.tasks.length)
-      .map((g) => ({ ...g, count: g.tasks.length, more: 0, less: false, shut: false }))
-    : shownGroups(snap, view, { groups: by, allDone, shut })
-  // what the keyboard walks: the rows on screen
-  const order = groups.flatMap((g) => g.tasks)
-  const nothing = !groups.length && !autos.length
-  // searching, the archived tasks that match come last, after the automations
-  const archivedGroup = groups.find((g) => g.key === 'archived')
-  const autoShut = !q && shut.includes(`${key}|automations`)
-  const autoGroup = autos.length ? (
-    <div key="automations" data-flip="automations">
-      <GroupHeading label="Automations" count={autos.length} flip="group:automations" fold={q ? undefined : { shut: autoShut, toggle: () => toggleShut(key, 'automations') }} />
-      {autoShut ? null : <List>{autos.map((a) => <AutoRow key={`${a.machine ?? ''}:${a.listName}:${a.name}`} a={a} where={autoWhere(snap, a)} from={autoFrom(snap, a)} />)}</List>}
-    </div>
-  ) : null
-  let lastOn: string | undefined
-  return (
-    <>
-      <TaskFilter listKey={view.search} order={order} />
-      <ByToggle />
-      <div ref={list} className="relative">
-        {!loaded ? <Empty className="pt-3 text-fg3">Reading tasks…</Empty> : null}
-        {groups.filter((g) => g !== archivedGroup).map((g) => {
-          const fold: Fold | undefined = q ? undefined : { shut: g.shut, toggle: (all) => toggleShut(key, g.key, all ? groups.filter((x) => x !== g).map((x) => x.key) : []) }
-          const row = (t: Task) => <TaskRow key={t.id} t={g.key === 'need' ? waitingRow(t, ws) : t} ix={order.indexOf(t)} where={whereOf(snap, t, g.names)} />
-          // Needs you: oldest first, as the phone lists them
-          const rank = (k: string) => { const i = ws.findIndex((w) => w.task === k); return i < 0 ? ws.length : i }
-          const rows = <List>{g.key === 'need'
-            ? g.tasks.map((t) => ({ r: rank(t.id), el: row(t) })).sort((a, b) => a.r - b.r).map((x) => x.el)
-            : g.tasks.map(row)}</List>
-          // by place: a space's work under its name, under its machine's name where more show; both fold
-          if (g.on !== undefined) {
-            const mShut = !q && shut.includes(`${key}|m:${g.on}`)
-            const first = g.on !== lastOn
-            lastOn = g.on
-            const mine = groups.filter((x) => x.on === g.on)
-            const head = view.level === 0 && first ? <MachineHeading name={g.machine ?? g.on} machine={snap.machines?.find((x) => x.machine === g.on)} count={mine.reduce((n, x) => n + x.count, 0)} fold={q ? undefined : { shut: mShut, toggle: () => toggleShut(key, `m:${g.on}`) }} /> : null
-            if (view.level === 0 && mShut) return head ? <div key={g.key}>{head}</div> : null
-            return (
-              <div key={g.key}>
-                {head}
-                <SpaceHeading group={g} count={g.count} fold={fold} />
-                {/* its tasks indented under the space's heading */}
-                {g.shut ? null : <div className="pl-5 phone:pl-6">{rows}</div>}
-              </div>
-            )
-          }
-          // Done, shut: only its count, a quiet line, until opened
-          if (g.key === 'done' && g.shut) {
-            return <DoneLine key="done" count={g.count} today={g.count === live.filter((t) => t.status === 'done' && !t.archived && !t.pinned && isToday(t.doneAt)).length} onClick={() => toggleShut(key, DONE_OPEN)} />
-          }
-          const doneFold: Fold | undefined = g.key === 'done' && !q ? { shut: false, toggle: () => toggleShut(key, DONE_OPEN) } : fold
-          return (
-            <div key={g.key}>
-              <GroupHeading label={g.label} note={g.note} count={g.count} flip={`group:${g.key}`} fold={doneFold} />
-              {g.shut ? null : rows}
-              {g.more || g.less ? (
-                <div data-flip={`more:${g.key}`}>
-                  <DoneToggle more={g.more} onClick={() => toggleAllDone(key, g.key)} />
-                </div>
-              ) : null}
+function startDialog(t: Task) {
+  openDialog(
+    (close) => {
+      const Form = () => {
+        const snap = getState().snap!
+        const every = isEverything(snap, t.place)
+        const machine = snap.places.find((p) => p.id === t.place)?.machine ?? t.on
+        const [pick, setPick] = useState<Pick>(pickFor(snap, every ? 'all' : t.place, 'Tasks'))
+        const [busy, setBusy] = useState(false)
+        const start = async () => {
+          if (busy) return
+          setBusy(true)
+          // Start task starts it and opens its thread
+          if (await tryAct({ type: 'task-start', chat: taskChat(t), agent: pick })) {
+            close()
+            openTask(t.id)
+          } else setBusy(false)
+        }
+        return (
+          <>
+            <div className="hd" style={{ height: 'auto', padding: 0, gap: 8, alignItems: 'flex-start' }}>
+              <h2 style={{ flex: 1, minWidth: 0 }}>{t.name}</h2>
+              <IB icon="x" label="Close" onClick={close} />
             </div>
-          )
-        })}
-        {/* Automations: their own group, last */}
-        {autoGroup}
-        {/* nothing at all: said once, never "yet" (3.0's) */}
-        {loaded && nothing && !q ? <Empty className="pt-3 text-fg3">{here ? `Nothing in ${place.name}.` : snap.tasks.length ? 'Nothing to do.' : 'No tasks on any machine. Ask an Assistant to plan some.'}</Empty> : null}
-        {archivedGroup ? (
-          <div key="archived">
-            <GroupHeading label="Archived" count={archivedGroup.tasks.length} flip="group:archived" />
-            <List>
-              {archivedGroup.tasks.map((t) => <TaskRow key={t.id} t={t} ix={order.indexOf(t)} where={whereOf(snap, t, { machine: view.level === 0, project: true })} />)}
-            </List>
-          </div>
-        ) : null}
-        {q && !groups.length && !autos.length ? <Empty className="pt-3 text-fg3">No tasks match “{q}”.</Empty> : null}
-        {footer}
-      </div>
-    </>
+            <p>{t.desc ? `${t.desc.replace(/\s+$/, '')}${/[.!?]$/.test(t.desc.trim()) ? '' : '.'} ` : ''}{t.afterTitle ? `It waits for ${t.afterTitle}; nothing starts before that unless you say go.` : 'Nothing starts until you say go.'}</p>
+            <div className="fld">
+              <span>Space</span>
+              <span className="fake">
+                <I n={every ? 'layers' : 'hash'} />
+                <span style={{ marginLeft: 8 }}>
+                  <b style={{ fontWeight: 500 }}>{spaceLabel(snap, t.place).replace(/^#/, '')}</b> <span style={{ color: 'var(--muted)' }}>{machineLabel(snap, machine)}</span>
+                </span>
+              </span>
+            </div>
+            <AgentField title="This task runs on" machine={machine} pick={pick} onChange={setPick} />
+            <Btn kind="pri" style={{ width: '100%' }} disabled={busy} onClick={() => void start()}>Start task</Btn>
+          </>
+        )
+      }
+      return <Form />
+    },
+    { label: t.name },
   )
 }
 
-/** By place: a machine's name over its spaces (when more than one machine has tasks); folds them all */
-/** a machine's heading in Place: its mark (emoji, a monitor for this computer, a server) and its name, muted and regular,
- *  as the Spaces sidebar's machine rows; the hierarchy is the icon and the indent, not weight */
-function MachineHeading({ name, machine, count, fold }: { name: string; machine?: Machine; count: number; fold?: Fold }) {
+/* ---------- the review card ---------- */
+
+interface Evidence {
+  summary?: string
+  details?: string
+  proof?: { id: string; title?: string } | string
+  diff?: MergeEvidence['diff']
+  checks?: MergeEvidence['checks']
+  git?: { repo?: boolean; branch?: string; base?: string } | null
+}
+const evidence = new Map<string, Evidence | 'loading'>()
+const later = new Set<string>()
+
+function useEvidence(t: Task): Evidence | undefined {
+  const [, tick] = useState(0)
+  const key = `${t.id}@${t.at ?? ''}`
+  useEffect(() => {
+    if (evidence.has(key)) return
+    evidence.set(key, 'loading')
+    act<{ evidence?: Evidence }>({ type: 'evidence', task: t.id })
+      .then((r) => evidence.set(key, r.evidence ?? {}))
+      .catch(() => void evidence.delete(key))
+      .finally(() => tick((n) => n + 1))
+  }, [key])
+  const e = evidence.get(key)
+  return e && e !== 'loading' ? e : undefined
+}
+
+/** One review card wherever it comes up (Everything's chat, the space's chat and the task), answerable from any of
+ *  them. On a branch or worktree: "Mark as done and merge". Changed in the folder, or not a repo: "Mark as done".
+ *  "Not now" leaves it under Needs you; what you type next in that task goes to its agent. */
+export function ReviewCard({ t, ctx }: { t: Task; ctx: 'chat' | 'thread' }) {
+  const snap = useSnap()
+  const ev = useEvidence(t)
+  const [fold, setFold] = useState(false)
+  const [, bump] = useState(0)
+  const Tile = registry.views.tile
+  if (!snap) return null
+  const s = tstate(t)
+  if (s === 'done' || s === 'archived') return <DoneRow>{statusWord(t).word} · {t.name}</DoneRow>
+  const down = placeDown(snap, t.place)
+  const branch = onBranch(t)
+  const merging = t.status === 'merging' || !!t.accepting
+  const where = branch ? 'On its own branch' : t.repo === 'folder' ? 'Changed in the folder, no branch' : 'Not a repo'
+  const files = ev?.diff?.list ?? []
+  // what its checks say, in their own words where they have some ("site builds")
+  const checks = ev?.checks && ev.checks.state !== 'none' && ev.checks.state !== 'unknown' ? (ev.checks.state === 'passed' ? ev.checks.text || 'checks passed' : ev.checks.state === 'failed' ? 'checks failed' : 'checks running') : ''
+  const foldWords = files.length ? [`${files.length} ${files.length === 1 ? 'file' : 'files'} changed${branch ? '' : ' in the folder'}`, checks].filter(Boolean).join(' · ') : ''
+  const proof = t.proof ?? (typeof ev?.proof === 'string' ? ev.proof : ev?.proof?.id)
   return (
-    <FoldHeading name={name} fold={fold} flip={`machine:${name}`} count={count} className="pt-4" sticky>
-      <span className="flex min-w-0 items-center gap-1.5 text-[0.8125rem] text-fg2 phone:text-base">
-        <MachineGlyph m={machine} />
-        <h3 className="min-w-0 truncate font-normal">{name}</h3>
-      </span>
-    </FoldHeading>
-  )
-}
-
-/** a machine's mark, as the Spaces sidebar draws it */
-function MachineGlyph({ m }: { m?: Machine }) {
-  if (m?.emoji) return <span data-icon="emoji" aria-hidden className="-mr-0.5 grid w-[15px] shrink-0 place-items-center text-[0.9375rem] leading-none phone:w-4 phone:text-base">{m.emoji}</span>
-  const Plain = m?.here ? MonitorIcon : ServerIcon
-  return <Plain className="size-[15px] shrink-0 -mr-0.5 text-fg3 phone:size-4" />
-}
-
-/** a heading's fold: shut or open, and what a tap does (all: Alt/Option held, its siblings go the same way) */
-type Fold = { shut: boolean; toggle: (all: boolean) => void }
-
-/**
- * A heading that folds what is under it away, as the sidebar's tree does: the whole heading is the button, the
- * sidebar's chevron where the rows' dots are, its count at the end, shut or open. Alt/Option-click takes its siblings
- * with it. Without a fold (filtering: every match shows) it is just the heading, in the same place.
- */
-function FoldHeading({ name, fold, flip, className, children, count, sticky }: { name: string; fold?: Fold; flip?: string; className?: string; children: ReactNode; count?: number; sticky?: boolean }) {
-  const Icon = fold?.shut ? NextIcon : DownIcon
-  const inner = (
-    <>
-      {fold ? <Icon aria-hidden className={clsx(ic, '-mx-px text-fg3 group-hover/h:text-fg phone:mx-0')} /> : <span aria-hidden className={clsx(ic, '-mx-px phone:mx-0')} />}
-      {children}
-      {/* its count right by its name ("Ready 2"), not across the panel */}
-      {count ? <span className="shrink-0 text-[0.75rem] text-fg3 tabular-nums phone:text-[0.875rem]">{count}</span> : null}
-    </>
-  )
-  const look = 'flex min-h-8 w-full items-center gap-3 rounded-row px-2 text-left phone:min-h-11 phone:px-3'
-  return (
-    <div data-flip={flip} data-heading={name} className={clsx('px-1.5 phone:px-2', sticky && 'sticky top-(--stick,0px) z-1 bg-bg', className)}>
-      {fold ? (
-        <button
-          type="button"
-          aria-expanded={!fold.shut}
-          onClick={(e) => fold.toggle(e.altKey)}
-          className={clsx(look, 'press group/h cursor-pointer outline-none select-none hover:bg-hover keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] coarse:min-h-11')}
-        >
-          {inner}
+    <div className="card" data-card={`review:${t.id}`}>
+      {ctx === 'chat' && <span className="t">{t.name}</span>}
+      <span className="s">{where}</span>
+      <span>{t.summary ?? ev?.summary ?? 'Ready for you to look at.'}</span>
+      {proof && Tile && <div className="atile"><Tile id={proof} /></div>}
+      {foldWords && (
+        <button type="button" className="fold" aria-expanded={fold} onClick={() => setFold(!fold)}>
+          <I n={fold ? 'down' : 'right'} c="s16" />
+          {foldWords}
         </button>
+      )}
+      {fold && (
+        <div className="files">
+          {files.map((f) => (
+            <span key={f.path}>{f.path}<em>{[f.added ? `+${f.added}` : '', f.removed ? `−${f.removed}` : ''].filter(Boolean).join(' ')}</em></span>
+          ))}
+        </div>
+      )}
+      {t.mergeFailed && <span className="s c-red">{t.mergeFailed}</span>}
+      {later.has(t.id) && <span className="s">Still here when you want it. Say what to change in the box below.</span>}
+      {down ? (
+        <span className="s">Can't reach {down.name}: this waits until the link is back</span>
       ) : (
-        <div className={look}>{inner}</div>
+        <div className="acts">
+          <Btn onClick={() => { later.add(t.id); bump((n) => n + 1) }}>Not now</Btn>
+          <Btn kind={ctx === 'chat' ? 'str' : 'pri'} disabled={merging} onClick={() => void tryAct({ type: 'accept', task: t.id })}>
+            {merging ? 'Merging…' : branch ? 'Mark as done and merge' : 'Mark as done'}
+          </Btn>
+        </div>
       )}
     </div>
   )
 }
 
-/** A group's label (Working, Done, a space): folds its tasks away, and its Show all with them */
-function GroupHeading({ label, note, count, flip, fold }: { label: string; note?: string; count: number; flip?: string; fold?: Fold }) {
+/** An agent that crashed or was cut off is never started again by Shepherdr on its own: a card with the reason and
+ *  Restart. Stopped by you: the next message carries on. */
+export function StoppedCard({ t }: { t: Task }) {
+  if (!t.stopped || t.stopped.by === 'you') return null
   return (
-    <FoldHeading name={label} fold={fold} flip={flip} count={count} className="pt-3">
-      <span className="min-w-0 truncate text-[0.75rem] font-medium text-fg2 phone:text-[0.875rem]">
-        {label}
-        {/* by space on All machines, the machine it is on */}
-        {note ? <span className="font-normal opacity-75"> · {note}</span> : null}
-      </span>
-    </FoldHeading>
-  )
-}
-
-/** By place: a space's name over its work, its emoji beside it if it has one; the whole heading folds it */
-function SpaceHeading({ group: g, count, fold }: { group: Pick<TaskGroup, 'label' | 'emoji' | 'key'>; count: number; fold?: Fold }) {
-  return (
-    // indented under its machine's heading, its icon (the space's emoji, else #) level with the machine's name's room
-    <FoldHeading name={g.label} fold={fold} flip={`group:${g.key}`} count={count} className="pt-2 pl-5 phone:pl-6" sticky>
-      <span className="flex min-w-0 items-center gap-1.5 text-[0.8125rem] text-fg2 phone:text-base">
-        {g.emoji ? <span data-icon="emoji" aria-hidden className="-mr-0.5 grid w-[15px] shrink-0 place-items-center text-[0.9375rem] leading-none phone:w-4 phone:text-base">{g.emoji}</span> : <HashIcon className="size-[15px] shrink-0 -mr-0.5 text-fg3 phone:size-4" />}
-        <span className="min-w-0 truncate">{g.label}</span>
-      </span>
-    </FoldHeading>
-  )
-}
-
-/** a Done time today, on this device's clock */
-const isToday = (ms?: number) => !!ms && new Date(ms).toDateString() === new Date().toDateString()
-
-/** Done, shut: one quiet line, "3 done today" (or "12 done", some older), a tap shows them */
-function DoneLine({ count, today, onClick }: { count: number; today: boolean; onClick: () => void }) {
-  return (
-    <div data-flip="group:done" className="px-1.5 pt-2 phone:px-2">
-      <button type="button" aria-expanded={false} onClick={onClick}
-        className="press flex min-h-8 w-full items-center gap-3 rounded-row px-2 text-left text-[0.75rem] text-fg3 outline-none hover:bg-hover hover:text-fg2 keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] coarse:min-h-11 phone:min-h-11 phone:px-3 phone:text-[0.875rem]">
-        <NextIcon aria-hidden className={clsx(ic, '-mx-px phone:mx-0')} />
-        <span className="tabular-nums">{count} done{today ? ' today' : ''}</span>
-      </button>
+    <div className="card" data-card={`stopped:${t.id}`}>
+      <span className="t c-red">Stopped</span>
+      <span>{t.stopped.why || (t.stopped.by === 'limit' ? "It hit its plan's limit." : 'Its agent is no longer running.')}</span>
+      <div className="acts">
+        <Btn kind="pri" onClick={() => void tryAct({ type: 'task-resume', chat: taskChat(t) })}>Restart</Btn>
+      </div>
     </div>
   )
 }
 
-/** Filter tasks: by id, title, status line or summary, as you type; ↑ ↓ pick one of what is left and Enter opens it */
-function TaskFilter({ listKey, order }: { listKey: string; order: Task[] }) {
-  const value = useUI((u) => u.filter[`${listKey}|tasks`] ?? '')
-  const cur = useUI((u) => (u.kb ? u.cur : -1))
-  // its key, where there is a keyboard
-  const keys = useUI((u) => u.device === 'desktop' || u.kb)
+/** In a chat: the cards of the tasks that need the person there (a review, a stopped agent), each where it came up.
+ *  The app puts them there from each task's status, not an agent. In a task: its own review or stopped card. */
+function taskCards(snap: Snapshot, thread: Thread): { key: string; at?: number; node: ReactNode }[] {
+  // a task handed in: its card while it waits, and where the card was, one quiet line once it is done
+  const reviewing = (t: Task) => tstate(t) === 'ready' || t.status === 'merging' || !!t.accepting || (tstate(t) === 'done' && !t.quiet && !!t.needsAtWas)
+  const halted = (t: Task) => tstate(t) === 'ask' && !!t.stopped && t.stopped.by !== 'you'
+  if (thread.task) {
+    const t = thread.task
+    return [...(reviewing(t) ? [{ key: `review:${t.id}`, node: <ReviewCard t={t} ctx="thread" /> }] : []), ...(halted(t) ? [{ key: `stopped:${t.id}`, node: <StoppedCard t={t} /> }] : [])]
+  }
+  const mine = tasksIn(snap, thread.place)
+  return [
+    ...mine.filter(reviewing).map((t, i) => ({ key: `review:${t.id}`, at: snap.demo ? new Date().setHours(7, 30, 0, i + 1) : t.needsAt ?? t.needsAtWas, node: <ReviewCard t={t} ctx="chat" /> })),
+    ...mine.filter(halted).map((t) => ({
+      key: `stopped:${t.id}`,
+      at: t.needsAt,
+      node: (
+        <>
+          <button type="button" className="ref" onClick={() => open(t)}><I n="chat" c="s16" />{t.name}</button>
+          <StoppedCard t={t} />
+        </>
+      ),
+    })),
+  ]
+}
+
+/* ---------- an open task ---------- */
+
+function TaskHead({ task: t, where, scrolled }: { task: Task; where: 'chat' | 'pane'; scrolled?: boolean }) {
+  const ph = useUI((u) => u.phone)
+  const thread: Thread = { chat: taskChat(t), place: t.place, task: t, where }
   return (
-    <FilterBox
-      label="Filter tasks"
-        hint={keys ? 'F' : undefined}
-      value={value}
-      onChange={(q) => setFilter(listKey, 'tasks', q)}
-      onKey={(e) => {
-        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-          e.preventDefault()
-          keysMoved('cursor')
-          setUI({ kb: true, cur: Math.max(0, Math.min(order.length - 1, cur + (e.key === 'ArrowDown' ? 1 : -1))) })
-        } else if (e.key === 'Enter' && order[Math.max(0, cur)]) {
-          e.preventDefault()
-          openTask(order[Math.max(0, cur)].id)
-        }
-      }}
-    />
+    <Hd back={where === 'chat' ? { label: 'Back', run: () => setUI({ wide: false, task: null }) } : { label: 'Back to tasks', run: () => setUI({ task: null }) }} title={t.name} scrolled={scrolled}>
+      {registry.taskHeader.map((h, i) => <h.View key={i} thread={thread} />)}
+      <IB icon="dots" label="More" aria-haspopup="menu" onClick={(e) => taskMenu(e.currentTarget, t, 'thread')} />
+      {where === 'pane' && !ph && <IB icon="expand" label="Expand" onClick={() => setUI({ wide: true })} />}
+      {where === 'pane' && !ph && <IB icon="x" label="Close" onClick={() => togglePane(null)} />}
+    </Hd>
   )
 }
 
-/** Under a group cut to its latest Done tasks, "Show 91 more"; once they all show, "Show less": a quiet row, not a call to act */
-function DoneToggle({ more, onClick }: { more: number; onClick: () => void }) {
+/** the status line: its status, time left, its id as small print, its machine, its pull request */
+function TaskTop({ task: t }: { task: Task }) {
+  const snap = useSnap()
+  const voiced = useUI((u) => u.voiced === t.id)
+  if (!snap) return null
+  const w = statusWord(t)
+  const left = tstate(t) === 'working' ? taskWhen(t) : ''
+  const strong = w.tone === 'ask' || w.tone === 'ready' || w.tone === 'red'
   return (
-    <div className="px-1.5 phone:px-2">
-      <button
-        type="button"
-        aria-expanded={!more}
-        className="press flex min-h-8 items-center gap-1 rounded-full px-2.5 text-[0.75rem] font-medium text-fg3 hover:text-fg2 keys:focus-visible:shadow-[inset_0_0_0_1.5px_var(--color-focus)] focus-visible:outline-none coarse:min-h-11 phone:min-h-11 phone:px-3 phone:text-[0.875rem]"
-        onClick={onClick}
-      >
-        {more ? `Show ${more} more` : 'Show less'}
-        <DownIcon aria-hidden className={clsx('size-3.5 shrink-0', !more && 'rotate-180')} />
-      </button>
+    <div className="status">
+      {strong ? <b className={w.tone === 'red' ? 'c-red' : `c-${w.tone}`}>{w.word}</b> : w.word}
+      {left && <span>· {left}</span>}
+      <span>· {taskRef(t)}</span>
+      <span>· {machineLabel(snap, t.on)}</span>
+      {t.pr && <span>· <a className="lk" href={t.pr.url} target="_blank" rel="noreferrer">PR #{t.pr.number}</a></span>}
+      {voiced && <span>· opened by voice</span>}
     </div>
   )
 }
 
-/** At the very bottom of a list's tasks, once it has archived ones: "Archived · 12", opening them */
-function ArchivedLink({ list }: { place: Place; list?: ListView }) {
+function TaskPane({ t }: { t: Task }) {
   const snap = useSnap()!
-  const n = list ? archivedIn(snap, list).length : 0
-  if (!n) return null
+  const ui = useUI()
+  const thread: Thread = { chat: taskChat(t), place: t.place, task: t, where: 'pane' }
+  const down = placeDown(snap, t.place)
+  const Body = registry.chatBody.find((b) => b.when(ui, thread))?.View
+  const Messages = registry.views.messages
+  const Box = registry.views.box
+  const drawer = registry.drawer.find((d) => d.when(ui, thread))
   return (
-    // a button, not a list row: it opens a view, it is not a task
-    <div data-flip="archived" className="mt-2 border-t border-line px-1.5 pt-1.5 phone:px-2">
-      <button type="button" className={clsx(rowClass(), 'w-full text-left')} onClick={() => setUI({ archived: list!.key, cur: 0 })}>
-        <span className="flex min-w-0 flex-1 items-center gap-2 text-fg2">
-          <ArchivedIcon aria-hidden className={`${ic} text-fg3`} />
-          <span className="truncate">Archived</span>
+    <PaneFrame
+      head={(sc) => <TaskHead task={t} where="pane" scrolled={sc} />}
+      scrollKey={thread.chat}
+      foot={!down && !Body && Box ? <Box thread={thread} placeholder={placeholderOf(snap, thread)} /> : undefined}
+      drawer={drawer && (
+        <>
+          <div className="rzh" {...edge('term')} />
+          <div className="tdr"><drawer.View thread={thread} /></div>
+        </>
+      )}
+    >
+      <div className="msgs">
+        {down ? (
+          <Empty title={`Can't reach ${down.name}`}>{down.unreachableSince ? `Last seen ${down.unreachableSince}. ` : ''}Work there carries on, and shows here when the link is back.</Empty>
+        ) : Body ? (
+          <Body thread={thread} />
+        ) : (
+          <>
+            <TaskTop task={t} />
+            {Messages && <Messages thread={thread} />}
+          </>
+        )}
+      </div>
+    </PaneFrame>
+  )
+}
+
+/* ---------- the list ---------- */
+
+function TaskRow({ snap, t, inSpace }: { snap: Snapshot; t: Task; inSpace: boolean }) {
+  const cur = useUI((u) => u.task === t.id)
+  const down = placeDown(snap, t.place)
+  const s = tstate(t)
+  const sub = down ? `Can't reach ${down.name} · last seen ${{ ask: 'asking', working: 'working', ready: 'ready', next: 'waiting', done: 'done', archived: 'done' }[s]}` : taskLine(t)
+  const when = down ? '' : taskWhen(t)
+  return (
+    <div className="rowx">
+      <button type="button" className={cx('row row2 tk', down && 'dim')} aria-current={cur} onClick={() => open(t)}>
+        <StatusIcon t={t} dim={!!down} />
+        <span className="n">
+          <span className="l1">{t.name}</span>
+          {sub && <span className="l2">{sub}</span>}
+          {!inSpace && <span className="l2">{whereWords(snap, t.place)}</span>}
         </span>
-        <Meta>{n}</Meta>
-        <NextIcon aria-hidden className={`${ic} text-fg3`} />
+        {when && <span className="v">{when}</span>}
       </button>
+      <IB icon="dots" label={`More for ${t.name}`} aria-haspopup="menu" onClick={(e) => taskMenu(e.currentTarget, t, 'row')} />
     </div>
   )
 }
 
-/** The Archived view, as the window's: the search field stays (it narrows them too; no filter row), Back to the
- *  tasks (Esc too), its heading and count, then the archived tasks, the latest archived first */
-function ArchivedList({ list: view }: { list: ListView }) {
-  const snap = useSnap()!
-  const q = useUI((u) => filterOf(u, view.search, 'tasks'))
-  const list = archivedIn(snap, view).filter((t) => !q || found(snap, t, q))
-  const back = () => setUI({ archived: null, cur: 0 })
-  useEffect(() => {
-    const on = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented || (e.target as HTMLElement)?.closest?.('input, textarea, [role=menu], [role=dialog]')) return
-      e.preventDefault()
-      back()
-    }
-    addEventListener('keydown', on)
-    return () => removeEventListener('keydown', on)
-  }, [])
+function Now({ snap, place }: { snap: Snapshot; place: string }) {
+  const ui = useUI()
+  const inSpace = !isEverything(snap, place)
+  const groups = nowGroups(tasksIn(snap, place)).filter((g) => g.tasks.length)
+  if (!groups.length) return <Empty>No tasks yet. Ask in a chat to add one.</Empty>
   return (
     <>
-      <TaskFilter listKey={view.search} order={list} />
-      <div>
-        {/* one header row, as a group's: Back to the tasks, its name and how many */}
-        <div className="flex min-h-9 items-center gap-1 pt-2 pr-4 pl-1.5 text-[0.75rem] font-medium text-fg3 phone:pt-2.5 phone:pr-5 phone:pl-2 phone:text-[0.875rem]">
-          <IconButton label="Back to tasks" onClick={back}>
-            <BackIcon className={ic} />
-          </IconButton>
-          <h3 className="min-w-0 flex-1 truncate">Archived</h3>
-          {list.length ? <span className="shrink-0 tabular-nums">{list.length}</span> : null}
-        </div>
-        {list.length ? (
-          <List>
-            {list.map((t, i) => (
-              <TaskRow key={t.id} t={t} ix={i} where={whereOf(snap, t, { machine: true, project: true })} />
-            ))}
-          </List>
-        ) : (
-          <Empty className="pt-0.5 text-fg3">{q ? `No archived tasks match “${q}”.` : 'No archived tasks. Done tasks come here on their own.'}</Empty>
-        )}
-        <Empty className="pt-3 text-fg3">Archived tasks keep their chat and summary. Search finds them too.</Empty>
-      </div>
+      {groups.map((g) => {
+        // Done and Archived start folded; the others open
+        const o = ui.open[g.name] ?? !['Done', 'Archived'].includes(g.name)
+        const shown = g.name === 'Done' ? g.tasks.slice(0, ui.doneShown) : g.tasks
+        return (
+          <div key={g.name} style={{ display: 'contents' }}>
+            <button type="button" className="grp" aria-expanded={o} onClick={() => setUI({ open: { ...ui.open, [g.name]: !o } })}>
+              {g.name} · {g.tasks.length}
+              <I n="down" c="s16" />
+            </button>
+            {o && shown.map((t) => <TaskRow key={t.id} snap={snap} t={t} inSpace={inSpace} />)}
+            {o && shown.length < g.tasks.length && (
+              <button type="button" className="grp" onClick={() => setUI({ doneShown: ui.doneShown + 20 })}>Show more</button>
+            )}
+          </div>
+        )
+      })}
     </>
   )
 }
 
-/** more than one machine has tasks or automations: only then can the list go by machine (the window's `multi`) */
-function multiMachine(snap: Snapshot) {
-  return new Set([...snap.tasks.map((t) => t.on), ...Object.values(snap.automations ?? {}).flat().map((a) => a.machine || snap.host)]).size > 1
+function TasksPane() {
+  const snap = useSnap()
+  const ui = useUI()
+  if (!snap) return null
+  const t = ui.task && !ui.wide ? snap.tasks.find((x) => x.id === ui.task) : undefined
+  if (t) return <TaskPane t={t} />
+  const inSp = isEverything(snap, ui.at) ? '' : ` in ${spaceLabel(snap, ui.at)}`
+  const Scheduled = has('schedules') ? registry.views.scheduled : undefined
+  const tab = Scheduled ? ui.tab : 'Now'
+  return (
+    <PaneFrame head={(sc) => <Hd title={`Tasks${inSp}`} pad={ui.phone ? 12 : 4} scrolled={sc}>{!ui.phone && <IB icon="x" label="Close" onClick={() => togglePane(null)} />}</Hd>}>
+      {Scheduled && (
+        <div className="tabs" role="tablist">
+          {(['Now', 'Scheduled'] as const).map((n) => (
+            <button type="button" key={n} className="tab" role="tab" aria-selected={tab === n} aria-pressed={tab === n} onClick={() => setUI({ tab: n })}>{n}</button>
+          ))}
+        </div>
+      )}
+      {tab === 'Now' || !Scheduled ? <Now snap={snap} place={ui.at} /> : <Scheduled place={ui.at} />}
+    </PaneFrame>
+  )
 }
 
-/** The Tasks header's ⋯: narrow the list to the space picked (the one thing the old chip row had that the toggle doesn't) */
-function TasksMenu(_: { place: Place }) {
-  const here = useUI((u) => u.thisSpace)
-  const phone = useUI((u) => u.device === 'phone')
-  const [open, setOpen] = useState(false)
-  const B = phone ? RoundButton : IconButton
+function TasksButton() {
+  const snap = useSnap()
+  const on = useUI((u) => u.pane === 'tasks')
+  const at = useUI((u) => u.at)
   return (
-    <div className="relative">
-      <B
-        label="Tasks options"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className={clsx('rounded-full!', phone ? 'aria-expanded:bg-line2' : 'aria-expanded:bg-hover')}
-        onClick={() => setOpen(!open)}
-      >
-        <MoreIcon className={ic} />
-      </B>
-      {open ? (
-        <Menu label="Tasks options" onClose={() => setOpen(false)} className="absolute top-full right-0 z-21 mt-1.5 max-w-[calc(100vw-24px)] origin-top-right">
-          <MenuItem role="menuitemcheckbox" aria-checked={here} icon={here ? <CheckIcon className={ic} /> : null} onClick={() => { setOpen(false); setThisSpace(!here) }}>
-            Only this space
-          </MenuItem>
-        </Menu>
-      ) : null}
-    </div>
+    <IB icon="tasks" label="Tasks" pressed={on} onClick={() => togglePane('tasks')}>
+      {snap && <Cnt n={needsCount(snap, at)} />}
+    </IB>
   )
 }
 
 export default definePlugin({
   name: 'tasks',
   setup(reg) {
-    reg.views.tasks = TaskList
-    reg.views.tasksMenu = TasksMenu
-    reg.views.taskActions = TaskActions
-    reg.overlays.push(ConfirmDone)
-    // the window's Automations group is the list's own (last, before Archived): only the Archived row is a footer
-    reg.tasksFooter.push(ArchivedLink)
+    reg.header.push({ order: 30, View: TasksButton })
+    reg.bar.push({ order: 10, pane: 'tasks', label: 'Tasks', icon: 'tasks', count: (snap, place) => needsCount(snap, place) })
+    reg.panes.push({ id: 'tasks', View: TasksPane })
+    reg.views.taskHead = TaskHead
+    reg.views.taskTop = TaskTop
+    reg.chatCards.push({ order: 20, cards: taskCards })
   },
 })
+
+export { notice }

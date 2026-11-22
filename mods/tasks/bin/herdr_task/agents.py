@@ -141,11 +141,14 @@ def task_status(task, live):
     # already on it (on_it()); then it is Working, with its agent's own status line.
     if task.get("attention") and not on_it(task, live):
         return "needs", "attention", task["attention"]
-    # Cut off by its provider (retry_pass): still Working while Herdr waits to tell it to carry
-    # on; Needs you once the tries are used up, or at once for what waiting can't fix.
-    r = task.get("retry") if st == "running" else None
-    if r and any(k.get("address") == r.get("address") for k in live) and ("blocked" not in states or r.get("over")):
-        return ("needs", "provider", r.get("reason")) if r.get("over") else ("working", None, retry_line(r))
+    # Stopped (3.2, step 38 and 39): the person's Stop, or its agent crashed, was cut off or hit its plan's limit
+    # (stopped_by, kept by `stop` and the tick's stopped_pass). Needs you until its agent takes a new turn (the
+    # next message carries on) or it is restarted; nothing restarts it by itself.
+    if st == "running" and task.get("stopped_by") and not carried_on(task, live, states):
+        return "needs", "stopped", task.get("stopped_why") or STOPPED
+    # Its agent reports an error itself (OSC 7501's fifth state).
+    if st == "running" and "error" in states and "working" not in states and "blocked" not in states:
+        return "needs", "stopped", error_words(live)
     if "blocked" in states:
         return "needs", "asks", REASONS["question"]
     if trust_asked(live):
@@ -195,6 +198,54 @@ def task_status(task, live):
 
 
 STOPPED = "Agent stopped"
+GONE = "Its agent is no longer running."
+BY_YOU = "Stopped by you."
+
+
+def carried_on(task, live, states=None):
+    """A stopped task's agent took up work again: after the person's Stop, a new turn (its agents' turns
+    as the stop kept them, stopped_turns: as ready_turns) or a question; after an error or a limit, an
+    agent at work (the tick looks at the rest: its log no longer ending on what cut it off)."""
+    states = states if states is not None else ["blocked" if asking(k) else status_word(k) for k in live]
+    if task.get("stopped_by") != "you":
+        return "working" in states
+    seen = task.get("stopped_turns") or {}
+    for k in live:
+        if (k.get("labels") or {}).get("herdr.role") == "reviewer":
+            continue
+        turn, was = k.get("turn") or 0, seen.get(k.get("address"))
+        if was is None:
+            if status_word(k) in ("working", "blocked"):
+                return True
+        elif turn > was or (turn >= was and status_word(k) in ("working", "blocked")):
+            return True
+    return False
+
+
+def error_words(live):
+    """What an agent that reports an error says of it, in one line."""
+    for k in live:
+        st = k.get("status")
+        if isinstance(st, dict) and st.get("state") == "error":
+            return fit(" ".join(str(st.get("msg") or "").split()), 200) or "Its agent reported an error."
+    return "Its agent reported an error."
+
+
+def stopped_facts(task, status, needs, why):
+    """{stopped_by, stopped_why} as every list of tasks carries them (3.2): who or what stopped a task that now
+    needs a restart or the person's next message, in one plain line; {} when it isn't stopped."""
+    if status != "needs" or needs != "stopped":
+        return {}
+    by = task.get("stopped_by") if task.get("stopped_by") in ("you", "error", "limit") else "error"
+    return {"stopped_by": by, "stopped_why": task.get("stopped_why") or (GONE if why == STOPPED else why) or GONE}
+
+
+def clear_stopped(task):
+    """A message to it, a resume or a restart: no longer stopped. Returns whether it was."""
+    had = [task.pop(k, None) for k in ("stopped_by", "stopped_why", "stopped_at", "stopped_turns", "retry")]
+    return any(x is not None for x in had)
+
+
 OUT_OF_ROUNDS = "Out of review rounds"
 
 
@@ -343,13 +394,6 @@ def on_it(task, live):
 def status_word(k):
     x = k.get("status")
     return x.get("state") if isinstance(x, dict) else x
-
-
-def retry_line(r):
-    """A provider retry's status line: "Provider overloaded · retry in 2m"."""
-    if r.get("due"):
-        return f"{r['reason']} · retry in {max(1, -(-(r['due'] - now()) // 60000))}m"
-    return f"{r['reason']} · retrying"
 
 
 # A Needs-you reason or an agent's status line: at most this many characters (as Shepherdr's

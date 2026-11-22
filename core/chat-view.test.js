@@ -6,24 +6,6 @@ import { WORDS, clock, bandActs, bandOrder, senderName, briefLabel, newsWords, n
 const ROOT = join(import.meta.dir, "..");
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
 
-describe("one set of words for the window's chat and the web's", () => {
-  // the window's chat (mods/chat) and the web app's (web/plugins/chat, web/src/restart.tsx) read every fixed word
-  // from WORDS: none is typed out again as a string in either, so they can't drift apart
-  const window = ["mods/chat/main.js"];
-  const web = readdirSync(join(ROOT, "web/plugins/chat")).filter((f) => /\.tsx?$/.test(f)).map((f) => `web/plugins/chat/${f}`);
-  for (const file of [...window, ...web]) {
-    test(file, () => {
-      // code only: a comment may quote a word; a toast's title is core/toasts.test.js's to check
-      const src = read(file).split("\n").filter((l) => !/^\s*(\/\/|\/\*|\*)/.test(l) && !/title: `\$\{toastWho/.test(l)).map((l) => l.replace(/\s\/\/ .*$/, "")).join("\n");
-      for (const w of Object.values(WORDS)) for (const q of [`"${w}"`, `'${w}'`, `>${w}<`, `\`${w}\``]) expect(src.includes(q) ? `${q} in ${file}` : "").toBe("");
-    });
-  }
-  test("both sides import them", () => {
-    expect(read("mods/chat/main.js")).toContain('from "./core/chat-view.js"');
-    expect(read("web/plugins/chat/rows.tsx")).toContain("from '@core/chat-view.js'");
-  });
-});
-
 describe("rows", () => {
   test("a message's time: today's as 14:05, an older one with its day", () => {
     const now = new Date(2026, 10, 4, 18, 0);
@@ -138,7 +120,7 @@ describe("the working line says what the agent does, in the window and on the we
     expect(doingWords(null, "")).toBe(null);
   });
   test("both sides read it from here", () => {
-    for (const f of ["mods/chat/main.js", "service/compat.ts"]) for (const fn of ["reportMsg(", "doingWords("]) expect(read(f).includes(fn) ? "" : `${fn} not in ${f}`).toBe("");
+    for (const f of ["service/compat.ts"]) for (const fn of ["reportMsg(", "doingWords("]) expect(read(f).includes(fn) ? "" : `${fn} not in ${f}`).toBe("");
   });
 });
 

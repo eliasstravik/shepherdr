@@ -20,6 +20,8 @@ case "$1" in
   --version) echo "agent-browser 0.41.1"; exit 0 ;;
   doctor) echo '{"checks":[{"id":"chrome.installed","status":"pass"}]}'; exit 0 ;;
 esac
+# (3.2: the space's browser and the join, answered quietly; the command itself says "ran")
+case "$*" in *"session list") exit 0 ;; *"get cdp-url") echo "ws://127.0.0.1:1/devtools/browser/fake"; exit 0 ;; *"herdr-s-"*|*" tab T1"|*" close") exit 0 ;; esac
 echo "ran $*"
 """
 
@@ -79,7 +81,7 @@ class MissingLibraries(unittest.TestCase):
     def run_hb(self, *args, path=None, extra=None):
         # no AppArmor restriction unless a test sets one (this machine's real sysctl must not decide the tests)
         env = {"HOME": self.home, "PATH": f"{path or self.fakes}:{self.bin}:/usr/bin:/bin",
-               "HERDR_BROWSER_BIN": self.ab, "HERDR_BROWSER_OS_RELEASE": self.osr,
+               "HERDR_BROWSER_BIN": self.ab, "HERDR_BROWSER_OS_RELEASE": self.osr, "HERDR_BROWSER_NEW_WINDOW": "echo T1",
                "HERDR_BROWSER_USERNS_SYSCTL": os.path.join(self.tmp, "no-such-sysctl"),
                "HERDR_BROWSER_APPARMOR_D": os.path.join(self.tmp, "no-apparmor.d"), **(extra or {})}
         return subprocess.run(["sh", HB, *args], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL,

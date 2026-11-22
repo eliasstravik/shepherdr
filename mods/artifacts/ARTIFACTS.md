@@ -1,127 +1,108 @@
-# Artifacts: show the person something
+# Artifacts
 
-An artifact is a recipe you write: a `recipe.json` (blocks of headings, text, tables, charts,
-pictures, forms) and its pictures beside it, in one folder. Herdr draws it natively twice from
-that one file: in the window, and in the web app on the person's phone. The person finds it in
-the Artifacts tab of the right sidebar and in your chat.
+An artifact is a web page you write to show the person something: a report, a comparison, a
+board, a plan, a form, a task's proof. It is a folder with an `index.html` and the files beside
+it (css, js, pictures, clips, data). The person opens it in Shepherdr, on a phone as often as on
+a desktop, and your chat shows its tile: a small picture of the page, taken when you publish.
+
+Make one when a page says it better than a chat message. A sentence or one picture goes in the
+chat.
+
+## Make one
 
 ```sh
-herdr-artifact new ./my-report          # writes a starting recipe.json
-herdr-artifact publish ./my-report --title "Coverage by package"     # prints its id
-herdr-artifact update <id> ./my-report --note "adds the API package" # a new version, same artifact
-herdr-artifact list                     # this folder's artifacts
-herdr-artifact rm <id>
-herdr-artifact open <id>                # show it to the person where they are, and print its link
-herdr-artifact link <id>                # only its link in the web app
-herdr-artifact preview <id>             # see it here as the person does: the web app's viewer on 127.0.0.1, for your browser
+herdr-artifact new ./report                                   # a starting index.html with the starter style
+herdr-artifact publish ./report --title "Coverage by package" # prints its id
+herdr-artifact preview <id>                                   # its link on this machine: look at it
+herdr-artifact update <id> ./report --note "what changed"     # a new version; the last 20 are kept
 ```
 
-- Change an artifact with `update` (a new version, the same card), not a second `publish`. The
-  last 20 versions are kept; the person can step back through them. An open copy reloads by
-  itself.
-- It belongs to the folder you run in (the repo root), like tasks; `--folder` picks another.
-  A task's agent gets its task in front of the title ("HAT-2: Coverage by package").
-- Publish checks it first (every block, every picture there); a broken one is refused with why.
-- Don't open it on the person's screen unasked; tell them it's there. Asked to show it: `open`, and give
-  them the link it prints.
+- Name files from the folder (`<img src="after.png">`, `<script src="app.js">`): no paths from
+  the root (`/after.png`), none that leave the folder (`../`), none from your disk. Publish tells
+  you which won't load.
+- At most 50 MB and 500 files. No links (copy the file in). Files that start with a dot are
+  left out.
+- The page runs on its own: its scripts work, but it can't reach Shepherdr, your files or its
+  own earlier state. Put the data in the page; what the person types is not remembered.
+- Check it before you say it's done: open `herdr-artifact preview <id>`'s link in your task's
+  browser at a phone's width (`herdr-browser set viewport 390 844`) and a desktop's (`1280 800`),
+  and fix what is cut off, tiny or unreadable.
+- The page's title is shown above it: start with the content. No emojis.
 
-## The recipe
+## The starter style
 
-```json
-{
-  "recipe": 1,
-  "blocks": [
-    { "type": "text", "md": "**92%** of lines are covered, up from 81%." },
-    { "type": "stats", "items": [{ "label": "Lines", "value": "92%", "note": "+11" }, { "label": "Files", "value": "148" }] },
-    { "type": "table", "columns": ["Package", { "label": "Coverage", "align": "right" }], "rows": [["api", "88%"], ["web", "95%"]] },
-    { "type": "image", "src": "after.png", "caption": "The new chart, in the window at 1440 px" },
-    { "type": "video", "src": "after.mp4", "caption": "The flow after the fix, 6 s", "loop": true, "muted": true, "autoplay": true },
-    { "type": "choice", "question": "Ship it?", "options": [{ "label": "Ship", "description": "merge today" }, { "label": "Wait" }] }
-  ]
-}
+Start from this, so the page looks at home in light and dark, on a phone and on a desktop.
+Black and white; colour only says a status (`good`, `warn`, `bad`). Wrap a wide table in
+`<div class="scroll">`.
+
+```css
+:root { color-scheme: light dark; --fg: #111; --bg: #fff; --muted: #666; --line: #ddd; --good: #1a7f37; --warn: #9a6700; --bad: #cf222e; }
+@media (prefers-color-scheme: dark) { :root { --fg: #eee; --bg: #111; --muted: #999; --line: #333; --good: #3fb950; --warn: #d29922; --bad: #f85149; } }
+* { box-sizing: border-box; }
+body { margin: 0 auto; padding: 16px; max-width: 720px; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); overflow-wrap: anywhere; }
+h1 { font-size: 22px; line-height: 1.25; margin: 0 0 12px; }
+h2 { font-size: 18px; margin: 28px 0 8px; }
+h3 { font-size: 16px; margin: 20px 0 6px; }
+p, ul, ol, figure, pre, table { margin: 0 0 14px; }
+img, video { max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; }
+figcaption, .muted { color: var(--muted); font-size: 14px; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 15px; }
+th, td { text-align: left; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+pre { overflow-x: auto; padding: 12px; border: 1px solid var(--line); border-radius: 6px; }
+pre, code { font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+a { color: inherit; }
+button { font: inherit; padding: 8px 14px; border: 1px solid var(--fg); border-radius: 6px; background: var(--fg); color: var(--bg); }
+.good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
 ```
 
-Blocks, top to bottom (each may carry an `"id"`; the person's notes point at blocks):
+Put `<meta name="viewport" content="width=device-width, initial-scale=1">` in the head
+(`herdr-artifact new` does). Pictures: take only what matters (`herdr-browser screenshot
+'<css selector>' /abs/shot.png`), or cut one with `herdr-artifact crop in.png out.png --rect
+x,y,w,h`. A short clip (`<video controls src="flow.mp4">`) beats a GIF.
 
-| type | fields |
-|---|---|
-| `heading` | `text`, `level` 1-3 |
-| `text` | `md` (Markdown: bold, links, `code`, lists) |
-| `list` | `items` (Markdown each), `ordered` |
-| `table` | `columns` (labels, or `{ label, align }`), `rows` (lists of cells; a cell may hold links, **bold** and `code`) |
-| `chart` | `kind` bar, line or pie, `labels`, `series` [{ `name`, `values` (numbers) }] |
-| `stats` | `items` [{ `label`, `value`, `note` }]: a row of big numbers |
-| `image` | `src` (a picture beside recipe.json), `caption`, `w`, `h` |
-| `video` | `src` (a clip beside it: mp4, webm or mov), `poster` (a picture beside it, optional), `caption`, `autoplay`, `loop`, `muted` |
-| `audio` | `src` (a sound beside it: mp3, m4a, wav or ogg), `caption` |
-| `pdf` | `src` (a PDF beside it), `caption`: shown inline, with a link to open it whole |
-| `pair` | `before` and `after`, each { `src`, `caption` } (a picture, or a clip with an optional `poster`): side by side, stacked on a phone; two clips play together |
-| `code` | `text`, `lang`: command output, a diff, a log |
-| `callout` | `tone` info, good, warn or bad, `title`, `md` |
-| `columns` | `columns`: lists of blocks, side by side (stacked on a phone) |
-| `tabs` | `tabs` [{ `label`, `blocks` }] |
-| `details` | `summary`, `blocks`: folded until opened |
-| `divider` | nothing |
-| `choice` | `question`, `options` [{ `label`, `description` }]: the person picks one |
-| `form` | `fields` [{ `name`, `label`, `kind` text, textarea, select or checkbox, `options`, `value` (optional: what it starts with and replies untouched; one of a select's options, true or false for a checkbox) }], `submit` |
-| `button` | `label`, `reply`: a press sends `reply` |
+## Answers and notes
 
-- **Pictures**: PNG, JPEG, GIF, WebP or SVG files in the folder, named in `src` (no paths up or
-  out). Screenshots go in as they are, so take only what matters: one element with
-  `herdr-browser screenshot '<css selector>' /abs/shot.png`, or a smaller viewport. To cut a PNG you have:
-  `herdr-artifact crop in.png out.png --rect x,y,w,h` (needs nothing else installed; `--max 1600` shrinks it).
-- **Clips, sounds, PDFs** (SHEP-209): a `video` plays in place in the web app (controls; `autoplay` with `muted` and
-  `loop` for a short clip that plays itself). **A short clip beats a GIF**: a GIF is big and can't stop or seek; a
-  clip is smaller, has sound and controls, and plays on the phone. No poster given: its first frame is made at publish
-  (with ffmpeg here) and the card shows it. A `.mov` or other clip no browser plays becomes an mp4 copy at publish
-  (ffmpeg here; without it, the notice says so). `audio` is a small player; `pdf` shows the PDF inline, with "Open the
-  PDF" under it (a phone may show only the link). In the window (GPUI) a clip, sound or PDF can't play: it shows its
-  poster (or a tile) and says "plays in the web app", so put the one thing it must show in the caption.
-- **Sizes**: a video at most 40 MB each, a sound 20 MB, a PDF 25 MB, a picture or other file 4 MB; the whole artifact
-  64 MB (every kept version counts). Over that, publish says which file and what to do (e.g. a shorter, smaller
-  `ffmpeg -i in.mov -vf scale=960:-2 -crf 28 -an short.mp4`).
-- **Its card in the chat** previews it: its first pictures and its first lines, and opens in
-  place. `"cover": "after.png"` beside `"blocks"` picks the picture it leads with.
-- **In your message too**: the key picture or a short video can also go right in your chat
-  message, as a Markdown image of its file (`![After](/abs/path/after.png)`; .mp4, .webm or
-  .mov play in place). The artifact stays the lasting record.
-- **Forms and answers**: a `choice`, a `form` or a `button` sends the person's words to you as
-  `<hc from="artifact" id=… version=… title=…>Ship it?: Ship</hc>`, in the window and on the web
-  alike.
-- **Update**: change recipe.json (and pictures or clips), then `herdr-artifact update <id> <dir> --note
-  "what changed"`. Each version is kept with its note.
-- **Mark up**: the person can point at a block (or a spot) and write what should change. It
-  reaches you as `<hc from="artifact" id=… version=… title=… on="the table “Coverage”">note</hc>`,
-  sometimes with a path to a picture of it. Change it and `update`.
-- Don't repeat the title inside it: the viewer shows it right above. Start with the content (a
-  one-line summary, the numbers, the picture). No emojis. Data goes in the recipe; it isn't read
-  live.
-- Only `.json`, pictures, clips, sounds and PDFs (plus `.txt`, `.md`, `.csv`), within the sizes above.
+The page can send the person's answer back to you: a button, a choice, a form.
+
+```html
+<button onclick="parent.postMessage({ shepherdr: 'answer', text: 'Ship it' }, '*')">Ship it</button>
+```
+
+`text` is what reaches you, so make it say the whole answer ("Ship it?: Wait, the price is
+wrong"). It arrives as:
+
+```
+<hc from="artifact" id="…" version="2" title="…" answer>
+Ship it
+</hc>
+```
+
+The person can also tap the page to drop a pin and write what should change. That arrives as
+`<hc from="artifact" id=… version=… title=… spot="0.42,0.31">the note</hc>`: the pin as
+fractions of the page's width and height, with the same in words. Change the page and `update`
+it. When you have ended, answers and notes go to the space's chat instead.
 
 ## A task's proof
 
-A proof is a recipe, always (the person accepts tasks from their phone too): titled "<the task's
-full title> · Proof"; a `text` block saying what changed in one to three plain lines; then each
-proof as an `image`, `video` (a short clip of a flow beats a GIF), `pair`, `code` or `pdf` block with a one-line `caption`
-(or a `text` line above it);
-then a `heading` "Not proven" and a `list`. `herdr-artifact publish` refuses a proof that isn't a
-recipe.
-
-## A custom panel, only when a recipe truly can't
-
-A recipe covers reports, boards, proofs, plans, forms and choices. Only something that must run
-code while the person looks (a game, a live terminal view, a drawing tool) is a custom panel: a
-Herdr mod (`main.js` in GPUI) that only the window can run. The web app shows just a picture of
-it, taken when the window last showed it, and "open it in the Herdr window". So:
+A proof is a page like any other, published as its task's proof:
 
 ```sh
-herdr-artifact new ./my-tool --custom   # a starting main.js
-herdr-artifact publish ./my-tool --title "Tic-tac-toe" --custom      # --custom on every publish and update
+herdr-artifact publish ./proof --task SHOP-4 --proof --title "<the task's full title> · Proof"
 ```
 
-Read `~/.config/herdr-app/AGENTS.md` (Mods, UI, the `herdr` module) and the type files
-`gpui-kit.d.ts` and `herdr.d.ts` there. `./artifact.js` is written for you (`id`, `version`,
-`asset(name)`, `reply(text)`, from a click only). Colors from `theme()` only, text 12-15 px, fill
-the panel (`size_full()`), scroll long content, work from 320 px wide, no timers
-(`cx.timer.every` rarely), never keep a `cx`. Publish checks it with `herdr-app check` in light
-and dark and at 320 px, and lists what to fix.
+It stays on its task (its card and thread), not in Artifacts, until the person keeps it. On the
+page, in this order:
+
+1. What changed, in one to three plain lines.
+2. Each proof (a picture, a before and after, a short clip, a command's output), each with a
+   one-line caption saying what it shows.
+3. A heading "Not proven" and a list of what you could not show, or "Nothing".
+
+## Other commands
+
+`herdr-artifact list` (this folder's; `--all` every folder's), `show <id>` (its versions and
+where its files are), `rename <id> "New title"`, `pin <id>` / `unpin <id>`, `restore <id>
+--version 3` (a copy of v3 becomes the newest), `keep <id>` (a proof kept in Artifacts),
+`rm <id>`, `open <id>` (shows it on the person's screen) and `link <id>`. Another machine's
+folder: `herdr-artifact --on <machine> <command> …`.

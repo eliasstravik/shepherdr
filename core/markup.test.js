@@ -1,20 +1,15 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { describe as spot, MARKUP, markupHint, markupSent } from "./markup.js";
+import { describe as spot, spotArg, markupHint, markupSent } from "./markup.js";
 
-const window = readFileSync(new URL("../mods/artifacts/markup.js", import.meta.url), "utf8");
-const body = (src) => src.slice(src.indexOf("function describe("), src.indexOf("\n}\n", src.indexOf("function describe(")));
-
-test("the spot in words, as the window sends it", () => {
-  expect(spot({ x: 120, y: 80, w: 180, h: 80 }, { width: 720, height: 540 })).toBe("the 180×80 px area at x 120–300, y 80–160 of the 720×540 panel (near the top left)");
-  expect(spot({ x: 360, y: 270, w: 0, h: 0 }, { width: 720, height: 540 })).toBe("the point at x 360, y 270 of the 720×540 panel (near the middle)");
+test("the pin in words and as herdr-artifact takes it", () => {
+  expect(spot({ x: 0.42, y: 0.31 })).toBe("42% from the left, 31% from the top of the page (near the top center)");
+  expect(spot({ x: 0.5, y: 0.5 })).toBe("50% from the left, 50% from the top of the page (near the middle)");
+  expect(spot({ x: 2, y: -1 })).toBe("100% from the left, 0% from the top of the page (near the top right)");
+  expect(spotArg({ x: 0.42, y: 0.31 })).toBe("0.420,0.310");
+  expect(spotArg({ x: 7, y: "x" })).toBe("1.000,0.000");
 });
 
-test("the window's markup.js has the same describe() and the same words", () => {
-  expect(body(window)).toBe(body(readFileSync(new URL("./markup.js", import.meta.url), "utf8")));
-  for (const w of Object.values(MARKUP)) expect(window).toContain(JSON.stringify(w).slice(1, -1).replace(/\\"/g, '"'));
-  expect(window).toContain("Click a spot or drag over an area, or write to ${keeperName()} about all of it.");
-  expect(markupHint("Claude Code")).toBe("Click a spot or drag over an area, or write to Claude Code about all of it.");
-  expect(window).toContain("Sent to ${keeperName(out.to)}. A new version shows here when it's in.");
+test("the card's lines name who hears it", () => {
+  expect(markupHint("Claude Code")).toBe("Tap the page to drop a pin, or write to Claude Code about all of it.");
   expect(markupSent("the agent")).toBe("Sent to the agent. A new version shows here when it's in.");
 });

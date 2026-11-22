@@ -9,7 +9,7 @@ import re
 import time
 from contextlib import contextmanager
 
-from .base import Fail, git, hc_json, HOME, LEGACY, MAX_RUNNING, now, run, STORE
+from .base import Fail, git, hc_json, HOME, LEGACY, now, run, STORE
 from .settings import settings_for
 from .agents import agent_running
 from .sessions import session_of
@@ -332,8 +332,6 @@ class Store:
                 return t
         raise Fail(f"No task {self.prefix}-{n} in {self.loc['folder']}.")
 
-    def max_running(self):
-        return int(settings_for(self)["tasks"].get("max_running") or MAX_RUNNING)
 
     def new(self, title, prompt="", mode="here"):
         d = self.data

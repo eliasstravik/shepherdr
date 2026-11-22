@@ -9,10 +9,13 @@ import type { HearIO } from "./voice-hear.ts";
 const now = Date.now();
 const snap: any = {
   host: "eliass-mac-mini", name: "Shepherdr", user: "You",
-  machines: [{ id: "m:eliass-mac-mini", machine: "eliass-mac-mini", name: "This computer", status: "idle", here: true },
+  everything: "h1",
+  machines: [{ id: "m:eliass-mac-mini", machine: "eliass-mac-mini", name: "mac-mini", status: "idle", here: true },
     { id: "m:mbp", machine: "eliass-macbook-pro", name: "MacBook Pro", status: "idle" }],
-  places: [{ id: "h1", name: "Home", home: true, machine: "eliass-mac-mini", chat: "p:h1" },
-    { id: "eliass-macbook-pro/h2", name: "Home", home: true, machine: "eliass-macbook-pro", chat: "p:eliass-macbook-pro:h2" }],
+  // Everything (the serving machine's home folder), and a space of the same name on each machine
+  places: [{ id: "h1", name: "home", home: true, machine: "eliass-mac-mini", chat: "p:h1" },
+    { id: "s1", name: "shop", machine: "eliass-mac-mini", chat: "p:s1" },
+    { id: "eliass-macbook-pro/s2", name: "shop", machine: "eliass-macbook-pro", chat: "p:eliass-macbook-pro:s2" }],
   tasks: [], needs: [], automations: {}, settings: [], asks: {},
   artifacts: [{ id: "hulk", title: "Hulk mini game · Proof", place: "h1", v: 1, at: now, when: "1m", by: "x" }],
 };
@@ -48,8 +51,8 @@ function page(answer: ((nav: any) => any) | null) {
       if (m.type === "nav" && answer) queueMicrotask(() => call.message(JSON.stringify({ type: "navved", id: m.id, ...answer(m.nav) })));
     },
     close() {},
-    start(where: Where, navWait = 1000) {
-      call = voiceCall({} as any, { io, hear, where,
+    start(where: Where, navWait = 1000, withIo: VoiceIO = io) {
+      call = voiceCall({} as any, { io: withIo, hear, where,
         dial: async () => `ws://127.0.0.1:${server.port}/`, navWait }, p);
       return call;
     },
@@ -71,13 +74,13 @@ test("a call from a phone: the open lands on that phone, and is said on screen o
   await until(() => !!agent);
   await Bun.sleep(50);
   const r = await tool({ what: "artifact", id: "the hulk mini game" });
-  expect(phone.got.filter((m) => m.type === "nav").map((m) => m.nav)).toEqual([{ kind: "artifact", artifact: "hulk", title: "Hulk mini game · Proof", v: 1, machine: null }]);
+  expect(phone.got.filter((m) => m.type === "nav").map((m) => m.nav)).toEqual([{ kind: "artifact", artifact: "hulk" }]);
   expect(laptop.got).toEqual([]);
   expect(JSON.parse(r.result)).toEqual({ ok: true, shown: "the artifact \"Hulk mini game · Proof\"" });
   expect(r.is_error).toBe(false);
   // another machine's space, by its machine's name
-  const s = await tool({ what: "space", id: "home on the macbook pro" });
-  expect(phone.got.filter((m) => m.type === "nav").pop().nav).toEqual({ kind: "space", place: "eliass-macbook-pro/h2" });
+  const s = await tool({ what: "space", id: "shop on the macbook pro" });
+  expect(phone.got.filter((m) => m.type === "nav").pop().nav).toEqual({ kind: "space", place: "eliass-macbook-pro/s2" });
   expect(JSON.parse(s.result).ok).toBe(true);
   c.end();
   agent = null;
@@ -87,9 +90,9 @@ test("a page that can't show it, or never answers: the agent hears it didn't ope
   const refuses = page(() => ({ ok: false, why: "this app doesn't list that space" }));
   let c = refuses.start({ client: "web", device: "desktop", machine: "eliass-mac-mini", call: "p:h1" });
   await until(() => !!agent);
-  const r = await tool({ what: "space", id: "Mac Mini Home" });
+  const r = await tool({ what: "space", id: "Mac Mini shop" });
   expect(r.is_error).toBe(true);
-  expect(r.result).toContain("couldn't open the Home on This computer (eliass-mac-mini) space on the person's screen: this app doesn't list that space");
+  expect(r.result).toContain("couldn't open the space #shop on mac-mini on the person's screen: this app doesn't list that space");
   c.end();
   agent = null;
   const old = page(null);
@@ -142,11 +145,11 @@ test("SHEP-173: hang_up after a send is refused and the call goes on; after the 
   const c = phone.start({ client: "web", device: "phone", machine: "eliass-mac-mini", call: "p:h1" });
   await until(() => !!agent);
   const ev = (m: object) => agent.send(JSON.stringify(m));
-  ev({ type: "user_transcript", user_transcription_event: { user_transcript: "Tell the Home Assistant to update codex." } });
+  ev({ type: "user_transcript", user_transcription_event: { user_transcript: "Tell Everything to update codex." } });
   ev({ type: "agent_response", agent_response_event: { agent_response: "On it." } });
-  ev({ type: "client_tool_call", client_tool_call: { tool_name: "send", tool_call_id: "s1", parameters: { to: "Home", text: "Update codex." } } });
+  ev({ type: "client_tool_call", client_tool_call: { tool_name: "send", tool_call_id: "s1", parameters: { to: "Everything", text: "Update codex." } } });
   await until(() => results.some((r) => r.tool_call_id === "s1"));
-  ev({ type: "agent_response", agent_response_event: { agent_response: "Passed it to the Home Assistant." } });
+  ev({ type: "agent_response", agent_response_event: { agent_response: "Passed it to Everything." } });
   ev({ type: "client_tool_call", client_tool_call: { tool_name: "hang_up", tool_call_id: "h1", parameters: {} } });
   await until(() => results.some((r) => r.tool_call_id === "h1"));
   const refused = results.find((r) => r.tool_call_id === "h1");
@@ -251,13 +254,13 @@ test("SHEP-105: updates wait while the person talks, then come together; a send 
   // a sidebar call with no chat: the opening says it is with Shepherdr
   const open = heard.findLast((m) => m.type === "conversation_initiation_client_data");
   expect(open.conversation_config_override.agent.prompt.prompt).toContain("It is with Shepherdr, not one agent");
-  // send to Home: followed from now on
+  // send to Everything: followed from now on
   const n = results.length;
-  agent.send(JSON.stringify({ type: "client_tool_call", client_tool_call: { tool_name: "send", tool_call_id: "s1", parameters: { to: "home on this computer", text: "Check the build" } } }));
+  agent.send(JSON.stringify({ type: "client_tool_call", client_tool_call: { tool_name: "send", tool_call_id: "s1", parameters: { to: "Everything", text: "Check the build" } } }));
   await until(() => results.length > n);
   expect(sent).toEqual(["p:h1"]);
   // its answer to the tool's result (SHEP-113: updates wait until the person's ask is answered)
-  agent.send(JSON.stringify({ type: "agent_response", agent_response_event: { agent_response: "Passed it to Home." } }));
+  agent.send(JSON.stringify({ type: "agent_response", agent_response_event: { agent_response: "Passed it to Everything." } }));
   // the person keeps talking while a reply comes in
   const loud = new Uint8Array(new Int16Array(1600).map((_, i) => (i % 2 ? 5000 : -5000)).buffer);
   const before = heard.length;
@@ -268,7 +271,7 @@ test("SHEP-105: updates wait while the person talks, then come together; a send 
   await until(() => heard.slice(before).some((m) => m.type === "user_message"));
   const said = heard.slice(before).filter((m) => m.type === "user_message");
   expect(said).toHaveLength(1);
-  expect(said[0].text).toContain('the Home Assistant replied: """The build is green."""');
+  expect(said[0].text).toContain('A reply in Everything: """The build is green."""');
   c.end();
 }, 10000);
 
@@ -277,7 +280,7 @@ test("SHEP-113: the person's ask is answered first; updates that came meanwhile 
   const box = { reply: null as null | { id: string; text: string } };
   const hearIO: HearIO = { snap: () => snap, view: (key) => (key === "p:h1" ? { lastReply: () => box.reply, status: () => "idle", asking: () => null } : null), follow: () => ({ stop: () => {} }) };
   const p = page(null);
-  // the Home space on screen: the call follows its chat's replies
+  // Everything on screen: the call follows its chat's replies
   const c = voiceCall({} as any, { io, hear: hearIO, where: { client: "web", device: "phone", machine: "box", place: "h1" }, dial: async () => `ws://127.0.0.1:${server.port}/` }, p as any);
   await until(() => !!agent);
   await Bun.sleep(100);
@@ -308,19 +311,27 @@ test("SHEP-113: the person's ask is answered first; updates that came meanwhile 
   c.end();
 }, 10000);
 
-test("SHEP-124: call_view: the voice agent sets the web call full screen or minimized on the page that started it", async () => {
-  const phone = page((nav) => ({ ok: true, where: { device: "phone", full: nav.full } }));
-  const c = phone.start({ client: "web", device: "phone", machine: "eliass-mac-mini", call: null });
+test("3.2: the call runs over the app: no call view to set; an agent's Screen opens beside its chat, and Take over goes through the app's action", async () => {
+  const acts: any[] = [];
+  const phone = page(() => ({ ok: true, where: { device: "phone", place: "s1", tab: "screen" } }));
+  const c = phone.start({ client: "web", device: "phone", machine: "eliass-mac-mini", place: "s1" }, 1000, { ...io, action: async (b) => { acts.push(b); return { ok: true }; } });
   await until(() => !!agent);
   await Bun.sleep(50);
-  for (const view of ["minimized", "full"]) {
+  const call = async (tool_name: string, parameters: any) => {
     const n = results.length;
-    agent.send(JSON.stringify({ type: "client_tool_call", client_tool_call: { tool_name: "call_view", tool_call_id: `v-${view}`, parameters: { view } } }));
+    agent.send(JSON.stringify({ type: "client_tool_call", client_tool_call: { tool_name, tool_call_id: `x${n}`, parameters } }));
     await until(() => results.length > n);
-    expect(phone.got.filter((m) => m.type === "nav").pop().nav).toEqual({ kind: "call", full: view === "full" });
-    expect(JSON.parse(results[n].result).ok).toBe(true);
-    expect(results[n].is_error).toBe(false);
-  }
+    return results[n];
+  };
+  // an agent made before this spec may still ask for it: there is no such tool any more
+  expect((await call("call_view", { view: "full" })).is_error).toBe(true);
+  expect(phone.got.filter((m) => m.type === "nav")).toEqual([]);
+  const shown = await call("open", { what: "screen" });
+  expect(phone.got.filter((m) => m.type === "nav").pop().nav).toEqual({ kind: "panel", panel: "screen" });
+  expect(JSON.parse(shown.result).ok).toBe(true);
+  const took = await call("act", { action: "take_over", id: "here", confirmed: false });
+  expect(took.is_error).toBe(false);
+  expect(acts).toEqual([{ type: "screen", key: "chat:s1", op: "take", src: "b" }]);
   c.end();
   agent = null;
 });

@@ -1,7 +1,7 @@
 // The voice agent's spec reaches agents made before (ensureAgent): kept and up to date, nothing asked; from another
 // spec, PATCHed (and the tools it replaced removed); gone from ElevenLabs, made again; made with another key, a new one.
 import { expect, test } from "bun:test";
-import { ensureAgent, agentSpec, SPEC, specTag, TOOLS, SYSTEM_TOOLS, hangUpGuard, closeWords, chimePcm, HUNG_UP, REFUSED, agentFile, envLines, opening, prompt, FIRST, LANGUAGES, TTS_MODEL, VOICE_ID, batchLines, needLine, replyLine, REPLY_MAX, toolWords, turnGate } from "./voice.js";
+import { ensureAgent, agentSpec, SPEC, specTag, TOOLS, SYSTEM_TOOLS, LOOKS, OPENS, ACTS, ASK_FIRST, SETTINGS, statusLine, hangUpGuard, closeWords, chimePcm, HUNG_UP, REFUSED, agentFile, envLines, opening, prompt, FIRST, LANGUAGES, TTS_MODEL, VOICE_ID, batchLines, needLine, replyLine, REPLY_MAX, toolWords, turnGate } from "./voice.js";
 
 function fake(o = {}) {
   const calls = [], saved = [];
@@ -61,16 +61,16 @@ test("one kept for another key isn't used: a new one", async () => {
   expect(await ensureAgent(f.io)).toBe("agent_new");
 });
 
-test("the spec: seven client tools (screen the fallback, call_view the call's own view, hang_up), a version that follows its words, and a file without the key", () => {
-  expect(TOOLS.map((t) => t.name)).toEqual(["look", "open", "send", "screen", "act", "call_view", "hang_up"]);
+test("the spec: six client tools (look, open, send, act, screen the fallback, hang_up), a version that follows its words, and a file without the key", () => {
+  expect(TOOLS.map((t) => t.name)).toEqual(["look", "open", "send", "screen", "act", "hang_up"]);
   for (const t of TOOLS) { expect(t.type).toBe("client"); expect(t.expects_response).toBe(true); expect(t.response_timeout_secs).toBeLessThanOrEqual(120); }
   expect(TOOLS.find((t) => t.name === "act").parameters.required).toContain("confirmed");
   expect(SPEC).toBe(specTag(agentSpec()));
   const changed = agentSpec(); changed.conversation_config.agent.prompt.tools[0].description += "!";
   expect(specTag(changed)).not.toBe(SPEC);
   expect(envLines(agentFile("agent_1", "tag1", SPEC))).toEqual({ ELEVENLABS_AGENT_ID: "agent_1", ELEVENLABS_KEY_TAG: "tag1", ELEVENLABS_SPEC: SPEC });
-  const o = opening("The app shows task SHEP 45.");
-  expect(o.conversation_config_override.agent.prompt.prompt).toContain("Where the call is now: The app shows task SHEP 45.");
+  const o = opening('The app shows the task "Fix the login".');
+  expect(o.conversation_config_override.agent.prompt.prompt).toContain('Where the call is now: The app shows the task "Fix the login".');
   expect(prompt()).toContain("Set confirmed true only after a clear yes on this call");
 });
 
@@ -78,7 +78,7 @@ test("SHEP-67: ends the call itself after a yes, waits quietly through silence, 
   const c = agentSpec().conversation_config;
   // ElevenLabs' skip_turn, listed with ours (a separate built_in_tools field beside inline tools is dropped); SHEP-173:
   // no end_call of ElevenLabs': our hang_up, which Shepherdr allows only after the person's yes
-  expect(c.agent.prompt.tools.map((t) => t.name)).toEqual(["look", "open", "send", "screen", "act", "call_view", "hang_up", "skip_turn", "language_detection"]);
+  expect(c.agent.prompt.tools.map((t) => t.name)).toEqual(["look", "open", "send", "screen", "act", "hang_up", "skip_turn", "language_detection"]);
   expect(SYSTEM_TOOLS.map((t) => [t.type, t.params.system_tool_type])).toEqual([["system", "skip_turn"], ["system", "language_detection"]]);
   expect(c.agent.prompt.tools.find((t) => t.name === "hang_up").type).toBe("client");
   expect(c.agent.prompt.built_in_tools).toBeUndefined();
@@ -133,7 +133,7 @@ test("SHEP-104: English first, then whatever language the person speaks, back an
 
 test("SHEP-105: one Shepherdr voice for everything, never tied to the chat it started in", () => {
   const p = prompt();
-  expect(p).toContain("The person called Shepherdr itself, not one agent");
+  expect(p).toContain("The person called Shepherdr as a whole, not one agent");
   expect(p).toContain("You never hand the call over to another voice");
   expect(p).not.toMatch(/started in .*'s chat/);
   expect(p).not.toContain("the call's chat");
@@ -146,18 +146,22 @@ test("SHEP-105: one Shepherdr voice for everything, never tied to the chat it st
   expect(p).toContain("Speak the language the person speaks");
   // updates that come together are said as one; quiet notes stay quiet
   expect(batchLines([])).toEqual([]);
-  const one = batchLines([replyLine("the shop Assistant", "Fixed it.")]);
-  expect(one).toEqual([{ type: "user_message", text: expect.stringContaining("the shop Assistant replied") }]);
-  const two = batchLines([{ type: "contextual_update", text: "[Update] x is working now." }, replyLine("the shop Assistant", "Fixed it."), needLine("TEST-7 is ready for review")]);
+  const one = batchLines([replyLine("#shop", "Fixed it.")]);
+  expect(one).toEqual([{ type: "user_message", text: expect.stringContaining('A reply in #shop: """Fixed it."""') }]);
+  const two = batchLines([{ type: "contextual_update", text: "[Update] x is working now." }, replyLine("#shop", "Fixed it."), needLine('The task "Fix the login" is ready for review')]);
   expect(two.map((l) => l.type)).toEqual(["contextual_update", "user_message"]);
   expect(two[1].text).toContain("2 things came in together");
-  expect(two[1].text).toContain("TEST-7 is ready for review");
+  expect(two[1].text).toContain('The task "Fix the login" is ready for review');
+  // a followed chat's agent: working and finished are quiet notes, a wait is said
+  expect(statusLine("#shop", "working").type).toBe("contextual_update");
+  expect(statusLine("#shop", "idle").type).toBe("contextual_update");
+  expect(statusLine("#shop", "blocked", "Deploy now?")).toEqual({ type: "user_message", text: "[Update] #shop needs the person: Deploy now?. Tell them, briefly." });
 });
 
 test("SHEP-113: a word before a slow tool, a filler for a slow reply, a sound while a tool runs, the ask first", () => {
   const c = agentSpec().conversation_config;
   // ElevenLabs' pre-tool speech: always before look, send and act; ElevenLabs decides for the quick open and screen
-  expect(Object.fromEntries(TOOLS.map((t) => [t.name, t.pre_tool_speech]))).toEqual({ look: "force", open: "auto", send: "force", screen: "auto", act: "force", call_view: "auto", hang_up: "auto" });
+  expect(Object.fromEntries(TOOLS.map((t) => [t.name, t.pre_tool_speech]))).toEqual({ look: "force", open: "auto", send: "force", screen: "auto", act: "force", hang_up: "auto" });
   for (const t of TOOLS) { expect(t.force_pre_tool_speech).toBeUndefined(); expect(t.tool_call_sound).toBe("typing"); expect(t.tool_call_sound_behavior).toBe("auto"); }
   // a slow model: a short filler of its own after 3 s (within ElevenLabs' 0.5..8)
   const soft = c.turn.soft_timeout_config;
@@ -178,11 +182,14 @@ test("SHEP-113: what a tool is doing, in plain words", () => {
   expect(toolWords("look", { what: "nope" })).toBe("looking");
   expect(toolWords("send", { to: "shop" })).toBe("sending to shop");
   expect(toolWords("send", { to: "here" })).toBe("sending to this chat");
-  expect(toolWords("act", { action: "accept", confirmed: true })).toBe("accepting the task");
-  expect(toolWords("act", { action: "accept", confirmed: false })).toBe("checking");
+  expect(toolWords("look", { what: "schedules" })).toBe("checking schedules");
+  expect(toolWords("act", { action: "done", confirmed: true })).toBe("marking it as done");
+  // an act that asks first changes nothing until the yes; the others run at once
+  expect(toolWords("act", { action: "done", confirmed: false })).toBe("checking");
+  expect(toolWords("act", { action: "take_over", confirmed: false })).toBe("taking over the screen");
+  expect(toolWords("act", { action: "start", confirmed: false })).toBe("starting the task");
+  for (const a of ACTS) expect(toolWords("act", { action: a, confirmed: true })).not.toBe("making the change");
   expect(toolWords("screen", { do: "click" })).toBe("using the screen");
-  expect(toolWords("call_view", { view: "full" })).toBe("showing the call");
-  expect(toolWords("call_view", { view: "minimized" })).toBe("minimizing the call");
   expect(toolWords("open", { what: "task" })).toBe("opening it");
   expect(toolWords("whatever")).toBe("working");
 });
@@ -206,24 +213,51 @@ test("SHEP-113: the person's ask holds the updates until it is answered, tools a
   expect(g.holding(41000)).toBe(false);
 });
 
-test("SHEP-124: call_view sets the call's own view (full or minimized), never screen clicks; opening minimizes by itself", () => {
-  const t = TOOLS.find((x) => x.name === "call_view");
-  expect(t.parameters.required).toEqual(["view"]);
-  expect(t.parameters.properties.view.enum).toEqual(["full", "minimized"]);
+test("3.2: the app's own words: Everything, spaces, tasks by title, Ready for review, Mark as done; nothing of what was dropped", () => {
   const p = prompt();
-  expect(p).toContain('"Back to the call", "maximize the call", "full screen": call_view full');
-  expect(p).toContain("Never screen for this.");
-  expect(p).toContain("Opening or moving around minimizes a full-screen call by itself");
+  for (const w of ["Everything is the root chat", 'written "#shop", said "shop"', "named by its title", "Needs you", "Ready for review", '"Mark as done and merge"', '"Not now"', "Stopped by you", "Up next",
+    '"nothing to do"', "Take over", "Hand back", "Needs your hands", "Switch to terminal", "your terminal", "Tasks, Scheduled"]) expect(p).toContain(w);
+  expect(p).toContain("You are Shepherdr speaking, in the first person");
+  expect(p).toContain("Name a task by its title, never by an id or number");
+  // every word the voice agent is given: the prompt, each tool, each parameter and choice
+  const spec = JSON.stringify(agentSpec().conversation_config.agent);
+  expect(spec).not.toMatch(/\b(Assistant|coordinator|worker|Accept(ed|ing|s)?|Autopilot|automations?|add-ons?|window|tabs?|layout)\b/i);
+  expect(spec).not.toMatch(/\b[A-Z]{2,8}[- ]\d+\b/);
+  expect(spec).not.toMatch(/call_view|full.screen|minimi[sz]e|worktree/i);
+  expect(spec).not.toMatch(/\b(Files|Changes) (panel|pane)|\bReview card\b/);
+  // what the page can open and the app can do (service/voice-tools.ts answers each)
+  expect(TOOLS.find((t) => t.name === "look").parameters.properties.what.enum).toEqual(LOOKS);
+  expect(LOOKS).toEqual(["here", "chat", "spaces", "machines", "tasks", "task", "needs", "news", "schedules", "settings", "secrets", "artifacts", "data"]);
+  expect(OPENS).toEqual(["space", "chat", "task", "screen", "terminal", "tasks", "needs", "artifacts", "artifact", "settings"]);
+  expect(TOOLS.find((t) => t.name === "open").parameters.properties.view.enum).toEqual(["browser", "desktop"]);
+  expect(SETTINGS).toEqual(["General", "Agents", "Tasks", "Instructions", "Secrets", "Machines", "Usage", "Plugins"]);
+  for (const s of SETTINGS) expect(p).toContain(s);
+  const act = TOOLS.find((t) => t.name === "act");
+  expect(act.parameters.properties.action.enum).toEqual(ACTS);
+  for (const a of ["done", "start", "stop", "restart", "rename_task", "move_task", "archive", "delete", "answer", "run_schedule", "pause_schedule", "resume_schedule",
+    "rename_space", "archive_space", "remove_space", "setting", "pin_artifact", "delete_artifact", "take_over", "hand_back", "skip_step"]) expect(ACTS).toContain(a);
+  // a spoken yes before what deletes, merges or stops: each named in the tool's own words
+  expect(ASK_FIRST).toEqual(["done", "done_without_merging", "stop", "delete", "archive_space", "remove_space", "delete_artifact"]);
+  for (const a of ASK_FIRST) { expect(ACTS).toContain(a); expect(act.description).toContain(a); }
+  expect(p).toContain("Marking a task as done on its own branch merges it: always ask.");
+  // an agent's Screen is opened and driven like everything else; the screen tool is the person's own page
+  expect(p).toContain('"Show me its screen": open screen. "Take over", "hand back", "skip that step": act take_over, hand_back, skip_step');
+  expect(p).toContain("It is not an agent's Screen: that is open screen.");
+  // the spec changed: an agent made on 3.1's spec is patched (ensureAgent compares the tag it kept)
+  expect(SPEC).toMatch(/^[0-9a-f]{8}$/);
+  expect(SPEC).not.toBe("d88f267b");
+  // small enough for ElevenLabs
+  expect(JSON.stringify(TOOLS).length).toBeLessThan(9000);
 });
 
-// SHEP-173: ElevenLabs' records of the person's calls: "Passed it to the Home Assistant." then end_call, no yes asked
+// SHEP-173: ElevenLabs' records of the person's calls: "Passed it to ..." then end_call, no yes asked
 test("SHEP-173: hang_up only right after the person answered a question, with no tool since", () => {
   const g = hangUpGuard();
   expect(g.may()).toBe(false);
-  g.seen("user_transcript", "Tell Home to update codex.");
+  g.seen("user_transcript", "Tell Everything to update codex.");
   g.seen("agent_response", "On it.");
   g.seen("client_tool_call", "send");
-  g.seen("agent_response", "Passed it to the Home Assistant.");
+  g.seen("agent_response", "Passed it to Everything.");
   g.seen("client_tool_call", "hang_up");
   expect(g.may()).toBe(false);
   // asked, then a yes: may (in any language: only the question mark counts)
@@ -265,9 +299,9 @@ test("SHEP-173: the end chime is short, soft and ends in silence", () => {
 
 test("a long reply is said whole; past the limit it says it was cut and where the rest is (#785)", () => {
   const five = "Sentence. ".repeat(500) + "Last words.";
-  expect(replyLine("the shop Assistant", five).text).toContain("Last words.");
-  expect(replyLine("the shop Assistant", five).text).not.toContain("cut short");
-  const huge = replyLine("the shop Assistant", "y".repeat(REPLY_MAX + 10)).text;
+  expect(replyLine("#shop", five).text).toContain("Last words.");
+  expect(replyLine("#shop", five).text).not.toContain("cut short");
+  const huge = replyLine("#shop", "y".repeat(REPLY_MAX + 10)).text;
   expect(huge).toContain("cut short here; the rest is in the chat");
   expect(huge).toContain("Tell the person what it says");
 });

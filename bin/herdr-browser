@@ -1,22 +1,33 @@
 #!/bin/sh
-# herdr-browser: a Herdr task's own browser (HERD-57). agent-browser at the version Herdr pins, on
-# the task's own session and profile, so every agent of a task drives the same browser and its
-# sign-ins stay with the task:
-#   session  herdr-<task>               (agent-browser --session; a <task> over 32 characters is cut to its
-#            last 20 and a hash of the task's key: herdr-<tail>-<8 hex>, as agent-browser's socket path is short)
-#   profile  ~/.local/state/shepherdr/browser/<task>    (a Chrome profile folder: cookies and sign-ins kept;
-#            ~/.herdr/browser/<task> on a machine whose Shepherdr data hasn't moved to its own folders yet)
-# <task> is the task's herdr.task key (<slug>#<id>) made safe for a name: ".config-herdr-app#57"
-# is "config-herdr-app-57". Which task: --task <key>, else $HERDR_BROWSER_TASK (herdr-task gives
-# its workers that), else the herdr.task label of the terminal it runs in ($HC_TERMINAL_ID).
+# herdr-browser: an agent's own page in its space's browser (3.2; HERD-57 before it). agent-browser at the version
+# Shepherdr pins. Each SPACE has one headless Chrome on one profile, so a site signed in to once is signed in for every
+# agent of that space; each task's agents, and the space's chat's own agent, have their own page (a window of its own)
+# in it, which Shepherdr's Screen shows live and the person can take over:
+#   the space's browser   session herdr-s-<space>, profile ~/.local/state/shepherdr/browser/spaces/<space>
+#                         (~/.herdr/browser/spaces/<space> on a machine whose data hasn't moved yet). Nobody drives
+#                         this session: it only keeps the Chrome. It stops after 10 idle minutes (herdr-task's tick)
+#                         and starts again with the next command; sign-ins stay in the profile.
+#   an agent's page       session herdr-<name>, joined to that Chrome (--cdp) and pinned to its own tab (--pin-tab);
+#                         its stream is what the Screen shows. <name> is the task's key (<slug>#<id>) made safe for a
+#                         name (".config-herdr-app#57" is "config-herdr-app-57"), or chat-<space> for a chat's agent.
+#                         A name over 32 characters is cut to its last 20 and a hash (agent-browser's socket path is short).
+# Whose: --task <key> (else $HERDR_BROWSER_TASK), --space <id> (else $HERDR_BROWSER_SPACE), --chat (the space's chat's
+# own agent); what is missing comes from the labels of the terminal it runs in ($HC_TERMINAL_ID).
+# 3.1 kept one profile per task (<root>/<task>): a space's profile starts from one of them (adopt_profile below).
 #
-# Beside the profile, plain files Herdr reads (herdr-task tick, the task panel's Browser view):
-#   <task>.task   the task's key, so a tick can find its task again
-#   <task>.used   touched by every agent command: tick closes a browser idle past its setting
-#   <task>.you    the person drives it (Take over in the panel): acting commands are refused while
-#                 it is fresh (the panel touches it every 30 s), so the agent holds off
-# --own: Herdr's own commands (the panel); they don't count as the agent using it, nor get refused.
-# --name: prints the session and profile it would use, as JSON, and runs nothing.
+# Beside the profiles, plain files Shepherdr reads (the service's screens, herdr-task's tick); herdr-desktop shares them:
+#   <name>.task    whose it is (the task's key, or chat:<space>);  <name>.space  its space
+#   <name>.used    touched by every agent command (spaces/<space>.used too): the tick closes a space's browser idle
+#                  past its setting
+#   <name>.you     the person drives (Take over): every browser AND desktop command of this agent is refused, and
+#                  nothing is read for it, until Hand back removes it
+#   <name>.hands   the agent asked for the person's hands (herdr-browser hands "<what>"): the Needs your hands card
+#   <name>.cdp, <name>.tab   the Chrome its session is joined to, and its own tab's id
+#   spaces/<space>.cdp       the space's Chrome (its DevTools address, on 127.0.0.1 only)
+#   spaces/<space>.desk      the person is signing in on the desktop: a normal Chrome holds the profile
+# --own: Shepherdr's own commands (the Screen); they don't count as the agent using it, nor get refused.
+# --name: prints the names it would use, as JSON, and runs nothing. --own --state: what is open, starting nothing.
+# --own --close-space [why] / --forget / --desk <url> / --desk-end: the tick's and the Screen's own.
 #
 # agent-browser itself (SHEP-156): any 0.41.x from the pin on, found on the PATH, or Shepherdr's own copy in
 # ~/.local/share/shepherdr/agent-browser/<pin>/ (preferred once there). When there's none, an agent's first command
@@ -114,19 +125,19 @@ install_mine() {
     fi
   done
   wait "$_pid"; _rc=$?
-  _err=$(cat "$_tmp.err" 2>/dev/null); rm -f "$_tmp.err"
+  _err=$(cat "${_tmp:?}.err" 2>/dev/null); rm -f "${_tmp:?}.err"
   if [ "$_rc" != 0 ]; then
-    rm -f "$_tmp"
+    rm -f "${_tmp:?}"
     why="couldn't download it (${_err:-no answer}; offline?)"; return 1
   fi
   _got=$( (sha256sum "$_tmp" 2>/dev/null || shasum -a 256 "$_tmp" 2>/dev/null) | awk '{ print $1 }')
   if [ "$_got" != "$_want" ]; then
-    rm -f "$_tmp"; why="the download isn't agent-browser $PIN (its checksum differs)"; return 1
+    rm -f "${_tmp:?}"; why="the download isn't agent-browser $PIN (its checksum differs)"; return 1
   fi
-  chmod 755 "$_tmp" && mv -f "$_tmp" "$mine" || { rm -f "$_tmp"; why="can't write to $abdir"; return 1; }
+  chmod 755 "${_tmp:?}" && mv -f "${_tmp:?}" "$mine" || { rm -f "${_tmp:?}"; why="can't write to ${abdir:?}"; return 1; }
   # an older pin's copy: no longer used
   for _d in "$abdir"/*/; do
-    [ -d "$_d" ] && [ "${_d%/}" != "$abdir/$PIN" ] && rm -rf "${_d%/}"
+    _dd=${_d%/}; [ -d "$_d" ] && [ "$_dd" != "$abdir/$PIN" ] && rm -rf "${_dd:?}"
   done
   return 0
 }
@@ -152,7 +163,7 @@ ensure() {
   until mkdir "$abdir/.lock" 2>/dev/null; do
     [ "$_n" = 0 ] && echo "herdr-browser: another herdr-browser is installing agent-browser $PIN; waiting for it…" >&2
     # another one is installing: wait for it (a lock left by one that died goes after 10 minutes)
-    if [ -n "$(find "$abdir/.lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then rmdir "$abdir/.lock" 2>/dev/null; continue; fi
+    if [ -n "$(find "${abdir:?}/.lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then rmdir "${abdir:?}/.lock" 2>/dev/null; continue; fi
     _n=$((_n + 1)); [ "$_n" -gt 600 ] && { why="another install is still running"; return 1; }
     sleep 1
   done
@@ -164,8 +175,8 @@ ensure() {
     [ "$_ok" = 0 ] && pick
   fi
   [ "$_ok" = 0 ] && { chrome || _ok=1; }
-  if [ "$_ok" = 0 ]; then rm -f "$abdir/.failed"; else printf '%s\n' "$why" > "$abdir/.failed"; fi
-  rmdir "$abdir/.lock" 2>/dev/null
+  if [ "$_ok" = 0 ]; then rm -f "${abdir:?}/.failed"; else printf '%s\n' "$why" > "${abdir:?}/.failed"; fi
+  rmdir "${abdir:?}/.lock" 2>/dev/null
   return $_ok
 }
 
@@ -281,8 +292,9 @@ EOF
 # a download).
 own_help() {
   cat <<EOF
-herdr-browser: this task's own browser: agent-browser $PIN on the task's session and profile.
+herdr-browser: your own tab in your space's browser (agent-browser $PIN; the space's agents share its sign-ins).
   herdr-browser <agent-browser command>   e.g. open <url>, snapshot -i, click @e2, screenshot /abs/shot.png
+  herdr-browser hands "<what>"            a step only a person can do (a sign-in code, a captcha): ask for their hands
   herdr-browser --install                 install agent-browser $PIN and Chrome, saying what it found
   herdr-browser --status                  what's here, as JSON
 EOF
@@ -318,61 +330,91 @@ case "${1-}" in
     exit 0 ;;
 esac
 
+# Whose browser: a task's agent (--task <slug#id>, else $HERDR_BROWSER_TASK) or a space's chat's own agent (--chat),
+# in which space (--space <id>, else $HERDR_BROWSER_SPACE). What is missing comes from the labels of the terminal it
+# runs in ($HC_TERMINAL_ID): herdr.task and herdr.task.space on a task's agent, herdr.space on a chat's own.
 task=${HERDR_BROWSER_TASK-}
-own=
+space=${HERDR_BROWSER_SPACE-}
+own=; chat=; show=; admin=; deskurl=
 while :; do
   case "${1-}" in
     --task) task=${2-}; shift 2 || exit 2 ;;
+    --space) space=${2-}; shift 2 || exit 2 ;;
+    --chat) chat=1; task=; shift ;;
     --own) own=1; shift ;;
     --name) show=1; shift ;;
+    --state|--close-space|--forget|--desk-end) admin=${1#--}; shift ;;
+    --desk) admin=desk; deskurl=${2-}; shift 2 || exit 2 ;;
     *) break ;;
   esac
 done
-if [ -z "$task" ] && [ -n "${HC_TERMINAL_ID-}" ]; then
-  task=$(hc get "$HC_TERMINAL_ID" --json 2>/dev/null | python3 -c 'import json,sys
-try: print((json.load(sys.stdin).get("labels") or {}).get("herdr.task") or "")
-except Exception: pass' 2>/dev/null)
+if [ -z "$chat" ] && { [ -z "$task" ] || [ -z "$space" ]; } && [ -n "${HC_TERMINAL_ID-}" ]; then
+  _l=$(hc get "$HC_TERMINAL_ID" --json 2>/dev/null | python3 -c 'import json,sys
+try: l = json.load(sys.stdin).get("labels") or {}
+except Exception: l = {}
+print(l.get("herdr.task") or "")
+print(l.get("herdr.task.space") or l.get("herdr.space") or l.get("herdr.coordinator.space") or "")' 2>/dev/null)
+  [ -n "$task" ] || task=$(printf '%s\n' "$_l" | sed -n 1p)
+  [ -n "$space" ] || space=$(printf '%s\n' "$_l" | sed -n 2p)
 fi
-if [ -z "$task" ]; then
-  echo "herdr-browser: which task's browser? Run it from a task's agent, or pass --task <slug#id>." >&2
+space=${space##*/}   # "vm/sp12" is sp12 on its own machine
+if [ -z "$task" ] && [ -z "$space" ]; then
+  echo "herdr-browser: whose browser? Run it from a task's agent or a space's chat, or pass --task <slug#id> (and --space <id>), or --chat --space <id>." >&2
   exit 2
 fi
-name=$(printf %s "$task" | sed 's/[^A-Za-z0-9_-]/-/g; s/--*/-/g; s/^-//; s/-$//')
-session="herdr-$name"
-# A long name is cut (SHEP-178): its last 20 characters and the first 8 hex of the key's sha256, the same every call.
-# Kept in step with herdr_task/browsers.py, service/browser.ts and bin/herdr-browser-view (sessionOf).
-if [ ${#name} -gt 32 ]; then
-  h=$(printf %s "$task" | sha256sum 2>/dev/null | cut -c1-8)
-  [ -n "$h" ] || h=$(printf %s "$task" | shasum -a 256 2>/dev/null | cut -c1-8)
-  session="herdr-$(printf %s "$name" | tail -c 20 | sed 's/^-*//')-$h"
+# A task whose space isn't known (started by an older Shepherdr, or by hand) shares its task list's browser.
+[ -n "$space" ] || space="list-${task%%#*}"
+safe() { printf %s "$1" | sed 's/[^A-Za-z0-9_-]/-/g; s/--*/-/g; s/^-//; s/-$//'; }
+# A long name is cut (SHEP-178): its last 20 characters and the first 8 hex of its key's sha256, the same every call.
+# Kept in step with bin/herdr-desktop, herdr_task/browsers.py and service/screens.ts (sessionOf).
+sess() {
+  if [ ${#1} -gt 32 ]; then
+    _h=$(printf %s "$2" | sha256sum 2>/dev/null | cut -c1-8)
+    [ -n "$_h" ] || _h=$(printf %s "$2" | shasum -a 256 2>/dev/null | cut -c1-8)
+    echo "herdr-$(printf %s "$1" | tail -c 20 | sed 's/^-*//')-$_h"
+  else echo "herdr-$1"; fi
+}
+sp=$(safe "$space")
+if [ -n "$task" ]; then who=$task; name=$(safe "$task"); else who="chat:$space"; name="chat-$sp"; fi
+session=$(sess "$name" "$who")
+owner=$(sess "s-$sp" "space:$space")
+profile="$root/spaces/$sp"
+if [ -n "$show" ]; then
+  printf '{"who":%s,"name":"%s","space":"%s","session":"%s","owner":"%s","profile":%s,"pin":"%s"}\n' \
+    "$(json_str "$who")" "$name" "$sp" "$session" "$owner" "$(json_str "$profile")" "$PIN"
+  exit 0
 fi
-profile="$root/$name"
-# A browser made before the data moved keeps the path it was started with (~/.herdr/browser/<name>, a link to the
-# same folder now): agent-browser's running session knows it by that path. New ones use the new place.
-old="$HOME/.herdr/browser/$name"
-if [ "$root" != "$HOME/.herdr/browser" ] && [ -d "$old" ] && [ -d "$profile" ] \
-   && [ "$(cd "$old" && pwd -P)" = "$(cd "$profile" && pwd -P)" ] && [ ! -f "$root/$name.new" ]; then
-  profile=$old
-elif [ ! -d "$profile" ] && [ "$root" != "$HOME/.herdr/browser" ]; then
-  mkdir -p "$root" 2>/dev/null; : > "$root/$name.new" 2>/dev/null || true   # made at the new place: always the new path from now on
-fi
-if [ -n "${show-}" ]; then
-  printf '{"task":"%s","session":"%s","profile":"%s","pin":"%s"}\n' "$task" "$session" "$profile" "$PIN"
+mkdir -p "$root/spaces" 2>/dev/null && chmod 700 "$root" 2>/dev/null
+
+# The first word that isn't a flag: what the command does.
+verb=
+for a in "$@"; do case "$a" in -*) ;; *) verb=$a; break ;; esac; done
+
+# Needs your hands: the agent asks for the person, in a few words. The app shows the card with the live picture, Skip
+# and Take over; the agent is told when the person is done or skipped it.
+if [ "${1-}" = hands ] && [ -z "$admin" ]; then
+  shift
+  if [ "${1-}" = --cancel ]; then rm -f "${root:?}/${name:?}.hands"; echo "herdr-browser: no longer asking for the person's hands."; exit 0; fi
+  what=$*
+  if [ -z "$what" ]; then echo 'herdr-browser: say what you need, in a few words: herdr-browser hands "Sign in to Stripe"' >&2; exit 2; fi
+  [ -f "$root/$name.task" ] || printf '%s\n' "$who" > "$root/$name.task"
+  printf '%s\n' "$sp" > "$root/$name.space"
+  printf '{"what":%s,"src":"b","at":%s}\n' "$(json_str "$what")" "$(date +%s)" > "$root/$name.hands"
+  echo "herdr-browser: asked the person: \"$what\". They see your page with Take over and Skip. Stop here and wait: you get a message when they are done or skip it. While they drive, your browser commands are refused."
   exit 0
 fi
 
-# Its session and profile are Herdr's: another one would start a second browser beside it.
+# Its session, profile and tab are Shepherdr's: another one would start a second browser beside it.
 for a in "$@"; do
   case "$a" in
-    --session|--session=*|--profile|--profile=*|--cdp|--cdp=*|--auto-connect|--namespace|--namespace=*)
-      echo "herdr-browser: $a isn't needed: this task's browser is always session $session (profile $profile)." >&2
+    --session|--session=*|--profile|--profile=*|--cdp|--cdp=*|--auto-connect|--namespace|--namespace=*|--pin-tab|--no-pin-tab|--idle-timeout|--idle-timeout=*)
+      echo "herdr-browser: $a isn't needed: this is always your own tab (session $session) in your space's browser (profile $profile)." >&2
       exit 2 ;;
   esac
 done
 
 # A usable agent-browser (one version per session: two keep restarting its daemon). None yet: an agent's first command
-# installs it (Herdr's own views only say so, they never wait on a download), unless a try failed in the last 10 minutes.
-mkdir -p "$root" 2>/dev/null && chmod 700 "$root" 2>/dev/null
+# installs it (Shepherdr's own views only say so, they never wait on a download), unless a try failed in the last 10 minutes.
 pick
 if ! usable; then
   [ "${1-}" = help ] && { own_help; exit 0; }
@@ -388,35 +430,242 @@ fi
 libs_check >&2 || exit 127
 sandbox_check >&2 || exit 127
 
-# The first word that isn't a flag: what the command does.
-verb=
-for a in "$@"; do case "$a" in -*) ;; *) verb=$a; break ;; esac; done
+# Pages see prefers-reduced-motion (Chrome draws them in software, so an animation costs a core);
+# an agent whose page must move turns it off with: set media no-preference.
+export AGENT_BROWSER_ARGS="${AGENT_BROWSER_ARGS:---force-prefers-reduced-motion}"
+
+# ---- the space's browser, and this agent's own tab in it ----
+live=
+sessions() { live=$("$bin" session list 2>/dev/null); }
+has() { printf '%s\n' "$live" | sed 's/^[[:space:]]*//' | grep -qxF -- "$1"; }
+active_tab() { python3 -c 'import json,sys
+try: print(next(t["targetId"] for t in json.load(sys.stdin)["data"]["tabs"] if t.get("active")))
+except Exception: pass' 2>/dev/null; }
+# The person signs in on the desktop (Open on the desktop instead): a normal Chrome holds the space's profile.
+desk_pid() {
+  _d=$(cat "$root/spaces/$sp.desk" 2>/dev/null)
+  if [ -n "$_d" ] && kill -0 "$_d" 2>/dev/null; then echo "$_d"; else rm -f "${root:?}/spaces/${sp:?}.desk"; fi
+}
+# The space's profile starts from a browser a task here already had (3.1 kept one per task, in <root>/<task>): this
+# task's own, else the one used last by a task of the same list. It is moved, not copied, and a link stays at its old
+# place; the other tasks' old profiles stay where they are, untouched, until their task is Done.
+adopt_profile() {
+  [ -e "$profile" ] && return 0
+  _from=
+  if [ -n "$task" ] && [ -d "$root/$name" ] && [ ! -L "$root/$name" ]; then _from=$name
+  elif [ -n "$task" ]; then
+    _pre=$(safe "${task%%#*}")
+    for _u in $(ls -t "$root/$_pre"-*.used 2>/dev/null); do
+      _n=${_u##*/}; _n=${_n%.used}
+      case "${_n#"$_pre"-}" in *[!0-9]*|"") continue ;; esac
+      if [ -d "$root/$_n" ] && [ ! -L "$root/$_n" ]; then _from=$_n; break; fi
+    done
+  fi
+  [ -n "$_from" ] || return 0
+  _k=$(cat "$root/$_from.task" 2>/dev/null)
+  "$bin" --session "$(sess "$_from" "${_k:-$_from}")" close >/dev/null 2>&1   # 3.1's own Chrome on it, if it still runs
+  mv "$root/$_from" "$profile" 2>/dev/null && ln -s "spaces/$sp" "$root/$_from" 2>/dev/null
+  rm -f "${root:?}/${_from:?}.new" "${root:?}/${_from:?}.session"
+  return 0
+}
+# Makes sure the space's browser runs (one headless Chrome on the space's profile, held by the session $owner, which
+# nobody drives) and sets cur to its DevTools address. -> 0, or 1 with $why.
+space_up() {
+  sessions
+  cur=
+  if has "$owner"; then cur=$("$bin" --session "$owner" --profile "$profile" --idle-timeout 0 get cdp-url 2>/dev/null | grep '^ws' | tail -n 1); fi
+  if [ -z "$cur" ]; then
+    _n=0
+    until mkdir "$root/spaces/$sp.lock" 2>/dev/null; do
+      if [ -n "$(find "${root:?}/spaces/${sp:?}.lock" -maxdepth 0 -mmin +2 2>/dev/null)" ]; then rmdir "${root:?}/spaces/${sp:?}.lock" 2>/dev/null; continue; fi
+      _n=$((_n + 1)); [ "$_n" -gt 90 ] && { why="another command is still starting this space's browser"; return 1; }
+      sleep 1
+    done
+    sessions
+    if has "$owner"; then "$bin" --session "$owner" close >/dev/null 2>&1; fi
+    adopt_profile
+    _err=$("$bin" --session "$owner" --profile "$profile" --idle-timeout 0 open about:blank 2>&1 >/dev/null)
+    cur=$("$bin" --session "$owner" --profile "$profile" --idle-timeout 0 get cdp-url 2>/dev/null | grep '^ws' | tail -n 1)
+    rmdir "${root:?}/spaces/${sp:?}.lock" 2>/dev/null
+    if [ -z "$cur" ]; then why="the space's browser didn't start (${_err:-agent-browser gave no address})"; return 1; fi
+  fi
+  [ "$(cat "$root/spaces/$sp.cdp" 2>/dev/null)" = "$cur" ] || printf '%s\n' "$cur" > "$root/spaces/$sp.cdp"
+  return 0
+}
+ab() { "$bin" --session "$session" --cdp "$cur" --pin-tab --idle-timeout 0 "$@"; }
+# This agent's own page in that browser: a window of its own in the browser's one profile (a tab behind another
+# isn't drawn, so it couldn't be watched; agent-browser's own `window new` makes a separate cookie jar, so it is asked
+# of Chrome itself: Target.createTarget with newWindow), which its session joins and stays pinned to. Every call of a
+# session carries the same --cdp and --pin-tab: one without them makes agent-browser start a Chrome of its own, or
+# take another agent's tab. -> 0, or 1 with $why.
+new_window='import base64, json, os, socket, struct, sys, urllib.parse
+u = urllib.parse.urlsplit(sys.argv[1])
+s = socket.create_connection((u.hostname, u.port), timeout=10)
+s.sendall(("GET %s HTTP/1.1\r\nHost: %s:%d\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\n\r\n"
+           % (u.path, u.hostname, u.port, base64.b64encode(os.urandom(16)).decode())).encode())
+buf = b""
+while b"\r\n\r\n" not in buf:
+    buf += s.recv(4096)
+buf = buf.split(b"\r\n\r\n", 1)[1]
+def send(o):
+    d = json.dumps(o).encode(); m = os.urandom(4)
+    h = bytes([0x81]) + (bytes([0x80 | len(d)]) if len(d) < 126 else bytes([0x80 | 126]) + struct.pack(">H", len(d)))
+    s.sendall(h + m + bytes(b ^ m[i % 4] for i, b in enumerate(d)))
+def need(n):
+    global buf
+    while len(buf) < n:
+        c = s.recv(65536)
+        if not c: raise SystemExit(1)
+        buf += c
+    r, buf = buf[:n], buf[n:]
+    return r
+def recv():
+    h = need(2); n = h[1] & 0x7F
+    if n == 126: n = struct.unpack(">H", need(2))[0]
+    elif n == 127: n = struct.unpack(">Q", need(8))[0]
+    return need(n)
+send({"id": 1, "method": "Target.createTarget", "params": {"url": "about:blank", "newWindow": True, "background": True}})
+while True:
+    m = json.loads(recv())
+    if m.get("id") == 1:
+        print((m.get("result") or {}).get("targetId") or "")
+        break'
+fresh=
+tab_up() {
+  [ "$(cat "$root/$name.cdp" 2>/dev/null)" = "$cur" ] && [ -s "$root/$name.tab" ] && return 0
+  if [ -f "$root/$name.cdp" ] || [ -f "$root/$name.used" ]; then fresh=again; else fresh=first; fi
+  "$bin" --session "$session" close >/dev/null 2>&1   # one left on a browser that is gone (or 3.1's own Chrome)
+  # ($HERDR_BROWSER_NEW_WINDOW: a command that prints the new window's id instead, for tests without a Chrome)
+  if [ -n "${HERDR_BROWSER_NEW_WINDOW:-}" ]; then _tab=$($HERDR_BROWSER_NEW_WINDOW 2>/dev/null)
+  else _tab=$(python3 -c "$new_window" "$cur" 2>/dev/null); fi
+  [ -n "$_tab" ] || { why="couldn't open a window in the space's browser"; return 1; }
+  if ! _err=$(ab tab "$_tab" 2>&1 >/dev/null); then why="couldn't join the space's browser ($_err)"; return 1; fi
+  printf '%s\n' "$cur" > "$root/$name.cdp"
+  printf '%s\n' "$_tab" > "$root/$name.tab"
+  return 0
+}
+mark() {
+  [ -f "$root/$name.task" ] || printf '%s\n' "$who" > "$root/$name.task"
+  [ "$(cat "$root/$name.space" 2>/dev/null)" = "$sp" ] || printf '%s\n' "$sp" > "$root/$name.space"
+}
+# Closes this agent's tab and its session; the space's browser and its sign-ins stay.
+tab_down() {
+  if has "$session"; then
+    _c=$(cat "$root/$name.cdp" 2>/dev/null)
+    [ -n "$_c" ] && "$bin" --session "$session" --cdp "$_c" --pin-tab tab close >/dev/null 2>&1
+    "$bin" --session "$session" close >/dev/null 2>&1
+  fi
+  rm -f "${root:?}/${name:?}.cdp" "${root:?}/${name:?}.tab"
+}
+# Closes the space's browser: every tab session on it, then the Chrome itself. Sign-ins stay in the profile.
+# $1: why, left for each agent that had a tab (said once on its next command).
+space_down() {
+  sessions
+  for _f in "$root"/*.space; do
+    [ -f "$_f" ] || continue
+    [ "$(cat "$_f" 2>/dev/null)" = "$sp" ] || continue
+    _n=${_f##*/}; _n=${_n%.space}
+    _k=$(cat "$root/$_n.task" 2>/dev/null)
+    _s=$(sess "$_n" "${_k:-$_n}")
+    if has "$_s"; then "$bin" --session "$_s" close >/dev/null 2>&1; fi
+    if [ -f "$root/$_n.cdp" ] && [ -n "${1-}" ]; then printf '%s\n' "$1" > "$root/$_n.closed"; fi
+    rm -f "${root:?}/${_n:?}.cdp" "${root:?}/${_n:?}.tab"
+  done
+  if has "$owner"; then "$bin" --session "$owner" close >/dev/null 2>&1; fi
+  rm -f "${root:?}/spaces/${sp:?}.cdp"
+}
+
+# Shepherdr's own (the service, herdr-task's tick): nothing here counts as the agent using its browser.
+case "$admin" in
+  state)
+    sessions
+    up=false; open=false; tab=; cdp=$(cat "$root/spaces/$sp.cdp" 2>/dev/null)
+    if has "$owner" && [ -n "$cdp" ]; then
+      up=true
+      if [ "$(cat "$root/$name.cdp" 2>/dev/null)" = "$cdp" ]; then open=true; tab=$(cat "$root/$name.tab" 2>/dev/null); fi
+    fi
+    desk=false; [ -n "$(desk_pid)" ] && desk=true
+    printf '{"who":%s,"name":"%s","space":"%s","session":"%s","owner":"%s","up":%s,"open":%s,"cdp":"%s","tab":"%s","desk":%s}\n' \
+      "$(json_str "$who")" "$name" "$sp" "$session" "$owner" "$up" "$open" "$cdp" "$tab" "$desk"
+    exit 0 ;;
+  close-space) space_down "${1-}"; exit 0 ;;
+  forget)
+    sessions; tab_down
+    for _e in .used .you .view .new .session .task .closed .space .hands; do rm -f "${root:?}/${name:?}${_e:?}"; done
+    # 3.1's own profile of this task, where no space took it over (a link: the space's profile stays)
+    if [ -L "${root:?}/${name:?}" ]; then rm -f "${root:?}/${name:?}"; elif [ -d "${root:?}/${name:?}" ]; then rm -rf "${root:?}/${name:?}"; fi
+    exit 0 ;;
+  desk)
+    # Open on the desktop instead: the same address in a normal Chrome (no automation) on the space's own profile,
+    # on the display in $DISPLAY (macOS: the real screen), so what the person signs in to there is signed in for the
+    # space's agents afterwards. The headless browser stops meanwhile: one profile, one Chrome.
+    _c=$(chrome_bin)
+    [ -n "$_c" ] || { echo "herdr-browser: no Chrome here to open on the desktop (run: $fix)" >&2; exit 1; }
+    if [ -z "$(desk_pid)" ]; then
+      space_down "the person opened this space's browser on the desktop to sign in"
+      mkdir -p "$profile" 2>/dev/null
+      nohup "$_c" --user-data-dir="$profile" --no-first-run --no-default-browser-check --new-window "$deskurl" >/dev/null 2>&1 &
+      echo $! > "$root/spaces/$sp.desk"
+    fi
+    printf '{"pid":%s}\n' "$(cat "$root/spaces/$sp.desk")"
+    exit 0 ;;
+  desk-end)
+    _d=$(desk_pid)
+    if [ -n "$_d" ]; then
+      kill "$_d" 2>/dev/null
+      _n=0; while kill -0 "$_d" 2>/dev/null && [ "$_n" -lt 50 ]; do sleep 0.1; _n=$((_n + 1)); done
+      kill -9 "$_d" 2>/dev/null
+      rm -f "${root:?}/spaces/${sp:?}.desk" "${profile:?}/SingletonLock" "${profile:?}/SingletonSocket" "${profile:?}/SingletonCookie"
+    fi
+    exit 0 ;;
+esac
+
+# What needs no browser runs as agent-browser itself, and starts none.
+case "$verb" in
+  skills|install|upgrade|doctor|profiles|plugin|dashboard|mcp|chat|auth|session|"") exec "$bin" --session "$session" "$@" ;;
+  connect)
+    echo "herdr-browser: connect isn't needed: you are always on your own tab in your space's browser." >&2; exit 2 ;;
+esac
 
 if [ -z "$own" ]; then
-  # The person drives it now: only looking is allowed.
+  # The person drives now (Take over in Shepherdr): nothing runs and nothing is read for the agent until they hand
+  # back. A flag nobody refreshed for $HERDR_YOU_STALE_MIN minutes (default 11: the service hands back at 10) has ended.
   you="$root/$name.you"
-  if [ -f "$you" ] && [ -n "$(find "$you" -mmin -2 2>/dev/null)" ]; then
-    case "$verb" in
-      snapshot|screenshot|get|is|session|stream|console|errors|""|help|--help) ;;
-      *)
-        echo "herdr-browser: the person took over this task's browser in Herdr and is using it now. Hold off: don't drive it until they hand it back (snapshot, screenshot and get still work). Check again in a minute, or ask in your chat." >&2
-        exit 3 ;;
-    esac
+  if [ -f "$you" ]; then
+    if [ -n "$(find "$you" -mmin "-${HERDR_YOU_STALE_MIN:-11}" 2>/dev/null)" ]; then
+      echo "herdr-browser: the person took over your browser and desktop in Shepherdr and is using them now, so this did not run and nothing was read. Stop and wait: you get a message when they hand back. Then look again (snapshot) before you carry on." >&2
+      exit 3
+    fi
+    rm -f "${you:?}"
   fi
-  touch "$root/$name.used" 2>/dev/null
-  # Herdr closed it (idle, or the task is Done): said once, so a blank page and a desktop-sized viewport aren't a
-  # mystery (GitHub #1147, #1138).
-  if [ -f "$root/$name.closed" ]; then
-    echo "herdr-browser: note: this task's browser had been closed ($(cat "$root/$name.closed" 2>/dev/null)); it starts again on a blank page at its default size: open your page and set the viewport again." >&2
-    rm -f "$root/$name.closed"
+  if [ -n "$(desk_pid)" ]; then
+    echo "herdr-browser: the person is signing in to this space's browser on the desktop, so it can't be used now. Stop and wait: you get a message when they are done." >&2
+    exit 3
   fi
 fi
-[ -f "$root/$name.task" ] || printf '%s\n' "$task" > "$root/$name.task"
-# A browser opened before names were cut (a name of 33-64 characters still fit agent-browser's socket path) holds the
-# profile: closed once, quietly, so the new session can open it (sign-ins are in the profile and stay).
-if [ "$session" != "herdr-$name" ] && [ ! -f "$root/$name.session" ]; then
-  [ ${#name} -le 64 ] && "$bin" --session "herdr-$name" close >/dev/null 2>&1
-  printf '%s\n' "$session" > "$root/$name.session" 2>/dev/null
+
+# The agent's own close: its tab only. The space's browser belongs to every agent of the space.
+if [ "$verb" = close ]; then
+  sessions; tab_down
+  echo "herdr-browser: your tab is closed; your space's browser and its sign-ins stay. Your next command opens a new tab."
+  exit 0
+fi
+
+space_up || { echo "herdr-browser: $why." >&2; exit 1; }
+tab_up || { echo "herdr-browser: $why." >&2; exit 1; }
+mark
+if [ -z "$own" ]; then
+  touch "$root/$name.used" "$root/spaces/$sp.used" 2>/dev/null
+  # Shepherdr closed it (idle, or the person signed in on the desktop): said once, so a blank page and a default
+  # viewport aren't a mystery (GitHub #1147, #1138).
+  if [ -f "$root/$name.closed" ]; then
+    echo "herdr-browser: note: your space's browser had been closed ($(cat "$root/$name.closed" 2>/dev/null)); your tab starts again on a blank page at its default size: open your page and set the viewport again. Sign-ins are kept." >&2
+    rm -f "${root:?}/${name:?}.closed"
+  elif [ "$fresh" = again ]; then
+    echo "herdr-browser: note: your space's browser was restarted, so your tab starts again on a blank page at its default size. Sign-ins are kept." >&2
+  fi
+else
+  rm -f "${root:?}/${name:?}.closed"
 fi
 
 # A file it writes lands where the agent is (#964): agent-browser's daemon saves a relative path from the folder it
@@ -483,30 +732,21 @@ case "$verb" in
     fi ;;
 esac
 
-# Pages see prefers-reduced-motion (Chrome draws them in software, so an animation costs a core);
-# an agent whose page must move turns it off with: set media no-preference.
-export AGENT_BROWSER_ARGS="${AGENT_BROWSER_ARGS:---force-prefers-reduced-motion}"
-# The session's stream (read when its daemon starts) carries the tab, its address and the person's
-# input for Herdr's Browser view; its pictures come from Chrome directly (bin/herdr-browser-view),
-# so the stream's own are kept small and cheap.
-export AGENT_BROWSER_STREAM_MAX_WIDTH="${AGENT_BROWSER_STREAM_MAX_WIDTH:-320}"
-export AGENT_BROWSER_STREAM_QUALITY="${AGENT_BROWSER_STREAM_QUALITY:-40}"
+# The live picture in Shepherdr is this session's own stream, as agent-browser gives it (no size or quality is set
+# here; AGENT_BROWSER_STREAM_QUALITY and AGENT_BROWSER_STREAM_MAX_WIDTH still apply where the person sets them).
 # open that never comes back (#1154): a watchdog ends the wait after HERDR_BROWSER_OPEN_WAIT seconds (default 90) and
 # says so. A reply the daemon dropped ("Invalid response: EOF", #1081) on a command that only looks or sets is tried
-# once more, and said plainly if it fails again. Everything else runs as agent-browser itself.
-case "$verb" in
-  open|goto|navigate|set|get|snapshot|screenshot|is|reload) ;;
-  *) exec "$bin" --session "$session" --profile "$profile" "$@" ;;
-esac
-errf=$(mktemp "${TMPDIR:-/tmp}/herdr-browser.XXXXXX") || exec "$bin" --session "$session" --profile "$profile" "$@"
-trap 'rm -f "$errf" "$errf.late"' EXIT
+# once more, and said plainly if it fails again. A tab that is gone (a page closed it) is opened again, once.
+# Everything else runs as agent-browser itself.
+errf=$(mktemp "${TMPDIR:-/tmp}/herdr-browser.XXXXXX") || exec "$bin" --session "$session" --cdp "$cur" --pin-tab --idle-timeout 0 "$@"
+trap 'rm -f "${errf:?}" "${errf:?}.late"' EXIT
 wait_s=${HERDR_BROWSER_OPEN_WAIT:-90}
-tries=0
+tries=0; regone=
 while :; do
   tries=$((tries + 1))
   case "$verb" in
     open|goto|navigate|reload)
-      "$bin" --session "$session" --profile "$profile" "$@" 2>"$errf" &
+      "$bin" --session "$session" --cdp "$cur" --pin-tab --idle-timeout 0 "$@" 2>"$errf" &   # itself, not ab(): the watchdog ends this very process
       pid=$!
       ( w=0; while [ "$w" -lt "$wait_s" ] && kill -0 "$pid" 2>/dev/null; do sleep 1; w=$((w + 1)); done
         kill -0 "$pid" 2>/dev/null && : > "$errf.late" && kill "$pid" 2>/dev/null ) &
@@ -518,17 +758,28 @@ while :; do
         echo "herdr-browser: $verb didn't finish within $wait_s s, so herdr-browser stopped waiting. The page may still be loading: get url and snapshot say where it is. If the next command hangs too, run: herdr-browser close, then open it again." >&2
         exit 124
       fi ;;
-    *) "$bin" --session "$session" --profile "$profile" "$@" 2>"$errf"; rc=$? ;;
+    *) ab "$@" 2>"$errf"; rc=$? ;;
   esac
-  if [ "$rc" != 0 ] && grep -qiE 'invalid response|EOF' "$errf" 2>/dev/null; then
-    if [ "$tries" = 1 ]; then
-      echo "herdr-browser: the browser dropped its answer to $verb; trying once more…" >&2
-      sleep 1; continue
+  if [ "$rc" != 0 ] && [ -z "$regone" ] && grep -q 'tab_gone' "$errf" 2>/dev/null; then
+    regone=1; tries=0
+    rm -f "${root:?}/${name:?}.cdp" "${root:?}/${name:?}.tab"
+    if tab_up; then
+      echo "herdr-browser: note: your tab was gone, so a new one was opened: it starts on a blank page." >&2
+      continue
     fi
-    cat "$errf" >&2
-    echo "herdr-browser: the browser dropped its answer to $verb twice, so whether it ran is unknown. Check with get url or snapshot; if it keeps happening, run herdr-browser close and start again." >&2
-    exit "$rc"
   fi
+  case "$verb" in
+    open|goto|navigate|set|get|snapshot|screenshot|is|reload)
+      if [ "$rc" != 0 ] && grep -qiE 'invalid response|EOF' "$errf" 2>/dev/null; then
+        if [ "$tries" = 1 ]; then
+          echo "herdr-browser: the browser dropped its answer to $verb; trying once more…" >&2
+          sleep 1; continue
+        fi
+        cat "$errf" >&2
+        echo "herdr-browser: the browser dropped its answer to $verb twice, so whether it ran is unknown. Check with get url or snapshot; if it keeps happening, run herdr-browser close and start again." >&2
+        exit "$rc"
+      fi ;;
+  esac
   break
 done
 cat "$errf" >&2

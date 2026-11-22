@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { spacesFromDoc, spaceName, tilde, sharedNames, gitTail, inOrder, withOrder, keptOrder, machinesInOrder, byMachineOrder, withMachineOrder, machineOrderOf } from "./spaces.js";
+import { assistantOf, spacesFromDoc, spaceName, tilde, sharedNames, gitTail, inOrder, withOrder, keptOrder, machinesInOrder, byMachineOrder, withMachineOrder, machineOrderOf } from "./spaces.js";
 
 test("two spaces with one name on a machine each show their folder, from ~ (the sidebar's rows, both sides)", () => {
   // built, so the repo's no-home-paths rule has nothing to find
@@ -80,4 +80,14 @@ test("another machine's tab keeps one machine on its terminals, as written or no
   expect(s.tabs[0].terminals).toEqual(["box/t6", "box/t7"]);
   // this machine's own: as written
   expect(spacesFromDoc(doc, null)[0].tabs[0].terminals).toEqual(["box/t6", "t7"]);
+});
+
+test("an ended assistant stays visible until a new one starts", () => {
+  const space = { id: "sp1", machine: null };
+  const old = { address: "t1", state: "ended", labels: { "herdr.role": "coordinator", "herdr.coordinator.space": "sp1" } };
+  const live = { ...old, address: "t2", state: "live" };
+  expect(assistantOf(space, [old])).toEqual(old);
+  expect(assistantOf(space, [old, live])).toEqual(live);
+  const newer = { ...old, address: "t3", created_ms: 200 };
+  expect(assistantOf(space, [newer, { ...old, created_ms: 100 }])).toEqual(newer);
 });

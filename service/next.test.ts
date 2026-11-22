@@ -1,0 +1,58 @@
+import { expect, test } from "bun:test";
+import { lastWords, nextWords, scheduleId, scheduleOf, schedulesOf, warningsOf, whenWords, catalogOf } from "./next.ts";
+
+test("a schedule says when it runs in words", () => {
+  expect(whenWords({ every: { kind: "every", text: "mondays 9:00" } })).toBe("Mondays 9:00");
+  expect(whenWords({ on: ["merged"] })).toBe("When a task is merged");
+  expect(whenWords({ every: { kind: "once", at: "2026-11-27 09:00", text: "once fri 9:00" } })).toBe("Once · Fri 27 Nov 9:00");
+  expect(whenWords({ every: { text: "every 30 minutes" }, on: ["checks-fail"] })).toBe("Every 30 minutes, When checks fail");
+});
+
+test("when it runs next, and how its last run ended", () => {
+  const now = new Date(2026, 10, 22, 10, 0).getTime();
+  expect(nextWords(now + 12 * 60_000, now)).toBe("in 12 min");
+  expect(nextWords(now + 9 * 3_600_000, now)).toBe("in 9h");
+  expect(nextWords(new Date(2026, 10, 23, 7, 30).getTime(), now)).toBe("tomorrow 7:30");
+  expect(nextWords(now + 7 * 86_400_000, now)).toBe("in 7 days");
+  expect(nextWords(now - 1, now)).toBe("");
+  expect(lastWords({ runs: [{ at: new Date(2026, 10, 22, 9, 0).getTime(), ended: "nothing" }] }, now)).toBe("today 9:00 · nothing to do");
+  expect(lastWords({}, now)).toBe("");
+});
+
+test("a schedule's id carries its machine, folder and own id, and nothing else passes", () => {
+  const id = scheduleId({ machine: "vm", folder: "/home/x/shop", id: 3 });
+  expect(scheduleOf(id)).toEqual({ machine: "vm", folder: "/home/x/shop", id: "3" });
+  expect(scheduleOf(scheduleId({ machine: null, folder: "/a", id: 1 }))).toEqual({ machine: null, folder: "/a", id: "1" });
+  expect(scheduleOf("vm|relative|1")).toBeNull();
+  expect(scheduleOf("vm|/a|1; rm -rf")).toBeNull();
+});
+
+test("schedules sit under the space they were made for, else the one in their folder, else Everything", () => {
+  const spaces = [{ id: "home", folder: "/home/x", machine: null }, { id: "sp1", folder: "/home/x/shop", machine: null }, { id: "vm/sp2", folder: "/srv/garden", machine: "vm" }];
+  const out = schedulesOf([
+    { id: 1, title: "Dependency check", prompt: "Check", folder: "/home/x/shop", machine: null, every: { text: "mondays 9:00" }, paused: false },
+    { id: 2, title: "Morning brief", prompt: "Tell me", folder: "/home/x/shop", machine: null, space: "home", paused: true },
+    { id: 1, title: "Water", prompt: "", folder: "/srv/garden", machine: "vm", space: "sp2", every: { kind: "once", at: "2026-11-27 09:00" } },
+    { id: 9, title: "Lost", prompt: "", folder: "/nowhere", machine: null },
+  ], spaces, "home", () => undefined);
+  expect(out.sp1!.map((a) => [a.name, a.on, a.when])).toEqual([["Dependency check", true, "Mondays 9:00"]]);
+  expect(out.home!.map((a) => [a.name, a.on])).toEqual([["Morning brief", false], ["Lost", true]]);
+  expect(out["vm/sp2"]![0]!.once).toBe(true);
+});
+
+test("the warnings line: a plan past 75%, a disk nearly full, a machine out of reach", () => {
+  const snap: any = { machines: [
+    { machine: "mini", name: "mini", status: "idle", health: { meters: [{ name: "Disk", pct: 58 }] } },
+    { machine: "vm", name: "vm", status: "idle", health: { meters: [{ name: "Disk", pct: 91 }] } },
+    { machine: "old", name: "old", status: "off", unreachableSince: "14:02" },
+  ] };
+  const w = warningsOf(snap, [{ name: "Claude Max", windows: [{ name: "This week", used: 76 }, { name: "These 5 hours", used: 40 }] }, { name: "Codex Pro", windows: [{ name: "This week", used: 12 }] }]);
+  expect(w.map((x) => x.text)).toEqual(["You've used 76% of this week's Claude plan", "vm: disk nearly full", "Can't reach old · last seen 14:02"]);
+});
+
+test("the picker's lists come from each agent's own menus; an agent Shepherdr can't hold a chat with is greyed", () => {
+  const c = catalogOf("mini", [{ kind: "claude", name: "Claude Code", models: [{ id: "opus", label: "Opus 5.5", efforts: ["low", "high"], fast: true }], perms: [{ id: "manual", label: "Manual" }, { id: "plan", label: "Plan" }], permDefault: "manual" }], { claude: true }, [{ key: "pi", name: "Pi" }]);
+  expect(c.agents[0]!.models[0]).toEqual({ id: "opus", name: "Opus 5.5", speeds: ["regular", "fast"], efforts: ["low", "high"] });
+  expect(c.agents[0]!.perms[0]).toEqual({ id: "manual", label: "Default", about: "Asks before edits and commands" });
+  expect(c.agents[1]).toMatchObject({ id: "pi", installed: false, why: "No chat yet" });
+});

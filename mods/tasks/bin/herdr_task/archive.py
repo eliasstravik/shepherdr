@@ -25,6 +25,7 @@ def archive_after_ms(value):
 
 def unarchive(s, t):
     if t.pop("archived", None) is not None:
+        t.pop("archived_by", None)
         t["unarchived"] = now()
         s.dirty = True
 
@@ -63,7 +64,8 @@ def archive_pass(report, folder=None):
                     and t0 - max(t["done_at"], t.get("unarchived") or 0) >= ms and f"{slug}#{t['id']}" not in busy)
 
         def back(t):
-            return t.get("archived") and (t.get("state") != "done" or f"{slug}#{t['id']}" in busy)
+            # archived by hand (herdr-task archive, 3.2) stays archived in any state until its agent works again
+            return t.get("archived") and ((t.get("state") != "done" and t.get("archived_by") != "you") or f"{slug}#{t['id']}" in busy)
 
         if busy is None:
             busy = busy_task_keys()

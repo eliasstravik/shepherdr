@@ -11,7 +11,7 @@ taught like any other, it seldom gets the person's messages to react to."""
 import json
 import os
 
-from .base import addon_off, hc_json, now, run, STORE
+from .base import hc_json, now, run, STORE
 from .settings import bare, reactions_on, read_settings, SETTINGS
 from .launch import is_coordinator
 
@@ -89,8 +89,6 @@ def reactions_pass(report, quiet):
     """Tells each live agent here that isn't an Assistant once when Reactions changed for its space
     since it was last taught (its LABEL). One started before this (no label) isn't told: its next
     start teaches it. quiet: news_pass's {address: {turn, at}}, so a no-reply leaves a read chat read."""
-    if addon_off("chat"):
-        return
     try:
         mtime = os.path.getmtime(SETTINGS)
     except OSError:

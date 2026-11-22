@@ -43,6 +43,9 @@ export const TOKEN = join(DATA, "token");         // local callers (the Herdr wi
 export const LOG = join(DATA, "service.log");
 export const PORT = Number(process.env.SHEPHERDR_PORT || 7788);
 export const MOUNT = "/shepherdr";                // tailscale serve --set-path; never funnel
+/** The script that restarts an agent on another command or session, shipped beside the service (run by agents.ts,
+ *  watch.ts). */
+export const RESTART = join(import.meta.dir, "restart.sh");
 
 // The settings file, ~/.config/shepherdr/settings.json (HERDR_TASK_SETTINGS: a test's own). Read at each use, so a
 // test's own file holds whichever module loaded first.

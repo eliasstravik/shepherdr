@@ -36,20 +36,20 @@ test("alerts say what the window's toasts say", () => {
     alerts: [{ id: "a1", title: "HERD-4 · Stuck", body: "why", notify: true }],
   });
   const a = [...alertsOf(snap()).values()];
-  expect(a.map((x) => x.title)).toEqual(["tt-repo Assistant · Needs you", "HERD-5 · Needs you", "HERD-4 · Finished", "HERD-4 · Stuck"]);
+  expect(a.map((x) => x.title)).toEqual(["#tt-repo · Needs you", "HERD-5 · Needs you", "Fix login · Ready for review", "HERD-4 · Stuck"]);
   expect(a[0].body).toBe("Rerun CI?");
   // another machine's task by its machine's name, never its raw id ("m3:HERD-6")
   const far = { ...snap(), machines: [{ machine: "m3", name: "MacBook" }], needs: [{ id: "q3", chat: "m3:HERD-6/worker", place: "sp1", task: "m3:HERD-6" }], tasks: [], alerts: [] };
   expect([...alertsOf(far).values()].map((x) => x.title)).toEqual(["HERD-6 on MacBook · Needs you"]);
   // Notify Off: nothing from its Assistant; tasks as always
-  expect([...alertsOf(snap("Off")).values()].map((x) => x.title)).toEqual(["HERD-5 · Needs you", "HERD-4 · Finished", "HERD-4 · Stuck"]);
+  expect([...alertsOf(snap("Off")).values()].map((x) => x.title)).toEqual(["HERD-5 · Needs you", "Fix login · Ready for review", "HERD-4 · Stuck"]);
 });
 
 test("an agent's own alert, from its label", () => {
   const snap = { places: [{ id: "sp1", name: "tt-repo", chat: "sp1" }], tasks: [], settings: [] };
   const terms = [{ address: "t1", state: "live", labels: { "herdr.role": "coordinator", "herdr.alert": JSON.stringify({ id: "x", at: 5, title: "Can't wait", body: "Look now" }) } }];
   const out = agentAlerts(terms, snap, (a) => (a === "t1" ? "sp1" : null), "/nonexistent");
-  expect(out).toEqual([{ id: "x", at: 5, title: "tt-repo Assistant · Can't wait", body: "Look now", chat: "sp1", place: "sp1", notify: true }]);
+  expect(out).toEqual([{ id: "x", at: 5, title: "#tt-repo · Can't wait", body: "Look now", chat: "sp1", place: "sp1", notify: true }]);
 });
 
 test("SHEP-255: an alert carries the task it is about: its chat's, or a task's helper's by its herdr.task label; a helper of no task's none", () => {
@@ -68,11 +68,13 @@ test("SHEP-255: an alert carries the task it is about: its chat's, or a task's h
 });
 
 // SHEP-243: each alert's buttons do the thing from the phone or the watch, in words that fit a watch
-const watch = (snap: any) => [...alertsOf(snap, new Set(), (c) => (c === "sp1" ? "Merged **SHEP-9**, all green.\n\nNext: the login page." : undefined)).values()];
+const watch = (snap: any) => [...alertsOf(snap, (c) => (c === "sp1" ? "Merged **SHEP-9**, all green.\n\nNext: the login page." : undefined)).values()];
 test("a ready task's alert offers Accept, the Tasks panel's Accept", () => {
   const [a] = watch({ places: [], tasks: [{ id: "m3:HERD-4", name: "Fix login", status: "ready", place: "sp1" }], needs: [], settings: [] });
   // one button: Chrome on Android hands every site button over as the last one's action
-  expect(a.actions).toEqual([{ action: "accept", title: "Accept" }]);
+  expect(a.actions).toEqual([{ action: "accept", title: "Mark as done" }]);
+  // named by its title, never its id; a tap opens the task itself
+  expect(a).toMatchObject({ title: "Fix login · Ready for review", body: "Tap to look at it.", url: "./?place=sp1&task=m3%3AHERD-4" });
   expect(a.accept).toEqual({ task: "m3:HERD-4" });
   // it goes once the task isn't ready any more (accepted from the app)
   expect(a.waits).toBe(true);
@@ -101,7 +103,7 @@ test("an agent waiting for words, and an Assistant's message, take a reply", () 
   expect(need.actions?.map((x) => x.action)).toEqual(["reply"]);
   expect(need.reply).toEqual({ chat: "HERD-5/worker", to: "m9" });
   // the Assistant's own words, short and plain
-  expect(msg.title).toBe("tt-repo · New message");
+  expect(msg.title).toBe("#tt-repo · New message");
   expect(msg.body).toBe("Merged SHEP-9, all green. Next: the login page.");
   expect(msg.reply).toEqual({ chat: "sp1" });
 });
@@ -112,6 +114,6 @@ test("every title and body fits a watch", () => {
     needs: [{ id: "q1", chat: "sp1", place: "sp1", question: { id: "q1", kind: "Question", title: long, choices: [{ label: long }] } }], alerts: [{ id: "a", title: long, body: long, notify: true }] });
   expect(all.length).toBe(3);
   for (const a of all) { expect(a.title.length).toBeLessThanOrEqual(30); expect(a.body.length).toBeLessThanOrEqual(80); }
-  expect(all[0].title).toBe("a-very-long-space… · Needs you");
+  expect(all[0].title).toBe("#a-very-long-spac… · Needs you");
   expect(all[0].actions?.[0].title.length).toBeLessThanOrEqual(24);
 });

@@ -12,19 +12,19 @@ import json
 import os
 import sys
 
-from .base import addon_off, hc_json, MAX_RUNNING, now, run, STORE
-from .settings import DEFAULTS, LOCAL_MACHINE, MUST_WORDS, SETTINGS, agent_key, bare, read_settings
+from .base import hc_json, now, run, STORE
+from .settings import DEFAULTS, LOCAL_MACHINE, MUST_WORDS, SETTINGS, agent_key, bare, instructions_text, read_settings
 from .launch import coordinators, is_coordinator
 from . import reactions
 
 # What an Assistant was last told, on its terminal: "review:1a2b3c,merge:…", a short hash of each line.
 LABEL = "herdr.settings"
 STATE = os.path.join(STORE, ".assistant-settings.json")
-EVERY_MS = 60000  # looked at again this often (Autopilot's switch is in its own file), and at once when the settings file changes
+EVERY_MS = 60000  # looked at again this often, and at once when the settings file changes
 
 HEAD = ("Your settings: (Shepherdr settings for this space, the truth for every task you add; a task's own --set wins, "
         "and `herdr-task show <id>` says what one task has)")
-MERGE_SHORT = {"ask": "ask the person first (they accept it in the Tasks panel, which merges it)",
+MERGE_SHORT = {"ask": "ask the person first (they mark it as done on its card, which merges it)",
                "checks": "after checks (Herdr merges a ready task once its checks pass)",
                "auto": "on its own (Herdr merges a ready task)"}
 BY = {"space": "set for this space", "machine": "this machine's setting", "everywhere": "your setting everywhere"}
@@ -71,27 +71,14 @@ def pick_words(p, unset):
     return agent + (f", model {p['model']}" if p.get("model") else "") + (f", effort {p['effort']}" if p.get("effort") else "")
 
 
-def autopilot_of(space, cfg):
-    """(on, schedule words, direction) of the space's Autopilot."""
-    from . import autopilot as ap
-    try:
-        with ap.state(write=False) as d:
-            eff = ap.resolve(d, (d.get("spaces") or {}).get(bare(space)) if space else None, bare(space) if space else None, cfg)
-        return eff["on"], ap.trigger_of(eff), ap.direction_of(bare(space) if space else None, cfg)
-    except Exception:  # never stops a session's start
-        return False, "", ""
-
-
-def rows(space, d=None, auto=None):
+def rows(space, d=None):
     """The block's lines for a space: [{key, label, text, value, by, scope}]. by: who set a line
     that differs from Herdr's default (None: the default); scope: "space" when the space sets one of
-    its parts itself, else "everywhere" (or "machine"). d: the settings file (read when None);
-    auto: (on, schedule, direction) of its Autopilot (read when None)."""
+    its parts itself, else "everywhere" (or "machine"). d: the settings file (read when None)."""
     d = read_settings() if d is None else d
     ls = layers(d, space)
-    on, every, direction = autopilot_of(space, d) if auto is None else auto
 
-    def lines(cfg, autopilot):
+    def lines(cfg):
         t = cfg["tasks"]
         rounds = int(t.get("review_rounds") or 0)
         must = t.get("must_fix") if t.get("must_fix") in MUST_WORDS else "major"
@@ -100,7 +87,6 @@ def rows(space, d=None, auto=None):
         merge = t.get("merge") if t.get("merge") in MERGE_SHORT else "ask"
         notes = [w for w, k in (("start", "start_notes"), ("finish", "finish_notes")) if str(t.get(k) or "").strip()]
         setup = " ".join(str(t.get("setup") or "").split())[:200]
-        a_on, a_every, a_dir = autopilot
         reacting = (cfg.get("agents") or {}).get("reactions") is not False
         offering = (cfg.get("agents") or {}).get("feedback") is not False
         suggesting = (cfg.get("agents") or {}).get("suggestions") is not False
@@ -118,15 +104,10 @@ def rows(space, d=None, auto=None):
              else "the folder's checked-out branch", str(t.get("base") or "").strip(), [("tasks", "base")]),
             ("worktrees", "Worktrees", "on (in a git repo, a worktree and branch per task)" if t.get("worktrees") is not False
              else "off (tasks work in the folder itself)", "off" if t.get("worktrees") is False else "on", [("tasks", "worktrees")]),
-            ("max_running", "Tasks at once", f"{t.get('max_running') or MAX_RUNNING} per folder (more wait and start by themselves)",
-             str(t.get("max_running") or MAX_RUNNING), [("tasks", "max_running")]),
             ("notes", "Task notes", (" and ".join(notes) + " notes set (every brief includes them)") if notes else "none",
              ",".join(notes) or "none", [("tasks", "start_notes"), ("tasks", "finish_notes")]),
             ("setup", "Before the agent starts", (f"{setup} (runs in each new worktree first; if it fails the task waits "
              "with why and its agent doesn't start)") if setup else "none", "on" if setup else "off", [("tasks", "setup")]),
-            ("autopilot", "Autopilot", ("on, " + a_every + (f", direction: {a_dir}" if a_dir else "")) if a_on
-             else "off" + (f" (direction when on: {a_dir})" if a_dir else ""), "on" if a_on else "off",
-             [("autopilot", "every"), ("autopilot", "events"), ("autopilot", "direction"), ("autopilot", None)]),
             ("reactions", "Reactions", "on (react to some of the person's messages with one emoji)" if reacting
              else "off (never react to the person's messages)", "on" if reacting else "off", [("agents", "reactions")]),
             ("suggestions", "Suggested next message", "on (end each reply with the message you'd likely send next, greyed out in the box)"
@@ -134,14 +115,15 @@ def rows(space, d=None, auto=None):
             ("feedback", "Feedback offers", f"on (offer once to file a Shepherdr problem as an issue on {repo}, only on the person's yes)"
              if offering else "off (never offer feedback for Shepherdr; file nothing)", "on" if offering else "off",
              [("agents", "feedback"), ("agents", "feedback_repo")]),
+            # 3.2: the person's own words for every agent (everything's, then this space's), as written (block())
+            ("instructions", "Instructions", told or "none", "on" if told else "off", [("instructions", None)]),
         ]
-    have = lines(resolve(ls), (on, every, direction))
-    default = {x[0]: x[2] for x in lines(resolve([]), (False, every, ""))}
+    told = instructions_text(ls[0][1], ls[2][1])
+    have = lines(resolve(ls))
+    default = {**{x[0]: x[2] for x in lines(resolve([]))}, "instructions": "none"}
     out = []
     for key, label, text, value, parts in have:
         def sets(layer):
-            if key == "autopilot" and layer is ls[2][1] and on:
-                return True  # its switch is the space's own
             return any((f is None and layer.get(sec)) or (f is not None and isinstance(layer.get(sec), dict) and layer[sec].get(f) is not None)
                        for sec, f in parts)
         setters = [name for name, layer in ls if sets(layer)]
@@ -152,7 +134,10 @@ def rows(space, d=None, auto=None):
 
 
 def block(rs):
-    return "\n".join([HEAD] + [f"- {r['label']}: {r['text']}" + (f"; {BY[r['by']]}" if r["by"] else "") for r in rs])
+    """The "Your settings" lines, then the person's Instructions as written (when there are any)."""
+    words = next((r["text"] for r in rs if r["key"] == "instructions" and r["value"] == "on"), "")
+    return "\n".join([HEAD] + [f"- {r['label']}: {r['text']}" + (f"; {BY[r['by']]}" if r["by"] else "") for r in rs if r["key"] != "instructions"]
+                     + ([words] if words else []))
 
 
 def digest(rs):
@@ -174,8 +159,10 @@ def notice(changed):
     out = []
     for i, r in enumerate(changed):
         words = (reactions.TURNED_ON if r["value"] == "on" else reactions.TURNED_OFF) if r["key"] == "reactions" else \
+            (f"The person changed their instructions. From now on:\n{r['text']}" if r["value"] == "on" else
+             "The person removed their instructions: none apply now.") if r["key"] == "instructions" else \
             f"{r['label']} is now {r['text']}" + (f"; {BY[r['by']]}" if r["by"] else "; Herdr's default") + \
-            ("." if r["key"] in ("autopilot", "feedback") else ". Tasks you add from now on get it; running ones keep their brief.")
+            ("." if r["key"] == "feedback" else ". Tasks you add from now on get it; running ones keep their brief.")
         end = f" {NOTICE_END}" if i == len(changed) - 1 else ""
         out.append(f'<herdr-setting name="{r["key"]}" value="{attr(r["value"])}" scope="{r["scope"]}">{words}{end}</herdr-setting>')
     return "\n".join(out)
@@ -213,8 +200,6 @@ def settings_pass(report, quiet):
     LABEL), in one message. One without the label (started before this) gets the whole block once
     it has had a turn. quiet: news_pass's {address: {turn, at}}, so a no-reply to this leaves a read
     chat read."""
-    if addon_off("chat"):
-        return
     try:
         mtime = os.path.getmtime(SETTINGS)
     except OSError:

@@ -64,7 +64,7 @@ test("a followed task chat moves to its worker's new terminal by itself", async 
   const map = new Map([["DEMO-1/worker", "t1y"]]);
   const live = new Live(h, { on() {}, load: async () => ({}) } as any, () => null, "test");
   live.chats = new Chats(h);
-  live.compat = { addrOf: (k: string) => map.get(k) ?? null, chat: (k: string, r: any) => ({ key: k, state: r.state, path: r.path ?? null }) } as any;
+  live.compat = { historyOf: () => null, addrOf: (k: string) => map.get(k) ?? null, chat: (k: string, r: any) => ({ key: k, state: r.state, path: r.path ?? null }) } as any;
   const got: any[] = [];
   const ws: any = { data: { who: "demo" }, readyState: 1, getBufferedAmount: () => 0, send: (t: string) => { const m = JSON.parse(t); if (m.type === "chat") got.push(m.chat); } };
   live.join(ws);
@@ -100,4 +100,15 @@ test("a local agent's chat is found when the live list lacks its foreground", as
     if (was === undefined) delete process.env.SHEPHERDR_HC; else process.env.SHEPHERDR_HC = was;
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+
+test("opening a stopped chat reads the agent's last recorded log", async () => {
+  const h = hub();
+  feed(h, "restarted", "t8", { address: "t8", state: "finished", labels: { "herdr.resume": JSON.stringify({ kind: "claude", log }) } });
+  const chats = new Chats(h);
+  chats.watch("t8", () => {});
+  for (let i = 0; i < 30 && chats.reader("t8")!.state !== "ready"; i++) await Bun.sleep(100);
+  expect(chats.reader("t8")!.path).toBe(log);
+  expect(chats.reader("t8")!.state).toBe("ready");
 });

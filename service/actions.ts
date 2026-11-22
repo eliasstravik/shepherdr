@@ -1,39 +1,27 @@
-// What a web page may do, each the same way the window does it (the shared core, hc and herdr-task): send the
+// What a web page may do, each through the shared core, hc and herdr-task: send the
 // person's words to an agent, stop it, mark an Assistant read, accept a Ready task, read a task's evidence.
 // Anything else is refused. Inputs are checked here; commands run with argument lists, never a shell line.
 import type { Hub } from "./hub.ts";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { appHome, writable } from "./paths.ts";
-import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { sendBody, steerNow, messageBody, refusal, reactionLine, mentionedIn, taskTag, markSaid } from "../core/send.js";
+import { sendBody, steerNow, messageBody, refusal, reactionLine, mentionedIn, taskTag } from "../core/send.js";
 import { kindOf } from "../core/chat-reader.js";
 import { WORDS } from "../core/chat-view.js";
 import { settle } from "../core/pending.js";
 import * as AGa from "../core/agents.js";
 import { answerCodex } from "./codex-ask.ts";
-const { sessionOf, forkArgv, liveTaskAgent, FORK_LIVE, CHOICE_KEY, choiceOf, withChoice, speedOf } = AGa as any;
+const { CHOICE_KEY, choiceOf, withChoice, speedOf } = AGa as any;
 import * as SP from "../core/spaces.js";
 const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, withOrder, withMachineOrder, DELETED, deletedSection, withRestoredSection } = SP as any;
 import type { Compat } from "./compat.ts";
-import { worktreeAct } from "./worktrees.ts";
-import { layoutScript } from "./layout-scripts.ts";
 import { noteFailed, once } from "./send-once.ts";
-import { execTemplate } from "./spaces.ts";
+import { execTemplate, ownId, withoutSpace } from "./spaces.ts";
 import * as MA from "../core/machine-add.js";
 import { exec } from "./model.ts";
 import { FIND } from "../core/chat-log.js";
-import { closeSaved, renameSaved, orderSaved, withoutSpace, splitId } from "./saved-spaces.ts";
 
-// The window's own space log (lib/spacelog.js): a space the service closed or renamed with no window is traced there too
-export function logSpace(action: string, id: string, name: string | null, extra: Record<string, unknown> = {}) {
-  try {
-    // where at each call, and never the real one under test (SHEP-131: a test once logged its fake spaces there)
-    const file = writable(join(appHome(), "data", "backups", "space-log.jsonl"));
-    mkdirSync(dirname(file), { recursive: true });
-    appendFileSync(file, JSON.stringify({ at: new Date().toISOString(), machine: splitId(id).machine, space: id, name, action, ...extra, by: "web, no window (service/saved-spaces.ts)" }) + "\n");
-  } catch {}
-}
 const attachDir = () => join(appHome(), "data", "chat-attach");
 /** files in one message at most (the page says so before it sends: web/plugins/chat/client.tsx) */
 export const MAX_FILES = 50;
@@ -50,9 +38,7 @@ async function sendNow(hub: Hub, b: any, compat: Compat, again = false) {
   const t = hub.terminals.get(a);
   if (!t || t.state !== "live") throw new Error("That agent isn't running.");
   const io = { hc: asPerson(hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (hub.terminals.get(a) as any)?.status?.state ?? null };
-  // the person is chatting with it: Autopilot waits (core/send.js markSaid)
-  markSaid(io, a);
-  // files sent with it: their paths after the words, as the window's chat sends them (copied first to another machine)
+  // files sent with it: their paths after the words (copied first to another machine)
   const sent: string[] = Array.isArray(b.attachments) ? b.attachments : [];
   // never some of them quietly
   if (sent.length > MAX_FILES) throw new Error(`At most ${MAX_FILES} files in one message.`);
@@ -164,10 +150,8 @@ export function firstWhenIdle(hub: Hub, addr: string, text: string, every = 2000
 }
 
 async function run(cmd: string[]) {
-  // a program that isn't there (herdr-app on a web-only install) fails as any other: its code, not a throw
+  // a program that isn't there fails as any other: its code, not a throw
   let p: ReturnType<typeof Bun.spawn<"ignore", "pipe", "pipe">>;
-  // the window's herdr-app: SHEPHERDR_HERDR_APP in tests (as SHEPHERDR_HC for hc)
-  if (cmd[0] === "herdr-app" && process.env.SHEPHERDR_HERDR_APP) cmd = [process.env.SHEPHERDR_HERDR_APP, ...cmd.slice(1)];
   try { p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" }); }
   catch (e) { return { code: 127, stdout: "", stderr: String(e) }; }
   const [stdout, stderr] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
@@ -209,21 +193,6 @@ function taskOf(b: any) {
   const ref = str(b.ref, 40), folder = str(b.folder, 4096), machine = b.machine == null ? null : str(b.machine, 80);
   if (!REF.test(ref) || !folder.startsWith("/") || (machine && !MACHINE.test(machine))) throw new Error("bad task");
   return { ref, folder, machine };
-}
-
-type Known = { kind: string; name: string; installed: boolean; run?: string[] };
-/** The agents a machine has, as the window's knownAgents() gives its + menu and Switch agent: the installed ones with
- *  their command, then the first two that aren't. Only the window can ask Herdr: it keeps them in its shared
- *  "machines.stats" (lib/machines.js). Without the window, Claude Code and Codex, looked for on that machine. */
-async function knownAgents(hub: Hub, compat: Compat, machine: string | null): Promise<Known[]> {
-  const s = (compat.shared?.value("machines.stats") as any)?.[machine ?? ""];
-  if (Array.isArray(s?.agents) && s.agents.some((a: any) => Array.isArray(a.run)))
-    return [...s.agents.map((a: any) => ({ kind: a.key, name: a.name, installed: true, run: a.run })),
-      ...(Array.isArray(s.others) ? s.others.map((a: any) => ({ kind: a.key, name: a.name, installed: false })) : [])];
-  const AGENTS: Record<string, { name: string; run: string[] }> = { claude: { name: "Claude Code", run: ["claude"] }, codex: { name: "Codex", run: ["codex"] } };
-  const r = await exec(hub, ["sh", "-c", 'for c in "$@"; do command -v "$c" >/dev/null 2>&1 && echo "$c"; done', "agents", ...Object.keys(AGENTS)], machine).catch(() => null);
-  const have = new Set((r?.stdout ?? "").split("\n").filter(Boolean));
-  return Object.entries(AGENTS).map(([kind, a]) => ({ kind, name: a.name, installed: have.has(kind), run: a.run }));
 }
 
 export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
@@ -270,7 +239,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (res.code !== 0) throw new Error(refusal(res).message);
     return { ok: true };
   }
-  // the person's shared choices (pins, the sidebar, icons): in the service's document, in the window's own format
+  // the person's shared choices (the spaces, pins, groups, icons, order): in the service's document
   const sh = compat.shared;
   if (b?.type === "pin" && typeof b.chat === "string" && b.chat.endsWith("/worker") && sh) {
     const t = compat.taskOf(b.chat.slice(0, -7));
@@ -283,50 +252,36 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   const bar = () => sh!.value("spaces-chat") ?? {};
   const sec = (id: unknown) => (typeof id === "string" && id.startsWith("s:") ? id.slice(2) : null);
   if (b?.type === "move" && typeof b.id === "string" && typeof b.to === "string" && sh) {
-    const to = b.to === "pinned" ? "pinned" : sec(b.to);
+    const to = sec(b.to);
     await sh.set("spaces-chat", withMove(bar(), b.id, to, typeof b.before === "string" ? b.before : null));
     return { ok: true };
   }
   if (b?.type === "order" && sh && typeof b.under === "string" && Array.isArray(b.ids)) {
-    // a dragged sidebar list, kept where the window keeps it: Pinned's and each section's spaces, and the sections'
-    // order, in the shared sidebar data; a machine's own spaces in the window's order (space.move)
+    // a dragged sidebar list: each group's spaces, the groups' order, a machine's spaces and the machines, all in the
+    // shared sidebar data ("spaces-chat")
     const ids = b.ids.filter((x: unknown) => typeof x === "string").slice(0, 500) as string[];
     const d = structuredClone(bar());
-    d.sections ??= []; d.pinned ??= [];
+    d.sections ??= [];
     const same = (a: string[], c: string[]) => a.length === c.length && a.every((x) => c.includes(x));
-    if (b.under === "pinned") { if (!same(ids, d.pinned)) throw new Error("Pinned changed meanwhile."); d.pinned = ids; }
-    else if (sec(b.under)) {
+    if (sec(b.under)) {
       const x = d.sections.find((y: any) => y.id === sec(b.under));
       if (!x || !same(ids, x.spaces ?? [])) throw new Error("That section changed meanwhile.");
       x.spaces = ids;
     } else if (b.under === "sections" || b.under.startsWith("sections:")) {
-      // the sections at the top (Pinned among them, which isn't one of the data's) or a machine's: their new order
+      // the groups at the top or a machine's: their new order
       const order = ids.map(sec).filter(Boolean) as string[];
       d.sections = [...order.map((id) => d.sections.find((y: any) => y.id === id)).filter(Boolean), ...d.sections.filter((y: any) => !order.includes(y.id))];
     } else if (b.under.startsWith("m:")) {
-      // the order is the sidebar's own (core/spaces.js withOrder), so it holds on every device and for spaces Herdr
-      // doesn't keep (the service's own, always last before SHEP-130); the rest of the machine's stay where they were
+      // the order is the sidebar's own (core/spaces.js withOrder), so it holds on every device; the rest of the
+      // machine's stay where they were
       const key = b.under.slice(2), machine = key === compat.host ? null : key;
       const all: any[] = compat.allSpaces?.() ?? [];
       const now = all.filter((s) => (s.machine ?? null) === machine).map((s) => s.id);
       await sh.set("spaces-chat", withOrder(bar(), machine, ids, now));
-      // and Herdr's own order too, best effort, for the window and a release before this one: its spaces only
-      const own = new Set(all.filter((s) => s.own).map((s) => s.id));
-      const mine = ids.filter((id) => !own.has(id));
-      try {
-        for (const [i, id] of mine.entries()) {
-          const r = await run(["herdr-app", "do", "space.move", "--id", id, "--index", String(i + 1)]);
-          if (r.code !== 0) {
-            // no window: the machine's saved spaces in that order (service/saved-spaces.ts)
-            await orderSaved(hub, machine, mine);
-            break;
-          }
-        }
-      } catch {}
       return { ok: true };
     } else if (b.under === "all") {
       // the machines (m:<key>, this computer by its name): their order in the sidebar's data, "" for this computer, so
-      // every device and the window show it (core/spaces.js withMachineOrder, SHEP-153)
+      // every device shows it (core/spaces.js withMachineOrder, SHEP-153)
       const keys = ids.filter((id) => id.startsWith("m:")).map((id) => (id.slice(2) === compat.host ? "" : id.slice(2)));
       await sh.set("spaces-chat", withMachineOrder(bar(), keys));
       return { ok: true };
@@ -337,11 +292,13 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   if (b?.type === "section" && sh) {
     if (b.op === "new" && typeof b.name === "string" && b.name.trim()) {
       const machine = typeof b.machine === "string" && b.machine !== compat.host ? b.machine : null;
-      await sh.set("spaces-chat", withSection(bar(), { id: `sec-${Date.now().toString(36)}`, name: b.name.trim().slice(0, 60), machine, icon: typeof b.emoji === "string" ? b.emoji.slice(0, 16) : null }));
-      return { ok: true };
+      const id = `sec-${Date.now().toString(36)}`;
+      await sh.set("spaces-chat", withSection(bar(), { id, name: b.name.trim().slice(0, 60), machine, icon: typeof b.emoji === "string" ? b.emoji.slice(0, 16) : null }));
+      // its id as the list names it, so a space can be moved straight into it (Move to group › New group…)
+      return { ok: true, id: `s:${id}` };
     }
     if (b.op === "delete" && sec(b.id)) {
-      // as the window's: at once, kept for its toast's Undo (shared "spaces-chat.deleted")
+      // at once, kept for its toast's Undo (shared "spaces-chat.deleted")
       const gone = deletedSection(bar(), sec(b.id));
       if (gone) await sh.set(DELETED, gone);
       await sh.set("spaces-chat", withoutSection(bar(), sec(b.id)));
@@ -360,38 +317,23 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const icon = typeof b.emoji === "string" ? b.emoji.slice(0, 16) || null : undefined;
     if (sec(b.id)) { await sh.set("spaces-chat", withSectionName(bar(), sec(b.id), name, icon)); return { ok: true }; }
     if (b.id.startsWith("m:")) {
-      // a machine's own name and emoji in the sidebar, as the window's Rename… (this computer is the snapshot's host)
+      // a machine's own name and emoji in the sidebar (this computer is the snapshot's host)
       const key = b.id.slice(2);
       await sh.set("spaces-chat", withMachineLook(bar(), key === compat.host ? null : key, name, icon ?? null));
       return { ok: true };
     }
-    // a space: its icon is ours; its name is Herdr's (the window renames it, when it runs)
+    // a space: its icon in the sidebar's data, its name in the list of spaces (shared "spaces")
     if (icon !== undefined) await sh.set("spaces-chat", withIcon(bar(), b.id, icon));
-    // an empty name gives it Herdr's own back, as the window's Rename dialog does
+    // an empty name (unname) gives it back the name of where it is: its repo's, else its folder's (core spaceName)
     if (name || b.unname === true) {
-      const r = await run(["herdr-app", "do", "space.rename", "--id", b.id, "--name", name]);
-      // no window: its saved name (Herdr's own name back is the window's to give)
-      if (r.code !== 0) {
-        if (!name) throw new Error("Giving a space Herdr's own name back needs the Herdr window open.");
-        const done = await renameSaved(hub, b.id, name);
-        if (!done) throw new Error("That space isn't here any more.");
-        logSpace("rename", b.id, done.was, { to: name });
-      }
+      const own: any[] = Array.isArray(sh.value("spaces")) ? sh.value("spaces") : [];
+      if (!own.some((x) => ownId(x) === b.id)) throw new Error("That space isn't here any more.");
+      await sh.set("spaces", own.map((x) => (ownId(x) === b.id ? { ...x, name } : x)));
     }
     return { ok: true };
   }
-  if (b?.type === "mode" && typeof b.place === "string" && (b.mode === "autopilot" || b.mode === "regular")) {
-    // Autopilot: herdr-task's, per space (a plain switch, as the window's header); another machine's ("vm/sp1") is
-    // switched by herdr-task there, told its folder from here, and its own scheduler wakes it
-    if (!/^([\w.-]+\/)?[\w-]+$/.test(b.place)) throw new Error("bad space");
-    const folder = compat.spaceOf(b.place)?.folder;
-    const r = await run(["herdr-task", "autopilot", b.mode === "autopilot" ? "on" : "off", "--space", b.place,
-      ...(b.place.includes("/") && folder ? ["--space-folder", folder] : []), "--json"]);
-    if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || "Autopilot didn't change.");
-    return { ok: true };
-  }
   if (b?.type === "model-pin" && compat.agents && ["claude", "codex"].includes(b.agent) && typeof b.model === "string" && /^[\w.\[\]-]{1,60}$/.test(b.model)) {
-    // the model menu's star: pinned to the top of its agent's list (core/agents.js PICKS_FILE, as the window's)
+    // the model menu's star: pinned to the top of its agent's list (core/agents.js PICKS_FILE)
     return { ok: true, picks: (compat.agents as any).pin(b.agent, b.model) };
   }
   if ((b?.type === "restart-info" || b?.type === "model-menu" || b?.type === "restart") && typeof b.chat === "string" && compat.agents) {
@@ -400,7 +342,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const fresh = b.type !== "restart-info" && b.chat.startsWith("p:") && !compat.addrOf(b.chat) ? compat.spaceOf(b.chat.slice(2).replace(":", "/")) : null;
     if (fresh) {
       // a space's Assistant that hasn't started (SHEP-263): the menu shows what its first message starts it on, and a
-      // pick only changes that choice (nothing runs yet), kept where the window's chat keeps its own (CHOICE_KEY)
+      // pick only changes that choice (nothing runs yet), kept in the shared document (CHOICE_KEY)
       if (b.type === "model-menu") return { ok: true, menu: await (compat.agents as any).freshMenu(fresh.machine, compat.assistantPick?.(fresh.id) ?? null) };
       if (!["claude", "codex"].includes(b.kind)) throw new Error("Pick Claude Code or Codex.");
       const opt = (v: unknown) => (typeof v === "string" && /^[\w.\[\]-]{1,60}$/.test(v) ? v : null);
@@ -448,72 +390,29 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     await exec(hub, ["open", MA.MAC_SETTING], b.machine).catch(() => null);
     return { ok: true };
   }
-  if (b?.type === "worktree" && typeof b.place === "string" && compat.shared) {
-    const sp = compat.spaceOf(b.place);
-    if (!sp) throw new Error("That space isn't here any more.");
-    return worktreeAct(hub, sp, b, compat.shared, () => act(hub, { type: "space-remove", place: b.place }, compat).catch(() => null), compat.allSpaces());
-  }
   if (b?.type === "assistant-close" && typeof b.place === "string") {
-    // 3.0's Close Assistant: its tab closes; "stop" ends the workers it started first, "keep" lets them finish
+    // a space's own agent stopped: its Assistant's terminal ends (hc kill); "stop" ends the workers it started first,
+    // "keep" lets them finish, "count" only says how many there are
     const key = `p:${b.place.replace("/", ":")}`, a = compat.addrOf(key);
     const t: any = a ? hub.terminals.get(a) : null;
-    if (!t) throw new Error("This space has no Assistant running.");
-    const workers = [...hub.terminals.values()].filter((x: any) => x.state === "live" && x.parent === a).length;
-    if (b.mode === "count") return { ok: true, workers };
-    const tab = t.labels?.["herdr.coordinator.tab"];
-    const script = join(appHome(), "mods", "coordinator", "close.sh");
-    if (!tab || !existsSync(script)) throw new Error("Closing an Assistant needs Shepherdr's window layout installed.");
-    const r = await run(["bash", script, tab, a!, b.mode === "stop" ? "stop" : "keep"]);
-    if (r.code !== 0) throw new Error("It didn't close: the Herdr window needs to be open.");
+    if (!a || !t) throw new Error("This space has no Assistant running.");
+    const workers = [...hub.terminals.values()].filter((x: any) => x.state === "live" && x.parent === a);
+    if (b.mode === "count") return { ok: true, workers: workers.length };
+    if (b.mode === "stop") for (const w of workers) await hc(["kill", w.address]);
+    const r = await hc(["kill", a]);
+    if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || "It didn't stop.");
     return { ok: true };
   }
   if ((b?.type === "held-now" || b?.type === "held-drop") && typeof b.cid === "string") {
-    // a queued message (the window's Send now and ×): sent at once, or taken back unsent
+    // a queued message (Send now and ×): sent at once, or taken back unsent
     const m = held.find((x) => x.cid === b.cid);
     if (!m) throw new Error("That message has gone in already.");
     if (b.type === "held-drop") held.splice(held.indexOf(m), 1);
     else { m.now = true; drain(); }
     return { ok: true };
   }
-  if (b?.type === "tab-rename" && (typeof b.place === "string" || typeof b.tab === "string") && typeof b.name === "string") {
-    // a tab's Rename… (3.0's tab menu, or a double-click on it): Herdr names the tab (an empty name: it is unnamed again,
-    // as the window's prompt does). tab: its id; place: the space whose Assistant's tab it is.
-    const a = typeof b.place === "string" ? compat.addrOf(`p:${b.place.replace("/", ":")}`) : null, t: any = a ? hub.terminals.get(a) : null;
-    const tab = typeof b.tab === "string" ? b.tab : t?.labels?.["herdr.coordinator.tab"], name = b.name.trim().slice(0, 80);
-    if (!tab || !/^[\w./:-]{1,200}$/.test(tab)) throw new Error("This space has no Assistant tab.");
-    const r = await run(["herdr-app", "do", "tab.rename", "--id", tab, "--name", name]);
-    if (r.code !== 0) {
-      // no window: its saved name; a tab's place reads the space's machine ("vm/…"), the Assistant's label its own id
-      if (!name) throw new Error("Giving a tab Herdr's own name back needs the Herdr window open.");
-      const there = a?.includes("/") && !tab.includes("/") ? `${a.split("/")[0]}/${tab}` : tab;
-      if (!(await renameSaved(hub, there, name))) throw new Error("That tab isn't here any more.");
-    }
-    return { ok: true };
-  }
-  if ((b?.type === "tab-close" || b?.type === "tab-move" || b?.type === "tab-end") && typeof b.tab === "string" && /^[\w./:-]{1,200}$/.test(b.tab)) {
-    // the tab bar's ×, a tab dragged onto another (index: from 1), and the pane header's End agent (its agent ends, its
-    // tab closes), as the window's
-    if (b.type === "tab-end" && typeof b.chat === "string") { const a = compat.addrOf(b.chat); if (a) await hc(["kill", a]); }
-    const r = b.type === "tab-move"
-      ? await run(["herdr-app", "do", "tab.move", "--id", b.tab, "--index", String(Math.max(1, Math.floor(Number(b.index) || 1)))])
-      : await run(["herdr-app", "do", "tab.close", "--id", b.tab, "--confirmed", "true"]);
-    if (r.code !== 0) throw new Error("Tabs are the Herdr window's: it needs the window open.");
-    return { ok: true };
-  }
-  if ((b?.type === "tab-agents" || b?.type === "tab-new") && typeof b.place === "string") {
-    // the tab bar's + (3.0's new-menu): a terminal, or an agent, as a new tab of the space, in its folder
-    const sp = compat.spaceOf(b.place);
-    if (!sp) throw new Error("That space isn't here any more.");
-    const known = await knownAgents(hub, compat, sp.machine ?? null);
-    if (b.type === "tab-agents") return { ok: true, agents: known.map(({ kind, name, installed }) => ({ kind, name, installed })) };
-    const a = typeof b.kind === "string" ? known.find((x) => x.kind === b.kind && x.installed && x.run?.length) : null;
-    if (b.kind != null && !a) throw new Error("Not an agent Shepherdr knows.");
-    const r = await run(["herdr-app", "do", "tab.new", "--space", sp.id, "--folder", sp.folder || "~", ...(a ? ["--name", a.name, "--argv", JSON.stringify(a.run)] : [])]);
-    if (r.code !== 0) throw new Error("A new tab opens in the Herdr window: it needs the window open.");
-    return { ok: true };
-  }
   if (b?.type === "space-commit" && typeof b.place === "string" && typeof b.message === "string") {
-    // Herdr's Changes panel's Commit, for the space's folder: everything (git add -A), with the message typed
+    // Commit, for the space's folder: everything (git add -A), with the message typed
     const sp = compat.spaceOf(b.place), message = b.message.trim().slice(0, 10_000);
     if (!sp) throw new Error("That space isn't here any more.");
     if (!message) throw new Error("Type a commit message first.");
@@ -521,46 +420,20 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (r.code !== 0) throw new Error(`Commit failed: ${(r.stderr || r.stdout).trim().split("\n").pop() ?? ""}`);
     return { ok: true };
   }
-  if (b?.type === "tab-switch" && typeof b.chat === "string") {
-    // a tab's Switch agent (3.0's: restart.sh with the agent's own command), and Restart for an agent that isn't Claude
-    // Code or Codex (no kind: as it runs now; an Assistant again from its template)
-    const a = compat.addrOf(b.chat), t: any = a ? hub.terminals.get(a) : null;
-    if (!a || !t) throw new Error("Its agent isn't running.");
-    const known = await knownAgents(hub, compat, a.includes("/") ? a.split("/")[0] : null);
-    const base = (s: unknown) => String(s ?? "").split(/[\\/]/).pop();
-    const now = known.find((x) => x.kind === t.labels?.["herdr.agent"]) ?? known.find((x) => base(x.run?.[0]) === base(t.foreground?.argv?.[0] ?? t.argv?.[0]));
-    const to = typeof b.kind === "string" ? known.find((x) => x.kind === b.kind && x.installed) : null;
-    if (b.kind != null && !to?.run?.length) throw new Error("Not an agent installed there.");
-    const assistant = t.labels?.["herdr.role"] === "coordinator" && !t.labels?.["herdr.agent"];
-    const argv = to?.run ?? (assistant ? null : now?.run ?? null);
-    const script = layoutScript("restart.sh");
-    if (!script) throw new Error("This install can't restart agents: update Shepherdr on that machine.");
-    const r = await run(["bash", script, a, ...(argv ? [JSON.stringify(argv)] : [])]);
-    if (r.code !== 0) throw new Error("It didn't restart: the Herdr window needs to be open.");
-    return { ok: true };
-  }
   if (b?.type === "space-remove" && typeof b.place === "string" && compat.shared) {
-    // Close a space: the window closes its own (herdr-app do space.close), or with no window the service closes it in
-    // the window's saved spaces (service/saved-spaces.ts); the service forgets one of its own and ends its Assistant
-    const own = Array.isArray(compat.shared.value("spaces")) ? compat.shared.value("spaces") : [];
-    const mine = own.find((x: any) => (x.machine ? `${x.machine}/${x.id}` : x.id) === b.place);
-    if (mine) {
-      await compat.shared.set("spaces", own.filter((x: any) => x !== mine));
-      for (const t of hub.terminals.values()) if (t.labels?.["herdr.coordinator.space"] === mine.id && (t.address.includes("/") ? t.address.split("/")[0] : null) === (mine.machine ?? null)) await hc(["kill", t.address]);
-      return { ok: true };
-    }
-    const r = await run(["herdr-app", "do", "space.close", "--id", b.place, "--confirmed", "true"]);
-    if (r.code !== 0) {
-      const gone = await closeSaved(hub, b.place);
-      if (!gone) throw new Error("That space isn't here any more.");
-      logSpace("close", b.place, gone.name);
-      const bar = compat.shared.value("spaces-chat") ?? {}, next = withoutSpace(bar, b.place);
-      if (next !== bar) await compat.shared.set("spaces-chat", next);
-    }
+    // Remove a space: gone from the list of spaces (shared "spaces") and from the sidebar's data (its group, icon and
+    // place in the order), its Assistant ended. Nothing in its folder is touched.
+    const own: any[] = Array.isArray(compat.shared.value("spaces")) ? compat.shared.value("spaces") : [];
+    const mine = own.find((x: any) => ownId(x) === b.place);
+    if (!mine) throw new Error("That space isn't here any more.");
+    await compat.shared.set("spaces", own.filter((x: any) => x !== mine));
+    const bar = compat.shared.value("spaces-chat") ?? {}, next = withoutSpace(bar, b.place);
+    if (next !== bar) await compat.shared.set("spaces-chat", next);
+    for (const t of hub.terminals.values()) if (t.state === "live" && t.labels?.["herdr.coordinator.space"] === mine.id && (t.address.includes("/") ? t.address.split("/")[0] : null) === (mine.machine ?? null)) await hc(["kill", t.address]);
     return { ok: true };
   }
   if (b?.type === "rewind" && typeof b.chat === "string" && typeof b.message === "string") {
-    // the CLI's own rewind on that message, as the window's: Claude Code's /rewind lists the prompts newest last (Up
+    // the CLI's own rewind on that message: Claude Code's /rewind lists the prompts newest last (Up
     // once per later prompt); Codex's Esc Esc browses back from the last (Left). Then its terminal shows it.
     const a = chat(b.chat), t: any = hub.terminals.get(a), r = compat.reader?.(a);
     if (t?.status?.state === "working") throw new Error("The agent is working: stop it first, then rewind.");
@@ -572,19 +445,12 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   }
   if (b?.type === "earlier" && typeof b.chat === "string") {
     // the chat scrolled to its top ("Loading earlier…"): the log's page before what it shows
-    await (compat as any).earlier?.(chat(b.chat));
-    return { ok: true };
-  }
-  if (b?.type === "fork" && typeof b.chat === "string") {
-    // a copy of the conversation in a new tab of its space, through the CLI's own fork (the window makes the tab)
-    const a = chat(b.chat), t: any = hub.terminals.get(a), r = compat.reader?.(a);
-    const kind = kindOf(t) ?? "claude", session = sessionOf(kind, r?.path ?? null);
-    if (!session) throw new Error("This conversation has no saved session to fork.");
-    // #1050: the task's agent still runs in that folder: the person says first whether a second agent should
-    if (!b.force && liveTaskAgent(t, hub.terminals.values())) return { ok: false, ask: FORK_LIVE };
-    const space = ["herdr.space", "herdr.task.space", "herdr.coordinator.space"].map((k) => t?.labels?.[k]).find(Boolean);
-    const res = await run(["herdr-app", "do", "tab.new", ...(space ? ["--space", space] : []), "--folder", t?.foreground?.cwd ?? t?.cwd ?? "", "--argv", JSON.stringify(forkArgv(kind, t?.foreground?.argv ?? t?.argv ?? [], session))]);
-    if (res.code !== 0) throw new Error("A fork opens as a tab in the Herdr window: it needs the window open.");
+    const current = compat.addrOf(b.chat);
+    const reader = current && compat.reader?.(current);
+    const history = compat.historyOf(b.chat);
+    const prior = history && compat.reader?.(history);
+    if (current && reader?.start) await (compat as any).earlier?.(current);
+    else if (history && prior?.start) await (compat as any).earlier?.(history);
     return { ok: true };
   }
   if (b?.type === "keys" && typeof b.chat === "string" && Array.isArray(b.keys) && b.keys.length <= 32 && b.keys.every((k: unknown) => typeof k === "string" && k.length <= 40)) {
@@ -593,13 +459,10 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   }
   if (b?.type === "send" && typeof b.chat === "string" && b.chat.startsWith("p:") && !compat.addrOf(b.chat)) {
     // a space's Assistant chat with no Assistant yet: the first message starts it (the assistant template) with the
-    // message as its task, as the window's empty Assistant chat does (mods/chat startAgent): in the window's slot for
-    // this space (its tab's chat pane takes it), else as the service's own (spaces.ts, a web-only install)
+    // message as its task, labelled for its space
     const space = b.chat.slice(2).replace(":", "/"), sp = compat.spaceOf(space);
     if (!sp) throw new Error("That space isn't here any more.");
     const bare = String(sp.id).split("/").pop()!;
-    const slots: Record<string, any> = compat.shared?.value("coordinator.slots") ?? {};
-    const [slot, rec] = Object.entries(slots).find(([, r]) => r && (r.space === sp.id || r.space === bare)) ?? [];
     const text = str(b.text ?? "").trim();
     if (!text) throw new Error("nothing to send");
     const files = Array.isArray(b.attachments) && !sp.machine ? b.attachments.filter((p: unknown) => typeof p === "string" && p.startsWith(attachDir() + "/") && !p.includes("/../")) : [];
@@ -611,10 +474,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       startWhenBack();
       return { ok: true, waiting: true };
     }
-    const labels = slot
-      ? ["--label", `herdr.chat=${SP.chatLabel(rec.pane)}`, "--label", `herdr.chat.slot=${slot}`, "--label", `herdr.chat.origin=slot:${slot}`, "--label", "herdr.role=coordinator",
-        "--label", `herdr.coordinator.space=${bare}`, ...(rec.tab ? ["--label", `herdr.coordinator.tab=${String(rec.tab).split("/").pop()}`] : [])]
-      : ["--label", "herdr.role=coordinator", "--label", `herdr.coordinator.space=${bare}`, "--label", `herdr.space=${bare}`];
+    const labels = ["--label", "herdr.role=coordinator", "--label", `herdr.coordinator.space=${bare}`, "--label", `herdr.space=${bare}`];
     const tpl = await execTemplate(hub, "assistant", sp.machine ?? null, compat.assistantPick?.(sp.id) ?? null);
     // when it began to go in, by this clock: the page knows its message again in the chat by it, as any send's
     const at = Date.now();
@@ -623,11 +483,11 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     let out: any = {};
     try { out = JSON.parse(r.stdout || "{}"); } catch {}
     if (r.code !== 0 || !out.address) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || "The Assistant didn't start.");
-    // what the person asked, for its chat to show apart from the template (the window's data/chat-first)
+    // what the person asked, for its chat to show apart from the template (data/chat-first)
     const first = join(appHome(), "data", "chat-first");
     const addr = sp.machine && !String(out.address).includes("/") ? `${sp.machine}/${out.address}` : String(out.address);
     if (out.first_message?.sent === false && tpl.words) firstWhenIdle(hub, addr, `${tpl.words}\n\n${task}`);
-    try { mkdirSync(first, { recursive: true }); writeFileSync(writable(join(first, `${String(slot ?? addr).replace(/[^\w.-]/g, "_")}.txt`)), text); } catch {}
+    try { mkdirSync(first, { recursive: true }); writeFileSync(writable(join(first, `${String(addr).replace(/[^\w.-]/g, "_")}.txt`)), text); } catch {}
     // it started on the choice made in its chat (assistantPick): that choice is spent, the next start is Settings' again
     if (compat.shared && choiceOf(compat.shared.value(CHOICE_KEY), sp.id)) void compat.shared.set(CHOICE_KEY, withChoice(compat.shared.value(CHOICE_KEY), sp.id, null)).catch(() => null);
     // the page's own id for it (SHEP-263): the chat gives its message back with that id, so the page's pending copy
@@ -635,12 +495,37 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (typeof b.cid === "string") compat.noteSend?.(addr, { cid: b.cid.slice(0, 80), text, files, at });
     return { ok: true, started: true, at };
   }
+  if (b?.type === "send" && typeof b.chat === "string" && b.chat.endsWith("/worker")) {
+    // a reply typed into a task whose agent is gone (Done, or stopped): herdr-task starts its agent again in the same
+    // thread with the reply, and the task goes back to Working
+    const t = compat.taskOf(b.chat.split("/")[0]), a = compat.addrOf(b.chat);
+    if (t && (!a || a.startsWith("log:") || hub.terminals.get(a)?.state !== "live")) {
+      const text = str(b.text ?? "", 100_000).trim();
+      if (!text) throw new Error("Nothing to send.");
+      const files = Array.isArray(b.attachments) ? b.attachments.filter((x: unknown) => typeof x === "string").slice(0, 50) : [];
+      const r = await task(["reply", t.ref, [text, ...files].join("\n\n")], t.folder, t.machine);
+      let out: any = null;
+      try { out = JSON.parse(r.stdout); } catch {}
+      if (r.code !== 0 || out?.error) throw new Error(out?.error || r.stderr.trim().split("\n").pop() || "Its agent didn't start.");
+      return { ok: true, started: true, at: Date.now() };
+    }
+  }
   if (b?.type === "send" && typeof b.chat === "string") {
-    // what it replies to (2.1 names the message by id) and the tasks it mentions, as the window's chat sends them
+    // what it replies to (the message by its id) and the tasks it mentions
     const a = chat(b.chat), r = compat.reader?.(a);
     const quoted = typeof b.reply === "string" ? r?.conv?.items?.find((x: any) => x.id === b.reply)?.text ?? null : null;
     const tags = mentionedIn(String(b.text ?? ""), compat.tasksFor(b.chat)).map((x: any) => taskTag(x, x.ref ?? `#${x.id}`)).join("");
     b = { ...b, addr: a, quote: quoted, tags };
+  }
+  else if (b?.type === "stop" && typeof b.chat === "string" && compat.taskOf(b.chat.split("/")[0])) {
+    // Stop on a task pauses its agent, like pressing Esc: it drops what it was doing and waits. herdr-task records
+    // that the person stopped it ("Stopped by you"); the next message carries on from there.
+    const t = compat.taskOf(b.chat.split("/")[0])!;
+    const r = await task(["stop", t.ref], t.folder, t.machine);
+    let out: any = null;
+    try { out = JSON.parse(r.stdout); } catch {}
+    if (r.code !== 0 || out?.error) return { ok: false, error: out?.error || r.stderr.trim().split("\n").pop() || "It didn't stop." };
+    return { ok: true };
   }
   else if ((b?.type === "stop" || b?.type === "steer") && typeof b.chat === "string") b = { ...b, addr: chat(b.chat) };
   else if (b?.type === "stop-job" && typeof b.chat === "string" && typeof b.job === "string") {
@@ -649,7 +534,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (!r || !b.job.startsWith("b:") || !(await r.stopJob(b.job.slice(2)))) throw new Error("It isn't running any more.");
     return { ok: true };
   }
-  else if ((b?.type === "close" || b?.type === "delete" || b?.type === "archive" || b?.type === "reopen" || b?.type === "task-resume" || b?.type === "schedule") && typeof b.chat === "string") {
+  else if ((b?.type === "close" || b?.type === "delete" || b?.type === "archive" || b?.type === "reopen" || b?.type === "task-resume" || b?.type === "schedule" || b?.type === "task-start" || b?.type === "task-move" || b?.type === "task-rename") && typeof b.chat === "string") {
     // a task's row menu: its chat key is "<task>/worker" (or 2.1's "/Agent")
     const t = compat.taskOf(b.chat.split("/")[0]);
     if (!t) throw new Error("That task isn't here any more.");
@@ -719,7 +604,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       return out ?? { ok: true };
     }
     case "task-resume": {
-      // an ended task's Resume (the window's): herdr-task starts its agent again on its session
+      // an ended task's Resume: herdr-task starts its agent again on its session
       const { ref, folder, machine } = taskOf(b);
       const r = await task(["resume", ref], folder, machine);
       let out: any = null;
@@ -739,16 +624,50 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       return { ok: true, why: out?.why ?? null };
     }
     // the person's own calls on a task, as herdr-task makes them: done, removed, or back from the archive
-    case "close": case "delete": case "archive": case "reopen": {
-      if (b.type === "archive" && b.on !== false) throw new Error("Done tasks archive themselves: Settings › Tasks › Archive Done after.");
+    // Start task, from the dialog of one not started yet: on the agent picked there
+    case "task-start": {
       const { ref, folder, machine } = taskOf(b);
-      const r = await task([b.type === "close" ? "done" : b.type === "delete" ? "rm" : b.type === "reopen" ? "reopen" : "unarchive", ref], folder, machine);
+      const p = b.agent && typeof b.agent === "object" ? b.agent : {};
+      const word = (v: unknown) => (typeof v === "string" && /^[\w.\[\]:/-]{1,80}$/.test(v) ? v : null);
+      const args = ["start", ref, ...(word(p.agent) ? ["--agent", word(p.agent)!] : []), ...(word(p.model) ? ["--model", word(p.model)!] : []), ...(word(p.effort) ? ["--effort", word(p.effort)!] : []),
+        ...(p.fast ? ["--speed", p.fast === "ultrafast" ? "ultrafast" : "fast"] : []), ...(word(p.perm) ? ["--permission", word(p.perm)!] : [])];
+      const r = await task(args, folder, machine);
+      let out: any = null;
+      try { out = JSON.parse(r.stdout); } catch {}
+      if (r.code !== 0 || out?.error) return { ok: false, error: out?.error || r.stderr.trim().split("\n").pop() || "It didn't start." };
+      return { ok: true };
+    }
+    case "task-rename": {
+      const { ref, folder, machine } = taskOf(b);
+      const r = await task(["edit", ref, "--title", str(b.name, 200).trim()], folder, machine);
+      let out: any = null;
+      try { out = JSON.parse(r.stdout); } catch {}
+      if (r.code !== 0 || out?.error) return { ok: false, error: out?.error || r.stderr.trim().split("\n").pop() || "It wasn't renamed." };
+      return { ok: true };
+    }
+    // Move to another space: only before the task has started, and on the same machine
+    case "task-move": {
+      const { ref, folder, machine } = taskOf(b);
+      const to = compat.spaceOf(str(b.place, 200));
+      if (!to) throw new Error("That space isn't here any more.");
+      if ((to.machine ?? null) !== (machine ?? null)) return { ok: false, error: "A task can move to a space on the same machine. For another machine, ask in that space's chat to add it there." };
+      const bare = to.id.slice(to.id.lastIndexOf("/") + 1);
+      const r = await task(["edit", ref, "--space", bare, ...(to.folder !== folder ? ["--move-to", to.folder] : [])], folder, machine);
+      let out: any = null;
+      try { out = JSON.parse(r.stdout); } catch {}
+      if (r.code !== 0 || out?.error) return { ok: false, error: out?.error || r.stderr.trim().split("\n").pop() || "It didn't move." };
+      return { ok: true };
+    }
+    case "close": case "delete": case "archive": case "reopen": {
+      const { ref, folder, machine } = taskOf(b);
+      // archiving takes it out of the list without deleting it; Mark as done from the menu closes it without merging
+      const r = await task([b.type === "close" ? "done" : b.type === "delete" ? "rm" : b.type === "reopen" ? "reopen" : b.on === false ? "unarchive" : "archive", ref], folder, machine);
       let out: any = null;
       try { out = JSON.parse(r.stdout); } catch {}
       if (r.code !== 0 || out?.error) return { ok: false, error: out?.error || r.stderr.trim().split("\n").pop() || "herdr-task refused it." };
       return { ok: true };
     }
   }
-  // 2.1 has more buttons than this service answers yet: they say so plainly
-  throw new Error("Not on the web yet: use the Herdr window for this.");
+  // an action this service doesn't answer (yet): said plainly
+  throw new Error("Shepherdr can't do that yet.");
 }

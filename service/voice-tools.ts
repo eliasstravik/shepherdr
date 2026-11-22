@@ -1,33 +1,35 @@
-// What a voice call's tools do (core/voice.js TOOLS: look, open, send, act), for the web app's call and the window's
-// alike: read from the snapshot the web app shows (service/compat.ts), the chats as the service reads them, and change
-// things through the same actions the web app's buttons send (service/actions.ts), so a call reaches what the person's
-// web app reaches, no more. Every answer is a few short sentences to be spoken, never raw data; long ones are cut
-// here. An act changes nothing until the voice agent says the person confirmed it out loud (confirmed: true).
-import type { Snapshot, Task, Place } from "../web/shared/types.ts";
-import { navWords, REPLY_MAX, TABS } from "../core/voice.js";
+// What a voice call's tools do (core/voice.js TOOLS: look, open, send, act, screen): read from the snapshot the app
+// shows (service/next.ts enrich), in the words the screen uses (web/shared/view.ts: no status is worked out twice),
+// the chats as the service reads them, and change things through the same actions the app's buttons send
+// (service/main.ts doAction), so a call reaches what the person's app reaches, no more. Every answer is a few short
+// sentences to be spoken, never raw data; long ones are cut here. A task is named by its title, a space as the list
+// names it ("#shop", "Everything"). An act that deletes, merges or stops changes nothing until the voice agent says
+// the person confirmed it out loud (confirmed: true).
+import type { AgentPick, Need, Snapshot, Task, Place } from "../web/shared/types.ts";
+import { ACTS, ASK_FIRST, navWords, REPLY_MAX, SETTINGS } from "../core/voice.js";
 import { screenParams, screenWords } from "../core/screen.js";
 import { planRows, windowWords, whyWords, healthWords } from "../core/machines.js";
+import { artifactsIn, everything, isEverything, listOf, machineLabel, machineWarn, needsCount, nowGroups, onBranch, scheduleLine, schedulesOf, spaceLabel, spacesOf, statusWord, taskLine, taskWhen, tstate, unreachable, whereWords } from "../web/shared/view.ts";
 import { SOURCES, scrub, render, at, search, segments, type SourceArgs } from "./voice-data.ts";
 
-/** Where a call comes from: its app, the chat it started from (if any), and what that app shows now (sent by the page or
- *  the window). SHEP-105: a call is with Shepherdr itself, not that chat: "here" is what the screen shows. */
+/** Where a call comes from and what its app shows now (sent by the page as it changes). SHEP-105: a call is with
+ *  Shepherdr as a whole, not one chat: "here" is what the screen shows. */
 export type Where = {
   client: "web" | "window";
-  /** phone, tablet or desktop (web) */
+  /** phone or desktop */
   device?: string | null;
-  /** the machine whose window it is (window), or the one serving the web app */
+  /** the machine serving the app */
   machine?: string | null;
-  /** the chat the call was started from, by its call button (its key: p:<space> for an Assistant, <task>/worker for a
-   *  task's agent); none from the sidebar's Shepherdr row or the phone's voice button. Only "here" while the screen
-   *  shows no chat. */
+  /** the chat a call was started from, when it was started from one (its key); only "here" while the screen shows none */
   call?: string | null;
-  /** what the app shows now: a space (place id), a task, the task's tab, an artifact open, Settings */
+  /** what the app shows now: a space (place id), a task, its right-hand pane (tasks, artifacts, screen, terminal), an
+   *  artifact open, Settings */
   place?: string | null;
   task?: string | null;
   tab?: string | null;
   artifact?: string | null;
   settings?: boolean;
-  /** the web call fills the screen (SHEP-118), else it is minimized */
+  /** (3.2: the call runs over the app, there is no full-screen call) */
   full?: boolean;
   /** SHEP-251: the phone is locked (Shepherdr Wake runs the call); SHEP-261: it can do all an unlocked one can */
   locked?: boolean;
@@ -35,36 +37,38 @@ export type Where = {
   screen?: boolean;
 };
 
-/** Something to show in the app the call runs in (the page's kernel, or the window's chat mod). */
+/** Something to show in the app the call runs in: what the page's voiceNav takes (web/plugins/voice/client.tsx). */
 export type Nav =
   | { kind: "space"; place: string }
-  | { kind: "task"; task: string; tab?: string; chat?: string; addr?: string | null; ref?: string; title?: string; folder?: string; machine?: string | null }
-  | { kind: "tasks"; filter?: string; search?: string }
-  | { kind: "panel"; panel: "artifacts" | "files" | "changes" | "terminal" | "chat" }
-  | { kind: "screen"; do: string; ref?: string; text?: string; direction?: string; submit?: boolean; find?: string; confirmed?: boolean }
+  /** a space's chat (its p: key) */
+  | { kind: "chat"; chat: string }
+  /** a task, in the Tasks pane; tab: its agent's Screen beside it */
+  | { kind: "task"; task: string; tab?: "screen" | "browser" }
+  /** Tasks, Now */
+  | { kind: "tasks" }
   | { kind: "needs" }
-  | { kind: "artifact"; artifact: string; title: string; v: number; machine?: string | null }
+  /** the shown chat's or task's own views: its chat or its agent's terminal, its Screen (browser, desktop), Tasks, Artifacts */
+  | { kind: "panel"; panel: "chat" | "terminal" | "screen" | "browser" | "desktop" | "tasks" | "artifacts" }
+  | { kind: "artifact"; artifact: string }
   | { kind: "settings"; section?: string }
-  | { kind: "chat"; chat: string; addr?: string | null }
-  /** SHEP-124: the web call's own view: full screen (full) or minimized */
-  | { kind: "call"; full: boolean };
+  /** the page itself (core/screen.js) */
+  | { kind: "screen"; do: string; ref?: string; text?: string; direction?: string; submit?: boolean; find?: string; confirmed?: boolean };
 
 export type ChatRead = { status: string | null; doing?: string | null; items: { who: "you" | "agent" | "news"; text: string; at?: number }[]; earlier?: () => Promise<boolean> };
 
 export interface VoiceIO {
+  /** the snapshot the app shows (enriched: service/next.ts) */
   snap(): Snapshot | null;
   /** a chat by its key, read now (null: no such chat running) */
   chat(key: string): Promise<ChatRead | null>;
   /** a message as the person's own into a chat; throws an Error in plain words */
   send(key: string, text: string): Promise<void>;
-  /** one of the web app's actions (Action), as /api/action runs it: its answer, or throws an Error in plain words */
+  /** one of the app's actions (Action), as /api/action runs it: its answer, or throws an Error in plain words */
   action(body: Record<string, unknown>): Promise<any>;
-  /** a chat key's terminal address (the window opens a task's chat by it) */
+  /** (not used since 3.2: the page opens a chat or task by its key or id alone) */
   addrOf?(key: string): string | null;
-  /** a task's folder and machine (the window's Accept card needs them) */
   taskWhere?(id: string): { ref: string; folder: string; machine: string | null } | null;
-  /** one of the web app's other reads (voice-data.ts SOURCES), as the panel that shows it fetches it: its data, or
-   *  throws an Error in plain words */
+  /** one of the other reads (voice-data.ts SOURCES): its data, or throws an Error in plain words */
   read?(source: string, args: SourceArgs): Promise<unknown>;
 }
 
@@ -74,11 +78,13 @@ export type Answer = { result: string; nav?: Nav; shows?: string; error?: boolea
 export type Ack = { ok: boolean; why?: string | null; where?: Record<string, unknown>; did?: string; ask?: string; screen?: string };
 
 const MAX = 3500;
-const cut = (s: string, n: number) => { const t = String(s ?? "").replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t; };
+const cut = (s: unknown, n: number) => { const t = String(s ?? "").replace(/\s+/g, " ").trim(); return t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t; };
 const norm = (s: unknown) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 const words = (s: unknown) => String(s ?? "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 const HERE = new Set(["", "here", "this", "that", "it", "current", "thisone", "thatone", "thistask", "thisspace", "thischat", "me"]);
 const isHere = (id: unknown) => HERE.has(norm(id));
+/** the app's " · " between facts, as a spoken pause */
+const plain = (s: string) => s.replace(/\s*·\s*/g, ", ").replace(/…$/, "");
 /** a list said out loud: the first n, then how many more */
 function list(items: string[], n: number, what: string) {
   if (!items.length) return "";
@@ -88,51 +94,51 @@ function list(items: string[], n: number, what: string) {
 const done = (result: string, nav?: Nav, max = MAX): Answer => ({ result: result.length > max ? `${result.slice(0, max - 1)}…` : result, ...(nav ? { nav } : {}) });
 const fail = (result: string): Answer => ({ result, error: true });
 
-export const STATUS: Record<string, string> = {
-  need: "needs you", ready: "ready for review", merging: "merging", work: "working", queued: "queued", scheduled: "scheduled", todo: "to do", done: "done",
-};
-const ORDER = ["need", "ready", "work", "merging", "queued", "scheduled", "todo", "done"];
-/** "ready", "review", "needs me": a task state from the person's words */
-function stateOf(q: string): string | null {
+/** The groups of Tasks › Now and the statuses within them, from the person's words ("the ready ones", "what's stuck"). */
+type Filter = "needs" | "ready" | "stopped" | "working" | "next" | "done" | "archived";
+const FILTER_WORDS: Record<Filter, string> = { needs: "that need you", ready: "ready for review", stopped: "stopped", working: "working", next: "up next", done: "done", archived: "archived" };
+function stateOf(q: string): Filter | null {
   const w = norm(q);
   if (!w) return null;
-  if (/^(need|needs|needsyou|needsme|waiting|blocked|asking)/.test(w)) return "need";
-  if (/^(ready|review|toreview|accept)/.test(w)) return "ready";
-  if (/^(work|working|running|active|busy|inprogress)/.test(w)) return "work";
-  if (/^merg/.test(w)) return "merging";
-  if (/^queue/.test(w)) return "queued";
-  if (/^(schedul|later)/.test(w)) return "scheduled";
-  if (/^(todo|notstarted|open)/.test(w)) return "todo";
+  if (/^(ready|review|toreview|forreview)/.test(w)) return "ready";
+  if (/^(stop|stuck|crash|fail)/.test(w)) return "stopped";
+  if (/^(need|needs|needsyou|needsme|waiting|blocked|asking|ask)/.test(w)) return "needs";
+  if (/^(work|working|running|active|busy|inprogress|merging)/.test(w)) return "working";
+  if (/^(upnext|next|queue|schedul|later|todo|notstarted|open)/.test(w)) return "next";
   if (/^(done|finished|merged|closed)/.test(w)) return "done";
+  if (/^archiv/.test(w)) return "archived";
   return null;
 }
+const fits = (t: Task, f: Filter) => {
+  const s = tstate(t);
+  return f === "needs" ? s === "ask" || s === "ready" : f === "ready" ? s === "ready" : f === "stopped" ? s === "ask" && !!t.stopped : f === "working" ? s === "working" : f === "next" ? s === "next" : s === f;
+};
 
 function ago(ms: number | undefined) {
   if (!ms) return "";
   const s = Math.round((Date.now() - ms) / 1000);
-  if (s < 0) return inTime(ms);
+  if (s < 0) return "soon";
   if (s < 90) return "just now";
   if (s < 3600) return `${Math.round(s / 60)} minutes ago`;
   if (s < 86400 * 2) return `${Math.round(s / 3600)} hours ago`;
   return `${Math.round(s / 86400)} days ago`;
 }
-function inTime(ms: number) {
-  const s = Math.round((ms - Date.now()) / 1000);
-  if (s < 90) return "in a minute";
-  if (s < 3600) return `in ${Math.round(s / 60)} minutes`;
-  if (s < 86400 * 2) return `in ${Math.round(s / 3600)} hours`;
-  return `in ${Math.round(s / 86400)} days`;
-}
-/** "SHEP-45" read as "SHEP 45"; another machine's "vm:SHEP-4" by its id */
-const spoken = (id: string) => id.split(":").pop()!.replace(/-/g, " ");
 
 // ---- finding what the person means --------------------------------------------------------
 
-const placeName = (snap: Snapshot, id: string | null | undefined) => snap.places.find((p) => p.id === id)?.name ?? "";
-const taskOfChat = (snap: Snapshot, key: string) => (key.endsWith("/worker") ? snap.tasks.find((t) => t.id === key.slice(0, -7)) ?? null : null);
+/** a space as the list names it: "Everything", "#shop" */
+const label = (snap: Snapshot, id: string | null | undefined) => (id ? spaceLabel(snap, id) || snap.places.find((p) => p.id === id)?.name || "" : "");
+/** a task as it is said: by its title, never its id */
+const titled = (t: Task, n = 80) => `"${cut(t.name, n)}"`;
+/** the spaces the app lists: Everything, then every space (another machine's home folder is not one) */
+function appSpaces(snap: Snapshot): Place[] {
+  const ev = everything(snap);
+  return [...(ev ? [ev] : []), ...spacesOf(snap)];
+}
+const taskOfChat = (snap: Snapshot, key: string) => (key.endsWith("/worker") ? snap.tasks.find((t) => t.id === key.slice(0, -7)) ?? null : snap.tasks.find((t) => t.agent?.chat === key) ?? null);
 const placeOfChat = (snap: Snapshot, key: string) => snap.places.find((p) => p.chat === key) ?? null;
 
-/** the chat the screen shows: an open task's agent, else the shown space's Assistant, else the one the call started from */
+/** the chat the screen shows: an open task's, else the shown space's, else the one the call started from */
 export function screenChat(snap: Snapshot, where: Where): string | null {
   const t = where.task ? snap.tasks.find((x) => x.id === where.task) : null;
   if (t) return t.agent?.chat ?? `${t.id}/worker`;
@@ -140,36 +146,36 @@ export function screenChat(snap: Snapshot, where: Where): string | null {
   return p?.chat ?? where.call ?? null;
 }
 const callKey = (where: Where) => where.call ?? "";
+const placeHere = (snap: Snapshot, where: Where) => where.place ?? placeOfChat(snap, callKey(where))?.id ?? taskOfChat(snap, callKey(where))?.place ?? null;
 
-/** the task meant: "this" (on screen, else the call's), its id ("SHEP-45", "shep 45", "45"), or words of its title */
+const TASK_FILLER = new Set(["the", "a", "an", "task", "tasks", "one", "that", "this", "about", "called", "named", "titled", "please", "my"]);
+/** the task meant: "this" (on screen, else the call's), words of its title (all of them; the one in the space on
+ *  screen first, then the newest), or its id should the voice agent have one from the data */
 export function findTask(snap: Snapshot, id: unknown, where: Where): Task | null {
   if (isHere(id)) return (where.task ? snap.tasks.find((t) => t.id === where.task) : null) ?? taskOfChat(snap, callKey(where));
   const want = norm(id);
   const live = snap.tasks.filter((t) => !t.archived);
+  const whole = (ts: Task[]) => ts.find((t) => norm(t.name) === want);
   const byId = (ts: Task[]) => ts.find((t) => norm(t.id) === want || norm(t.id.split(":").pop()) === want);
-  const hit = byId(live) ?? byId(snap.tasks);
-  if (hit) return hit;
-  // just its number: the one in the space on screen first
-  if (/^\d+$/.test(want)) {
-    const num = live.filter((t) => t.id.split("-").pop() === want);
-    const here = where.place ?? placeOfChat(snap, callKey(where))?.id ?? taskOfChat(snap, callKey(where))?.place;
-    return num.find((t) => t.place === here) ?? (num.length === 1 ? num[0] : null);
-  }
-  const ws = words(id);
+  const exact = whole(live) ?? byId(live) ?? whole(snap.tasks) ?? byId(snap.tasks);
+  if (exact) return exact;
+  const ws = words(id).filter((w) => !TASK_FILLER.has(w));
   if (!ws.length) return null;
-  const match = (t: Task) => ws.every((w) => `${t.id} ${t.name}`.toLowerCase().includes(w));
-  return live.find(match) ?? snap.tasks.find(match) ?? null;
+  const here = placeHere(snap, where);
+  const match = (t: Task) => { const text = `${t.name} ${t.id}`.toLowerCase(); return ws.every((w) => text.includes(w)); };
+  const best = (ts: Task[]) => ts.filter(match).sort((a, b) => Number(b.place === here) - Number(a.place === here) || (b.at ?? 0) - (a.at ?? 0))[0];
+  return best(live) ?? best(snap.tasks) ?? null;
 }
 
 /** every name a machine goes by: its name, its own name, its key ("eliass-mac-mini"), and "this computer" for the one
- *  Shepherdr serves from (the Mac mini that serves calls itself "This computer", but the person says "the Mac mini") */
+ *  Shepherdr serves from */
 export function machineAliases(m: Snapshot["machines"][number]) {
   const out = [m.name, m.ownName ?? "", m.machine, ...(m.here ? ["this computer", "this machine"] : [])].filter(Boolean);
   return [...new Set(out)];
 }
-const FILLER = new Set(["the", "a", "an", "space", "spaces", "project", "on", "in", "at", "of", "my", "assistant", "s", "to", "switch", "go", "open", "show", "one", "please", "machine", "computer", "s"]);
+const FILLER = new Set(["the", "a", "an", "space", "spaces", "project", "on", "in", "at", "of", "my", "s", "to", "switch", "go", "open", "show", "one", "please", "machine", "computer", "chat", "its"]);
 const said = (s: unknown) => words(s).filter((w) => !FILLER.has(w));
-/** the machines named in the person's words, and the words left for the space: "Mac Mini Home" → the Mac mini, ["home"] */
+/** the machines named in the person's words, and the words left for the space: "Mac Mini shop" → the Mac mini, ["shop"] */
 function machinesSaid(snap: Snapshot, id: unknown) {
   const all = norm(id), ws = said(id);
   let best = 0, hits: Snapshot["machines"] = [], used = new Set<string>();
@@ -191,38 +197,42 @@ function machinesSaid(snap: Snapshot, id: unknown) {
   return { machines: hits, rest: ws.filter((w) => !used.has(w)) };
 }
 
-/** every space the person may mean: "here", its name, its id, "Home on the Mac mini", "Mac Mini Home", words of it */
+/** every space the person may mean: "here", "Everything", its name ("shop", "#shop"), "shop on the Mac mini", words of it */
 export function spacesSaid(snap: Snapshot, id: unknown, where: Where): Place[] {
   if (isHere(id)) {
-    const p = where.place ?? placeOfChat(snap, callKey(where))?.id ?? taskOfChat(snap, callKey(where))?.place;
-    const hit = snap.places.find((x) => x.id === p);
+    const hit = snap.places.find((x) => x.id === placeHere(snap, where));
     return hit ? [hit] : [];
   }
   const want = norm(id);
-  const exact = snap.places.filter((p) => norm(p.id) === want || norm(p.id.split("/").pop()) === want);
+  const ev = everything(snap);
+  if (ev && /^(everything|everythingchat|theeverythingchat|home|root|mainchat|shepherdr)$/.test(want.replace(/^the/, ""))) return [ev];
+  const all = spacesOf(snap);
+  const exact = all.filter((p) => norm(p.id) === want || norm(p.id.split("/").pop()) === want);
   if (exact.length === 1) return exact;
   const { machines, rest } = machinesSaid(snap, id);
   const on = (p: Place) => !machines.length || machines.some((m) => m.machine === p.machine);
   const named = (p: Place, ws: string[]) => {
     const name = norm(p.name), nameWords = words(p.name);
-    if (!ws.length) return !!p.home;
-    return norm(ws.join("")) === name || ws.every((w) => nameWords.some((n) => n === w || (w.length > 2 && n.startsWith(w))) || (w.length > 2 && name.includes(w)) || (w === "home" && !!p.home));
+    if (!ws.length) return false;
+    return norm(ws.join("")) === name || ws.every((w) => nameWords.some((n) => n === w || (w.length > 2 && n.startsWith(w))) || (w.length > 2 && name.includes(w)));
   };
   // a machine said and its space's name: that machine's
-  let hits = snap.places.filter((p) => on(p) && named(p, rest));
+  let hits = all.filter((p) => on(p) && named(p, rest));
   // the space's name said whole (one with a machine's word in it, "mini app")
-  if (!hits.length) hits = snap.places.filter((p) => norm(p.name) === want);
-  if (!hits.length && machines.length) hits = snap.places.filter((p) => named(p, said(id)));
+  if (!hits.length) hits = all.filter((p) => norm(p.name) === want);
+  if (!hits.length && machines.length) hits = all.filter((p) => named(p, said(id)));
   // words that name no space (a machine called otherwise than said): the space by the words that do, so it asks which
   if (!hits.length) {
-    const known = said(id).filter((w) => snap.places.some((p) => named(p, [w])));
-    if (known.length) hits = snap.places.filter((p) => on(p) && named(p, known));
-    if (!hits.length && known.length) hits = snap.places.filter((p) => named(p, known));
+    const known = said(id).filter((w) => all.some((p) => named(p, [w])));
+    if (known.length) hits = all.filter((p) => on(p) && named(p, known));
+    if (!hits.length && known.length) hits = all.filter((p) => named(p, known));
   }
   if (hits.length > 1) {
-    // the same name exactly beats words of it
+    // the same name exactly beats words of it; one in the list beats an archived one
     const whole = hits.filter((p) => norm(p.name) === norm(rest.join("")));
     if (whole.length) hits = whole;
+    const active = hits.filter((p) => !p.archived);
+    if (active.length) hits = active;
   }
   return hits;
 }
@@ -233,14 +243,8 @@ export function findSpace(snap: Snapshot, id: unknown, where: Where): Place | nu
   return hits.length === 1 ? hits[0] : null;
 }
 
-/** "Home on the Mac mini": a space as the person would say it, its machine named when the name is on more than one */
-const spaceSaid = (snap: Snapshot, p: Place) => `${p.name} on ${machineSaid(snap, p.machine)}`;
-/** a machine as the person knows it: "This computer" with its own name beside it */
-function machineSaid(snap: Snapshot, key: string | undefined) {
-  const m = snap.machines.find((x) => x.machine === key);
-  if (!m) return key ?? "";
-  return m.here && m.machine && norm(m.name) !== norm(m.machine) ? `${m.name} (${m.machine})` : m.name;
-}
+/** "#shop on mac-mini": a space with its machine, as the list's small print has it (whereWords) */
+const spaceSaid = (snap: Snapshot, p: Place) => (isEverything(snap, p.id) ? "Everything" : plain(whereWords(snap, p.id)).replace(", ", " on "));
 
 /** the artifact meant: "this" (open now), its id, or words of its title (most words first, newest first) */
 export function findArtifact(snap: Snapshot, id: unknown, where: Where) {
@@ -250,7 +254,7 @@ export function findArtifact(snap: Snapshot, id: unknown, where: Where) {
   if (exact) return exact;
   const ws = said(id).filter((w) => !["artifact", "page", "proof", "report", "the", "that", "it"].includes(w));
   if (!ws.length) return arts.find((x) => words(x.title).some((w) => words(id).includes(w))) ?? null;
-  const text = (x: any) => `${x.title} ${x.task ?? ""} ${x.by ?? ""}`.toLowerCase();
+  const text = (x: any) => `${x.title} ${snap.tasks.find((t) => t.id === x.task)?.name ?? ""} ${x.task ?? ""}`.toLowerCase();
   const score = (x: any) => ws.filter((w) => text(x).includes(w)).length;
   let best = 0, hit: (typeof arts)[number] | null = null;
   for (const a of arts) { const s = score(a); if (s > best) { best = s; hit = a; } }
@@ -258,61 +262,88 @@ export function findArtifact(snap: Snapshot, id: unknown, where: Where) {
   return hit && best * 2 >= ws.length ? hit : null;
 }
 
-/** a chat by what the person called it: "here" (the one on screen), a task (its agent's chat) or a space (its Assistant's) */
-function findChat(snap: Snapshot, id: unknown, where: Where): { key: string; name: string } | { error: string } {
-  if (isHere(id)) {
-    const key = screenChat(snap, where);
-    return key ? { key, name: chatName(snap, key) } : { error: "No chat is on screen: which space or task?" };
-  }
-  const t = findTask(snap, id, where);
-  if (t && (norm(id) === norm(t.id) || norm(id) === norm(t.id.split(":").pop()) || !findSpace(snap, id, where))) {
-    const key = t.agent?.chat;
-    return key ? { key, name: `${spoken(t.id)}'s agent` } : { error: `${spoken(t.id)} has no agent running (it is ${STATUS[t.status] ?? t.status}).` };
-  }
-  const p = findSpace(snap, id, where);
-  if (p) return { key: p.chat, name: `the ${p.name} Assistant` };
-  return { error: `I can't find a space or task called "${cut(String(id), 60)}".` };
+/** what a chat is called: "Everything", "#shop", the task "Fix the login" */
+export function chatName(snap: Snapshot, key: string) {
+  const p = placeOfChat(snap, key);
+  if (p) return label(snap, p.id) || "this chat";
+  const t = taskOfChat(snap, key);
+  return t ? `the task ${titled(t)}` : "this chat";
+}
+/** a chat as it is said after a send ("Passed it to shop."): a space's name without its "#", a task's title */
+function chatSaid(snap: Snapshot, key: string) {
+  const p = placeOfChat(snap, key);
+  if (p) return isEverything(snap, p.id) ? "Everything" : p.name;
+  const t = taskOfChat(snap, key);
+  return t ? titled(t) : "this chat";
 }
 
-export function chatName(snap: Snapshot, key: string) {
-  const t = taskOfChat(snap, key);
-  if (t) return `${spoken(t.id)}'s agent`;
-  const p = placeOfChat(snap, key);
-  return p ? `the ${p.name} Assistant` : "this chat";
+type ChatHit = { key: string; name: string; task?: Task; place?: Place };
+/** a chat by what the person called it: "here" (the one on screen), a space (its chat) or a task (its own) */
+function findChat(snap: Snapshot, id: unknown, where: Where): ChatHit | { error: string } {
+  if (isHere(id)) {
+    const key = screenChat(snap, where);
+    if (!key) return { error: "No chat is on screen: which space or task?" };
+    return { key, name: chatName(snap, key), task: taskOfChat(snap, key) ?? undefined, place: placeOfChat(snap, key) ?? undefined };
+  }
+  const p = findSpace(snap, id, where);
+  const t = findTask(snap, id, where);
+  if (t && (!p || norm(id) === norm(t.name) || norm(id) === norm(t.id))) {
+    const key = t.agent?.chat;
+    return key ? { key, name: `the task ${titled(t)}`, task: t } : { error: `${titled(t)} has no agent running: it is ${statusWord(t).word}.${tstate(t) === "next" ? " Start it first." : ""}` };
+  }
+  if (p) return { key: p.chat, name: label(snap, p.id), place: p };
+  const many = spacesSaid(snap, id, where);
+  if (many.length > 1) return { error: `Which one: ${many.slice(0, 6).map((x) => spaceSaid(snap, x)).join("; ")}? Ask the person.` };
+  return { error: `I can't find a space or task called "${cut(id, 60)}".` };
 }
 
 // ---- look ---------------------------------------------------------------------------------
 
-function taskLine(snap: Snapshot, t: Task, withPlace = true) {
-  const bits = [STATUS[t.status] ?? t.status];
-  if (t.status === "work") {
-    if (t.report?.progress != null) bits.push(`${t.report.progress}% done`);
-    if (t.left) bits.push(`${t.left} left`);
-  }
-  if (t.status === "scheduled" && t.startsAt) bits.push(`starts ${inTime(t.startsAt)}`);
-  if (t.status === "queued" && t.after?.length) bits.push(`after ${t.after.map(spoken).join(", ")}`);
-  const what = t.status === "ready" ? t.summary : t.status === "done" ? "" : t.report?.msg || t.sub;
-  const space = withPlace ? placeName(snap, t.place) : "";
-  return `${spoken(t.id)}, "${cut(t.name, 80)}"${space ? ` in ${space}` : ""}: ${bits.join(", ")}${what ? `. ${cut(what, 140)}` : ""}`;
+/** the screen of a task or a chat, as the snapshot knows it (none: idle, the person's to use) */
+const screenOf = (snap: Snapshot, key: string) => snap.screens?.[key];
+/** a step only the person can do there, still open */
+const handsOf = (snap: Snapshot, key: string) => { const h = screenOf(snap, key)?.hands; return h && !h.settled ? h.what : ""; };
+
+/** what waits in a chat, in the app's words: a question and its choices, a command to allow, a secret, a reply */
+export function askWords(n: Need): string {
+  const q = n.question;
+  if (q && q.command !== undefined) return `wants to run a command: ${cut(q.command || q.title, 160)}`;
+  if (q) return `asks: ${cut(q.title, 160)}${q.choices?.length ? ` (choices: ${q.choices.slice(0, 4).map((c) => cut(c.label, 40)).join(", ")})` : ""}`;
+  if (n.secret) return `needs the secret ${n.secret.name}${n.secret.why ? ` (${cut(n.secret.why, 100)})` : ""}: it goes in the app's masked box, never by voice`;
+  return `waits for a reply${n.text ? `: ${cut(n.text, 160)}` : ""}`;
 }
+
+/** A task in one line, as its row reads: its title, where, its status word and what it says now. */
+export function taskSaid(snap: Snapshot, t: Task, withPlace = true) {
+  const s = tstate(t), word = statusWord(t).word, line = taskLine(t);
+  // the row's second line, without the status said twice ("Stopped · it hit its limit" after "Stopped")
+  const rest = line.startsWith(word) ? line.slice(word.length).replace(/^[\s·…]+/, "") : line.startsWith(word.split(" · ")[0]) ? "" : line;
+  const what = s === "ready" ? t.summary ?? "" : handsOf(snap, `task:${t.id}`) ? `Needs your hands: ${handsOf(snap, `task:${t.id}`)}` : rest;
+  const when = taskWhen(t);
+  const time = !when || when === "now" ? "" : s === "working" ? `, ${when}` : s === "ask" || s === "ready" ? `, for ${when}` : "";
+  const space = withPlace ? label(snap, t.place) : "";
+  return `${titled(t)}${space ? ` in ${space}` : ""}: ${plain(word)}${time}${what ? `. ${cut(plain(what), 140)}` : ""}`;
+}
+
+const PANES: Record<string, string> = { tasks: "Tasks", artifacts: "Artifacts", screen: "Screen", terminal: "your terminal" };
 
 /** Where the call is and what the app shows, in words (look here, and the call's opening). */
 export function lookHere(snap: Snapshot, where: Where) {
-  const from = where.client === "web" ? `the web app${where.device ? ` on a ${where.device}` : ""}` : `the Herdr window${where.machine ? ` on ${where.machine}` : ""}`;
-  const out = [`The call runs in ${from}. It is with Shepherdr, not one agent.`];
+  const out = [`The call runs in the Shepherdr app${where.device ? ` on a ${where.device}` : ""}. It is with Shepherdr, not one agent.`];
   const shows: string[] = [];
   if (where.settings) shows.push("Settings");
   const t = where.task ? snap.tasks.find((x) => x.id === where.task) : null;
-  if (t) shows.push(`task ${spoken(t.id)}, "${cut(t.name, 80)}" (${STATUS[t.status] ?? t.status})${where.tab && where.tab !== "chat" ? `, its ${where.tab} tab` : ""}`);
+  if (t) shows.push(`the task ${titled(t)} (${plain(statusWord(t).word)})${where.tab === "screen" ? " and its Screen" : ""}`);
   const p = where.place ? snap.places.find((x) => x.id === where.place) : null;
-  if (p) shows.push(`${t ? "in " : ""}the ${p.name} space on ${machineSaid(snap, p.machine)}`);
+  if (p) shows.push(`${t ? "in " : ""}${isEverything(snap, p.id) ? "Everything" : `the space ${spaceSaid(snap, p)}`}`);
   const a = where.artifact ? snap.artifacts.find((x) => x.id === where.artifact) : null;
   if (a) shows.push(`the artifact "${cut(a.title, 80)}"`);
+  if (where.tab && !t && !a && PANES[where.tab]) shows.push(where.tab === "screen" ? "its agent's Screen" : PANES[where.tab]);
   if (shows.length) out.push(`The app shows ${shows.join(", ")}.`);
   if (where.locked === true) out.push("The person is on their phone with it locked: the app is not on its screen, but you can do all you can do unlocked.");
-  if (where.client === "web" && typeof where.full === "boolean" && where.locked !== true) out.push(where.full ? "The call fills the screen (full screen) over the app." : "The call is minimized: the app shows.");
-  const need = snap.needs.length, ready = snap.tasks.filter((x) => x.status === "ready" && !x.archived).length, work = snap.tasks.filter((x) => x.status === "work" && !x.archived).length;
-  out.push(`Overall: ${need} waiting on the person, ${ready} ready for review, ${work} working.`);
+  const live = snap.tasks.filter((x) => !x.archived);
+  const n = needsCount(snap), ready = live.filter((x) => tstate(x) === "ready").length, work = live.filter((x) => tstate(x) === "working").length;
+  out.push(`Overall: ${n} ${n === 1 ? "needs" : "need"} the person${ready ? ` (${ready} ready for review)` : ""}, ${work} working.`);
   return out.join(" ");
 }
 
@@ -338,35 +369,39 @@ async function lookChat(io: VoiceIO, snap: Snapshot, where: Where, id: unknown, 
   let last = read.items.slice(-count);
   const size = (xs: typeof last) => xs.filter((x) => x !== newest).map(line).join("\n").length;
   while (last.length > 1 && size(last) > MAX - 200) last = last.slice(1);
-  return done(`${c.name} is ${st}.${last.length ? `\nIts last ${last.length} message${last.length === 1 ? "" : "s"}, oldest first:\n${last.map(line).join("\n")}` : " Its chat is empty."}`, undefined, MAX + REPLY_MAX);
+  return done(`The agent in ${c.name} is ${st}.${last.length ? `\nIts last ${last.length} message${last.length === 1 ? "" : "s"}, oldest first:\n${last.map(line).join("\n")}` : " Its chat is empty."}`, undefined, MAX + REPLY_MAX);
 }
 
 function lookSpaces(snap: Snapshot) {
   const out: string[] = [];
-  for (const m of snap.machines) {
-    const mine = snap.places.filter((p) => p.machine === m.machine);
-    if (!mine.length) continue;
-    const rows = mine.map((p) => {
-      const ts = snap.tasks.filter((t) => t.place === p.id && !t.archived);
-      const n = (s: string) => ts.filter((t) => t.status === s).length;
-      const bits = [p.mode === "autopilot" || p.pilot?.on ? "Autopilot on" : "", n("need") ? `${n("need")} need you` : "", n("ready") ? `${n("ready")} ready` : "", n("work") ? `${n("work")} working` : ""].filter(Boolean);
-      return `${p.name}${p.home ? " (home)" : ""}${bits.length ? `: ${bits.join(", ")}` : ""}`;
-    });
-    out.push(`On ${machineSaid(snap, m.machine)}${m.status === "off" ? " (offline)" : ""}: ${rows.join("; ")}.`);
+  const counts = (id: string) => {
+    const n = needsCount(snap, id), w = snap.tasks.filter((t) => t.place === id && tstate(t) === "working").length;
+    return [n ? `${n} ${n === 1 ? "needs" : "need"} you` : "", w ? `${w} working` : ""].filter(Boolean).join(", ");
+  };
+  const ev = everything(snap);
+  if (ev) { const n = needsCount(snap); out.push(`Everything, the root chat${n ? `: ${n} ${n === 1 ? "needs" : "need"} you in all` : ""}.`); }
+  for (const m of listOf(snap, "Active")) {
+    const rows = [...m.groups.flatMap((g) => g.spaces), ...m.spaces].map((p) => `#${p.name}${counts(p.id) ? `: ${counts(p.id)}` : ""}`);
+    if (rows.length) out.push(`On ${m.machine.name}${unreachable(m.machine) ? " (can't reach it)" : ""}: ${rows.join("; ")}.`);
   }
+  const arch = spacesOf(snap).filter((p) => p.archived);
+  if (arch.length) out.push(`Archived: ${arch.slice(0, 8).map((p) => `#${p.name}`).join(", ")}.`);
   return done(out.join("\n") || "No spaces yet.");
 }
 
 function lookMachines(snap: Snapshot) {
-  return done(snap.machines.map((m) => {
-    const sp = snap.places.filter((p) => p.machine === m.machine).length;
-    const work = snap.tasks.filter((t) => !t.archived && t.status === "work" && snap.places.find((p) => p.id === t.place)?.machine === m.machine).length;
+  const rows = snap.machines.map((m) => {
+    const sp = spacesOf(snap).filter((p) => p.machine === m.machine && !p.archived).length;
+    const work = snap.tasks.filter((t) => tstate(t) === "working" && snap.places.find((p) => p.id === t.place)?.machine === m.machine).length;
     const plans = planWords((m as any).stats);
-    return `${machineSaid(snap, m.machine)}${m.here ? " (where Shepherdr serves from)" : ""}: ${m.status === "off" ? `offline${m.unreachableSince ? ` since ${m.unreachableSince}` : ""}` : m.connecting ? "connecting" : "online"}, ${sp} space${sp === 1 ? "" : "s"}, ${work} task${work === 1 ? "" : "s"} working.${plans ? ` ${plans}` : ""}`;
-  }).join("\n") || "No machines.");
+    const warn = machineWarn(m);
+    return `${m.name}${m.here ? " (serves Shepherdr)" : ""}: ${unreachable(m) ? `can't reach it${m.unreachableSince ? `, last seen ${m.unreachableSince}` : ""}` : m.connecting ? "connecting" : "online"}, ${sp} space${sp === 1 ? "" : "s"}, ${work} task${work === 1 ? "" : "s"} working.${warn && !unreachable(m) ? ` ${warn}.` : ""}${plans ? ` ${plans}` : ""}`;
+  });
+  const warns = (snap.warnings ?? []).map((w) => plain(w.text));
+  return done((rows.join("\n") || "No machines.") + (warns.length ? `\nWarnings: ${warns.join("; ")}.` : ""));
 }
 
-/** a machine's health and its agent plans' limits, as its machine popup words them (core/machines.js) */
+/** a machine's health and its agent plans' limits, as Settings › Machines and Usage word them (core/machines.js) */
 export function planWords(stats: any, now = Date.now()) {
   if (!stats) return "";
   const out: string[] = [];
@@ -383,164 +418,176 @@ export function planWords(stats: any, now = Date.now()) {
 }
 
 function lookTasks(snap: Snapshot, where: Where, id: unknown, query: string, count: number) {
-  let ts = snap.tasks.filter((t) => !t.archived);
+  let ts = snap.tasks;
   let scope = "";
   if (id) {
-    const m = snap.machines.find((x) => norm(x.name) === norm(id) || norm(x.machine) === norm(id));
+    const m = snap.machines.find((x) => machineAliases(x).some((a) => norm(a) === norm(id)));
     const p = m ? null : findSpace(snap, id, where);
     if (m) { ts = ts.filter((t) => snap.places.find((p) => p.id === t.place)?.machine === m.machine); scope = ` on ${m.name}`; }
-    else if (p) { ts = ts.filter((t) => t.place === p.id); scope = ` in ${p.name}`; }
-    else return fail(`I can't find a space or machine called "${cut(String(id), 60)}".`);
+    else if (p && !isEverything(snap, p.id)) { ts = ts.filter((t) => t.place === p.id); scope = ` in ${label(snap, p.id)}`; }
+    else if (!p) return fail(`I can't find a space or machine called "${cut(id, 60)}".`);
   }
   const st = stateOf(query);
-  if (st) ts = ts.filter((t) => t.status === st);
-  else if (query) { const ws = words(query); ts = ts.filter((t) => ws.every((w) => `${t.id} ${t.name} ${t.sub ?? ""} ${t.summary ?? ""}`.toLowerCase().includes(w))); }
-  else ts = ts.filter((t) => t.status !== "done");
-  ts.sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status) || (b.at ?? 0) - (a.at ?? 0));
-  if (!ts.length) return done(`No ${st ? `${STATUS[st]} ` : ""}tasks${scope}${query && !st ? ` matching "${cut(query, 60)}"` : ""}.`);
-  const counts = ORDER.map((s) => [s, ts.filter((t) => t.status === s).length] as const).filter(([, n]) => n).map(([s, n]) => `${n} ${STATUS[s]}`).join(", ");
-  return done(`${ts.length} task${ts.length === 1 ? "" : "s"}${scope}: ${counts}.\n${list(ts.map((t) => taskLine(snap, t, !scope)), count, "tasks")}`);
+  if (st) ts = ts.filter((t) => fits(t, st));
+  else if (query) { const ws = words(query); ts = ts.filter((t) => !t.archived && ws.every((w) => `${t.name} ${t.sub ?? ""} ${t.summary ?? ""}`.toLowerCase().includes(w))); }
+  else ts = ts.filter((t) => !["done", "archived"].includes(tstate(t)));
+  if (!ts.length) return done(`No tasks${st ? ` ${FILTER_WORDS[st]}` : ""}${scope}${query && !st ? ` matching "${cut(query, 60)}"` : ""}.`);
+  // in the order of Tasks › Now: Needs you, Working, Up next, Done
+  const groups = nowGroups(ts).filter((g) => g.tasks.length);
+  const counts = groups.map((g) => `${g.tasks.length} ${g.name === "Needs you" ? (g.tasks.length === 1 ? "needs you" : "need you") : g.name.toLowerCase()}`).join(", ");
+  return done(`${ts.length} task${ts.length === 1 ? "" : "s"}${scope}: ${counts}.\n${list(groups.flatMap((g) => g.tasks).map((t) => taskSaid(snap, t, !scope)), count, "tasks")}`);
 }
 
 async function lookTask(io: VoiceIO, snap: Snapshot, where: Where, id: unknown) {
   const t = findTask(snap, id, where);
-  if (!t) return fail(isHere(id) ? "No task is on screen or on this call: which one?" : `I can't find task "${cut(String(id), 60)}".`);
-  const out = [`${spoken(t.id)}, "${cut(t.name, 120)}", in ${placeName(snap, t.place) || "no space"}: ${STATUS[t.status] ?? t.status}${t.archived ? " (archived)" : ""}.`];
-  if (t.status === "work" || t.status === "need") {
-    if (t.report?.msg) out.push(`Its status: ${cut(t.report.msg, 120)}${t.report.progress != null ? `, ${t.report.progress}% done` : ""}${t.left ? `, ${t.left} left` : ""}.`);
-    const need = snap.needs.find((n) => n.task === t.id);
-    if (need) out.push(`It waits for: ${cut(need.question?.title ?? need.secret?.name ?? need.text ?? "an answer", 200)}.`);
-  }
-  if (t.status === "queued" && t.after?.length) out.push(`It waits for ${t.after.map(spoken).join(", ")}.`);
-  if (t.status === "scheduled" && t.startsAt) out.push(`It starts ${inTime(t.startsAt)}.`);
+  if (!t) return fail(isHere(id) ? "No task is on screen or on this call: which one?" : `I can't find a task called "${cut(id, 60)}".`);
+  const s = tstate(t), p = snap.places.find((x) => x.id === t.place);
+  const out = [`${titled(t, 120)} in ${p ? spaceSaid(snap, p) : "no space"}: ${plain(taskLine(t) || statusWord(t).word)}.`];
+  if (s === "archived") out.push("It is archived.");
+  const need = snap.needs.find((n) => n.task === t.id);
+  if (s === "ask" && need && (need.question || need.secret)) out.push(`It ${askWords(need)}.`);
+  const hands = handsOf(snap, `task:${t.id}`);
+  if (hands) out.push(`It needs your hands on its Screen: ${cut(hands, 160)}.`);
+  else if (screenOf(snap, `task:${t.id}`)?.active) out.push(`Its agent is using its Screen now${screenOf(snap, `task:${t.id}`)?.driver === "you" ? " (you took over)" : ""}.`);
+  if (s === "working" && taskWhen(t)) out.push(`About ${taskWhen(t)}.`);
+  if (t.afterTitle && s === "next") out.push(`It starts after "${cut(t.afterTitle, 80)}".`);
+  if (t.schedule) out.push("It is a run of a schedule.");
   if (t.summary) out.push(`Its summary: ${cut(t.summary, 300)}`);
   if (t.details) out.push(`Details: ${cut(t.details, 600)}`);
-  if (t.pr) out.push(`Pull request number ${t.pr.number}.`);
-  if (t.facts) out.push(cut(t.facts, 300));
-  if (t.status === "ready") {
-    // what the Accept card shows: checks and proof, from Git and GitHub (never the agent's own words)
+  if (s === "ready") {
+    out.push(onBranch(t) ? "It is on its own branch: Mark as done and merge." : t.repo === "folder" ? "It changed the folder itself, no branch: Mark as done, nothing to merge." : "Mark as done when you are happy with it; Not now leaves it here.");
+    if (t.mergeFailed) out.push(`The last merge failed: ${cut(t.mergeFailed, 160)}.`);
+    // what its review card shows: files changed, checks and proof, from Git and GitHub (never the agent's own words)
     const ev = await Promise.race([io.action({ type: "evidence", task: t.id }).catch(() => null), new Promise((r) => setTimeout(() => r(null), 8000))]) as any;
-    const said = evidenceWords(ev);
-    if (said) out.push(said);
+    const words = evidenceWords(ev);
+    if (words) out.push(words);
   }
-  if (!t.summary && t.desc) out.push(`Its brief starts: ${cut(t.desc, 300)}`);
-  if (t.started) out.push(`Started ${ago(t.started)}.`);
+  if (!t.summary && t.desc && s !== "done") out.push(`Its brief starts: ${cut(t.desc, 300)}`);
+  if (t.started && s !== "next") out.push(`Started ${ago(t.started)}.`);
   if (t.doneAt) out.push(`Finished ${ago(t.doneAt)}.`);
   return done(out.join("\n"));
 }
 
-/** herdr-task show --evidence, in a few words: commits and files, checks, proof */
-export function evidenceWords(ev: any) {
+/** a task's review card in a few words: files changed, checks, proof (herdr-task show --evidence, either shape) */
+export function evidenceWords(got: any) {
+  const ev = got?.evidence ?? got;
   if (!ev || typeof ev !== "object") return "";
   const out: string[] = [];
-  const commits = Array.isArray(ev.commits) ? ev.commits.length : null, files = Array.isArray(ev.files) ? ev.files.length : null;
-  if (commits != null || files != null) out.push(`Changes: ${commits ?? "?"} commit${commits === 1 ? "" : "s"}${files != null ? `, ${files} file${files === 1 ? "" : "s"}` : ""}.`);
+  const files = typeof ev.diff?.files === "number" ? ev.diff.files : Array.isArray(ev.diff?.list) ? ev.diff.list.length : Array.isArray(ev.files) ? ev.files.length : null;
+  if (files != null) out.push(`${files} file${files === 1 ? "" : "s"} changed.`);
   const checks = ev.checks ?? ev.pr?.checks;
   if (Array.isArray(checks) && checks.length) {
     const bad = checks.filter((c: any) => /fail|error|cancel/i.test(String(c.conclusion ?? c.state ?? c.status ?? "")));
     const wait = checks.filter((c: any) => /pending|progress|queued|expected/i.test(String(c.conclusion ?? c.state ?? c.status ?? "")));
     out.push(bad.length ? `Checks: ${bad.length} failed (${bad.slice(0, 3).map((c: any) => cut(c.name ?? "", 40)).join(", ")}).` : wait.length ? `Checks: ${wait.length} still running.` : `Checks: all ${checks.length} passed.`);
+  } else if (checks && typeof checks === "object" && typeof checks.state === "string") {
+    if (checks.state === "passed") out.push("Checks passed.");
+    else if (checks.state === "failed") out.push(`Checks failed${checks.text ? `: ${cut(checks.text, 100)}` : ""}.`);
+    else if (checks.state === "running") out.push("Checks are still running.");
   } else if (typeof checks === "string") out.push(`Checks: ${cut(checks, 100)}.`);
   const proof = ev.proof ?? ev.artifact;
-  if (proof) out.push(`It has a proof page${typeof proof === "object" && proof.title ? `, "${cut(proof.title, 80)}"` : ""}.`);
+  if (proof) out.push(`It has a proof${typeof proof === "object" && proof.title ? `, "${cut(proof.title, 80)}"` : ""}.`);
   return out.join(" ");
 }
 
+/** Everything that waits on the person, as Tasks › Needs you and the chats' own asks show it. */
 function lookNeeds(snap: Snapshot) {
-  const out = snap.needs.map((n) => {
-    const who = n.task ? spoken(n.task) : `the ${placeName(snap, n.place) || "space"} Assistant`;
-    if (n.question) return `${who} asks: ${cut(n.question.title, 160)}${n.question.choices?.length ? ` (choices: ${n.question.choices.slice(0, 4).map((c) => cut(c.label, 40)).join(", ")})` : ""}`;
-    if (n.secret) return `${who} needs the secret ${n.secret.name}${n.secret.why ? `: ${cut(n.secret.why, 100)}` : ""}. It goes in the app's masked box, not by voice.`;
-    return `${who} waits: ${cut(n.text ?? "for an answer", 160)}`;
-  });
-  const ready = snap.tasks.filter((t) => t.status === "ready" && !t.archived).map((t) => `${spoken(t.id)}, "${cut(t.name, 80)}", is ready for review${t.summary ? `: ${cut(t.summary, 140)}` : ""}`);
-  if (!out.length && !ready.length) return done("Nothing waits on the person right now.");
-  return done(list([...out, ...ready], 10, "things"));
+  const rows: string[] = [];
+  const told = new Set<Need>();
+  for (const t of snap.tasks.filter((x) => ["ask", "ready"].includes(tstate(x)))) {
+    const n = snap.needs.find((x) => x.task === t.id && (x.question || x.secret));
+    if (n) told.add(n);
+    for (const x of snap.needs) if (x.task === t.id) told.add(x);
+    rows.push(n ? `${titled(t)} in ${label(snap, t.place)} ${askWords(n)}` : taskSaid(snap, t));
+  }
+  for (const n of snap.needs) if (!told.has(n) && !n.task) { told.add(n); rows.push(`${label(snap, n.place) || "A chat"} ${askWords(n)}`); }
+  for (const p of appSpaces(snap)) {
+    const hands = handsOf(snap, `chat:${p.id}`);
+    if (hands) rows.push(`${label(snap, p.id)} needs your hands on its Screen: ${cut(hands, 140)}`);
+    else if (p.needs && !snap.needs.some((n) => !n.task && n.place === p.id)) rows.push(`${label(snap, p.id)} waits for the person in its chat`);
+  }
+  if (!rows.length) return done("Nothing needs the person right now.");
+  return done(`${rows.length} ${rows.length === 1 ? "needs" : "need"} the person:\n${list(rows, 10, "things")}`);
 }
 
 function lookNews(snap: Snapshot, count: number) {
   const items: { at: number; text: string }[] = [];
-  for (const a of snap.alerts ?? []) items.push({ at: a.at, text: `Alert, ${cut(a.title, 80)}: ${cut(a.body, 140)}` });
-  for (const t of snap.tasks) {
-    if (t.archived || !t.at) continue;
-    items.push({ at: t.at, text: `${spoken(t.id)}, "${cut(t.name, 70)}", ${t.status === "done" ? "was done" : t.status === "ready" ? "became ready for review" : t.status === "work" ? "is working" : `is ${STATUS[t.status] ?? t.status}`}` });
-  }
+  for (const a of snap.alerts ?? []) items.push({ at: a.at, text: `Alert, ${cut(a.title.replace(/^[A-Z][A-Z0-9]*-\d+\s*·\s*/, ""), 80)}: ${cut(a.body, 140)}` });
+  for (const t of snap.tasks) if (!t.archived && t.at) items.push({ at: t.at, text: taskSaid(snap, t) });
   items.sort((a, b) => b.at - a.at);
-  if (!items.length) return done("No news.");
-  return done(`Latest first:\n${items.slice(0, count).map((x) => `${ago(x.at)}: ${x.text}.`).join("\n")}`);
+  const warns = (snap.warnings ?? []).map((w) => plain(w.text));
+  if (!items.length && !warns.length) return done("No news.");
+  return done(`${warns.length ? `Warnings: ${warns.join("; ")}.\n` : ""}${items.length ? `Latest first:\n${items.slice(0, count).map((x) => `${ago(x.at)}: ${x.text}.`).join("\n")}` : ""}`.trim());
 }
 
-function pilotLine(snap: Snapshot, p: Place) {
-  const a = p.pilot;
-  const on = a?.on ?? p.mode === "autopilot";
-  if (!on) return `${p.name}: Autopilot off.`;
-  const bits = [a?.inflight ? "waking now" : a?.pending ? "queued to wake" : a?.next_run ? `next wake ${inTime(a.next_run * (a.next_run < 1e12 ? 1000 : 1))}` : "", a?.blank ? "its heartbeat is still empty" : ""].filter(Boolean);
-  const last = a?.events?.length ? ` Latest: ${cut(a.events[a.events.length - 1], 140)}.` : "";
-  return `${p.name}: Autopilot on${bits.length ? `, ${bits.join(", ")}` : ""}.${last}`;
-}
-
-function lookAutopilot(snap: Snapshot, where: Where, id: unknown) {
-  if (id) {
-    const p = findSpace(snap, id, where);
-    if (!p) return fail(`I can't find a space called "${cut(String(id), 60)}".`);
-    return done(pilotLine(snap, p));
-  }
-  const on = snap.places.filter((p) => p.pilot?.on || p.mode === "autopilot");
-  return done(on.length ? `Autopilot is on in ${on.length} space${on.length === 1 ? "" : "s"}:\n${on.map((p) => pilotLine(snap, p)).join("\n")}` : "Autopilot is off in every space.");
-}
-
-function lookAutomations(snap: Snapshot, where: Where, id: unknown) {
+function lookSchedules(snap: Snapshot, where: Where, id: unknown) {
   const p = id ? findSpace(snap, id, where) : null;
-  if (id && !p) return fail(`I can't find a space called "${cut(String(id), 60)}".`);
-  const rows: string[] = [];
-  for (const [place, autos] of Object.entries(snap.automations ?? {})) {
-    if (p && place !== p.id) continue;
-    for (const a of autos) rows.push(`${a.name}${p ? "" : ` (${placeName(snap, place)})`}: ${a.on ? "" : "paused, "}${cut(a.when, 80)}, adds "${cut(a.what, 80)}"${a.on && a.next?.[0] ? `, next ${a.next[0]}` : ""}${a.error ? `. Its last run failed: ${cut(a.error, 100)}` : ""}.`);
-  }
-  return done(rows.length ? list(rows, 12, "automations") : `No automations${p ? ` in ${p.name}` : ""}.`);
+  if (id && !p) return fail(`I can't find a space called "${cut(id, 60)}".`);
+  const all = !p || isEverything(snap, p.id);
+  const rows = schedulesOf(snap, p?.id).map((a) => `"${cut(a.name, 80)}"${all ? ` in ${label(snap, a.place) || "Everything"}` : ""}: ${plain(scheduleLine(a))}${a.last ? `; last run ${plain(a.last)}` : ""}${a.error ? `. It didn't run as planned: ${cut(a.error, 100)}` : ""}.`);
+  return done(rows.length ? list(rows, 12, "schedules") : `No schedules${all ? "" : ` in ${label(snap, p!.id)}`}.`);
 }
 
-/** Settings' rows at a level (all: Everywhere's; a space's id), what each is set to */
-function settingRows(snap: Snapshot, level: string) {
-  return (snap.settings ?? []).filter((s) => s.name !== "Secrets" && (s.global || (s.level ?? "all") === level))
-    .flatMap((s) => s.rows.filter((r) => r.key && !r.button && !(r as any).hidden).map((r) => ({ section: s.name, row: r, level: s.level ?? "all" })));
-}
+const MERGE_WORDS: Record<string, string> = { done: "When I mark it as done", checks: "When checks pass", now: "Right away" };
+const pickSaid = (p: AgentPick | undefined) => (p ? [p.agent, p.model, p.effort, p.fast === "ultrafast" ? "ultrafast" : p.fast ? "fast" : ""].filter(Boolean).join(", ") : "its own default");
+const onOff = (v: unknown) => (v ? "on" : "off");
 
+/** Settings as its pages show them: everything's values, or a space's own on top (the rest are Everything's). */
 function lookSettings(snap: Snapshot, where: Where, id: unknown, query: string) {
+  const c = snap.config;
+  if (!c) return fail("Settings can't be read right now.");
   const p = id ? findSpace(snap, id, where) : null;
-  if (id && !p) return fail(`I can't find a space called "${cut(String(id), 60)}".`);
-  let rows = settingRows(snap, p?.id ?? "all");
+  if (id && !p) return fail(`I can't find a space called "${cut(id, 60)}".`);
+  const own = p && !isEverything(snap, p.id) ? c.spaces[p.id] : null;
+  const space = p && !isEverything(snap, p.id) ? p : null;
+  const lv = own ?? c.all;
+  const mark = (k: string) => (space ? (own?.own.includes(k) ? " (its own)" : " (as everywhere)") : "");
+  let rows = [
+    ...(["Chats", "Tasks", "Reviews"] as const).map((r) => `Agents › ${r} run on ${pickSaid(lv.agents?.[r])}${mark(`agents.${r}`)}`),
+    `Tasks › Review by a second agent: ${onOff(lv.review)}${mark("review")}`,
+    `Tasks › Merge: ${MERGE_WORDS[lv.merge] ?? lv.merge}${mark("merge")}`,
+    `Tasks › Proof: ${onOff(lv.proof)}${mark("proof")}`,
+    `Instructions: ${space ? (own?.own.includes("instructions") && own.instructions ? cut(own.instructions, 300) : "none of its own") : c.all.instructions ? cut(c.all.instructions, 300) : "none"}`,
+    ...(space ? [] : [
+      `Plugins: ${c.plugins.map((x) => `${x.name} ${x.always ? "always on" : onOff(x.on)}`).join(", ")}`,
+      `Usage: ${c.plans.length ? c.plans.map((pl) => `${pl.name}: ${pl.windows.map((w) => `${w.name} ${w.used}% used${w.resets ? `, ${w.resets[0].toLowerCase()}${w.resets.slice(1)}` : ""}`).join("; ")}`).join(". ") : "no plan usage read yet"}`,
+      `Secrets: ${c.secrets.length} kept (look secrets for their names)`,
+      `Machines: ${snap.machines.map((m) => m.name).join(", ")}`,
+    ]),
+  ];
   const ws = words(query);
-  if (ws.length) rows = rows.filter((x) => ws.every((w) => `${x.section} ${x.row.label} ${x.row.key}`.toLowerCase().includes(w)));
-  if (!rows.length) return done(`No settings${query ? ` about "${cut(query, 60)}"` : ""}${p ? ` for ${p.name}` : ""}.`);
-  const say = (x: (typeof rows)[number]) => `${x.section} › ${x.row.label}: ${cut(x.row.value || "default", 80)}${x.row.options?.length && x.row.options.length <= 6 ? ` (choices: ${x.row.options.join(", ")})` : ""}`;
-  return done(`${p ? `${p.name}'s` : "Everywhere's"} settings${query ? ` about "${cut(query, 40)}"` : ""}:\n${list(rows.map(say), ws.length ? 15 : 25, "settings: ask about one")}`);
+  if (ws.length) rows = rows.filter((r) => ws.every((w) => r.toLowerCase().includes(w)));
+  if (!rows.length) return done(`No settings about "${cut(query, 60)}"${space ? ` for ${label(snap, space.id)}` : ""}. Its pages: ${SETTINGS.join(", ")}.`);
+  return done(`${space ? `${label(snap, space.id)}'s settings` : "Settings, for every space"}${query ? ` about "${cut(query, 40)}"` : ""}:\n${rows.join("\n")}`);
 }
-
-type Kept = { name: string; scope: string; machine?: string | null; space?: string | null; where?: string };
-const vaultOf = (snap: Snapshot): Kept[] => ((snap.settings ?? []).find((s) => s.name === "Secrets" && (s as any).vault) as any)?.vault ?? [];
 
 function lookSecrets(snap: Snapshot) {
-  const v = vaultOf(snap);
-  if (!v.length) return done("No secrets are kept yet.");
-  return done(`${v.length} secret${v.length === 1 ? "" : "s"} kept (names only, values are never read out):\n${list(v.map((e) => `${e.name}, ${e.where ?? e.scope}`), 20, "secrets")}`);
+  const c = snap.config;
+  if (!c) return fail("Secrets can't be read right now.");
+  if (!c.secrets.length) return done("No secrets are kept yet.");
+  return done(`${c.secrets.length} secret${c.secrets.length === 1 ? "" : "s"} kept (names only, values are never read out):\n${list(c.secrets.map((e) => `${e.name}, ${e.scope === "all" ? "every space" : `only ${label(snap, e.scope) || "one space"}`}`), 20, "secrets")}`);
 }
 
-function lookArtifacts(snap: Snapshot, where: Where, query: string, count: number) {
-  let arts = [...(snap.artifacts ?? [])].sort((a, b) => b.at - a.at);
+function lookArtifacts(snap: Snapshot, where: Where, id: unknown, query: string, count: number) {
+  const p = id ? findSpace(snap, id, where) : null;
+  if (id && !p) return fail(`I can't find a space called "${cut(id, 60)}".`);
+  const ev = everything(snap);
   const ws = words(query);
-  if (ws.length) arts = arts.filter((a) => ws.every((w) => `${a.title} ${(a as any).task ?? ""} ${placeName(snap, a.place)}`.toLowerCase().includes(w)));
-  if (!arts.length) return done(`No artifacts${query ? ` about "${cut(query, 60)}"` : ""}.`);
-  return done(list(arts.map((a) => `"${cut(a.title, 90)}"${placeName(snap, a.place) ? ` in ${placeName(snap, a.place)}` : ""}, ${ago(a.at)}${(a as any).by ? ` by ${(a as any).by}` : ""}`), count, "artifacts"));
+  // the Artifacts list: things made to keep (a task's proof stays on its task); a search finds proofs too
+  let arts = ws.length ? [...(snap.artifacts ?? [])].sort((a, b) => b.at - a.at).filter((a) => !p || isEverything(snap, p.id) || a.place === p.id)
+    : p || ev ? artifactsIn(snap, (p ?? ev)!.id) : [...(snap.artifacts ?? [])].sort((a, b) => b.at - a.at);
+  if (ws.length) arts = arts.filter((a) => ws.every((w) => `${a.title} ${snap.tasks.find((t) => t.id === a.task)?.name ?? ""} ${snap.places.find((x) => x.id === a.place)?.name ?? ""}`.toLowerCase().includes(w)));
+  if (!arts.length) return done(`No artifacts${query ? ` about "${cut(query, 60)}"` : ""}${p && !isEverything(snap, p.id) ? ` in ${label(snap, p.id)}` : ""}.`);
+  return done(list(arts.map((a) => `"${cut(a.title, 90)}"${label(snap, a.place) ? ` in ${label(snap, a.place)}` : ""}, ${ago(a.at)}${a.pinned ? ", pinned" : ""}${a.proof ? ", a task's proof" : ""}`), count, "artifacts"));
 }
 
-// ---- data: everything the UI shows (voice-data.ts) ----------------------------------------
+// ---- data: everything the app shows (voice-data.ts) ---------------------------------------
 
 /** What look data's top shows: the snapshot's every part, then the other sources. */
 function dataTop(snap: Snapshot) {
   const parts = Object.entries(snap as any).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}: ${Array.isArray(v) ? `${v.length} items` : v && typeof v === "object" ? `{${Object.keys(v).slice(0, 8).join(", ")}${Object.keys(v).length > 8 ? ", …" : ""}}` : JSON.stringify(v)}`);
   const src = Object.entries(SOURCES).map(([k, s]) => `${k}${s.arg ? ` (id: ${s.arg.replace(/-/g, " ")})` : ""}: ${s.about}`);
-  return `Everything the app shows. path a part, then any key, item id or name ("machines/mini/stats/limits"), or query words to search it all.\nThe app's live data:\n${parts.join("\n")}\nRead when a panel opens (path its name):\n${src.join("\n")}`;
+  return `Everything the app shows. path a part, then any key, item id or name ("machines/mini/stats/limits"), or query words to search it all.\nThe app's live data:\n${parts.join("\n")}\nRead on demand (path its name):\n${src.join("\n")}`;
 }
 
 /** what a source is about, from the look's id: a task, a space, a chat... ("here": what is on screen) */
@@ -548,20 +595,18 @@ function sourceArgs(snap: Snapshot, where: Where, kind: string | undefined, id: 
   if (!kind) return {};
   if (kind === "task" || kind === "task-or-space") {
     const t = findTask(snap, id, where);
-    const exact = t && (isHere(id) || norm(id) === norm(t.id) || norm(id) === norm(t.id.split(":").pop()));
+    const exact = t && (isHere(id) || norm(id) === norm(t.name) || norm(id) === norm(t.id) || norm(id) === norm(t.id.split(":").pop()));
     if (t && (kind === "task" || exact)) return { task: t.id };
     if (kind === "task-or-space") { const p = findSpace(snap, id, where); if (p) return { place: p.id }; if (t) return { task: t.id }; }
-    return { error: isHere(id) ? "Which task? Say its id." : `I can't find ${kind === "task" ? "task" : "a task or space"} "${cut(id, 60)}".` };
+    return { error: isHere(id) ? "Which task? Say its title." : `I can't find ${kind === "task" ? "a task" : "a task or space"} called "${cut(id, 60)}".` };
   }
   if (kind === "space") { const p = findSpace(snap, id, where); return p ? { place: p.id } : { error: `Which space? I can't find "${cut(id, 60)}".` }; }
   if (kind === "chat") { const c = findChat(snap, id || "here", where); return "error" in c ? c : { chat: c.key }; }
-  if (kind === "artifact") { const a = findArtifact(snap, id, where); return a ? { artifact: a.id, v: a.v, machine: (a as any).machine ?? null } : { error: `I can't find an artifact like "${cut(id, 60)}".` }; }
   if (kind === "machine") {
     if (!id || isHere(id)) return { machine: null };
     const m = snap.machines.find((x) => machineAliases(x).some((a) => norm(a) === norm(id)));
     return m ? { machine: m.here ? null : m.machine } : { error: `I can't find a machine called "${cut(id, 60)}".` };
   }
-  if (kind === "role") return id ? { role: id.toLowerCase().trim() } : { error: "Which role? assistant, worker or reviewer." };
   return {};
 }
 
@@ -575,7 +620,7 @@ async function lookData(io: VoiceIO, snap: Snapshot, where: Where, id: string, p
     if ("error" in node) return fail(`${node.error} Look at data with no path for every part.`);
     if (query) {
       const hits = search(node.v, query);
-      return done(hits.length ? `${hits.length} value${hits.length === 1 ? "" : "s"} about "${cut(query, 60)}"${segs.length ? ` in ${node.trail}` : ""}:\n${hits.join("\n")}` : `Nothing about "${cut(query, 60)}"${segs.length ? ` in ${node.trail}` : ""} in the live data. A panel's own data may have it: look at data with no path for those.`);
+      return done(hits.length ? `${hits.length} value${hits.length === 1 ? "" : "s"} about "${cut(query, 60)}"${segs.length ? ` in ${node.trail}` : ""}:\n${hits.join("\n")}` : `Nothing about "${cut(query, 60)}"${segs.length ? ` in ${node.trail}` : ""} in the live data. What is read on demand may have it: look at data with no path for those.`);
     }
     return done(`${node.trail}:\n${render(node.v, node.key)}`);
   }
@@ -603,9 +648,6 @@ export async function voiceTool(name: string, params: any, where: Where, io: Voi
   const id = typeof p.id === "string" ? p.id.slice(0, 200) : typeof p.id === "number" ? String(p.id) : "";
   const query = typeof p.query === "string" ? p.query.slice(0, 200).trim() : "";
   const count = Math.max(1, Math.min(30, Number.isFinite(Number(p.count)) && Number(p.count) > 0 ? Math.round(Number(p.count)) : 6));
-  // the oldest calls' tools, from an agent made before (send_to_agent, read_chat): as send and look at the chat
-  if (name === "send_to_agent") return voiceTool("send", { text: p.text }, where, io);
-  if (name === "read_chat") return voiceTool("look", { what: "chat" }, where, io);
   if (!snap) return fail("Shepherdr is still starting: try again in a moment.");
   try {
     if (name === "look") {
@@ -618,16 +660,15 @@ export async function voiceTool(name: string, params: any, where: Where, io: Voi
         case "task": return await lookTask(io, snap, where, id);
         case "needs": return lookNeeds(snap);
         case "news": return lookNews(snap, p.count ? count : 8);
-        case "autopilot": return lookAutopilot(snap, where, id);
-        case "automations": return lookAutomations(snap, where, id);
+        case "schedules": return lookSchedules(snap, where, id);
         case "settings": return lookSettings(snap, where, id, query);
         case "secrets": return lookSecrets(snap);
-        case "artifacts": return lookArtifacts(snap, where, query, p.count ? count : 8);
+        case "artifacts": return lookArtifacts(snap, where, id, query, p.count ? count : 8);
         case "data": return await lookData(io, snap, where, id, typeof p.path === "string" ? p.path.slice(0, 300) : "", query);
       }
-      return fail(`look can read: here, chat, spaces, machines, tasks, task, needs, news, autopilot, automations, settings, secrets, artifacts, data.`);
+      return fail(`look can read: here, chat, spaces, machines, tasks, task, needs, news, schedules, settings, secrets, artifacts, data.`);
     }
-    if (name === "open") return open(snap, where, io, String(p.what ?? ""), id, typeof p.tab === "string" ? p.tab : "", query);
+    if (name === "open") return open(snap, where, String(p.what ?? ""), id, typeof p.view === "string" ? p.view : typeof p.tab === "string" ? p.tab : "");
     if (name === "send") {
       const text = typeof p.text === "string" ? p.text.trim() : "";
       if (!text || text.length > 16000) return fail("Nothing to send.");
@@ -635,20 +676,13 @@ export async function voiceTool(name: string, params: any, where: Where, io: Voi
       if ("error" in c) return fail(c.error);
       await io.send(c.key, text);
       // the call follows that chat from now on: its replies come as [Update]s (voice-hear.ts)
-      return { ...done(`Sent to ${c.name}. Say "Passed it to ${c.name}." and nothing else: its reply comes later as an [Update].`), sent: c.key };
+      return { ...done(`Sent to ${c.name}. Say "Passed it to ${chatSaid(snap, c.key)}." and nothing else: the reply comes later as an [Update].`), sent: c.key };
     }
     if (name === "act") return await act(snap, where, io, p, id);
-    if (name === "call_view") {
-      // SHEP-124: the call's view, set by the page itself (never clicks on the screen)
-      const view = String(p.view ?? "");
-      if (view !== "full" && view !== "minimized") return fail("call_view's view is full or minimized.");
-      if (where.client !== "web") return fail("This call runs in the Herdr window, which has no full-screen call.");
-      return view === "full" ? showing("the full-screen call", { kind: "call", full: true }) : showing("the app, with the call minimized", { kind: "call", full: false });
-    }
     if (name === "screen") {
       const q = screenParams(p) as any;
       if (q.error) return fail(q.error);
-      return { result: "Asked the screen, but it hasn't answered.", nav: { kind: "screen", ...q }, shows: "the screen" };
+      return { result: "Asked the page, but it hasn't answered.", nav: { kind: "screen", ...q }, shows: "the page" };
     }
     return fail("No such tool.");
   } catch (e: any) {
@@ -657,155 +691,306 @@ export async function voiceTool(name: string, params: any, where: Where, io: Voi
 }
 
 /** An open: what to show and, until the app confirms, words that claim nothing (shown() says the rest). */
-const showing = (shows: string, nav: Nav): Answer => ({ result: `Asked the app to show ${shows}, but it hasn't confirmed: don't say it's on screen.`, nav, shows });
+const showing = (shows: string, nav: Nav, then?: Nav): Answer => ({ result: `Asked the app to show ${shows}, but it hasn't confirmed: don't say it's on screen.`, nav, shows, ...(then ? { then } : {}) });
+const which = (snap: Snapshot, hits: Place[], id: string): Answer =>
+  fail(hits.length ? `Which one: ${hits.slice(0, 6).map((p) => spaceSaid(snap, p)).join("; ")}? Ask the person.` : `I can't find a space called "${cut(id, 60)}". Spaces: ${appSpaces(snap).filter((p) => !p.archived).slice(0, 12).map((p) => spaceSaid(snap, p)).join("; ")}.`);
 
-function open(snap: Snapshot, where: Where, io: VoiceIO, what: string, id: string, tab: string, query: string): Answer {
+/** the Settings page meant ("usage", "the plugins page", "voice" → Plugins, "schedules" → Plugins): null when none fits */
+function settingsPage(id: string): string | null {
+  const w = norm(id);
+  if (!w) return "";
+  const hit = SETTINGS.find((n: string) => w.includes(n.toLowerCase()) || (w.length > 2 && n.toLowerCase().startsWith(w)));
+  if (hit) return hit;
+  if (/model|claude|codex|agent/.test(w)) return "Agents";
+  if (/review|merge|proof/.test(w)) return "Tasks";
+  if (/voice|screens|schedule|reaction|terminal|plugin/.test(w)) return "Plugins";
+  if (/plan|limit|usage/.test(w)) return "Usage";
+  if (/theme|appearance|notification|alert|motion|width/.test(w)) return "General";
+  if (/key|token|secret/.test(w)) return "Secrets";
+  return null;
+}
+
+function open(snap: Snapshot, where: Where, what: string, id: string, view: string): Answer {
+  /** a list or view of the shown chat; a space named: there first (the page goes to it, then opens the view) */
+  const panel = (panel: "chat" | "terminal" | "tasks" | "artifacts", name: string): Answer => {
+    if (!id || isHere(id)) return showing(name, { kind: "panel", panel });
+    const hits = spacesSaid(snap, id, where);
+    if (hits.length !== 1) return which(snap, hits, id);
+    return showing(`${label(snap, hits[0].id)}'s ${name}`, { kind: "space", place: hits[0].id }, { kind: "panel", panel });
+  };
   switch (what) {
     case "space": {
       const hits = spacesSaid(snap, id, where);
-      if (!hits.length) return fail(`I can't find a space called "${cut(id, 60)}". Spaces: ${snap.places.slice(0, 12).map((p) => spaceSaid(snap, p)).join("; ")}.`);
-      if (hits.length > 1) return fail(`Which one: ${hits.slice(0, 6).map((p) => spaceSaid(snap, p)).join("; ")}? Ask the person.`);
+      if (hits.length !== 1) return which(snap, hits, id);
       const p = hits[0];
-      return showing(`the ${spaceSaid(snap, p)} space`, { kind: "space", place: p.id });
+      return showing(isEverything(snap, p.id) ? "Everything" : `the space ${spaceSaid(snap, p)}`, { kind: "space", place: p.id });
+    }
+    case "chat": {
+      const c = !id || isHere(id) ? null : findChat(snap, id, where);
+      // "back to the chat": the shown chat again, its agent's terminal put away
+      if (!c) return where.task ? showing("the task's chat", { kind: "task", task: where.task }) : showing("the chat", { kind: "panel", panel: "chat" });
+      if ("error" in c) {
+        // a task with no agent running still opens: its thread shows what it is
+        const t = findTask(snap, id, where);
+        return t && !findSpace(snap, id, where) ? showing(`the task ${titled(t)}`, { kind: "task", task: t.id }) : fail(c.error);
+      }
+      if (c.task) return showing(`the task ${titled(c.task)}`, { kind: "task", task: c.task.id });
+      return showing(`${c.name}'s chat`, { kind: "chat", chat: c.key }, { kind: "panel", panel: "chat" });
     }
     case "task": {
       const t = findTask(snap, id, where);
-      if (!t) return fail(isHere(id) ? "Which task?" : `I can't find task "${cut(id, 60)}".`);
-      // a task has no Files or Changes tab (SHEP-143): its changes are its pull request's, else its chat
-      const asked = tab === "files" || tab === "changes" ? (t.pr ? "pr" : "chat") : tab;
-      const want = TABS.includes(asked) ? asked : "chat";
-      if (want === "review" && t.status !== "ready") return fail(`${spoken(t.id)} isn't ready for review: it is ${STATUS[t.status] ?? t.status}.`);
-      if (want === "pr" && !t.pr) return fail(`${spoken(t.id)} has no pull request yet.`);
-      const at = io.taskWhere?.(t.id);
-      const chat = t.agent?.chat;
-      return showing(`${spoken(t.id)}${want === "chat" ? "" : want === "review" ? "'s review" : `'s ${want === "pr" ? "pull request" : want}`}`,
-        { kind: "task", task: t.id, tab: want, ...(chat ? { chat, addr: io.addrOf?.(chat) ?? null } : {}), ...(at ? { ref: at.ref, folder: at.folder, machine: at.machine } : {}), title: t.name });
+      if (!t) return fail(isHere(id) ? "Which task?" : `I can't find a task called "${cut(id, 60)}".`);
+      if (/^(screen|browser|desktop)$/.test(view)) return open(snap, where, "screen", t.id, view);
+      return showing(`the task ${titled(t)}`, { kind: "task", task: t.id });
     }
-    case "tasks": {
-      // a state said ("ready ones") filters by it; other words go in the filter box ("voice" → tasks about voice)
-      const st = query ? stateOf(query) : null;
-      const rest = st ? words(query).filter((w) => !stateOf(w) && !["tasks", "task", "the", "ones", "only", "all", "for", "me", "you"].includes(w)).join(" ") : query;
-      return showing(`the Tasks panel${st ? `, ${STATUS[st]}` : ""}${rest ? `, filtered by "${cut(rest, 60)}"` : ""}`, { kind: "tasks", ...(st ? { filter: st } : {}), ...(rest ? { search: rest } : {}) });
+    case "screen": {
+      // an agent's Screen: its browser, or its desktop; a task's opens beside its task, a chat's beside its chat
+      const desk = /^d/i.test(view);
+      const name = desk ? "desktop" : "Screen";
+      if (!id || isHere(id)) {
+        if (!where.task && !where.place) return fail("Whose Screen? Say the task or the space.");
+        return showing(`its agent's ${name}`, { kind: "panel", panel: desk ? "desktop" : "screen" });
+      }
+      const c = findChat(snap, id, where);
+      const t = "error" in c ? (findSpace(snap, id, where) ? null : findTask(snap, id, where)) : c.task ?? null;
+      if (t) return showing(`the ${name} of ${titled(t)}`, { kind: "task", task: t.id, tab: "screen" }, desk ? { kind: "panel", panel: "desktop" } : undefined);
+      if ("error" in c) return fail(c.error);
+      return showing(`${c.name}'s ${name}`, { kind: "space", place: c.place!.id }, { kind: "panel", panel: desk ? "desktop" : "screen" });
     }
-    case "artifacts": case "files": case "changes": case "terminal": {
-      // the shown space's panel; a space named: there first (the page goes to it, then opens the panel)
+    case "terminal": {
+      // "Switch to terminal": a chat's agent's own terminal, in the chat's place
+      const t = id && !isHere(id) && !findSpace(snap, id, where) ? findTask(snap, id, where) : isHere(id) || !id ? (where.task ? snap.tasks.find((x) => x.id === where.task) ?? null : null) : null;
+      if (t) return fail(`A task's terminal opens from its menu: open the task ${titled(t)}, then with screen press its menu's "Switch to terminal".`);
+      return panel("terminal", "agent's terminal");
+    }
+    case "tasks": case "needs": {
+      // Tasks, Now: Needs you first
       if (id && !isHere(id)) {
         const hits = spacesSaid(snap, id, where);
-        if (hits.length !== 1) return fail(hits.length ? `Which one: ${hits.slice(0, 6).map((p) => spaceSaid(snap, p)).join("; ")}? Ask the person.` : `I can't find a space called "${cut(id, 60)}".`);
-        return { ...showing(`the ${hits[0].name} space's ${what === "terminal" ? "Assistant terminal" : `${what} panel`}`, { kind: "space", place: hits[0].id }), then: { kind: "panel", panel: what } } as Answer;
+        if (hits.length !== 1) return which(snap, hits, id);
+        return showing(`${label(snap, hits[0].id)}'s Tasks`, { kind: "space", place: hits[0].id }, { kind: "panel", panel: "tasks" });
       }
-      return showing(what === "terminal" ? "the space's Assistant terminal" : `the ${what[0].toUpperCase()}${what.slice(1)} panel`, { kind: "panel", panel: what as "artifacts" });
+      return showing(what === "needs" ? "Tasks, with what needs the person first" : "Tasks", { kind: what });
     }
-    case "needs": return showing("what needs the person", { kind: "needs" });
+    case "artifacts": return panel("artifacts", "Artifacts");
     case "artifact": {
       const a = findArtifact(snap, id, where);
       if (!a) return fail(`I can't find an artifact like "${cut(id, 60)}". Look at artifacts for their titles.`);
-      return showing(`the artifact "${cut(a.title, 80)}"`, { kind: "artifact", artifact: a.id, title: a.title, v: a.v, machine: (a as any).machine ?? null });
+      return showing(`the artifact "${cut(a.title, 80)}"`, { kind: "artifact", artifact: a.id });
     }
-    case "settings": return showing(`Settings${id ? `, ${id}` : ""}`, { kind: "settings", ...(id ? { section: id } : {}) });
-    case "chat": {
-      const c = findChat(snap, id || "here", where);
-      if ("error" in c) return fail(c.error);
-      return showing(`${c.name}'s chat`, { kind: "chat", chat: c.key, addr: io.addrOf?.(c.key) ?? null });
+    case "settings": {
+      const page = settingsPage(id);
+      if (page === null) return fail(`Settings has no page like "${cut(id, 40)}". Its pages: ${SETTINGS.join(", ")}.`);
+      return showing(`Settings${page ? `, ${page}` : ""}`, { kind: "settings", ...(page ? { section: page } : {}) });
     }
   }
-  return fail("open can show: space, task, tasks, needs, artifacts, files, changes, terminal, artifact, settings, chat.");
+  return fail("open can show: space, chat, task, screen, terminal, tasks, needs, artifacts, artifact, settings.");
 }
 
 /** An open's answer once the app that started the call tried it: on screen only when it said so. show() asks that very
- *  app (the page's call socket, or the window's chat) and resolves with its ack, or null when it didn't answer. */
+ *  page (its call socket) and resolves with its ack, or null when it didn't answer. */
 export async function shown(a: Answer, show: (nav: Nav) => Promise<Ack | null>): Promise<Answer> {
   if (!a.nav) return a;
   const ask = (nav: Nav) => show(nav).catch((e) => ({ ok: false, why: String(e?.message ?? e) }) as Ack);
   let ack = await ask(a.nav);
-  // the screen's answer is the screen itself (core/screen.js)
+  // the page's answer is the page itself (core/screen.js)
   if (a.nav.kind === "screen") { const { then: _t, ...rest } = a; return { ...rest, ...(screenWords(ack, a.nav.do) as { result: string; error?: boolean }) }; }
-  // two steps (a space, then its panel): the second only once the first is on screen
+  // two steps (a space, then its view): the second only once the first is on screen
   if (ack?.ok && a.then) ack = await ask(a.then);
   const { then: _t, ...rest } = a;
   return { ...rest, ...(navWords(a.shows ?? "it", ack) as { result: string; error?: boolean }) };
 }
 
-/** What an act will do, in words to ask the person ("Accept SHEP 45, “Voice calls”? That merges it."). */
+// ---- act: what the app's buttons do -------------------------------------------------------
+
+const TASK_ACTS = ["done", "done_without_merging", "start", "stop", "restart", "rename_task", "move_task", "archive", "unarchive", "delete"];
+const SPACE_ACTS = ["rename_space", "archive_space", "unarchive_space", "remove_space"];
+const SCHEDULE_ACTS: Record<string, string> = { run_schedule: "run", pause_schedule: "pause", resume_schedule: "resume" };
+const SCREEN_ACTS: Record<string, string> = { take_over: "take", hand_back: "handback", skip_step: "skip" };
+const YES = /^(yes|yeah|yep|y|ok|okay|allow|allowit|approve|accept|go|goahead|run|runit|sure|do|doit|true|on)$/;
+const NO = /^(no|nope|n|deny|denyit|reject|dont|stop|cancel|refuse|false|off)$/;
+
+/** the choice of a question the person's words pick: its number ("the second", "2"), its label, yes or no */
+function choiceOf(n: Need, value: string): number | null {
+  const cs = n.question?.choices ?? [];
+  const w = norm(value);
+  if (!w) return null;
+  if (n.question?.command !== undefined && (YES.test(w) || NO.test(w) || /^declin/.test(w))) return YES.test(w) ? 0 : 1;
+  if (!cs.length) return null;
+  const nth = ["first", "second", "third", "fourth", "fifth"].findIndex((x) => w === x || w === `the${x}` || w === `${x}one` || w === `the${x}one`);
+  if (nth >= 0 && nth < cs.length) return nth;
+  if (/^\d$/.test(w) && Number(w) >= 1 && Number(w) <= cs.length) return Number(w) - 1;
+  const exact = cs.findIndex((c) => norm(c.label) === w);
+  if (exact >= 0) return exact;
+  const yes = YES.test(w), no = NO.test(w) || /^declin/.test(w);
+  if (yes || no) {
+    // a command to allow, as its card's buttons: Allow once is the first choice, Decline the second
+    if (n.question?.command !== undefined) return yes ? 0 : 1;
+    const hit = cs.findIndex((c) => (yes ? /^(yes|allow|approve|ok|run|proceed|continue)/i : /^(no|deny|decline|reject|don|cancel|stop)/i).test(c.label.trim()));
+    if (hit >= 0) return hit;
+  }
+  const ws = words(value);
+  const part = cs.map((c, i) => ({ i, n: ws.filter((x) => c.label.toLowerCase().includes(x)).length })).filter((x) => x.n === ws.length);
+  return part.length === 1 ? part[0].i : null;
+}
+
+/** One of the app's buttons, pressed for the person. An act that deletes, merges or stops says what to ask first
+ *  ("Mark “Fix the login” as done and merge it?") and changes nothing until confirmed. */
 async function act(snap: Snapshot, where: Where, io: VoiceIO, p: any, id: string): Promise<Answer> {
   const action = String(p.action ?? "");
-  const value = typeof p.value === "string" ? p.value.trim().slice(0, 300) : "";
+  const value = typeof p.value === "string" ? p.value.trim().slice(0, 4000) : typeof p.value === "number" || typeof p.value === "boolean" ? String(p.value) : "";
   const key = typeof p.key === "string" ? p.key.trim().slice(0, 200) : "";
   const confirmed = p.confirmed === true;
-  const TASK = ["accept", "start", "schedule", "unschedule", "stop", "resume", "done", "reopen", "delete", "pin", "unpin"];
-  const SPACE = ["autopilot_on", "autopilot_off", "autopilot_run", "rename_space", "remove_space"];
-  let ask = "", body: Record<string, unknown> | null = null, said = "";
-  if (TASK.includes(action)) {
+  /** asked first: the acts that delete, merge or stop (core/voice.js ASK_FIRST), and others when they would */
+  let asks = ASK_FIRST.includes(action);
+  let ask = "", body: Record<string, unknown> | null = null, did = "";
+  if (TASK_ACTS.includes(action)) {
     const t = findTask(snap, id, where);
-    if (!t) return fail(isHere(id) ? "Which task?" : `I can't find task "${cut(id, 60)}".`);
-    const n = `${spoken(t.id)}, "${cut(t.name, 70)}"`, chat = `${t.id}/worker`;
+    if (!t) return fail(isHere(id) ? "Which task?" : `I can't find a task called "${cut(id, 60)}".`);
+    const n = titled(t, 70), chat = t.agent?.chat ?? `${t.id}/worker`, s = tstate(t), is = plain(statusWord(t).word);
     switch (action) {
-      case "accept":
-        if (t.status !== "ready") return fail(`${spoken(t.id)} isn't ready to accept: it is ${STATUS[t.status] ?? t.status}.`);
-      {
-        // as the Accept button (SHEP-225): it merges only a task with a branch or pull request of its own; else it's just done
-        const merges = Boolean(t.branch || t.pr);
-        ask = merges ? `Accept ${n}? That merges it.` : `Accept ${n}? That marks it done; nothing merges.`; body = { type: "accept", task: t.id };
-        said = merges ? `Accepted ${spoken(t.id)}: it merges now.` : `Accepted ${spoken(t.id)}: done.`; break;
+      case "done": {
+        if (s === "done" || s === "archived") return fail(`${n} is already ${is}.`);
+        if (t.status === "merging" || t.accepting) return fail(`${n} is merging already.`);
+        if (s === "ready") {
+          // the review card's button: on its own branch it merges, else it is just done
+          const merges = onBranch(t);
+          ask = merges ? `Mark ${n} as done and merge it?` : `Mark ${n} as done?`; body = { type: "accept", task: t.id };
+          did = merges ? `${n} is marked as done: it merges now.` : `${n} is marked as done.`;
+        } else {
+          // the menu's Mark as done on one not handed in: done as it is, nothing merged
+          ask = `Mark ${n} as done? It is ${is}${onBranch(t) ? ", and its branch is not merged" : ""}.`; body = { type: "close", chat, force: true }; did = `${n} is marked as done${onBranch(t) ? ", not merged" : ""}.`;
+        }
+        break;
       }
-      case "start": ask = `Start ${n} now?`; body = { type: "schedule", chat, now: true }; said = `${spoken(t.id)} starts now.`; break;
-      case "schedule":
-        if (!value) return fail("When? Say a time, like in 2 hours or tomorrow at 9.");
-        ask = `Start ${n} ${value}?`; body = /^in\s+/i.test(value) ? { type: "schedule", chat, in: value.replace(/^in\s+/i, "") } : { type: "schedule", chat, at: value }; said = `${spoken(t.id)} is scheduled.`; break;
-      case "unschedule": ask = `Take ${n} off its schedule, back to to do?`; body = { type: "schedule", chat, off: true }; said = `${spoken(t.id)} is back to to do.`; break;
+      case "done_without_merging":
+        if (s === "done" || s === "archived") return fail(`${n} is already ${is}.`);
+        ask = `Mark ${n} as done without merging anything?`; body = { type: "close", chat, force: true }; did = `${n} is marked as done, not merged.`; break;
+      case "start":
+        if (s !== "next") return fail(`${n} isn't waiting to start: it is ${is}.${t.stopped ? " Restart it instead." : ""}`);
+        body = { type: "task-start", chat }; did = `${n} starts now.`; break;
       case "stop":
-        if (!t.agent?.chat) return fail(`${spoken(t.id)} has no agent running.`);
-        ask = `Stop ${n}'s agent? Its work stays.`; body = { type: "stop", chat: t.agent.chat }; said = `Stopped ${spoken(t.id)}'s agent.`; break;
-      case "resume": ask = `Start ${n}'s agent again where it left off?`; body = { type: "task-resume", chat }; said = `${spoken(t.id)}'s agent is starting again.`; break;
-      case "done": ask = `Mark ${n} done without merging anything?`; body = { type: "close", chat }; said = `${spoken(t.id)} is done.`; break;
-      case "reopen": ask = `Reopen ${n}?`; body = { type: "reopen", chat }; said = `${spoken(t.id)} is open again.`; break;
-      case "delete": ask = `Delete ${n}: its agent, branch and chat? This can't be undone.`; body = { type: "delete", chat }; said = `Deleted ${spoken(t.id)}.`; break;
-      case "pin": case "unpin": ask = `${action === "pin" ? "Pin" : "Unpin"} ${n}?`; body = { type: "pin", chat, on: action === "pin" }; said = `${action === "pin" ? "Pinned" : "Unpinned"} ${spoken(t.id)}.`; break;
+        if (s !== "working") return fail(`${n} isn't working: it is ${is}.`);
+        ask = `Stop ${n}? Its agent stops where it is; your next message carries on.`; body = { type: "stop", chat }; did = `Stopped ${n}.`; break;
+      case "restart":
+        if (!t.stopped) return fail(`${n} isn't stopped: it is ${is}.`);
+        body = { type: "task-resume", chat }; did = `${n} is starting again.`; break;
+      case "rename_task":
+        if (!value) return fail("What should it be called?");
+        body = { type: "task-rename", chat, name: cut(value, 200) }; did = `It is called "${cut(value, 80)}" now.`; break;
+      case "move_task": {
+        if (s !== "next") return fail(`A task moves only before it has started: ${n} is ${is}.`);
+        const hits = spacesSaid(snap, value, where);
+        if (hits.length !== 1) return value ? which(snap, hits, value) : fail("Move it to which space?");
+        if (hits[0].id === t.place) return fail(`${n} is in ${label(snap, t.place)} already.`);
+        body = { type: "task-move", chat, place: hits[0].id }; did = `Moved ${n} to ${label(snap, hits[0].id)}.`; break;
+      }
+      case "archive":
+        if (t.archived) return fail(`${n} is archived already.`);
+        // archiving a working task stops its agent first: asked like a stop
+        if (s === "working") { asks = true; ask = `Archive ${n}? It is working: its agent stops.`; }
+        body = { type: "archive", chat, on: true }; did = `Archived ${n}.`; break;
+      case "unarchive":
+        if (!t.archived) return fail(`${n} isn't archived.`);
+        body = { type: "archive", chat, on: false }; did = `${n} is back in Tasks.`; break;
+      case "delete": ask = `Delete ${n}? It is removed and its agent is stopped; its branch and files are left alone. This can't be undone.`; body = { type: "delete", chat, force: true }; did = `Deleted ${n}.`; break;
     }
-  } else if (SPACE.includes(action)) {
-    const sp = findSpace(snap, id, where);
-    if (!sp) return fail(isHere(id) ? "Which space?" : `I can't find a space called "${cut(id, 60)}".`);
+  } else if (action === "answer") {
+    // a question or a command to allow, answered as its card's buttons do; a plain wait is answered with send
+    const c = findChat(snap, id || "here", where);
+    if ("error" in c) return fail(c.error);
+    const n = snap.needs.find((x) => x.chat === c.key && x.question && x.question.sent === undefined && !x.question.closed);
+    if (!n) return fail(`${c.name} has no question open. To reply in its chat, use send.`);
+    const q = n.question!;
+    if ((q.parts?.length ?? 0) > 1) return fail(`${c.name} asks several things at once: open it and answer on the page.`);
+    if (!value) return fail(`Answer what? It ${askWords(n)}.`);
+    const pick = choiceOf(n, value);
+    // words that pick no choice are a reply: what is typed next in that chat goes to its agent
+    if (pick === null) return fail(q.command !== undefined ? "Allow it or decline it?" : q.choices?.length ? `That isn't one of its choices: ${q.choices.slice(0, 6).map((x) => cut(x.label, 40)).join(", ")}. Which one? Other words go in its chat with send.` : "It has no choices to pick: reply in its chat with send.");
+    body = { type: "answer", chat: c.key, question: q.id, choice: pick, ...(q.command === undefined ? { byVoice: true, voiceAnswer: q.choices[pick]?.label ?? value } : {}) };
+    did = q.command !== undefined ? (pick === 0 ? `Allowed it once for ${c.name}.` : `Declined it for ${c.name}.`) : `Answered ${c.name}: ${cut(q.choices[pick]?.label ?? value, 60)}.`;
+  } else if (action in SCHEDULE_ACTS) {
+    const all = schedulesOf(snap);
+    const ws = words(id).filter((w) => !["the", "schedule", "a", "my"].includes(w));
+    const hits = isHere(id) ? [] : all.filter((a) => norm(a.name) === norm(id));
+    const some = hits.length ? hits : ws.length ? all.filter((a) => ws.every((w) => a.name.toLowerCase().includes(w))) : [];
+    if (some.length !== 1) return fail(some.length ? `Which one: ${some.slice(0, 6).map((a) => `"${cut(a.name, 50)}" in ${label(snap, a.place) || "Everything"}`).join("; ")}?` : `I can't find a schedule called "${cut(id, 60)}". Look at schedules for their names.`);
+    const a = some[0], op = SCHEDULE_ACTS[action];
+    if (op === "pause" && !a.on) return fail(`"${cut(a.name, 60)}" is paused already.`);
+    if (op === "resume" && a.on) return fail(`"${cut(a.name, 60)}" isn't paused.`);
+    body = { type: "automation", op, id: a.id, place: a.place, name: a.name };
+    did = op === "run" ? `"${cut(a.name, 60)}" runs now, as a task.` : op === "pause" ? `Paused "${cut(a.name, 60)}".` : `"${cut(a.name, 60)}" is on again.`;
+  } else if (SPACE_ACTS.includes(action)) {
+    const hits = spacesSaid(snap, id, where);
+    if (hits.length !== 1) return isHere(id) && !hits.length ? fail("Which space?") : which(snap, hits, id);
+    const sp = hits[0], n = label(snap, sp.id);
+    if (isEverything(snap, sp.id)) return fail("Everything is the root chat: it can't be renamed, archived or removed.");
+    const working = snap.tasks.filter((t) => t.place === sp.id && tstate(t) === "working").length;
+    const stops = `${working ? `Its ${working} working task${working === 1 ? " stops" : "s stop"}, and its` : "Its"} schedules stop.`;
     switch (action) {
-      case "autopilot_on": ask = `Turn Autopilot on in ${sp.name}? Its Assistant then works on its own.`; body = { type: "mode", place: sp.id, mode: "autopilot" }; said = `Autopilot is on in ${sp.name}.`; break;
-      case "autopilot_off": ask = `Turn Autopilot off in ${sp.name}?`; body = { type: "mode", place: sp.id, mode: "regular" }; said = `Autopilot is off in ${sp.name}.`; break;
-      case "autopilot_run": ask = `Wake ${sp.name}'s Autopilot now?`; body = { type: "autopilot-run", place: sp.id }; said = `${sp.name}'s Autopilot wakes now.`; break;
       case "rename_space":
         if (!value) return fail("What should it be called?");
-        ask = `Rename ${sp.name} to ${value}?`; body = { type: "rename", id: sp.id, name: value }; said = `Renamed it ${value}.`; break;
-      case "remove_space": ask = `Remove ${sp.name} from Shepherdr? Its folder and code stay on disk.`; body = { type: "space-remove", place: sp.id }; said = `Removed ${sp.name}.`; break;
+        body = { type: "rename", id: sp.id, name: value }; did = `It is called ${cut(value, 80)} now.`; break;
+      case "archive_space":
+        if (sp.archived) return fail(`${n} is archived already.`);
+        ask = `Archive ${n}? ${stops} Nothing is deleted.`; body = { type: "space-archive", place: sp.id, on: true }; did = `Archived ${n}.`; break;
+      case "unarchive_space":
+        if (!sp.archived) return fail(`${n} isn't archived.`);
+        body = { type: "space-archive", place: sp.id, on: false }; did = `${n} is back in the list.`; break;
+      case "remove_space": ask = `Remove ${n} from Shepherdr? ${stops} Its folder and code stay on disk.`; body = { type: "space-remove", place: sp.id, stop: true }; did = `Removed ${n}.`; break;
     }
   } else if (action === "setting") {
+    const c = snap.config;
+    if (!c) return fail("Settings can't be changed right now.");
+    // no space said: for every space; "here": the space on screen
     const sp = id ? findSpace(snap, id, where) : null;
-    if (id && !sp) return fail(`I can't find a space called "${cut(id, 60)}".`);
-    const ws = words(key);
-    const rows = settingRows(snap, sp?.id ?? "all").filter((x) => ws.length && ws.every((w) => `${x.section} ${x.row.label} ${x.row.key}`.toLowerCase().includes(w)));
-    const exact = rows.find((x) => norm(x.row.label) === norm(key));
-    const r = exact ?? (rows.length === 1 ? rows[0] : null);
-    if (!r) return fail(rows.length ? `Which one: ${rows.slice(0, 6).map((x) => `${x.section} › ${x.row.label}`).join("; ")}?` : `I can't find a setting called "${cut(key, 60)}". Look at settings first.`);
-    let v: string | null = value;
-    if (r.row.options?.length) {
-      v = r.row.options.find((o) => norm(o) === norm(value)) ?? r.row.options.find((o) => norm(o).startsWith(norm(value)) && norm(value)) ?? null;
-      if (!v) return fail(`${r.row.label} can be: ${r.row.options.join(", ")}.`);
-    } else if (/^(default|reset|clear|none)$/i.test(value)) v = null;
-    if (v === null && !r.row.text && !r.row.options?.length) return fail("What value?");
-    ask = `Set ${r.section} › ${r.row.label} to ${v ?? "its default"}${sp ? ` for ${sp.name}` : " everywhere"}?`;
-    body = { type: "setting", key: r.row.key, value: v, place: r.level }; said = `${r.row.label} is now ${v ?? "its default"}.`;
-  } else if (action === "forget_secret") {
-    const all = vaultOf(snap).filter((e) => norm(e.name) === norm(key));
-    if (!all.length) return fail(`No secret called "${cut(key, 60)}" is kept.`);
-    const sp = id ? findSpace(snap, id, where) : null;
-    const e = (sp ? all.find((x) => x.space === sp.id) : null) ?? (all.length === 1 ? all[0] : null);
-    if (!e) return fail(`${all[0].name} is kept in ${all.length} places: ${all.map((x) => x.where ?? x.scope).join("; ")}. Which one?`);
-    const level = e.scope === "everywhere" ? "all" : e.scope === "machine" ? `m:${e.machine ?? ""}` : String(e.space);
-    ask = `Delete the secret ${e.name} (${e.where ?? e.scope})? Agents that use it lose it.`; body = { type: "secret", level, name: e.name, value: null }; said = `Deleted the secret ${e.name}.`;
-  } else if (action === "delete_artifact") {
-    const ws = words(id);
-    const a = isHere(id) && where.artifact ? snap.artifacts.find((x) => x.id === where.artifact) : snap.artifacts.find((x) => x.id === id) ?? (ws.length ? snap.artifacts.find((x) => ws.every((w) => x.title.toLowerCase().includes(w))) : null);
+    if (id && !sp) return fail(isHere(id) ? "Which space?" : `I can't find a space called "${cut(id, 60)}".`);
+    const place = sp && !isEverything(snap, sp.id) ? sp.id : "all";
+    const forWhom = place === "all" ? "for every space" : `for ${label(snap, place)}`;
+    const k = norm(key), v = norm(value);
+    const reset = /^(reset|default|same|aseverything|aseverywhere)$/.test(v);
+    if (reset && place === "all") return fail("Only a space's own setting can be reset: say which space.");
+    const toggle = () => (YES.test(v) || v === "enable" || v === "enabled" ? true : NO.test(v) || v === "disable" || v === "disabled" ? false : null);
+    const plugin = c.plugins.find((x) => norm(x.name) === k || norm(x.id) === k || k === `plugin${norm(x.id)}` || k === `${norm(x.name)}plugin`);
+    if (/^merge/.test(k) || k === "whentomerge") {
+      const m = reset ? null : /check/.test(v) ? "checks" : /now|rightaway|atonce|immediately|auto/.test(v) ? "now" : /done|mark|ask|review|manual/.test(v) ? "done" : undefined;
+      if (m === undefined) return fail(`Merge can be: ${Object.values(MERGE_WORDS).join(", ")}.`);
+      body = { type: "config", place, key: "merge", value: m }; did = `Merge is ${m ? `"${MERGE_WORDS[m]}"` : "as everywhere"} ${forWhom}.`;
+    } else if (/^(review|proof)/.test(k) || /secondagent/.test(k)) {
+      const which = /^proof/.test(k) ? "proof" : "review", on = reset ? null : toggle();
+      if (on === null && !reset) return fail(`${which === "proof" ? "Proof" : "Review by a second agent"} is on or off: which?`);
+      body = { type: "config", place, key: which, value: on }; did = `${which === "proof" ? "Proof" : "Review by a second agent"} is ${on === null ? "as everywhere" : onOff(on)} ${forWhom}.`;
+    } else if (plugin) {
+      if (plugin.always) return fail(`${plugin.name} is always on.`);
+      const on = toggle();
+      if (on === null) return fail(`${plugin.name} is on or off: which?`);
+      // switching Voice off takes this call's button away: asked first
+      if (plugin.id === "voice" && !on) { asks = true; ask = "Switch Voice off? Its button goes, and so does this way of talking to me."; }
+      body = { type: "config", place: "all", key: `plugin.${plugin.id}`, value: on }; did = `${plugin.name} is ${onOff(on)}.`;
+    } else return fail(`By voice I can set Merge, Review by a second agent, Proof and the plugins (${c.plugins.filter((x) => !x.always).map((x) => x.name).join(", ")}). For the rest, open Settings and use screen, or ask in Everything.`);
+  } else if (action === "pin_artifact" || action === "unpin_artifact" || action === "delete_artifact") {
+    const a = findArtifact(snap, id, where);
     if (!a) return fail(`I can't find an artifact like "${cut(id, 60)}".`);
-    ask = `Delete the artifact "${cut(a.title, 80)}" and its versions?`; body = { type: "artifact-delete", place: a.place, artifact: a.id }; said = `Deleted "${cut(a.title, 80)}".`;
-  } else return fail(`act can do: ${["accept", "start", "schedule", "unschedule", "stop", "resume", "done", "reopen", "delete", "pin", "unpin", "autopilot_on", "autopilot_off", "autopilot_run", "rename_space", "remove_space", "setting", "forget_secret", "delete_artifact"].join(", ")}. Anything else goes to the space's Assistant with send.`);
-  if (!confirmed) return done(`Nothing changed yet. Ask the person: "${ask}" Only after a clear yes, call act again with confirmed true.`);
+    const n = `"${cut(a.title, 80)}"`;
+    if (action === "delete_artifact") { ask = `Delete the artifact ${n} and its versions? This can't be undone.`; body = { type: "artifact-delete", place: a.place, artifact: a.id }; did = `Deleted ${n}.`; }
+    else { const on = action === "pin_artifact"; body = { type: "artifact-pin", place: a.place, artifact: a.id, on }; did = `${on ? "Pinned" : "Unpinned"} ${n}.`; }
+  } else if (action in SCREEN_ACTS) {
+    // an agent's Screen: the task's or chat's on screen, or the one named
+    const c = findChat(snap, id || "here", where);
+    const t = "error" in c ? (id && !isHere(id) && !findSpace(snap, id, where) ? findTask(snap, id, where) : null) : c.task ?? null;
+    if ("error" in c && !t) return fail(isHere(id) ? "Whose Screen? Say the task or the space." : c.error);
+    const k = t ? `task:${t.id}` : `chat:${(c as ChatHit).place!.id}`;
+    const whose = t ? titled(t) : (c as ChatHit).name;
+    const sc = screenOf(snap, k), op = SCREEN_ACTS[action];
+    const src = /^d/i.test(value) ? "d" : /^b/i.test(value) ? "b" : sc?.b || !sc?.d ? "b" : "d";
+    const hands = handsOf(snap, k);
+    if (op === "skip" && !hands) return fail(`${whose} has no step waiting for your hands.`);
+    if (op === "handback" && sc && sc.driver !== "you" && !hands) return fail(`You haven't taken over the Screen of ${whose}.`);
+    body = { type: "screen", key: k, op, src, ...(op === "handback" && hands ? { done: true } : {}) };
+    did = op === "take" ? `You have the Screen of ${whose} now: its mouse and keyboard are yours. Say "hand back" when you are done.` : op === "handback" ? `Handed the Screen of ${whose} back to its agent.` : `Skipped that step for ${whose}.`;
+  } else return fail(`act can do: ${(ACTS as string[]).join(", ")}. Anything else: ask for it in a chat with send, or do it on the page with screen.`);
+  if (asks && !confirmed) return done(`Nothing changed yet. Ask the person: "${ask}" Only after a clear yes, call act again with confirmed true.`);
   const r = await io.action(body!);
   if (r && typeof r === "object" && r.ok === false) return fail(cut(String(r.error ?? "It didn't go through."), 300));
-  return done(r?.why ? `${said} ${cut(String(r.why), 200)}` : said);
+  return done(r?.why ? `${did} ${cut(String(r.why), 200)}` : did);
 }

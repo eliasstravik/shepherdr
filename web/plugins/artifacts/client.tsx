@@ -1,889 +1,232 @@
-// Artifacts any agent makes (shepherdr artifact): a card in the chat where it was made, in a sealed frame; full screen
-// on a tap, with its versions, Mark up and a box to write to its keeper, so you change it by chatting beside it; and a
-// list per place, and one per chat (its ⋯ → Artifacts). A newer version swaps in live: only its data changed, the page takes the new data without a reload.
-// Shown in the side panel, it fills a place's Artifacts list (or a task's Artifacts tab) beside the chat.
-import clsx from 'clsx'
-import { Recipe, UNREADABLE } from '@client/screens/Recipe.tsx'
-import { enterHint, sendsNow } from '@client/enter.ts'
-import * as R from '@core/recipe.js'
-import * as M from '@core/markup.js'
-import * as CV from '@core/chat-view.js'
-import { Markdown } from '@plugins/chat/markdown.tsx'
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import {
-  act,
-  closeArtifact,
-  definePlugin,
-  filterOf,
-  getState,
-  listView,
-  matches,
-  openArtifact,
-  openSplit,
-  panesHere,
-  placeOf,
-  setFilter,
-  setUI,
-  splitClick,
-  taskInMiddle,
-  useSnap,
-  useStore,
-  useUI,
-} from '@client/kernel.ts'
-import { useDialogFocus } from '@client/focus.ts'
-import { useMotion } from '@client/motion.ts'
-import { isDark, useDark } from '@client/theme.ts'
-import {
-  BackIcon,
-  CheckIcon,
-  DownIcon,
-  NextIcon,
-  dimmed,
-  FilterBox,
-  ic,
-  IconButton,
-  List,
-  MarkBadge,
-  MarkUpIcon,
-  PageIcon,
-  PanelIcon,
-  Row,
-  RowText,
-  TextBox,
-  UpIcon,
-  XIcon,
-} from '@client/ui.tsx'
-import type { Artifact, ArtifactVersion, Chat, Message, Task } from '@shared/types.ts'
-import { titleInTask } from '@core/task-artifacts.js'
+// Artifacts: things made to keep. An artifact is a web page an agent writes (an HTML file and the files beside it);
+// Shepherdr keeps and serves it, in a frame that cannot reach the app itself. The pane lists them as picture tiles
+// (search, pinned ones on top); one opens in the pane as the real page it is, with its version, Mark up (the speech
+// bubble) and a menu. The same tile shows a page in a chat and a task's proof on its review card.
+import { useEffect, useRef, useState } from 'react'
+import { PaneFrame } from '@client/App.tsx'
+import { renameDialog } from '@client/list.tsx'
+import { definePlugin, getState, notice, openArtifact, setUI, togglePane, tryAct, useSnap, useUI } from '@client/kernel.ts'
+import { confirm, openDialog, openMenu } from '@client/overlay.tsx'
+import { Btn, cx, Empty, Hd, I, IB, Row } from '@client/ui.tsx'
+import { copyText } from '@client/copy.ts'
+import { useDark } from '@client/prefs.ts'
+import type { Artifact, Chat, Message } from '@shared/types.ts'
+import { agoShort, artifactsIn, isEverything, spaceLabel } from '@shared/view.ts'
 
-const { withIds, preview } = R as any
-const { WORDS, artifactLine } = CV as any
-const { MARKUP, markupHint, markupSent, describe } = M as any
+const on = (a: Artifact) => (a.machine ? `&on=${encodeURIComponent(a.machine)}` : '')
+/** the page itself, at a version */
+export const pageUrl = (a: Artifact, v: number) => `api/artifacts/${encodeURIComponent(a.id)}/page/?v=${v}${on(a)}`
+/** the picture of the page taken when it was published */
+const thumbUrl = (a: Artifact, dark: boolean) => `api/artifacts/${encodeURIComponent(a.id)}/thumb?v=${a.v}${dark ? '&dark=1' : ''}${on(a)}`
 
-export type Pick = { text: string; selector: string; component?: string; x: number; y: number }
-
-const frameUrl = (id: string, v: number, full: boolean, device: string, part = '', theme = '') =>
-  `api/artifacts/${encodeURIComponent(id)}${part}?v=${v}${full ? '&full=1' : ''}&device=${device}${theme ? `&theme=${theme}` : ''}`
-
-/** how long ago, as the window says it: "just now", "5m ago", "2h ago", "3d ago" */
-export function ago(ms: number) {
-  const m = Math.floor((Date.now() - ms) / 60000)
-  if (m < 1) return 'just now'
-  return m < 60 ? `${m}m ago` : m < 1440 ? `${Math.floor(m / 60)}h ago` : `${Math.floor(m / 1440)}d ago`
-}
-
-/** which version, who made it and when: "v3 · Claude Code · 2h ago" (the window's) */
-const detailOf = (a: Artifact) => [`v${a.v}`, a.by, a.at ? ago(a.at) : null].filter(Boolean).join(' · ')
-
-/** the version stepper the window's artifact bars have: ‹ v2 of 5 ›, then "· Latest ›" while an older one shows; one
- *  version only: "v3" in the sidebar's head, "v3 · 2h ago" in the viewer's bar */
-function Stepper({ art, shown, onStep, bar }: { art: Artifact; shown: number; onStep: (n: number | undefined) => void; bar: 'sidebar' | 'viewer' }) {
-  const kept = [...art.versions.map((x) => x.n)].sort((a, b) => a - b)
-  const latest = art.v
-  const older = shown < latest
-  const prev = kept.filter((n) => n < shown).pop()
-  const next = kept.find((n) => n > shown)
-  const me = art.versions.find((x) => x.n === shown)
-  const when = me?.at ? ago(me.at) : undefined
-  if (kept.length <= 1 && !older)
-    return <div className="shrink-0 text-xs text-fg2 tabular-nums phone:text-[0.8125rem]">v{shown}{bar === 'viewer' && when ? ` · ${when}` : ''}</div>
+/** a page as a picture tile: a small picture of the page, its title, when it was updated; tap to open */
+function Tile({ id }: { id: string }) {
+  const snap = useSnap()
+  const dark = useDark()
+  const a = snap?.artifacts.find((x) => x.id === id)
+  if (!snap || !a) return null
   return (
-    <div className="flex shrink-0 items-center text-xs tabular-nums phone:text-[0.8125rem]">
-      <IconButton label={prev ? `v${prev}` : `v${shown}`} disabled={!prev} className="rounded-full! disabled:opacity-40" onClick={() => prev && onStep(prev)}>
-        <BackIcon className={ic} />
-      </IconButton>
-      <span className={clsx('px-0.5', older ? 'text-fg' : 'text-fg2')}>v{shown} of {latest}</span>
-      <IconButton label={next ? `v${next}` : `v${shown}`} disabled={!next} className="rounded-full! disabled:opacity-40" onClick={() => next && onStep(next === latest ? undefined : next)}>
-        <NextIcon className={ic} />
-      </IconButton>
-      {older ? (
-        <>
-          <span className="px-1 text-fg3">·</span>
-          <button type="button" className="press-dim rounded-full px-1.5 py-1 font-medium text-focus hover:bg-hover" onClick={() => onStep(undefined)}>Latest ›</button>
-        </>
-      ) : null}
-    </div>
-  )
-}
-
-type Spot = { x: number; y: number; w: number; h: number }
-
-/** Mark up, as the window's (mods/artifacts/markup.js): a dashed edge over the artifact; click a spot or drag over an
- *  area (the note box hides while you draw), write what should change, and Send gives it to the agent that keeps it,
- *  the spot in words. Esc drops the spot, then ends. Laid over the artifact in the viewer and in the sidebar. */
-function MarkupLayer({ art, v, onEnd }: { art: Artifact; v: number; onEnd: () => void }) {
-  const ref = useRef<HTMLDivElement>(null)
-  const device = useUI((u) => u.device)
-  const [spot, setSpot] = useState<Spot | null>(null)
-  const [press, setPress] = useState<{ x0: number; y0: number; x1: number; y1: number; moved: boolean } | null>(null)
-  const [text, setText] = useState('')
-  const [said, setSaid] = useState('')
-  const [failed, setFailed] = useState(false)
-  const [sending, setSending] = useState(false)
-  const keeper = art.keeper || 'the agent'
-  const focus = () => device !== 'phone' && setTimeout(() => ref.current?.querySelector('textarea')?.focus(), 0)
-  useEffect(() => { focus() }, [])
-  const at = (e: { clientX: number; clientY: number }) => {
-    const r = ref.current!.getBoundingClientRect()
-    return { x: Math.max(0, Math.min(r.width, e.clientX - r.left)), y: Math.max(0, Math.min(r.height, e.clientY - r.top)) }
-  }
-  const box = (p: NonNullable<typeof press>): Spot => ({ x: Math.min(p.x0, p.x1), y: Math.min(p.y0, p.y1), w: Math.abs(p.x1 - p.x0), h: Math.abs(p.y1 - p.y0) })
-  const shown = press?.moved ? box(press) : spot
-  const send = async () => {
-    const t = text.trim()
-    if (!t || sending) return
-    const r0 = ref.current?.getBoundingClientRect()
-    setSending(true)
-    setFailed(false)
-    setSaid(MARKUP.sending)
-    const r = (await act(spot
-      ? { type: 'artifact-note', place: art.place, artifact: art.id, v, note: t, target: describe(spot, r0 ? { width: r0.width, height: r0.height } : null) }
-      : { type: 'artifact-say', place: art.place, artifact: art.id, v, text: t }).catch((e: Error) => ({ ok: false, error: e?.message }))) as { ok?: boolean; error?: string; said?: string }
-    setSending(false)
-    if (r.ok === false) {
-      setFailed(true)
-      return setSaid(r.error || MARKUP.failed)
-    }
-    setText('')
-    setSpot(null)
-    // held for an agent on a question (#1213): its own plain line
-    setSaid(r.said || markupSent(keeper))
-  }
-  // a touch screen taps where the window clicks
-  const hint = device === 'desktop' ? markupHint(keeper) : markupHint(keeper).replace(/^Click/, 'Tap')
-  const line = said || (spot ? (spot.w || spot.h ? MARKUP.area : MARKUP.spot) : hint)
-  return (
-    <div
-      ref={ref}
-      className="absolute inset-0 cursor-crosshair touch-none rounded-[inherit] border-2 border-dashed border-focus"
-      onPointerDown={(e) => {
-        if (e.button !== 0) return
-        const q = at(e)
-        e.currentTarget.setPointerCapture(e.pointerId)
-        setPress({ x0: q.x, y0: q.y, x1: q.x, y1: q.y, moved: false })
-        setSaid('')
-        setFailed(false)
-      }}
-      onPointerMove={(e) => {
-        if (!press) return
-        const q = at(e)
-        setPress({ ...press, x1: q.x, y1: q.y, moved: press.moved || Math.abs(q.x - press.x0) + Math.abs(q.y - press.y0) > 4 })
-      }}
-      onPointerUp={() => {
-        if (!press) return
-        setSpot(press.moved ? box(press) : { x: press.x0, y: press.y0, w: 0, h: 0 })
-        setPress(null)
-        focus()
-      }}
-    >
-      {shown && (shown.w || shown.h) ? (
-        <span className="pointer-events-none absolute rounded-[4px] border-2 border-focus bg-[color-mix(in_srgb,var(--focus)_12%,transparent)]" style={{ left: shown.x, top: shown.y, width: shown.w, height: shown.h }} />
-      ) : null}
-      {shown ? <MarkBadge x={shown.x} y={shown.y} /> : null}
-      {press ? null : (
-        // the window's markup card: what it's about, Clear spot, the note and Send
-        <div
-          className="absolute inset-x-2.5 bottom-[max(env(safe-area-inset-bottom),--spacing(2.5))] flex cursor-default flex-col gap-1.5 rounded-box bg-bg p-2 shadow-dialog"
-          onPointerDown={(e) => e.stopPropagation()}
-          onPointerUp={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-start gap-2 px-0.5 text-[0.75rem] phone:text-[0.8125rem]">
-            <p className={clsx('min-w-0 flex-1 text-pretty', failed ? 'text-need-fg' : 'text-fg2')} role={said ? 'status' : undefined}>{line}</p>
-            {spot && !said ? (
-              <button type="button" className="shrink-0 font-medium text-focus hover:underline" onClick={() => setSpot(null)}>{MARKUP.clear}</button>
-            ) : null}
-          </div>
-          <div className="flex items-center gap-1.5">
-            <TextBox
-              label="Note"
-              enterKeyHint={enterHint()}
-              value={text}
-              onChange={(t) => {
-                setText(t)
-                if (said && !sending) {
-                  setSaid('')
-                  setFailed(false)
-                }
-              }}
-              onKeyDown={(e) => {
-                if (sendsNow(e, getState().ui.keyboard)) {
-                  e.preventDefault()
-                  void send()
-                }
-                // Esc drops the spot, then ends marking up
-                if (e.key === 'Escape') {
-                  e.preventDefault()
-                  e.stopPropagation()
-                  if (spot) setSpot(null)
-                  else onEnd()
-                }
-              }}
-              placeholder={MARKUP.placeholder}
-              className="max-h-32 min-h-8 min-w-0 flex-1 rounded-row bg-bg px-2.5 py-1.5 shadow-[inset_0_0_0_1px_var(--line2)] outline-none placeholder:text-fg3 focus:shadow-[inset_0_0_0_1.5px_var(--focus)] phone:min-h-11 phone:text-[1rem]"
-            />
-            <button
-              type="button"
-              aria-label="Send"
-              disabled={!text.trim() || sending}
-              onClick={() => void send()}
-              className={clsx('press-dim relative grid size-8 shrink-0 place-items-center rounded-row bg-fg text-bg after:absolute after:-inset-1.5 phone:size-11', dimmed)}
-            >
-              <UpIcon className={ic} />
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** the version whose HTML a version shows (one that brought only data shows the HTML before it) */
-const htmlOf = (a: Artifact, n: number) => a.versions.find((x) => x.n === n)?.html ?? n
-
-/* ---------- an artifact in the side panel ---------- */
-
-const SHOWN = 'shepherdr.panelArtifacts'
-/** the artifact each side panel shows, by "place:<id>" (its Artifacts list) or "chat:<key>" (a task's Artifacts tab),
- *  remembered on this device */
-let shownIn: Record<string, string> = (() => {
-  try {
-    return JSON.parse(localStorage.getItem(SHOWN) ?? '{}') as Record<string, string>
-  } catch {
-    return {}
-  }
-})()
-const shownListeners = new Set<() => void>()
-
-/** the last one each list showed: its row stays marked after ‹ Artifacts, as the window's */
-const lastShown: Record<string, string> = {}
-
-function setShown(key: string, id: string | null) {
-  if (id) lastShown[key] = id
-  const { [key]: _, ...rest } = shownIn
-  shownIn = id ? { ...rest, [key]: id } : rest
-  try {
-    localStorage.setItem(SHOWN, JSON.stringify(shownIn))
-  } catch {
-    /* private window: the list shows again next time */
-  }
-  shownListeners.forEach((l) => l())
-}
-
-/** the artifact a side panel shows, while it is still kept */
-function useShown(key: string) {
-  const id = useSyncExternalStore(
-    (l) => {
-      shownListeners.add(l)
-      return () => shownListeners.delete(l)
-    },
-    () => shownIn[key],
-  )
-  return useSnap()?.artifacts?.find((a) => a.id === id)
-}
-
-/** Show an artifact beside the chat: in the Artifacts list on the right (whatever its chips show; a phone's
- *  Artifacts tab), or, on a desktop where an open task's chat covers that list, in the task's own Artifacts tab (a
- *  phone or tablet has no column for it: the task gives way to the list) */
-export function showInPanel(id: string) {
-  const { ui, snap } = getState()
-  if (!snap) return
-  if (ui.viewer) closeArtifact()
-  setShown(`list:${listView(ui, snap).key}`, id)
-  setUI(ui.device === 'phone' ? { task: null, tab: 'artifacts', pick: null, plus: null, menu: false } : { task: ui.task && !taskInMiddle(ui, snap) ? null : ui.task, side: 'artifacts' })
-}
-
-/** Mark up / Done, one look in the viewer's bar and the panel's (and the window's, mods/artifacts/main.js and
- *  chat-image/artifact-bar.js): a pointer clicking a spot and its name, round like every header button. round: on a
- *  phone's bar it is a grey circle with only the pointer, like Close beside it. While marking it says Done with a tick,
- *  tinted the blue of the frame round what you mark. */
-function MarkUpButton({ on, onClick, round }: { on: boolean; onClick: () => void; round?: boolean }) {
-  return (
-    <button
-      type="button"
-      aria-label={on ? 'Done' : 'Mark up'}
-      aria-pressed={on}
-      onClick={onClick}
-      className={clsx(
-        'hit press-dim inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full pr-2.5 pl-2 text-[0.8125rem] font-medium whitespace-nowrap coarse:h-9 phone:h-11 phone:gap-2 phone:pr-4 phone:pl-3.5 phone:text-[0.9375rem]',
-        on ? 'bg-[color-mix(in_srgb,var(--focus)_14%,var(--bg))] text-fg' : 'text-fg2 hover:bg-hover hover:text-fg',
-        round && !on && 'phone:w-11 phone:justify-center phone:bg-bubble phone:px-0',
-      )}
-    >
-      {on ? <CheckIcon className={clsx(ic, 'text-focus')} /> : <MarkUpIcon className={ic} />}
-      <span className={clsx(round && !on && 'phone:hidden')}>{on ? 'Done' : 'Mark up'}</span>
+    <button type="button" className="tile" onClick={() => openArtifact(a.id)}>
+      <span className="prev"><img src={thumbUrl(a, dark)} alt="" loading="lazy" /></span>
+      <span className="l1" style={{ fontWeight: 500 }}>{a.title}</span>
+      <span className="l2">{spaceLabel(snap, a.place)} · {agoShort(a.at)}</span>
     </button>
   )
 }
 
-/** An artifact in the side panel, under the window's sidebar bar: ‹ Artifacts back to the list, its title, which
- *  version (‹ v2 of 5 ›, · Latest ›), and Mark up / Done, which marks it up right there */
-function PanelArtifact({ art, onBack }: { art: Artifact; onBack: () => void }) {
-  const [v, setV] = useState<number | undefined>(undefined)
-  const [marking, setMarking] = useState(false)
-  const shown = v && art.versions.some((x) => x.n === v) ? v : art.v
-  return (
-    <div role="region" aria-label={art.title} className="flex h-full min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-1.5 border-b border-line py-1 pr-2 pl-1 coarse:py-0.5">
-        <button type="button" onClick={() => { setMarking(false); onBack() }} className="press-dim flex h-8 shrink-0 items-center gap-0.5 rounded-full pr-2 pl-1 text-[0.8125rem] text-fg2 hover:bg-hover hover:text-fg phone:h-11 phone:text-[0.9375rem]">
-          <BackIcon className={ic} />
-          Artifacts
-        </button>
-        <div className="min-w-0 flex-1 truncate font-semibold">{art.title}</div>
-        <Stepper art={art} shown={shown} bar="sidebar" onStep={(n) => { setMarking(false); setV(n) }} />
-        <MarkUpButton on={marking} onClick={() => setMarking(!marking)} />
-      </div>
-      <div className="relative min-h-0 flex-1">
-        <div className="absolute inset-0">
-          <ArtifactFrame art={art} v={shown} full />
+/** a page an agent made shows in the chat as its tile */
+function InChat({ msg }: { msg: Message; chat: Chat }) {
+  if (!msg.artifact) return null
+  return <div className="atile"><Tile id={msg.artifact.id} /></div>
+}
+
+/* ---------- an open artifact ---------- */
+
+/** Earlier versions: a list (view, Restore) */
+function versions(a: Artifact) {
+  openDialog(
+    (close) => (
+      <>
+        <h2>{a.title}</h2>
+        <div>
+          {a.versions.map((v) => {
+            const shown = (getState().ui.artV ?? a.v) === v.n
+            return (
+              <div className="rowx" key={v.n}>
+                <Row icon="clock" label={`Version ${v.n}`} sub={`${shown ? 'Now showing · ' : ''}${v.at ? `${agoShort(v.at)} ago` : v.when}`} onClick={() => { close(); setUI({ artV: v.n === a.v ? null : v.n }) }} />
+                {v.n !== a.v && <Btn small onClick={() => { close(); void tryAct({ type: 'artifact-restore', place: a.place, artifact: a.id, v: v.n }, `Version ${v.n} is the newest again`).then((ok) => ok && setUI({ artV: null })) }}>Restore</Btn>}
+              </div>
+            )
+          })}
         </div>
-        {marking ? <MarkupLayer key={`${art.id}:${shown}`} art={art} v={shown} onEnd={() => setMarking(false)} /> : null}
-      </div>
-    </div>
+        <div className="acts"><Btn onClick={close}>Close</Btn></div>
+      </>
+    ),
+    { label: `${a.title}: earlier versions` },
   )
 }
 
-/** An artifact filling a split view's pane, at its latest */
-function SplitArtifact({ artifactId }: { artifactId: string }) {
-  const art = useSnap()?.artifacts?.find((a) => a.id === artifactId)
-  return art ? (
-    <div className="absolute inset-0">
-      <ArtifactFrame art={art} v={art.v} full />
-    </div>
-  ) : null
-}
-
-/** a person just tapped or typed, and not in another frame: a tap inside a frame marks the app as touched too (the
- *  browser's user activation), a script can't; where the browser can't tell, the frame must have the focus */
-function touchedNow(frame: HTMLIFrameElement | null) {
-  const other = document.activeElement instanceof HTMLIFrameElement && document.activeElement !== frame
-  const ua = (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation
-  return !other && (ua ? ua.isActive : document.activeElement === frame)
-}
-
-const onResize = (l: () => void) => {
-  addEventListener('resize', l)
-  return () => removeEventListener('resize', l)
-}
-/** the window's height; on a touch screen at its tallest for its width, so a keyboard or a browser's toolbar coming
- *  and going doesn't resize every card in the chat (turning it does) */
-let tallest = { w: 0, h: 0 }
-const useWindowHeight = () =>
-  useSyncExternalStore(onResize, () => {
-    if (!matchMedia('(pointer: coarse)').matches) return innerHeight
-    if (innerWidth !== tallest.w || innerHeight > tallest.h) tallest = { w: innerWidth, h: innerHeight }
-    return tallest.h
+function del(a: Artifact) {
+  confirm({
+    title: 'Delete this page?',
+    body: `“${a.title}” and its earlier versions are deleted. This can't be undone.`,
+    ok: 'Delete',
+    danger: true,
+    run: async () => {
+      if (await tryAct({ type: 'artifact-delete', place: a.place, artifact: a.id }) && getState().ui.art === a.id) setUI({ art: null, artWide: false })
+    },
   })
-
-/** how tall each page last said it is, so a card scrolled back into the chat doesn't jump */
-const heights = new Map<string, number>()
-
-/** Shepherdr 3.1: a recipe artifact is drawn here as the web's own HTML (Recipe.tsx); a custom panel only the Herdr
- *  window runs shows the window's picture of it; a 2.1 page (none here now) still has its frame. Each version by its own
- *  kind: a converted one was a panel before it became a recipe. */
-export function ArtifactFrame(p: Parameters<typeof PageFrame>[0]) {
-  const kind = p.art.versions.find((x) => x.n === p.v)?.kind ?? p.art.kind
-  if (kind === 'recipe') return <RecipeFrame {...p} />
-  if (kind === 'gpui') return <WindowPicture {...p} />
-  return <PageFrame {...p} />
 }
 
-/** A recipe of the version shown, its pictures from the service (Mark up lays its layer over it: MarkupLayer). */
-function RecipeFrame({ art, v, full }: Parameters<typeof PageFrame>[0]) {
-  const [recipe, setRecipe] = useState<{ blocks: unknown[] } | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  // another machine's: the service reads its files there
-  const on = art.machine ? `&on=${encodeURIComponent(art.machine)}` : ''
-  useEffect(() => {
-    let gone = false
-    setRecipe(null)
-    setError(null)
-    fetch(`api/artifacts/${encodeURIComponent(art.id)}/recipe?v=${v}${on}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('gone'))))
-      .then((r) => !gone && setRecipe(withIds(r)), () => !gone && setError(UNREADABLE))
-    return () => { gone = true }
-  }, [art.id, v, on])
-  if (error) return <p className="p-4 text-fg3">{error}</p>
-  if (!recipe) return <p className="p-4 text-fg3">Loading…</p>
-  return (
-    <div className={clsx('overflow-y-auto p-4 phone:p-5', full ? 'h-full' : 'max-h-[70dvh]')}>
-      <Recipe recipe={recipe} asset={(src) => `api/artifacts/${encodeURIComponent(art.id)}/file/${src.split('/').map(encodeURIComponent).join('/')}?v=${v}${on}`}
-        reply={(text) => act({ type: 'artifact-send', place: art.place, artifact: art.id, v, text })} />
-    </div>
+function menu(anchor: Element, a: Artifact, v: number) {
+  const link = new URL(`?artifact=${encodeURIComponent(a.id)}`, location.href).href
+  openMenu(
+    anchor,
+    [
+      { icon: 'ext', label: 'Open in a new tab', run: () => void window.open(pageUrl(a, v), '_blank', 'noopener') },
+      // Expand gives the page the middle, like a task
+      { icon: 'expand', label: getState().ui.artWide ? 'Back to the pane' : 'Expand', run: () => setUI({ artWide: !getState().ui.artWide }) },
+      // a proof stays on its task until kept: Keep moves it to Artifacts
+      ...(a.proof ? [{ icon: 'archive' as const, label: 'Keep', run: () => void tryAct({ type: 'artifact-keep', place: a.place, artifact: a.id }, 'Kept in Artifacts') }] : [{ icon: 'pin' as const, label: a.pinned ? 'Unpin' : 'Pin', run: () => void tryAct({ type: 'artifact-pin', place: a.place, artifact: a.id, on: !a.pinned }) }]),
+      { icon: 'clock', label: 'Earlier versions', value: a.versions.length > 1 ? String(a.versions.length - 1) : undefined, run: () => versions(a) },
+      { icon: 'copy', label: 'Copy link', run: () => void copyText(link).then((ok) => ok && notice('Link copied')) },
+      { icon: 'pen', label: 'Rename', run: () => renameDialog(a.title, (name) => tryAct({ type: 'artifact-rename', place: a.place, artifact: a.id, name })) },
+      { icon: 'bin', label: 'Delete', danger: true, line: true, run: () => del(a) },
+    ],
+    { label: a.title },
   )
 }
 
-/** A custom panel, for the Herdr window only: the picture the window last took of it (herdr-artifact picture, as it
- *  showed it), this version's or else the newest before it, with where to open it small underneath. */
-function WindowPicture({ art, v, full }: Parameters<typeof PageFrame>[0]) {
-  const shot = (x: ArtifactVersion) => (x.kind ?? art.kind) === 'gpui' && !!x.picture
-  // newest first
-  const pic = art.versions.find((x) => x.n === v && shot(x)) ?? art.versions.find((x) => x.n < v && shot(x))
-  const on = art.machine ? `&on=${encodeURIComponent(art.machine)}` : ''
-  if (!pic) return <p className="p-4 text-pretty text-fg3">Made for the Herdr window: open it there.</p>
-  return (
-    <figure className={clsx('flex flex-col gap-1.5 overflow-y-auto p-4 phone:p-5', full ? 'h-full' : 'max-h-[70dvh]')}>
-      <img src={`api/artifacts/${encodeURIComponent(art.id)}/file/.window.png?v=${pic.n}&t=${pic.picture}${on}`} alt={art.title}
-        className="h-auto max-w-full self-start rounded-box shadow-box" />
-      <figcaption className="text-pretty text-xs text-fg3">
-        {pic.n === v ? '' : `As v${pic.n} looked. `}Made for the Herdr window: open it there.
-      </figcaption>
-    </figure>
-  )
-}
-
-/** An artifact's page in a sealed frame: scripts and forms run, never with this app's origin, and it loads nothing. */
-function PageFrame({
-  art,
-  v,
-  full,
-  markup,
-  onPick,
-  onMore,
-}: {
-  art: Artifact
-  v: number
-  full?: boolean
-  markup?: boolean
-  onPick?: (p: Pick) => void
-  /** more of the page is below what shows */
-  onMore?: (more: boolean) => void
-}) {
-  const ref = useRef<HTMLIFrameElement>(null)
-  const device = useUI((u) => u.device)
-  // in the chat it is as tall as its page, up to most of the screen; the rest scrolls inside it
-  const cap = Math.round(useWindowHeight() * (device === 'phone' ? 0.7 : 0.75))
-  const known = `${art.id}:${htmlOf(art, v)}:${device}${full ? ':full' : ''}`
-  const [h, setH] = useState(() => heights.get(known) ?? 96)
-  // the version in the frame's address: a newer one with the same page only brings data, which goes in without a reload
-  const [loaded, setLoaded] = useState(v)
-  /** the version whose data is in the frame */
-  const has = useRef(v)
-  const last = useRef(0)
-  const page = htmlOf(art, v)
-  const pageLoaded = htmlOf(art, loaded)
-  // it opens in the app's light or dark, and is told when that changes, without a reload
-  const dark = useDark()
-  const opened = useMemo(() => (isDark() ? 'dark' : 'light'), [loaded, full, device])
-  const theme = dark ? 'dark' : 'light'
-  useEffect(() => {
-    ref.current?.contentWindow?.postMessage({ shepherdr: 'theme', theme }, '*')
-  }, [theme])
-  useEffect(() => {
-    if (v === has.current) return
-    if (page !== pageLoaded) {
-      has.current = v
-      return setLoaded(v)
-    }
-    has.current = v
-    fetch(frameUrl(art.id, v, false, device, '/data'))
-      .then((r) => r.json())
-      .then((r: { data?: unknown }) => has.current === v && ref.current?.contentWindow?.postMessage({ shepherdr: 'data', data: r.data ?? null }, '*'))
-      .catch(() => has.current === v && setLoaded(v))
-  }, [art.id, v, page, pageLoaded, device])
+/** The page, in a frame that cannot reach the app. Marking up: tap the page to drop a pin, then write. */
+function Page({ a, v, markup, pin, setPin }: { a: Artifact; v: number; markup: boolean; pin: { x: number; y: number } | null; setPin: (p: { x: number; y: number } | null) => void }) {
+  const frame = useRef<HTMLIFrameElement>(null)
+  // a page can send the person's answer back to its agent: parent.postMessage({ shepherdr: 'answer', text }, '*')
   useEffect(() => {
     const on = (e: MessageEvent) => {
-      if (e.source !== ref.current?.contentWindow || !e.data || typeof e.data !== 'object') return
-      const d = e.data as { shepherdr?: string; h?: number; stuck?: boolean; grows?: boolean; text?: string; url?: string; more?: boolean } & Pick
-      if (d.shepherdr === 'more') onMore?.(!!d.more)
-      if (d.shepherdr === 'height' && d.h) {
-        // one that grows with its frame (100vh) starts from scratch each time, so it settles the same each time
-        if (d.stuck) heights.delete(known)
-        else if (!d.grows) heights.set(known, d.h)
-        setH(d.h)
-      }
-      // a page speaks for you only right after you tapped or typed in it: the browser's own mark of a person's touch,
-      // which no script can make; at most once every two seconds, and on one line (it can't write a chat line of its own)
-      if (d.shepherdr === 'send' && typeof d.text === 'string' && d.text.trim() && touchedNow(ref.current) && Date.now() - last.current > 2000) {
-        last.current = Date.now()
-        const text = d.text.replace(/\s*[\r\n]+\s*/g, ' ').trim().slice(0, 2000)
-        act({ type: 'artifact-send', place: art.place, artifact: art.id, v, text })
-          .then((r: { to?: string }) => ref.current?.contentWindow?.postMessage({ shepherdr: 'sent', text, to: r?.to }, '*'))
-          .catch(() => undefined)
-      }
-      // a web link opens in a tab of its own, from a tap in the page, never with this app as its opener
-      if (d.shepherdr === 'open' && typeof d.url === 'string' && /^https?:\/\//i.test(d.url) && touchedNow(ref.current)) window.open(d.url, '_blank', 'noopener,noreferrer')
-      if (d.shepherdr === 'pick' && markup && onPick) onPick({ text: d.text ?? '', selector: d.selector, component: d.component, x: d.x, y: d.y })
+      const d = e.data as { shepherdr?: string; text?: unknown } | null
+      if (e.source !== frame.current?.contentWindow || d?.shepherdr !== 'answer' || typeof d.text !== 'string' || !d.text.trim()) return
+      void tryAct({ type: 'artifact-say', place: a.place, artifact: a.id, v, text: d.text.slice(0, 4000) }, 'Sent to the agent that made it')
     }
     addEventListener('message', on)
     return () => removeEventListener('message', on)
-  }, [art.id, art.place, v, known, markup, onPick, onMore])
-  useEffect(() => {
-    ref.current?.contentWindow?.postMessage({ shepherdr: 'markup', on: !!markup }, '*')
-  }, [markup])
-  // a fixed-size design fits whole within the cap
-  useEffect(() => {
-    if (!full) ref.current?.contentWindow?.postMessage({ shepherdr: 'cap', h: cap }, '*')
-  }, [cap, full])
+  }, [a.id, a.place, v])
   return (
-    <iframe
-      ref={ref}
-      title={art.title}
-      sandbox="allow-scripts allow-forms"
-      // a Copy button in the page may write to the clipboard (SHEP-152); nothing else of the app's is lent to it
-      allow="clipboard-write"
-      loading={full ? undefined : 'lazy'}
-      src={frameUrl(art.id, loaded, !!full, device, '', opened)}
-      onLoad={() => {
-        if (theme !== opened) ref.current?.contentWindow?.postMessage({ shepherdr: 'theme', theme }, '*')
-        if (markup) ref.current?.contentWindow?.postMessage({ shepherdr: 'markup', on: true }, '*')
-        if (!full) ref.current?.contentWindow?.postMessage({ shepherdr: 'cap', h: cap }, '*')
-        // newer data came while it was still loading (or loaded again): it gets that data now
-        if (has.current !== loaded) {
-          const want = has.current
-          fetch(frameUrl(art.id, want, false, device, '/data'))
-            .then((r) => r.json())
-            .then((r: { data?: unknown }) => has.current === want && ref.current?.contentWindow?.postMessage({ shepherdr: 'data', data: r.data ?? null }, '*'))
-            .catch(() => undefined)
-        }
-      }}
-      className={clsx('block w-full border-0 bg-transparent', full && 'h-full')}
-      style={full ? undefined : { height: Math.min(Math.max(h, 24), cap) }}
-    />
-  )
-}
-
-/** the newest post of an artifact in a chat shows it; earlier ones fold to a line, so a chat never repeats big frames */
-function ArtifactCard({ msg, chat }: { msg: Message; chat: Chat; from: string }) {
-  const snap = useSnap()!
-  const post = msg.artifact
-  if (!post) return null
-  const art = snap.artifacts?.find((a) => a.id === post.id)
-  const later = chat.messages.slice(chat.messages.indexOf(msg) + 1).some((m) => m.artifact?.id === post.id)
-  // under the words it came with (a message of its own, on its own)
-  const gap = msg.text && 'mt-2'
-  // gone from its folder's list: the window's chat shows nothing for it
-  if (!art) return null
-  // an earlier publish of it: a quiet line, as the window's chat ("Published <title> v2"), that opens that version
-  if (later)
-    return (
-      <button type="button" onClick={() => openArtifact(art.id, post.v)}
-        className={clsx(gap, 'press-dim flex max-w-full items-center gap-1.5 rounded-row text-left text-[0.75rem] text-fg3 hover:bg-hover hover:text-fg2 phone:min-h-11 phone:text-[0.8125rem]')}>
-        <PageIcon className={ic} />
-        <span className="min-w-0 truncate">Published {art.title} v{post.v}</span>
-      </button>
-    )
-  // its latest publish: the window's card, its title, "Artifact · v3" (its latest version) and Open, over what is in it
-  return <PreviewCard art={art} gap={gap || undefined} />
-}
-
-/** what an artifact's card shows of it (core/recipe.js preview: its key pictures, its first words), by artifact and
- *  version: read once, kept while the chat scrolls. { pics: their addresses, lines } */
-type Peek = { pics: string[]; vids: string[]; lines: string[] }
-const peeks = new Map<string, { images: string[]; videos?: string[]; lines: string[] } | 'none'>()
-function usePeek(art: Artifact): Peek | null {
-  const kind = art.versions.find((x) => x.n === art.v)?.kind ?? art.kind
-  const key = `${art.machine ?? ''}:${art.id}:${art.v}`
-  const on = art.machine ? `&on=${encodeURIComponent(art.machine)}` : ''
-  const base = `api/artifacts/${encodeURIComponent(art.id)}`
-  const [, redraw] = useState(0)
-  useEffect(() => {
-    if (kind !== 'recipe' || peeks.has(key)) return
-    let gone = false
-    fetch(`${base}/recipe?v=${art.v}${on}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('gone'))))
-      .then((r) => peeks.set(key, preview(r)), () => peeks.set(key, 'none'))
-      .finally(() => !gone && redraw((n) => n + 1))
-    return () => { gone = true }
-  }, [key, kind, base, on, art.v])
-  if (kind === 'gpui') {
-    // a custom panel: the picture the window last took of it (newest first)
-    const pic = art.versions.find((x) => x.n <= art.v && (x.kind ?? art.kind) === 'gpui' && !!x.picture)
-    return pic ? { pics: [`${base}/file/.window.png?v=${pic.n}&t=${pic.picture}${on}`], vids: [], lines: [] } : null
-  }
-  const p = peeks.get(key)
-  if (!p || p === 'none') return null
-  const addr = (src: string) => `${base}/file/${src.split('/').map(encodeURIComponent).join('/')}?v=${art.v}${on}`
-  // a clip with no poster: its first frame, shown by the browser (SHEP-209)
-  return { pics: p.images.map(addr), vids: (p.videos ?? []).map(addr), lines: p.lines }
-}
-
-/** the cards that are open in place, by artifact (it stays open as new versions come) */
-const opened = new Set<string>()
-
-/** An artifact's latest card in the chat: its title, "Artifact · v3" and Open, then its key pictures and first lines;
- *  Show more opens all of it right here, in the chat, and Open takes it full screen. A new version redraws it in place. */
-function PreviewCard({ art, gap }: { art: Artifact; gap?: string }) {
-  const peek = usePeek(art)
-  const [open, setOpen] = useState(() => opened.has(art.id))
-  const toggle = (on: boolean) => { if (on) opened.add(art.id); else opened.delete(art.id); setOpen(on) }
-  const pics = peek?.pics ?? []
-  const vids = peek?.vids ?? []
-  const lines = peek?.lines ?? []
-  const tiles = pics.length + vids.length
-  const kind = art.versions.find((x) => x.n === art.v)?.kind ?? art.kind
-  return (
-    <div data-card className={clsx(gap, 'flex w-full flex-col overflow-hidden rounded-box bg-bubble shadow-[inset_0_0_0_1px_var(--line2)]', open ? 'max-w-[720px]' : 'max-w-[480px]')}>
-      <div className="flex items-center gap-2.5 px-2.5 py-2">
-        <button type="button" onClick={() => toggle(!open)} aria-expanded={open} aria-label={`${open ? WORDS.showLess : WORDS.showMore}: ${art.title}`}
-          className="press-dim flex min-w-0 flex-1 items-center gap-2.5 rounded-row text-left">
-          <span className="grid size-8 shrink-0 place-items-center rounded-row bg-bg text-fg2 phone:size-10">
-            <PageIcon className={ic} />
-          </span>
-          <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate font-medium">{art.title}</span>
-            <span className="text-[0.75rem] text-fg3 tabular-nums phone:text-[0.8125rem]">{artifactLine(art.v)}</span>
-          </span>
-        </button>
-        <button type="button" onClick={(e) => (splitClick(e) ? openSplit({ kind: 'artifact', id: art.id }) : openArtifact(art.id))}
-          className="press grid h-7 shrink-0 place-items-center rounded-row bg-bg px-2.5 text-[0.8125rem] font-medium shadow-[inset_0_0_0_1px_var(--line2)] hover:bg-hover phone:h-9">
-          Open
-        </button>
-      </div>
-      {open ? (
-        <div className="border-t border-line">
-          <ArtifactFrame art={art} v={art.v} />
+    <div style={{ position: 'relative', flex: 1, display: 'flex', minHeight: 0 }}>
+      <iframe ref={frame} className="page" title={a.title} src={pageUrl(a, v)} sandbox="allow-scripts allow-forms allow-popups" referrerPolicy="no-referrer" />
+      {markup && (
+        <div
+          role="button"
+          aria-label="Tap the page where you mean"
+          style={{ position: 'absolute', inset: 0, cursor: 'crosshair' }}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect()
+            setPin({ x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height })
+          }}
+        >
+          {pin && <span className="pinmark" style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%` }} />}
         </div>
-      ) : (
-        <>
-          {tiles ? (
-            <button type="button" onClick={() => toggle(true)} aria-label={`${WORDS.showMore}: ${art.title}`}
-              className={clsx('grid gap-1.5 px-2.5', tiles === 1 ? 'grid-cols-1' : tiles === 2 ? 'grid-cols-2' : 'grid-cols-3')}>
-              {pics.map((src) => (
-                <img key={src} src={src} alt="" loading="lazy" decoding="async" draggable={false}
-                  className={clsx('w-full rounded-[8px] bg-bg object-cover object-top outline-1 -outline-offset-1 outline-fg/10', tiles === 1 ? 'max-h-[240px]' : 'aspect-[4/3]')} />
-              ))}
-              {vids.map((src) => (
-                <video key={src} src={src} preload="metadata" muted playsInline aria-label=""
-                  className={clsx('w-full rounded-[8px] bg-black object-cover object-top outline-1 -outline-offset-1 outline-fg/10', tiles === 1 ? 'max-h-[240px]' : 'aspect-[4/3]')} />
-              ))}
-            </button>
-          ) : null}
-          {lines.length ? (
-            <div className="line-clamp-3 px-3 pt-2 text-[0.875rem]/5 text-fg2 phone:text-[0.9375rem]/6 [&_p]:inline">
-              <Markdown text={lines.join(' · ')} />
-            </div>
-          ) : null}
-          {tiles || lines.length || kind !== 'recipe' ? (
-            <button type="button" onClick={() => toggle(true)}
-              className="press-dim flex items-center gap-1 self-start rounded-row px-3 pt-1.5 pb-2.5 text-[0.8125rem] font-medium text-fg2 hover:text-fg phone:min-h-11 phone:text-[0.875rem]">
-              {WORDS.showMore}
-              <DownIcon className="size-3.5" />
-            </button>
-          ) : null}
-        </>
       )}
-      {open ? (
-        <button type="button" onClick={() => toggle(false)}
-          className="press-dim flex items-center gap-1 self-start rounded-row px-3 py-2 text-[0.8125rem] font-medium text-fg2 hover:text-fg phone:min-h-11 phone:text-[0.875rem]">
-          {WORDS.showLess}
-          <UpIcon className="size-3.5" />
-        </button>
-      ) : null}
     </div>
   )
 }
 
-/** An artifact full screen, as the window's viewer: its bar (icon, title, which version or the stepper, Mark up / Done,
- *  Open in sidebar, Close) over the artifact; Mark up lays the window's layer over it. A newer version swaps in while
- *  you look. */
-function Viewer() {
-  const v = useUI((u) => u.viewer)
-  const device = useUI((u) => u.device)
-  const snap = useSnap()
-  const art = v && snap?.artifacts?.find((a) => a.id === v.artifact)
+function Open({ a, where }: { a: Artifact; where: 'pane' | 'middle' }) {
+  const snap = useSnap()!
+  const ui = useUI()
   const [markup, setMarkup] = useState(false)
-  // a version no longer kept (the last 20 are) shows the latest
-  const shown = art && v?.v && art.versions.some((x) => x.n === v.v) ? v.v : art?.v
-  // another artifact, or another version: Mark up ends, as the window's viewer reopening on it
-  useEffect(() => setMarkup(false), [v?.artifact, shown])
-  if (!v) return null
-  const phone = device === 'phone'
-  if (!art || !shown)
-    return (
-      <div role="dialog" aria-modal="true" aria-label="Artifact" className="fixed inset-0 z-40 grid place-items-center bg-black/35 p-6" onClick={closeArtifact}>
-        <div className="rounded-box bg-bg px-5 py-4 shadow-dialog">{snap ? 'This artifact was deleted.' : 'Opening…'}</div>
-      </div>
-    )
-  // round, like every header's buttons; grey circles on a phone
-  const barBtn = phone ? 'rounded-full! bg-bubble' : 'rounded-full!'
-  return (
-    <ViewerShell label={art.title} phone={phone}>
-      {/* the whole screen is the page's, but for a slim bar on top (the window's artifact viewer bar) */}
-      <div className="flex w-full min-w-0 flex-col overflow-hidden pr-[env(safe-area-inset-right)] pl-[env(safe-area-inset-left)]">
-        <div className="flex shrink-0 items-center gap-1.5 border-b border-line pt-[calc(env(safe-area-inset-top)+--spacing(1))] pr-2 [[data-topbar]~*_&]:pt-1 pb-1 pl-4 phone:gap-2 phone:px-3">
-          <PageIcon className={clsx(ic, 'shrink-0 text-fg2 phone:hidden')} />
-          <div className="min-w-0 flex-1 truncate font-medium">{art.title || 'Artifact'}</div>
-          <Stepper art={art} shown={shown} bar="viewer" onStep={(n) => openArtifact(art.id, n)} />
-          <MarkUpButton on={markup} onClick={() => setMarkup(!markup)} round />
-          {/* beside the chat, in the Artifacts panel */}
-          {phone ? null : (
-            <IconButton label="Open in sidebar" onClick={() => showInPanel(art.id)} className="rounded-full!">
-              <PanelIcon className={ic} />
-            </IconButton>
-          )}
-          <IconButton label="Close" onClick={closeArtifact} className={barBtn}>
-            <XIcon className={ic} />
-          </IconButton>
-        </div>
-        <div className="relative min-h-0 flex-1">
-          <div className="absolute inset-0">
-            <ArtifactFrame art={art} v={shown} full />
-          </div>
-          {markup ? <MarkupLayer key={`${art.id}:${shown}`} art={art} v={shown} onEnd={() => setMarkup(false)} /> : null}
-        </div>
-      </div>
-    </ViewerShell>
-  )
-}
-
-/** the viewer over the whole screen: it pushes in on a phone and fades in wider, takes the focus and keeps Tab in it,
- *  and gives the focus back when it closes */
-function ViewerShell({ label, phone, children }: { label: string; phone: boolean; children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null)
-  useMotion(ref, phone ? 'page' : 'fade')
-  // a phone has no keyboard to move: nothing takes the focus there (it would only show a ring)
-  useDialogFocus(ref, { focus: !phone })
-  return (
-    <div ref={ref} role="dialog" aria-modal="true" aria-label={label} className="fixed inset-0 z-40 flex bg-bg">
-      {children}
-    </div>
-  )
-}
-
-
-
-/** "All" in the list's bar: every folder's artifacts (the default, like Tasks), or the shown space's (the window's
- *  toggle), kept on this device. A new key: a choice saved under the old one ('shepherdr.artifactsAll', off by
- *  default) starts over on All. */
-const ALL = 'shepherdr.artifactsAllFolders'
-let allOn = (() => { try { localStorage.removeItem('shepherdr.artifactsAll'); return localStorage.getItem(ALL) !== '0' } catch { return true } })()
-const allListeners = new Set<() => void>()
-function setAll(on: boolean) {
-  allOn = on
-  try { localStorage.setItem(ALL, on ? '1' : '0') } catch { /* private window */ }
-  allListeners.forEach((l) => l())
-}
-
-/** The Artifacts panel, as the window's: "Artifacts", the space's folder or All folders, the All toggle, "Filter
- *  artifacts" (F), and each artifact with "v3 · its maker · 2h ago" ("Open · " while it is open in a pane); newest
- *  first. A row opens it right here, in place of the list (‹ Artifacts goes back). */
-function ArtifactList(_: { placeId: string }) {
-  const snap = useSnap()!
-  const view = useStore((s) => listView(s.ui, snap))
-  const place = useUI((u) => u.place)
-  const panes = useUI((u) => panesHere(u))
-  const all = useSyncExternalStore((l) => (allListeners.add(l), () => void allListeners.delete(l)), () => allOn)
-  const value = useUI((u) => u.filter[`${view.search}|artifacts`] ?? '')
-  const q = useUI((u) => filterOf(u, view.search, 'artifacts')).trim()
-  // its key, where there is a keyboard
-  const keys = useUI((u) => u.device === 'desktop' || u.kb)
-  const here = placeOf(snap, place)
-  // the folder the shown space's artifacts are kept for, and its name ("~" at home), as the window's header
-  const store = here.store
-  const key = `list:${view.key}`
-  // one shown in the panel takes the list's place
-  const shown = useShown(key)
-  // "2h ago" moves on by the minute
-  const [, tick] = useState(0)
+  const [pin, setPin] = useState<{ x: number; y: number } | null>(null)
+  const [note, setNote] = useState('')
+  const input = useRef<HTMLInputElement>(null)
+  const v = ui.artV ?? a.v
   useEffect(() => {
-    const t = setInterval(() => tick((n) => n + 1), 60000)
-    return () => clearInterval(t)
-  }, [])
-  // with All, every folder's on the shown space's machine (the window's `list --all` there)
-  const machineOf = (a: Artifact) => a.machine ?? snap.host
-  const items = (snap.artifacts ?? [])
-    .filter((a) => (all ? machineOf(a) === here.machine : store?.key && a.store ? a.store === store.key : a.place === here.id))
-    .sort((a, b) => b.at - a.at)
-  // by its title, the task that made it, who made it, and (with All) its folder
-  const list = q ? items.filter((a) => matches(q, a.title, a.task, a.by, all ? a.folderName : undefined, all ? a.folder : undefined)) : items
-  const isOpen = (a: Artifact) => panes.some((p) => p.kind === 'artifact' && p.id === a.id)
-  if (shown) return <PanelArtifact art={shown} onBack={() => setShown(key, null)} />
+    if (markup) input.current?.focus()
+    else setPin(null)
+  }, [markup])
+  const send = async () => {
+    const t = note.trim()
+    if (!t) return
+    // the note goes to the agent that made it, with the spot pointed at; if that agent is gone, to its space's chat.
+    // One that did not go through stays in the box, with its pin, to send again
+    if (!(await tryAct({ type: 'artifact-note', place: a.place, artifact: a.id, v, note: t, ...(pin ? { spot: pin } : {}) }, 'Sent to the agent that made it'))) return
+    setNote('')
+    setMarkup(false)
+  }
+  const back = where === 'middle' ? { label: 'Back', run: () => setUI({ artWide: false }) } : { label: 'Back to artifacts', run: () => setUI({ art: null }) }
   return (
-    <>
-      <div className="flex items-center gap-2 px-3 pt-2 phone:px-4">
-        <span className="shrink-0 font-semibold">Artifacts</span>
-        <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-fg3 phone:text-[0.9375rem]">{all ? 'All folders' : store?.name ?? here.name}</span>
-        <button type="button" aria-pressed={all} onClick={() => setAll(!all)}
-          className="press-dim h-7 shrink-0 rounded-full px-2.5 text-[0.8125rem] font-medium text-fg2 hover:bg-hover hover:text-fg aria-pressed:bg-sel aria-pressed:text-fg coarse:h-9 phone:h-9 phone:text-[0.875rem]">
-          All
-        </button>
-      </div>
-      <FilterBox
-        label="Filter artifacts"
-        hint={keys ? 'F' : undefined}
-        value={value}
-        onChange={(v) => setFilter(view.search, 'artifacts', v)}
-      />
-      {!items.length ? (
-        <div className="flex flex-col items-center gap-1.5 px-5 pt-7 pb-4 text-center">
-          <PageIcon className={clsx(ic, 'text-fg3')} />
-          <p className="pt-1 font-medium">No artifacts.</p>
-          <p className="max-w-64 text-[0.8125rem] text-pretty text-fg2 phone:text-[0.9375rem]">
-            {all ? 'Reports, boards and forms agents make show here.' : `Reports, boards and forms agents make for ${store?.name ?? here.name} show here. Ask an agent to make one.`}
-          </p>
-        </div>
-      ) : list.length ? (
-        <List className="pt-1">
-          {list.map((a) => {
-            const sel = lastShown[key] === a.id
-            return (
-              <Row key={a.id} two sel={sel} onActivate={() => setShown(key, a.id)} className="gap-3! py-2!">
-                <PageIcon className={clsx(ic, 'mt-0.5 shrink-0 self-start', sel || isOpen(a) ? 'text-focus' : 'text-fg3')} />
-                <RowText sub={<>{isOpen(a) ? 'Open · ' : ''}{detailOf(a)}</>}>
-                  <span className="block truncate">{a.title}</span>
-                </RowText>
-                {all && a.folderName ? <span className="max-w-36 shrink-0 truncate self-start text-[0.75rem] text-fg3 phone:text-[0.8125rem]">{a.folderName}</span> : null}
-              </Row>
-            )
-          })}
-        </List>
-      ) : (
-        <p className="px-5 pt-7 text-center text-[0.8125rem] text-fg3 phone:text-[0.9375rem]">No artifacts match “{q}”.</p>
+    <PaneFrame
+      flush
+      head={(sc) => (
+        <Hd back={back} title={a.title} sub={`Version ${v} · ${spaceLabel(snap, a.place)} · ${agoShort(a.versions.find((x) => x.n === v)?.at ?? a.at)} ago`} scrolled={sc}>
+          <IB icon="chat" label="Mark up" pressed={markup} onClick={() => setMarkup(!markup)} />
+          <IB icon="dots" label="More" aria-haspopup="menu" onClick={(e) => menu(e.currentTarget, a, v)} />
+          {where === 'pane' && !ui.phone && <IB icon="x" label="Close" onClick={() => togglePane(null)} />}
+        </Hd>
       )}
-    </>
+      foot={markup ? <input ref={input} className="inp" name="note" aria-label="Say what to change" placeholder="Say what to change. It goes to the agent that made this." enterKeyHint="send" autoComplete="off" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void send()} /> : undefined}
+    >
+      <Page a={a} v={v} markup={markup} pin={pin} setPin={setPin} />
+    </PaneFrame>
   )
 }
 
-/** A task's Artifacts tab (SHEP-60): what its agent and its helpers made or updated (the service finds them:
- *  core/task-artifacts.js), its proof first and marked so, then newest first; each with its title (without the task's
- *  id in front), how many versions and when. A tap opens it in the viewer (its versions, Mark up). None: a quiet line. */
-function TaskArtifacts({ task }: { task: Task; chatKey: string }) {
-  const snap = useSnap()!
-  // "2h ago" moves on by the minute
-  const [, tick] = useState(0)
-  useEffect(() => {
-    const t = setInterval(() => tick((n) => n + 1), 60000)
-    return () => clearInterval(t)
-  }, [])
-  const ref = task.id.slice(task.id.lastIndexOf(':') + 1)
-  const all = snap.artifacts ?? []
-  const list = (task.artifacts ?? []).map((id) => all.find((a) => a.id === id)).filter((a): a is Artifact => !!a)
-  if (!list.length)
-    return (
-      <div className="flex flex-col items-center gap-1.5 px-5 pt-10 pb-4 text-center">
-        <PageIcon className={clsx(ic, 'text-fg3')} />
-        <p className="pt-1 font-medium">No artifacts yet</p>
-        <p className="max-w-64 text-[0.8125rem] text-pretty text-fg2 phone:text-[0.9375rem]">Reports and proofs this task's agent makes show here.</p>
-      </div>
-    )
+function ArtifactsPane() {
+  const snap = useSnap()
+  const ui = useUI()
+  if (!snap) return null
+  const a = ui.art ? snap.artifacts.find((x) => x.id === ui.art) : undefined
+  if (a && !ui.artWide) return <Open a={a} where="pane" />
+  const every = isEverything(snap, ui.at)
+  const q = (ui.artq ?? '').trim().toLowerCase()
+  const list = artifactsIn(snap, ui.at).filter((x) => !q || x.title.toLowerCase().includes(q))
+  const pinned = list.filter((x) => x.pinned)
+  const rest = list.filter((x) => !x.pinned)
+  const grid = (l: Artifact[]) => <div className="grid">{l.map((x) => <Tile key={x.id} id={x.id} />)}</div>
   return (
-    <List className="py-1.5">
-      {list.map((a) => {
-        const proof = a.id === task.proof
-        return (
-          <Row key={a.id} two onActivate={() => openArtifact(a.id)} data-task-artifact={a.id} className="gap-3! py-2!">
-            <PageIcon className={clsx(ic, 'mt-0.5 shrink-0 self-start', proof ? 'text-focus' : 'text-fg3')} />
-            <RowText sub={[`${a.v} ${a.v === 1 ? 'version' : 'versions'}`, a.at ? ago(a.at) : null].filter(Boolean).join(' · ')}>
-              <span className="flex min-w-0 items-center gap-2">
-                <span className="min-w-0 truncate">{titleInTask(a.title, ref, proof)}</span>
-                {proof ? <span className="shrink-0 rounded-full bg-sel px-2 py-px text-[0.6875rem]/4 font-medium text-fg2 phone:text-[0.75rem]/4">Proof</span> : null}
-              </span>
-            </RowText>
-          </Row>
-        )
-      })}
-    </List>
+    <PaneFrame
+      head={(sc) => (
+        <Hd title={`Artifacts${every ? '' : ` in ${spaceLabel(snap, ui.at)}`}`} pad={ui.phone ? 12 : 4} scrolled={sc}>
+          <IB icon="search" label="Search artifacts" pressed={ui.artq !== null} onClick={() => setUI({ artq: ui.artq === null ? '' : null })} />
+          {!ui.phone && <IB icon="x" label="Close" onClick={() => togglePane(null)} />}
+        </Hd>
+      )}
+    >
+      {ui.artq !== null && <input className="inp" name="aq" aria-label="Search artifacts" placeholder="Search artifacts" value={ui.artq} autoComplete="off" autoFocus style={{ marginBottom: 12 }} onChange={(e) => setUI({ artq: e.target.value })} />}
+      {list.length ? (
+        <>
+          {pinned.length > 0 && <div className="lab">Pinned</div>}
+          {pinned.length > 0 && grid(pinned)}
+          {pinned.length > 0 && <div className="lab">Everything else</div>}
+          {grid(rest)}
+        </>
+      ) : (
+        <Empty>{q ? 'No artifact matches.' : 'Nothing made here yet.'}</Empty>
+      )}
+    </PaneFrame>
   )
+}
+
+function Middle() {
+  const snap = useSnap()
+  const art = useUI((u) => u.art)
+  const a = snap?.artifacts.find((x) => x.id === art)
+  return a ? <Open a={a} where="middle" /> : null
+}
+
+function ArtifactsButton() {
+  const on = useUI((u) => u.pane === 'artifacts')
+  return <IB icon="doc" label="Artifacts" pressed={on} onClick={() => togglePane('artifacts')} />
 }
 
 export default definePlugin({
   name: 'artifacts',
   setup(reg) {
-    // a task's own: the last of its tabs, always there (its place never moves), counted once it has some
-    reg.taskPanel.push({ id: 'artifacts', order: 30, label: 'Artifacts', Icon: PageIcon, count: (t) => t.artifacts?.length ?? 0, View: TaskArtifacts })
-    reg.views.artifacts = ArtifactList
-    reg.views.artifact = SplitArtifact
-    reg.messageParts.push({ order: 50, View: ArtifactCard })
-    reg.overlays.push(Viewer)
+    reg.header.push({ order: 40, View: ArtifactsButton })
+    reg.bar.push({ order: 20, pane: 'artifacts', label: 'Artifacts', icon: 'doc' })
+    reg.panes.push({ id: 'artifacts', View: ArtifactsPane })
+    reg.views.tile = Tile
+    reg.messageParts.push({ order: 50, View: InChat })
+    reg.middle.push({ when: (ui) => ui.artWide && !!ui.art, View: Middle })
   },
 })
+
+export { cx, I }

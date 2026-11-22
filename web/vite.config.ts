@@ -1,4 +1,3 @@
-import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
@@ -12,7 +11,7 @@ writeRegistry(at('./'))
 export default defineConfig({
   root: at('./'),
   base: './',
-  plugins: [react(), tailwindcss()],
+  plugins: [react()],
   resolve: { alias: { '@shared': at('./shared'), '@client': at('./src'), '@plugins': at('./plugins'), '@core': at('../core') } },
   build: { outDir: at('./dist'), emptyOutDir: true, chunkSizeWarningLimit: 900 },
   server: { host: '127.0.0.1', allowedHosts: ['.ts.net'], proxy: { '/api': { target: process.env.SHEPHERDR_API_URL || `http://127.0.0.1:${process.env.SHEPHERDR_PORT || 7788}`, ws: true } } },

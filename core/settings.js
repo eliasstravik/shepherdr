@@ -12,13 +12,8 @@ import { SERVE } from "./host.js";
 export const SECTIONS = [
   { id: "agents", title: "Agents", icon: "bot", space: true },
   { id: "tasks", title: "Tasks", icon: "list-checks", space: true },
-  // Everywhere's heartbeat, schedule and events, and a space's own (core/autopilot.js); a space switches it on in its
-  // Assistant's header
-  { id: "autopilot", title: "Autopilot", icon: "plane", space: true },
-  { id: "notify", title: "Notify", icon: "bell", space: true },
   { id: "secrets", title: "Secrets", icon: "key", space: true },
   { id: "machines", title: "Machines", icon: "network" },
-  { id: "window", title: "Window", icon: "layout" },
   { id: "web", title: "Web", icon: "globe" },
 ];
 // The window's title over its pages: Everywhere's, or a space's own.
@@ -76,7 +71,6 @@ export const INSTRUCTIONS = {
     coordinator: "Every Assistant uses this. Repo-specific rules go in the repo's AGENTS.md or CLAUDE.md. Changes apply when an Assistant restarts.",
     worker: "Every worker gets this first. Repo-specific rules go in the repo's AGENTS.md or CLAUDE.md. Changes apply to the next task that starts.",
     reviewer: "Every reviewer gets this first. Repo-specific rules go in the repo's AGENTS.md or CLAUDE.md. Changes apply to the next review.",
-    heartbeat: "Autopilot's heartbeat, plain text: an Assistant on Autopilot gets it on every wake. Changes apply from the next wake.",
   },
 };
 export const USE_OTHER_CLI = "Use other CLI";
@@ -187,7 +181,6 @@ export const ABOUT = {
   "tasks.review_rounds": "A task's agent has its work reviewed and fixes what's found.",
   "tasks.must_fix": "What the agent fixes before it says ready. It lists the rest.",
   "tasks.proof": "Each task shows real proof of its work in one artifact, linked from Accept.",
-  "tasks.max_running": "Per folder. More wait their turn and start by themselves.",
   "tasks.archive_after": "Done tasks move to Archived, with their chat and summary.",
   "tasks.worktrees": "In a git repo, each task gets its own worktree and branch.",
   "automations.enabled": "Tasks an agent set to start on a schedule or an event.",
@@ -250,10 +243,6 @@ export function branchPattern(pattern) {
   return "";
 }
 
-// ---- Notify ----------------------------------------------------------------------------------------------------
-export const NOTIFY_ABOUT = "What reaches you from a space's Assistant. Tasks always alert.";
-export const notifyMachineAbout = (v) => `Its spaces use ${v}.`;
-
 // ---- Secrets ---------------------------------------------------------------------------------------------------
 export const SECRETS = {
   about: "Agents use these by name and never see them.",
@@ -307,7 +296,7 @@ export const MACHINES = {
 // What the old machine scope could hold, as the person knows it.
 export const OLD_NAMES = { coordinator: "Assistant", worker: "Workers", reviewer: "Reviewer", backup: "Backup agent",
   automations: "Run automations", merge: "Merge", review_rounds: "Review", must_fix: "Must fix", proof: "Proof",
-  max_running: "Tasks at once", archive_after: "Archive Done after", worktrees: "Worktrees",
+  archive_after: "Archive Done after", worktrees: "Worktrees",
   setup: "Before the agent starts", start_notes: "When a task starts", finish_notes: "When a task finishes", accept_command: "When a task is accepted", base: "Base branch", branch: "Branch names", agents: "Reactions" };
 // Home Assistant's line: on or off, and what herdr-task's home round last found there (~/.local/share/shepherdr/tasks/.home.json).
 export function homeAbout(on, st) {
@@ -318,48 +307,11 @@ export function homeAbout(on, st) {
     : "No home space there.";
 }
 
-// ---- Window ----------------------------------------------------------------------------------------------------
-// On/off switches kept in shared state (on unless false), then Add-ons (lib/addons.json's switches).
-export const SWITCHES = [
-  { id: "tabs", title: "Show tabs", about: "The space's tabs, in the bar at the top. The bar's buttons stay either way.",
-    key: "tabbar.tabs" },
-  { id: "worktrees", title: "Worktrees in the sidebar", about: "A repo's worktree spaces, listed under it.",
-    key: "sidebar.worktrees" },
-  { id: "unread", title: "Bold unread spaces", about: "A space whose Assistant has something new shows bold and bright.",
-    key: "sidebar.unread" },
-  { id: "counts", title: "Red counts", about: "What needs you, counted in red on spaces, tabs and Tasks.", key: "counts.red" },
-  { id: "greens", title: "Green counts", about: "Tasks in Ready, counted in green on spaces, tabs and Tasks.", key: "counts.green" },
-  { id: "filters", title: "Status filters in Tasks", about: "The row of status chips under the Tasks search.",
-    key: "tasks.filters" },
-  { id: "place", title: "Show space on task rows", about: "Each task row names its space and machine, dimmed on the right.",
-    key: "tasks.place" },
-  { id: "helpers", title: "Show subagents above the chat box", about: "The agent's own subagents at work, listed over the box.",
-    key: "chat.helpers" },
-  { id: "assistant", title: "Assistant in new spaces", about: "A new space opens with its Assistant's chat, else a terminal.",
-    key: "coordinator.auto" },
-];
-export const ADDONS = "Add-ons";
-// Usage insights' Delete, under its switch (the window's and the web's Settings > Window): every machine's log.
-export const INSIGHTS = {
-  title: "Delete usage data",
-  about: "Deletes the usage log on this computer and on your other machines. It starts again from now while the add-on is on.",
-  button: "Delete",
-  done: "Deleted.",
-  missed: (names) => `Deleted here. Not reached: ${names}. Try again when they're online.`,
-};
-// An add-on's line: its about, and what stops a flip (stop: the titles in the way).
-export function addonAbout(about, now, stop) {
-  if (!stop.length) return about;
-  const one = stop.length === 1, names = stop.join(", ");
-  return now ? `${about} ${names} need${one ? "s" : ""} it: turn ${one ? "that" : "them"} off first.`
-    : `${about} Needs ${names}: turn ${one ? "it" : "them"} on first.`;
-}
-
 // ---- Web -------------------------------------------------------------------------------------------------------
 export const WEB = { title: "Shepherdr on the web", link: "Link", copy: "Copy", copied: "Copied", phone: "Open it on your phone" };
-// The Web page's state line: off (the Web add-on), not read yet, no service, or what the service last said (web.json).
+// The Web page's state line: not read yet, no service, or what the service last said (web.json).
 // Served from another machine (Serve from, core/host.js): says which; a move under way says that first.
-export const webState = (off, loaded, w) => (off ? "Off. Turn it on under Window › Add-ons." : !loaded ? "Reading…"
+export const webState = (loaded, w) => (!loaded ? "Reading…"
   : !w ? "Shepherdr's service isn't running here." : w.serve?.moving ? SERVE.moving(w.serve.moving)
   : w.serve?.host && !w.serve.reachable ? SERVE.unreachable(w.serve.host) : w.why ? w.why
   : w.serve?.host ? SERVE.elsewhere(w.serve.host) : "On, private to your tailnet.");
@@ -371,7 +323,7 @@ export const ROUNDS = [[0, "Off"], [1, "1 round"], [2, "2 rounds"], [3, "3 round
 export const ARCHIVE = [[0, "Off"], [1, "1 day"], [3, "3 days"], [7, "1 week"], [30, "1 month"]];
 export const ONOFF = [[true, "On"], [false, "Off"]];
 
-export const DEFAULTS = { tasks: { merge: "ask", review_rounds: 0, must_fix: "major", max_running: 10, worktrees: true, archive_after: 7, proof: true }, automations: { enabled: true },
+export const DEFAULTS = { tasks: { merge: "ask", review_rounds: 0, must_fix: "major", worktrees: true, archive_after: 7, proof: true }, automations: { enabled: true },
   agents: { reactions: true, suggestions: true, feedback: true, feedback_repo: "" } };
 
 // [section, field, label, choices | { min, max }]
@@ -380,7 +332,6 @@ export const TASK_ROWS = [
   ["tasks", "review_rounds", "Review", ROUNDS],
   ["tasks", "must_fix", "Must fix", MUST_FIX],
   ["tasks", "proof", "Proof", ONOFF],
-  ["tasks", "max_running", "Tasks at once", { min: 1, max: 10 }],
   ["tasks", "archive_after", "Archive Done after", ARCHIVE],
   ["tasks", "worktrees", "Worktrees", ONOFF],
   ["automations", "enabled", "Run automations", ONOFF],

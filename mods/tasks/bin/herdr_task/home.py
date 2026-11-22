@@ -1,22 +1,23 @@
 """Home: each machine's home space (the space at its home folder, ~) has an Assistant that also
-looks after the machine, as Shepherdr's home coordinator: its disk, load and memory (HERD-40's
-health sample), processes stuck busy, and worktrees finished tasks left behind. Herdr tells it in
-tagged lines only what changed (a meter crossing its alert limit or coming back, a process newly
-stuck, worktrees newly left over); it tells the person only what matters. The lead machine's home
-Assistant also keeps every machine's overview: what needs the person in every space, one line each, and each
-home machine's health news.
+looks after the machine; on the machine that serves the web app it is Everything (3.2), the one the
+person asks about all their spaces and machines. Herdr tells it in tagged lines only what changed:
+every machine's task news that needs the person, one line each (the overview), and each machine's
+health news (HERD-40's sample: a meter crossing its alert limit or coming back, a process newly
+stuck, worktrees newly left over); it tells the person only what matters. The same numbers can be
+asked for at any time: `herdr-task home` (--json).
 
-Opt-in per machine: Shepherdr settings machines[<name> | "local"].home (true / false); unset, on
-for this computer only. Each machine with a window runs it (home_pass): it reads itself and each
-machine it links to (`herdr-task home report` there, over its herdr-core link) once a minute,
-judges, and sends. Nothing is installed or run on another machine beyond herdr-task itself.
+Who runs it: the scheduler on the machine that serves the web app (main_here), once a minute
+(home_pass): it reads itself and each machine it links to (`herdr-task home report` there, over its
+herdr-core link), judges, and sends. Nothing is installed or run on another machine beyond herdr-task
+itself. Health news per machine: Shepherdr settings machines[<name> | "local"].home (true / false);
+unset, on for this computer only. A machine with a home Assistant of its own (a space at its home
+folder there) is told its own health too.
 
-The lead (#1029): with windows on several machines, one keeps the overview, the hub, the one the
-others link to (lead_of). Each window still tells its own machine's home Assistant its own health;
-what the lead reads anyway (itself and the machines it links to) only the lead sends. A window the
-lead doesn't link to keeps its own overview for what the lead doesn't read (#1188): news never goes
-to a home Assistant that can't reach the machine it's about. A lone window, or windows that don't
-link to each other, each lead as before.
+The lead (#1029): while no Serve from record names one machine, each machine with a service serves
+itself; of those that link each other one keeps the overview, the hub, the one the others link to
+(lead_of). What the lead reads anyway (itself and the machines it links to) only the lead sends; a
+machine the lead doesn't link to keeps its own overview for what the lead doesn't read (#1188): news
+never goes to a home Assistant that can't reach the machine it's about.
 """
 
 import json
@@ -25,7 +26,7 @@ import re
 import subprocess
 import threading
 
-from .base import APP_HOME, Fail, guard, HOME, hc_json, now, run, STORE, WHERE
+from .base import Fail, guard, HOME, hc_json, now, run, STORE, WHERE
 from .settings import LOCAL_MACHINE, SETTINGS
 from .output import say
 from .store import is_task_list, read_list, store_files
@@ -51,8 +52,26 @@ OVERVIEW_OWN_EVENTS = ("needs-you", "failed", "accept-failed")
 
 
 def main_here():
-    """This is the main machine: the Herdr window lives here."""
-    return os.path.isdir(os.path.join(APP_HOME, "mods"))
+    """Whether this machine serves the web app: then the home round (home_pass) is its scheduler's, and Everything
+    (the Assistant in its home folder) is the one told every machine's task news and health. So: Shepherdr's service
+    runs here (the service.json it keeps while it runs, its process alive), and Serve from's record (herdr-core
+    document "shepherdr.host" in Shepherdr's session) names this machine, or there is none (each machine with a
+    service serves itself; two that link each other settle who leads, lead_of). A machine that only runs tasks has
+    no service: never."""
+    try:
+        with open(os.path.join(WHERE.path("service"), "service.json")) as f:
+            pid = int(json.load(f).get("pid") or 0)
+        if pid:
+            os.kill(pid, 0)
+    except PermissionError:
+        pass  # alive, another user's: still a service here
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
+    rec = ((_core_file("docs.json") or {}).get("shepherdr.host") or {}).get("value")
+    me = _core_file("core.json")
+    if isinstance(rec, dict) and rec.get("id"):
+        return isinstance(me, dict) and rec["id"] == me.get("id")
+    return True
 
 
 def read_settings():
@@ -219,15 +238,10 @@ def local_report(candidates=None, since=None, news_only=False):
     out = {"home": HOME, "at": now(), **link_facts()}
     real = os.path.realpath(HOME)
     space = next((sid for sid, folder in candidates or [] if folder and os.path.realpath(folder) == real), None)
-    if not space and candidates is not None and out["overview"]:
-        # A window here knows its own home space even when the asking window doesn't list it (#1029: the lead's).
-        r = run(["herdr-app", "ls"])
-        try:
-            own = json.loads(r.stdout).get("spaces") or [] if r.returncode == 0 else []
-        except ValueError:
-            own = []
-        space = next((s["id"].split("/")[-1] for s in own if not s.get("machine") and s.get("folder")
-                      and os.path.realpath(s["folder"]) == real), None)
+    if not space and candidates is not None:
+        # This machine knows its own home space even when the asker doesn't list it (#1029).
+        from .launch import core_spaces
+        space = next((s["id"] for s in core_spaces() if os.path.realpath(s["folder"]) == real), None)
     if space:
         out["space"], out["assistant"] = space, assistant_in(space)
     if since is not None:
@@ -397,11 +411,8 @@ def home_pass(report, force=False, only=None, to=None):
         return
     state["at"] = now()
     cfg = read_settings()
-    r = run(["herdr-app", "ls"])
-    try:
-        spaces = json.loads(r.stdout).get("spaces") or [] if r.returncode == 0 else []
-    except ValueError:
-        spaces = []
+    from .launch import core_spaces
+    spaces = core_spaces()
     from .machines import connected_machines
     linked = [m for m in connected_machines() if m.get("state") == "connected"]
     names = [None] + [m["name"] for m in linked]

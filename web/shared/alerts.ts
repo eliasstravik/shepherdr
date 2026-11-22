@@ -20,7 +20,11 @@ export const clip = (text: string, n: number) => excerpt(text, n)
 
 /** who a task's agent is in a toast or an alert, as the window names it (core/toasts.js taskWho): its ref on this
  *  computer ("SHEP-17"), with its machine's name on another ("SHEP-17 on Mac mini"); never the raw "m3:SHEP-17" */
-export function taskWho(snap: Pick<Snapshot, 'machines'>, id: string): string {
+/** A task as an alert names it: by its title, never its id ("Faster product search"); one the snapshot no longer has,
+ *  by its short id. */
+export function taskWho(snap: Pick<Snapshot, 'machines'> & { tasks?: { id: string; name: string }[] }, id: string): string {
+  const t = snap.tasks?.find((x) => x.id === id)
+  if (t?.name) return t.name
   const at = id.lastIndexOf(':')
   return at < 0 ? id : T.taskWho(id.slice(at + 1), machineName(snap.machines, id.slice(0, at)))
 }
@@ -156,7 +160,9 @@ export function watchTitle(title: string): string {
  *  button's action, so with two, "Yes" would arrive as "No". A tap on the alert itself opens the app for the rest. */
 export type PushAction = { action: string; title: string; type?: 'text'; placeholder?: string }
 export const REPLY: PushAction = { action: 'reply', title: 'Reply', type: 'text', placeholder: 'Reply…' }
-export const ACCEPT: PushAction = { action: 'accept', title: 'Accept' }
+/** the button on a Ready for review alert: on a branch it merges too, and says so */
+export const ACCEPT: PushAction = { action: 'accept', title: 'Mark as done' }
+export const ACCEPT_MERGE: PushAction = { action: 'accept', title: 'Mark as done and merge' }
 
 /** a card answered from a button, as on its card: never a plan, a merge or a form, which stay a deliberate pick in the
  *  app (sendsOnTap's rule) */
@@ -171,7 +177,7 @@ export function choiceButtons(q: Question): PushAction[] {
 }
 
 /** what came of a button, said on the notification in its place: done, already done elsewhere, or why it didn't go */
-export const PUSH_DONE = { accepted: 'Accepted ✓', answered: 'Answered ✓', sent: 'Sent ✓', handled: 'Already handled', failed: "Didn't go through" } as const
+export const PUSH_DONE = { accepted: 'Done ✓', answered: 'Answered ✓', sent: 'Sent ✓', handled: 'Already handled', failed: "Didn't go through" } as const
 /** a refusal that only means it was done already (accepted, answered, gone): nothing to fix */
 export const alreadyHandled = (error: string) => /isn't ready|answered already|isn't here any more|no longer waiting|only a ready task/i.test(error)
 
@@ -262,16 +268,16 @@ export function pushPayload(a: Alert, w: { count: number; tags: string[] }): Pus
 /** what a device can be told about, each its own switch; a device chooses its own (or one choice for all of them) */
 export const PUSH_TOPICS = [
   { id: 'needs', label: 'Needs you', about: 'Questions, permission prompts, an agent stuck or asking for help' },
-  { id: 'ready', label: 'Ready for review', about: 'A task finished and waits for your Accept' },
+  { id: 'ready', label: 'Ready for review', about: 'A task finished and waits for you to look at it' },
   { id: 'done', label: 'Done', about: 'A task merged or closed' },
-  { id: 'assistant', label: 'Messages from the Assistant', about: "A space's Assistant wrote in its chat" },
-  { id: 'autopilot', label: 'Autopilot updates', about: 'What an Assistant did when its Autopilot woke it' },
+  { id: 'assistant', label: 'Messages in a chat', about: 'Shepherdr wrote in a chat' },
 ] as const
 export type PushTopic = (typeof PUSH_TOPICS)[number]['id']
 /** a device turned on now: what needs you (its questions among them) and a task ready for its Accept; never routine
  *  progress (SHEP-243) */
 export const DEFAULT_TOPICS: PushTopic[] = ['needs', 'ready']
-/** a device turned on before it could choose: what it got then */
+/** a device turned on before it could choose: what it got then. A stored choice that names a topic there no longer
+ *  is (3.1's 'autopilot') still loads: pushTopics keeps only the topics there are */
 export const LEGACY_TOPICS: PushTopic[] = ['needs', 'ready']
 export const pushTopics = (v: unknown): PushTopic[] => (Array.isArray(v) ? PUSH_TOPICS.map((t) => t.id).filter((id) => v.includes(id)) : [...LEGACY_TOPICS])
 

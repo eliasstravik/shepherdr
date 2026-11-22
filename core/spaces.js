@@ -27,8 +27,9 @@ export function chatPane(k) {
 // machine's own ids, without the "<machine>/" an app id has).
 export function assistantOf(space, ts) {
   const id = String(space.id).split("/").pop();
-  return ts.find((k) => k.state === "live" && k.labels?.["herdr.role"] === "coordinator"
-    && k.labels?.["herdr.coordinator.space"] === id && machineOf(k.address) === (space.machine ?? null)) ?? null;
+  const matches = ts.filter((k) => k.labels?.["herdr.role"] === "coordinator"
+    && k.labels?.["herdr.coordinator.space"] === id && machineOf(k.address) === (space.machine ?? null));
+  return matches.find((k) => k.state === "live") ?? matches.reduce((latest, k) => !latest || (Number(k.created_ms) || 0) >= (Number(latest.created_ms) || 0) ? k : latest, null);
 }
 
 // The turn last read. Before any mark: the turn the window last saw it done at (its "chat.seen").

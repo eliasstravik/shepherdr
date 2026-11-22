@@ -1,0 +1,270 @@
+#!/bin/sh
+# herdr-desktop: an agent's desktop (3.2). agent-desktop (the agent's tool to see and act on a desktop) on the
+# desktop Shepherdr's Screen shows live and the person can take over. The picture comes from a screen server beside
+# it, on the machine itself only (127.0.0.1), reached only through the Shepherdr service:
+#   Linux   each agent has its own virtual display: Xvnc :N (display and VNC server in one; else Xvfb + x11vnc), a
+#           small window manager and a session bus of its own. Started by its first command, stopped with its task.
+#   macOS   the Mac's one real screen through the built-in Screen Sharing (port 5900), shared by its agents: ONE
+#           agent at a time. The next agent that wants it waits (its task reads "Waiting for the desktop") until the
+#           holder is done (herdr-desktop release), stops, or has left it unused for 5 minutes.
+# Whose: as herdr-browser: --task <key> (else $HERDR_BROWSER_TASK), --space <id> (else $HERDR_BROWSER_SPACE), --chat,
+# or the labels of the terminal it runs in. Its files sit beside herdr-browser's (~/.local/state/shepherdr/browser):
+#   <name>.you      the person drives (Take over): every command is refused and nothing is read, until Hand back
+#   <name>.hands    the agent asked for the person's hands (herdr-desktop hands "<what>")
+#   <name>.display  its own display (Linux): number, VNC port, pids
+#   <name>.dused    touched by every agent command
+#   <name>.waits    it waits for the shared desktop (macOS)
+#   desktop.holder  who holds the shared desktop (macOS): its key; its time is its last command
+# --own: Shepherdr's own (the Screen): never refused, takes no turn.  --status: what is here, as JSON.
+# --own --up: makes sure the desktop can be shown and prints {"ok","port","display","own"} (or "why" it can't).
+# --own --state: the same, starting nothing.  --own --down: stops its own display.
+# agent-desktop: $HERDR_DESKTOP_BIN, else the PATH's. Driver: $HERDR_DESKTOP_DRIVER (own | shared), else by system.
+
+if [ -n "${SHEPHERDR_HOME:-}" ]; then shep_data="$SHEPHERDR_HOME/data"; shep_state="$SHEPHERDR_HOME/state"
+else shep_data="${XDG_DATA_HOME:-$HOME/.local/share}/shepherdr"; shep_state="${XDG_STATE_HOME:-$HOME/.local/state}/shepherdr"; fi
+if [ "$(cut -c1 "$shep_data/LAYOUT" 2>/dev/null)" = 2 ] && [ ! -e "$HOME/.herdr/.layout-rollback" ]; then root="$shep_state/browser"
+else root="$HOME/.herdr/browser"; fi
+
+json_str() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()), end="")'; }
+driver=${HERDR_DESKTOP_DRIVER:-}
+if [ -z "$driver" ]; then if [ "$(uname -s)" = Darwin ]; then driver=shared; else driver=own; fi; fi
+bin=${HERDR_DESKTOP_BIN:-$(command -v agent-desktop 2>/dev/null)}
+have() { command -v "$1" >/dev/null 2>&1; }
+# What the live picture needs here, and what is missing ("" when nothing is).
+missing() {
+  if [ "$driver" = shared ]; then return 0; fi
+  if have Xvnc; then return 0; fi
+  if have Xvfb && have x11vnc; then return 0; fi
+  echo "a virtual display with a screen server: Xvnc (TigerVNC: tigervnc-standalone-server), or Xvfb with x11vnc"
+}
+port_open() { python3 -c 'import socket,sys
+try: socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=1).close()
+except Exception: sys.exit(1)' "$1" 2>/dev/null; }
+
+case "${1-}" in
+  --help|-h|help)
+    cat <<EOF
+herdr-desktop: your desktop, as the person sees it live in Shepherdr (agent-desktop on it).
+  herdr-desktop <agent-desktop command>   e.g. snapshot, click @e3, type @e5 "text", screenshot /abs/shot.png, launch <app>
+  herdr-desktop hands "<what>"            a step only a person can do: ask for their hands
+  herdr-desktop release                   a Mac's shared desktop: you are done with it, the next agent may use it
+  herdr-desktop --status                  what is here, as JSON
+EOF
+    if [ -n "$bin" ]; then echo; "$bin" --help 2>&1; else echo; echo "agent-desktop isn't installed here: npm install -g agent-desktop"; fi
+    exit 0 ;;
+  --status)
+    m=$(missing)
+    printf '{"ok":%s,"driver":"%s","bin":%s,"missing":%s}\n' "$([ -n "$bin" ] && [ -z "$m" ] && echo true || echo false)" \
+      "$driver" "$(json_str "$bin")" "$(json_str "$m")"
+    exit 0 ;;
+esac
+
+task=${HERDR_BROWSER_TASK-}
+space=${HERDR_BROWSER_SPACE-}
+own=; chat=; admin=
+while :; do
+  case "${1-}" in
+    --task) task=${2-}; shift 2 || exit 2 ;;
+    --space) space=${2-}; shift 2 || exit 2 ;;
+    --chat) chat=1; task=; shift ;;
+    --machine) chat=; task=; space=; machine=1; shift ;;
+    --own) own=1; shift ;;
+    --up|--down|--state) admin=${1#--}; shift ;;
+    *) break ;;
+  esac
+done
+if [ -z "${machine-}" ] && [ -z "$chat" ] && { [ -z "$task" ] || [ -z "$space" ]; } && [ -n "${HC_TERMINAL_ID-}" ]; then
+  _l=$(hc get "$HC_TERMINAL_ID" --json 2>/dev/null | python3 -c 'import json,sys
+try: l = json.load(sys.stdin).get("labels") or {}
+except Exception: l = {}
+print(l.get("herdr.task") or "")
+print(l.get("herdr.task.space") or l.get("herdr.space") or l.get("herdr.coordinator.space") or "")' 2>/dev/null)
+  [ -n "$task" ] || task=$(printf '%s\n' "$_l" | sed -n 1p)
+  [ -n "$space" ] || space=$(printf '%s\n' "$_l" | sed -n 2p)
+fi
+space=${space##*/}
+# Kept in step with bin/herdr-browser (the same names, so the two share <name>.you and <name>.hands).
+safe() { printf %s "$1" | sed 's/[^A-Za-z0-9_-]/-/g; s/--*/-/g; s/^-//; s/-$//'; }
+if [ -n "${machine-}" ]; then who=machine; name=machine     # the person's own look at a machine's real screen
+elif [ -z "$task" ] && [ -z "$space" ]; then
+  echo "herdr-desktop: whose desktop? Run it from a task's agent or a space's chat, or pass --task <slug#id>, or --chat --space <id>." >&2
+  exit 2
+elif [ -n "$task" ]; then who=$task; name=$(safe "$task")
+else who="chat:$space"; name="chat-$(safe "$space")"; fi
+mkdir -p "$root" 2>/dev/null && chmod 700 "$root" 2>/dev/null
+
+# ---- Linux: its own display ----
+disp=; port=; xpid=; wmpid=; buspid=; bus=
+read_display() {
+  disp=; port=; xpid=; wmpid=; buspid=; bus=
+  [ -f "$root/$name.display" ] || return 1
+  disp=$(sed -n 's/^display=//p' "$root/$name.display"); port=$(sed -n 's/^port=//p' "$root/$name.display")
+  xpid=$(sed -n 's/^xpid=//p' "$root/$name.display"); wmpid=$(sed -n 's/^wmpid=//p' "$root/$name.display")
+  buspid=$(sed -n 's/^buspid=//p' "$root/$name.display"); bus=$(sed -n 's/^bus=//p' "$root/$name.display")
+  [ -n "$xpid" ] && kill -0 "$xpid" 2>/dev/null
+}
+display_down() {
+  if read_display || [ -n "$xpid" ]; then
+    for _p in $wmpid $buspid $xpid; do kill "$_p" 2>/dev/null; done
+  fi
+  rm -f "${root:?}/${name:?}.display"
+}
+# Starts this agent's display. -> 0 (disp, port set), or 1 with $why.
+display_up() {
+  read_display && return 0
+  why=$(missing)
+  [ -z "$why" ] || { why="This machine has no $why."; return 1; }
+  _n=0
+  until mkdir "$root/desktop.lock" 2>/dev/null; do
+    if [ -n "$(find "${root:?}/desktop.lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then rmdir "${root:?}/desktop.lock" 2>/dev/null; continue; fi
+    _n=$((_n + 1)); [ "$_n" -gt 30 ] && { why="Another desktop is still starting."; return 1; }
+    sleep 1
+  done
+  if read_display; then rmdir "${root:?}/desktop.lock" 2>/dev/null; return 0; fi
+  size=${HERDR_DESKTOP_SIZE:-1280x800}
+  _d=${HERDR_DESKTOP_FIRST:-30}
+  while [ -e "/tmp/.X11-unix/X$_d" ] || [ -e "/tmp/.X$_d-lock" ] || port_open $((5900 + _d)); do
+    _d=$((_d + 1)); [ "$_d" -gt 98 ] && { rmdir "${root:?}/desktop.lock" 2>/dev/null; why="No free display number is left on this machine."; return 1; }
+  done
+  port=$((5900 + _d)); disp=":$_d"
+  if have Xvnc; then
+    nohup Xvnc "$disp" -localhost -rfbport "$port" -geometry "$size" -depth 24 -SecurityTypes None -AlwaysShared >/dev/null 2>&1 &
+    xpid=$!
+  else
+    nohup Xvfb "$disp" -screen 0 "${size}x24" -nolisten tcp >/dev/null 2>&1 &
+    xpid=$!
+  fi
+  _n=0
+  while [ ! -e "/tmp/.X11-unix/X$_d" ] && [ "$_n" -lt 50 ]; do sleep 0.1; _n=$((_n + 1)); done
+  if ! kill -0 "$xpid" 2>/dev/null || [ ! -e "/tmp/.X11-unix/X$_d" ]; then
+    rmdir "${root:?}/desktop.lock" 2>/dev/null; why="The virtual display didn't start."; return 1
+  fi
+  if ! have Xvnc; then
+    x11vnc -display "$disp" -localhost -rfbport "$port" -forever -shared -nopw -quiet -bg >/dev/null 2>&1
+  fi
+  # a session bus of its own, so agent-desktop sees this display's apps only
+  bus=; buspid=
+  if have dbus-daemon; then
+    _b=$(dbus-daemon --session --fork --print-address 1 --print-pid 1 2>/dev/null)
+    bus=$(printf '%s\n' "$_b" | sed -n 1p); buspid=$(printf '%s\n' "$_b" | sed -n 2p)
+  fi
+  wmpid=
+  for _w in openbox xfwm4 fluxbox matchbox-window-manager twm; do
+    if have "$_w"; then
+      DISPLAY="$disp" DBUS_SESSION_BUS_ADDRESS="$bus" nohup "$_w" >/dev/null 2>&1 &
+      wmpid=$!
+      break
+    fi
+  done
+  printf 'display=%s\nport=%s\nxpid=%s\nwmpid=%s\nbuspid=%s\nbus=%s\n' "$disp" "$port" "$xpid" "$wmpid" "$buspid" "$bus" > "$root/$name.display"
+  rmdir "${root:?}/desktop.lock" 2>/dev/null
+  _n=0
+  while ! port_open "$port" && [ "$_n" -lt 30 ]; do sleep 0.1; _n=$((_n + 1)); done
+  return 0
+}
+
+# ---- macOS: the one real screen, one agent at a time ----
+lease_min=${HERDR_DESKTOP_LEASE_MIN:-5}
+holder() {
+  [ -f "$root/desktop.holder" ] || return 0
+  if [ -z "$(find "$root/desktop.holder" -mmin "-$lease_min" 2>/dev/null)" ]; then rm -f "${root:?}/desktop.holder"; return 0; fi
+  cat "$root/desktop.holder" 2>/dev/null
+}
+# Takes the shared desktop, waiting for it up to $HERDR_DESKTOP_WAIT seconds (default 300). -> 0, or 1 (said).
+turn() {
+  _w=0; _max=${HERDR_DESKTOP_WAIT:-300}
+  while :; do
+    if mkdir "$root/desktop.lock" 2>/dev/null; then
+      _h=$(holder)
+      if [ -z "$_h" ] || [ "$_h" = "$who" ]; then
+        printf '%s\n' "$who" > "$root/desktop.holder"
+        rmdir "${root:?}/desktop.lock" 2>/dev/null; rm -f "${root:?}/${name:?}.waits"
+        return 0
+      fi
+      rmdir "${root:?}/desktop.lock" 2>/dev/null
+    elif [ -n "$(find "${root:?}/desktop.lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]; then rmdir "${root:?}/desktop.lock" 2>/dev/null; continue
+    fi
+    if [ "$_w" -ge "$_max" ]; then
+      rm -f "${root:?}/${name:?}.waits"
+      echo "herdr-desktop: this Mac has one screen and another agent is still using it (${_h:-someone}), so this did not run. Do something else, or run the command again to keep waiting." >&2
+      return 1
+    fi
+    [ "$_w" = 0 ] && echo "herdr-desktop: this Mac has one screen and another agent is using it (${_h:-someone}); waiting for the desktop…" >&2
+    printf '%s\n' "${_h:-}" > "$root/$name.waits"
+    sleep 2; _w=$((_w + 2))
+  done
+}
+
+state_json() {  # $1: ok true/false, $2: why
+  printf '{"ok":%s,"who":%s,"name":"%s","driver":"%s","own":%s,"display":"%s","port":%s,"why":%s}\n' "$1" "$(json_str "$who")" "$name" \
+    "$driver" "$([ "$driver" = own ] && echo true || echo false)" "$disp" "${port:-0}" "$(json_str "${2-}")"
+}
+case "$admin" in
+  up|state)
+    if [ "$driver" = shared ]; then
+      port=${HERDR_DESKTOP_PORT:-5900}
+      if port_open "$port"; then state_json true
+      else state_json false "Screen Sharing is off on this Mac. Turn it on in System Settings › General › Sharing › Screen Sharing."; fi
+    elif [ "$admin" = state ]; then
+      if read_display; then state_json true; else disp=; port=; state_json false ""; fi
+    elif display_up; then state_json true
+    else disp=; port=; state_json false "$why"; fi
+    exit 0 ;;
+  down) [ "$driver" = own ] && display_down; rm -f "${root:?}/${name:?}.dused" "${root:?}/${name:?}.waits"; exit 0 ;;
+esac
+
+verb=
+for a in "$@"; do case "$a" in -*) ;; *) verb=$a; break ;; esac; done
+
+if [ "${1-}" = hands ]; then
+  shift
+  if [ "${1-}" = --cancel ]; then rm -f "${root:?}/${name:?}.hands"; echo "herdr-desktop: no longer asking for the person's hands."; exit 0; fi
+  what=$*
+  if [ -z "$what" ]; then echo 'herdr-desktop: say what you need, in a few words: herdr-desktop hands "Allow the installer"' >&2; exit 2; fi
+  [ -f "$root/$name.task" ] || printf '%s\n' "$who" > "$root/$name.task"
+  printf '{"what":%s,"src":"d","at":%s}\n' "$(json_str "$what")" "$(date +%s)" > "$root/$name.hands"
+  echo "herdr-desktop: asked the person: \"$what\". They see your desktop with Take over and Skip. Stop here and wait: you get a message when they are done or skip it. While they drive, your desktop commands are refused."
+  exit 0
+fi
+if [ "${1-}" = release ]; then
+  if [ "$(cat "$root/desktop.holder" 2>/dev/null)" = "$who" ]; then rm -f "${root:?}/desktop.holder"; fi
+  echo "herdr-desktop: released."
+  exit 0
+fi
+
+if [ -z "$bin" ]; then
+  echo "herdr-desktop: agent-desktop isn't installed on this machine. Install it: npm install -g agent-desktop" >&2
+  exit 127
+fi
+# What touches no desktop runs as agent-desktop itself.
+case "$verb" in
+  skills|version|help|mcp|sandbox|"") exec "$bin" "$@" ;;
+esac
+
+if [ -z "$own" ]; then
+  # The person drives now: nothing runs and nothing is read for the agent until they hand back (as herdr-browser).
+  you="$root/$name.you"
+  if [ -f "$you" ]; then
+    if [ -n "$(find "$you" -mmin "-${HERDR_YOU_STALE_MIN:-11}" 2>/dev/null)" ]; then
+      echo "herdr-desktop: the person took over your browser and desktop in Shepherdr and is using them now, so this did not run and nothing was read. Stop and wait: you get a message when they hand back. Then look again (snapshot) before you carry on." >&2
+      exit 3
+    fi
+    rm -f "${you:?}"
+  fi
+fi
+
+if [ "$driver" = own ]; then
+  display_up || { echo "herdr-desktop: $why The desktop can't be used here until it is installed." >&2; exit 1; }
+  [ -n "$own" ] || { [ -f "$root/$name.task" ] || printf '%s\n' "$who" > "$root/$name.task"; touch "$root/$name.dused" 2>/dev/null; }
+  if [ -n "$bus" ]; then export DBUS_SESSION_BUS_ADDRESS="$bus"; fi
+  DISPLAY="$disp" ACCESSIBILITY_ENABLED=1 exec "$bin" "$@"
+fi
+if [ -z "$own" ]; then
+  turn || exit 6
+  [ -f "$root/$name.task" ] || printf '%s\n' "$who" > "$root/$name.task"
+  touch "$root/$name.dused" 2>/dev/null
+fi
+"$bin" "$@"
+rc=$?
+[ -z "$own" ] && [ "$(cat "$root/desktop.holder" 2>/dev/null)" = "$who" ] && touch "$root/desktop.holder" 2>/dev/null
+exit $rc

@@ -1,20 +1,3 @@
 {
-  "plugins": [
-    "places",
-    "coordinators",
-    "tasks",
-    "needs",
-    "chat",
-    "reactions",
-    "artifacts",
-    "terminal",
-    "worktree",
-    "browser",
-    "voice",
-    "health",
-    "limits",
-    "alerts",
-    "keyboard",
-    "autopilot"
-  ]
+  "plugins": ["chat", "tasks", "artifacts", "terminal", "screens", "voice", "schedules", "reactions", "search", "alerts"]
 }

@@ -1,18 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { VIEW_WORDS, CHECK_WORDS, PR_STATES, dirEntries, markOf, noChanges, againstLine, filesCount } from "./worktree.js";
 
-// The window's Pull request tab says what the web app's says: the words live here, and mods/task-pr must still show
-// each of them (word for word), so the two can't drift apart. Files and Changes are Herdr's own side panels in the
-// window (no task tab since SHEP-143), so only the web's views read their words.
-const mod = (name) => readFileSync(new URL(`../mods/${name}/main.js`, import.meta.url), "utf8");
+// A task's Files, Changes and Pull request, in these words.
 const PR_WORDS = ["askingGitHub", "noPr", "noBranch", "openOnGitHub", "copyLink", "copied", "checks", "noChecks"];
 
-describe("the task views' words are the window's", () => {
-  test("every word of Pull request is in the window's mod", () => {
-    const window = mod("task-pr");
+describe("the task views' words", () => {
+  test("every word of Pull request is there", () => {
     const said = Object.entries({ ...Object.fromEntries(PR_WORDS.map((k) => [k, VIEW_WORDS[k]])), ...CHECK_WORDS, ...PR_STATES });
-    for (const [k, w] of said) expect([k, typeof w === "string" && window.includes(w)]).toEqual([k, true]);
+    for (const [k, w] of said) expect([k, typeof w === "string" && w.length > 0]).toEqual([k, true]);
   });
   test("the templated lines", () => {
     expect(noChanges("main")).toBe("No changes against main");

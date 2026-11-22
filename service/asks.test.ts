@@ -21,7 +21,8 @@ test("a permission becomes a card, and Allow answers the hook as the window's ca
   // #1078: marked seen, so a Codex hook knows a card shows it (else Codex asks in its terminal in seconds)
   expect(existsSync(join(dir, "seen", "t5.100.1"))).toBe(true);
   const q = new Compat().question(asks.of("t5")[0], "p:sp1");
-  expect(q).toMatchObject({ title: "Run: npm test", kind: "Question", choices: [{ label: "Allow" }, { label: "Deny" }] });
+  // 3.2's permission card: the request in the agent's own words, Allow once and Decline
+  expect(q).toMatchObject({ title: "Run a command", kind: "Question", command: "Run the tests\nnpm test", choices: [{ label: "Allow once" }, { label: "Decline" }] });
   asks.answer("t5.100.1", { choice: 0 });
   expect(JSON.parse(readFileSync(join(dir, "ans", "t5.100.1.json"), "utf8")).hookSpecificOutput.decision.behavior).toBe("allow");
   expect(readFileSync(join(dir, "end", "t5.100.1"), "utf8")).toBe("Allowed on the web\n");

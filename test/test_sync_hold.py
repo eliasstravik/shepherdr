@@ -39,7 +39,7 @@ class Calls:
     def __call__(self, args, *a, **k):
         self.calls.append(list(args))
         # herdr-task's look for its source there (cli.remote_run): the other machine holds none
-        if list(args[-3:-1]) == ["test", "-d"]:
+        if list(args[-3:-1]) == ["sh", "-c"] and "mods/tasks/bin/herdr_task" in args[-1]:
             return types.SimpleNamespace(returncode=1, stdout="", stderr="")
         return types.SimpleNamespace(returncode=self.code, stdout="", stderr="")
 
@@ -133,8 +133,7 @@ class Hold(unittest.TestCase):
                     mock.patch.object(machines, "sync_machine", lambda n, m, op, force: synced.append(n) or {"machine": n, "state": "current", "details": [], "version": "v2"}), \
                     mock.patch.object(machines, "_save_state", lambda fn: fn(state)), \
                     mock.patch.object(machines, "_spawn", lambda argv, log: spawned.append(argv)), \
-                    mock.patch.object(machines, "_busy", lambda n: False), mock.patch.object(machines, "_reach_cache", lambda: {"at": machines.now()}), \
-                    mock.patch.object(machines, "addon_off", lambda n: False):
+                    mock.patch.object(machines, "_busy", lambda n: False), mock.patch.object(machines, "_reach_cache", lambda: {"at": machines.now()}):
                 machines.machines_pass({})
                 rows = machines.sync(op="install")["machines"]
                 check = machines.sync(op="check")["machines"]

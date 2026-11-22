@@ -28,11 +28,12 @@ export const clip = (s, n) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…
 
 // One title format for what an agent says: "HERD-4 · Needs you", "~ Assistant · Finished".
 export const NEEDS_YOU = "Needs you";
-export const FINISHED = "Finished";
+export const FINISHED = "Ready for review";
 export const toastTitle = (who, what) => `${who} · ${what}`;
 // Who an Assistant is, by its space's name ("tt-repo Assistant"); a task's agent is its task's ref ("HERD-4"), on
 // another machine with that machine's name, as the chat names an agent there (core/chat-view.js): "HERD-4 on vm".
-export const assistantWho = (spaceName) => (spaceName ? `${spaceName} Assistant` : "Assistant");
+// (3.2: the app never says Assistant: a space's chat is "#shop", Everything's is Shepherdr itself)
+export const assistantWho = (spaceName) => (spaceName && !/^(home|~)$/i.test(spaceName) ? `#${spaceName}` : "Shepherdr");
 export const taskWho = (ref, machine) => (machine ? `${ref} on ${machine}` : ref);
 
 // Several toasts at once, in one line (a phone shows one toast): "2 tasks need you" when each is a task needing

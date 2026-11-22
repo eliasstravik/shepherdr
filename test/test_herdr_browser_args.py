@@ -1,4 +1,5 @@
-"""herdr-browser's own care around agent-browser's arguments, against a fake agent-browser that logs them:
+"""herdr-browser's own care around agent-browser's arguments, against a fake agent-browser that logs them
+(test/fake_ab.py: it answers the space's browser and the join, and logs the command itself):
 a relative file path is made absolute from the caller's folder (agent-browser's daemon saved it from its own, #964),
 and a web address that doesn't answer is refused with why instead of hanging the browser (#1034)."""
 import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
@@ -8,6 +9,8 @@ import socket
 import subprocess
 import tempfile
 import unittest
+
+import fake_ab
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HB = os.path.join(ROOT, "bin", "herdr-browser")
@@ -24,19 +27,18 @@ class BrowserArgs(unittest.TestCase):
         self.log = os.path.join(self.home, "ab.log")
         self.bin = os.path.join(self.home, "agent-browser")
         with open(self.bin, "w") as f:
-            f.write('#!/bin/sh\n[ "$1" = --version ] && { echo "agent-browser 0.41.1"; exit 0; }\n'
-                    'for a in "$@"; do printf "%%s\\n" "$a"; done > %s\n' % self.log)
+            f.write(fake_ab.script('for a in "$@"; do printf "%%s\\n" "$a"; done > %s' % self.log))
         os.chmod(self.bin, 0o755)
 
     def run_it(self, *args, **env):
-        e = {"HOME": self.home, "PATH": os.environ["PATH"], "HERDR_BROWSER_BIN": self.bin, **env}
-        return subprocess.run(["sh", HB, "--task", "dev-shop#2", *args], env=e, cwd=self.here, capture_output=True, text=True)
+        e = {"HOME": self.home, "PATH": os.environ["PATH"], "HERDR_BROWSER_BIN": self.bin, **fake_ab.ENV, **env}
+        return subprocess.run(["sh", HB, "--task", "dev-shop#2", "--space", "sp1", *args], env=e, cwd=self.here, capture_output=True, text=True)
 
     def args(self, *args):
         p = self.run_it(*args)
         self.assertEqual(p.returncode, 0, p.stderr)
         with open(self.log) as f:
-            return f.read().splitlines()[4:]  # after --session <s> --profile <p>
+            return f.read().splitlines()  # the command, after --session <s> --cdp <url> --pin-tab --idle-timeout 0
 
     def test_a_relative_screenshot_lands_where_the_agent_is(self):
         self.assertEqual(self.args("screenshot", "shot.png"), ["screenshot", os.path.join(self.here, "shot.png")])
@@ -102,13 +104,12 @@ class BrowserAnswers(unittest.TestCase):
 
     def fake(self, body):
         with open(self.bin, "w") as f:
-            f.write('#!/bin/sh\n[ "$1" = --version ] && { echo "agent-browser 0.41.1"; exit 0; }\n'
-                    'echo x >> %s\nn=$(wc -l < %s | tr -d " ")\n%s\n' % (self.count, self.count, body))
+            f.write(fake_ab.script('echo x >> %s\nn=$(wc -l < %s | tr -d " ")\n%s' % (self.count, self.count, body)))
         os.chmod(self.bin, 0o755)
 
     def run_it(self, *args, **env):
-        e = {"HOME": self.home, "PATH": os.environ["PATH"], "HERDR_BROWSER_BIN": self.bin, **env}
-        return subprocess.run(["sh", HB, "--task", "dev-shop#2", *args], env=e, capture_output=True, text=True, timeout=60)
+        e = {"HOME": self.home, "PATH": os.environ["PATH"], "HERDR_BROWSER_BIN": self.bin, **fake_ab.ENV, **env}
+        return subprocess.run(["sh", HB, "--task", "dev-shop#2", "--space", "sp1", *args], env=e, capture_output=True, text=True, timeout=60)
 
     def calls(self):
         with open(self.count) as f:

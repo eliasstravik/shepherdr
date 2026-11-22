@@ -97,6 +97,10 @@ export function relocate(key, value, rename) {
   }
   // what each space's Assistant starts on, chosen before its first message (core/agents.js CHOICE_KEY): by space id
   if (key === "coordinator.choice" && isObj(value)) return mapKeys(value, (id) => moveId(id, rename));
+  // the spaces (service/spaces.ts: the service's own list), each with its machine (none: this computer)
+  if (key === "spaces" && Array.isArray(value)) return value.flatMap((s) => { const m = rename(s?.machine ?? null); return m === undefined ? [] : [{ ...s, machine: m }]; });
+  // the machines whose window spaces were carried over (service/carry-over.ts): "" is this computer
+  if (key === "spaces.imported" && Array.isArray(value)) return keep(value, machineKey("")(rename));
   return value;
 }
 
@@ -137,6 +141,8 @@ export function keepForeign(key, next, old, back) {
     return out;
   }
   if (key === "coordinator.choice" && isObj(next) && isObj(old)) return { ...Object.fromEntries(Object.entries(old).filter(([id]) => foreignId(id))), ...next };
+  if (key === "spaces" && Array.isArray(next) && Array.isArray(old)) return [...next, ...old.filter((s) => back(s?.machine ?? null) === undefined)];
+  if (key === "spaces.imported" && Array.isArray(next) && Array.isArray(old)) return [...next, ...old.filter((k) => back(k === "" ? null : k) === undefined && !next.includes(k))];
   return next;
 }
 

@@ -29,7 +29,7 @@ import sys
 import tempfile
 from contextlib import contextmanager
 
-from .base import APP_HOME, ENTRY, Fail, GH, HOME, hc_json, now, run, STORE
+from .base import APP_HOME, ENTRY, Fail, GH, HOME, hc_json, now, run, SHARE, STORE
 from .settings import DEFAULTS, bare, read_settings
 
 STATE = os.path.join(STORE, ".feedback.json")
@@ -102,8 +102,8 @@ def key_of(line):
 @contextmanager
 def problems():
     """STATE's {key: {line, state, at, space, ...}} under its lock (an agent and the Assistant may
-    write it at once). state: told (sent to the Assistant), later (noted on an Autopilot wake, to
-    offer once the person is back), offered, declined, filed."""
+    write it at once). state: told (sent to the Assistant), offered, declined, filed (later: an older
+    version's, noted to offer once the person is back)."""
     os.makedirs(os.path.dirname(STATE), exist_ok=True)
     with open(STATE + ".lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -202,11 +202,18 @@ def trim(text):
 # ---- the issue ------------------------------------------------------------------------------
 
 def shepherdr_version():
-    try:
-        with open(os.path.join(APP_HOME, "data", "shepherdr", "installed.json")) as f:
-            return str(json.load(f).get("version") or "unknown")
-    except (OSError, ValueError, AttributeError):
-        return "unknown"
+    """The installed version: the install's record (<SHARE>/installed.json; a machine not switched to 3.2 yet
+    keeps it in Herdr's app folder)."""
+    for p in (os.path.join(SHARE, "installed.json"), os.path.join(HOME, ".local", "share", "shepherdr", "installed.json"),
+              os.path.join(APP_HOME, "data", "shepherdr", "installed.json")):
+        try:
+            with open(p) as f:
+                v = json.load(f).get("version")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if v:
+            return str(v)
+    return "unknown"
 
 
 def os_words():
@@ -368,7 +375,7 @@ def cmd_feedback(args):
         return say(args, rows, "\n".join(f"{r['key']}  {r['state']}  {r['line']}" for r in rows) or "Nothing waits to be offered.")
     if not line and not args.key:
         raise Fail("Say the problem in one line: herdr-task feedback \"Ready refused a reviewed commit\" --details \"…\"")
-    if (args.file or args.no or args.later) and not assistant:
+    if (args.file or args.no) and not assistant:
         raise Fail("Only an Assistant asks the person and files feedback: run herdr-task feedback \"<one line>\" --details \"…\" "
                    "and your Assistant offers it. Carry on with your work.")
     key = args.key or key_of(line)
@@ -425,9 +432,6 @@ def offer_or_tell(args, ps, key, p, line, k, addr, labels, assistant, space):
     if assistant:
         if state == "offered" and recent(p):
             return say(args, {"key": key, "offer": False, "why": "offered"}, "Already offered: don't offer it again.")
-        if args.later:
-            ps[key] = {**entry, "state": "later"}
-            return say(args, {"key": key, "state": "later"}, "Noted: offer it once the person is back (herdr-task feedback --list).")
         ps[key] = {**entry, "state": "offered"}
         return say(args, {"key": key, "offer": True}, offer_words(line, key))
     if state in ("told", "offered", "later") and recent(p):

@@ -1,11 +1,12 @@
-// What a voice call hears (SHEP-105): a call is with Shepherdr itself, not one chat, so it follows the chats it sent to
-// during the call and the one on screen (their replies said briefly, their status as quiet notes), and says anything new
-// anywhere that needs the person (a question, a secret, a task Ready) in one short line. Updates wait in a queue: the
-// call takes them once the person and the voice are both quiet, several as one (core/voice.js batchLines). The web's
-// call (voice.ts) and the window's (POST /api/voice/hear, from mods/chat/voice.ts) both use it.
+// What a voice call hears (SHEP-105): a call is with Shepherdr as a whole, not one chat, so it follows the chats it sent
+// to during the call and the one on screen (their replies said briefly, their status as quiet notes), and says anything
+// new anywhere that needs the person, once, in one short line and in the app's words: a question, a command to allow,
+// a step that needs their hands, a task Ready for review, a task Stopped. Updates wait in a queue: the call takes them
+// once the person and the voice are both quiet, several as one (core/voice.js batchLines).
 import type { Snapshot } from "../web/shared/types.ts";
+import { spaceLabel, tstate } from "../web/shared/view.ts";
 import * as V from "../core/voice.js";
-import { chatName, screenChat, type Where } from "./voice-tools.ts";
+import { askWords, chatName, screenChat, type Where } from "./voice-tools.ts";
 
 const { replyLine, statusLine, needLine, batchLines } = V as any;
 
@@ -13,6 +14,7 @@ const { replyLine, statusLine, needLine, batchLines } = V as any;
 export type ChatView = { lastReply(): { id: string; text: string; at?: number } | null; status(): string | null; asking(): string | null };
 
 export type HearIO = {
+  /** the snapshot the app shows (enriched: service/next.ts) */
   snap(): Snapshot | null;
   /** a chat's view, by its key (null: no agent running there now) */
   view(key: string): ChatView | null;
@@ -22,16 +24,42 @@ export type HearIO = {
 };
 
 type Line = { type: string; text: string };
-const spoken = (id: string) => id.split(":").pop()!.replace(/-/g, " ");
+const short = (s: unknown, n: number) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
 
-/** a need's key and its words ("the shop Assistant needs you: Which port?") */
-function needWords(snap: Snapshot, n: Snapshot["needs"][number]) {
-  const who = n.task ? `${spoken(n.task)}'s agent` : chatName(snap, n.chat);
-  const what = n.question?.title ?? (n.secret ? `a secret, ${n.secret.name}` : n.text ?? "");
-  return `${who} needs the person${what ? `: ${String(what).replace(/\s+/g, " ").slice(0, 300)}` : ""}`;
+/** Everything that needs the person now, each by a key that lasts as long as it does, with its one line: a need (a
+ *  question, a command to allow, a secret, a plain wait), a step for their hands, a task Ready for review or Stopped.
+ *  chat: the chat it is in (a followed chat's own wait is said by its status instead). */
+export function needsNow(snap: Snapshot): Map<string, { text: string; chat?: string; secret?: boolean }> {
+  const out = new Map<string, { text: string; chat?: string; secret?: boolean }>();
+  const title = (id: string) => { const t = snap.tasks.find((x) => x.id === id); return t ? `The task "${short(t.name, 80)}"` : "A task"; };
+  // a step only the person can do on an agent's Screen
+  const hands = new Set<string>();
+  for (const [key, sc] of Object.entries(snap.screens ?? {})) {
+    if (!sc?.hands || sc.hands.settled) continue;
+    const who = key.startsWith("task:") ? title(key.slice(5)) : key.startsWith("chat:") ? spaceLabel(snap, key.slice(5)) || "A chat" : "";
+    if (!who) continue;
+    if (key.startsWith("task:")) hands.add(key.slice(5));
+    out.set(`hands:${key}`, { text: `${who} needs your hands on its Screen: ${short(sc.hands.what, 200)}` });
+  }
+  const stopped = new Set<string>();
+  for (const t of snap.tasks) {
+    if (t.archived) continue;
+    if (tstate(t) === "ready") out.set(`ready:${t.id}`, { text: `${title(t.id)} is ready for review` });
+    // stopped by a crash or a limit (Stopped by you is the person's own doing: not news)
+    else if (tstate(t) === "ask" && t.stopped && t.stopped.by !== "you") {
+      stopped.add(t.id);
+      out.set(`stopped:${t.id}`, { text: `${title(t.id)} stopped${t.stopped.why ? `: ${short(t.stopped.why, 200)}` : t.stopped.by === "limit" ? ": it hit its plan's limit" : ""}` });
+    }
+  }
+  for (const n of snap.needs ?? []) {
+    // a wait with no card of a task whose stop or step for the person's hands is said already
+    if (n.task && !n.question && !n.secret && (stopped.has(n.task) || hands.has(n.task))) continue;
+    if (n.task && snap.tasks.find((t) => t.id === n.task)?.stopped?.by === "you") continue;
+    const who = n.task ? title(n.task) : spaceLabel(snap, n.place) || chatName(snap, n.chat);
+    out.set(`need:${n.chat}#${n.id}`, { text: `${who} ${n.question || n.secret ? askWords(n).split(": it goes in")[0] : `needs the person${n.text ? `: ${short(n.text, 300)}` : ""}`}`, chat: n.chat, secret: !!n.secret });
+  }
+  return out;
 }
-const needKey = (n: Snapshot["needs"][number]) => `${n.chat}#${n.id}`;
-const readyIds = (snap: Snapshot | null) => new Set((snap?.tasks ?? []).filter((t) => t.status === "ready" && !t.archived).map((t) => t.id));
 
 /** how long after a chat's status said it waits its need (the snapshot a little behind) counts as that same wait */
 const WAIT_TOLD_MS = 15_000;
@@ -44,8 +72,8 @@ export function hearing(io: HearIO) {
   let shown: string | null = null;
   const queue: Line[] = [];
   const first = io.snap();
-  const needs = new Set((first?.needs ?? []).map(needKey));
-  let ready = readyIds(first);
+  /** what needed the person when the call started, and what was said since: each said once */
+  const needs = new Set(first ? needsNow(first).keys() : []);
   /** when a followed chat's status said it waits for the person: its need that shows soon after isn't said again */
   const toldWait = new Map<string, number>();
 
@@ -96,7 +124,7 @@ export function hearing(io: HearIO) {
     },
     /** the keys followed now (tests, and look) */
     following: () => [...chats.keys()],
-    /** looks once (about every second): new replies, status, needs, Ready tasks, into the queue */
+    /** looks once (about every second): new replies, status, and what newly needs the person, into the queue */
     tick() {
       for (const key of wanted()) watch(key);
       for (const [key, c] of chats) {
@@ -113,23 +141,16 @@ export function hearing(io: HearIO) {
       }
       const s = io.snap();
       if (!s) return;
-      // a need answered is forgotten: the same one again later (a task's "attention" id comes back) is new
-      const now = new Set((s.needs ?? []).map(needKey));
+      // one that went away is forgotten: the same one again later (a task's "attention" id comes back) is new
+      const now = needsNow(s);
       for (const k of needs) if (!now.has(k)) needs.delete(k);
-      for (const n of s.needs ?? []) {
-        const k = needKey(n);
+      for (const [k, n] of now) {
         if (needs.has(k)) continue;
         needs.add(k);
         // a followed chat's wait that its status just said (statusLine); a later question of one still waiting is new
-        if (!n.secret && Date.now() - (toldWait.get(n.chat) ?? 0) < WAIT_TOLD_MS) { toldWait.delete(n.chat); continue; }
-        queue.push(needLine(needWords(s, n)));
+        if (n.chat && !n.secret && Date.now() - (toldWait.get(n.chat) ?? 0) < WAIT_TOLD_MS) { toldWait.delete(n.chat); continue; }
+        queue.push(needLine(n.text));
       }
-      const nowReady = readyIds(s);
-      for (const id of nowReady) if (!ready.has(id)) {
-        const t = s.tasks.find((x) => x.id === id)!;
-        queue.push(needLine(`${spoken(t.id)}, "${String(t.name).slice(0, 80)}", is ready for review`));
-      }
-      ready = nowReady;
     },
     /** the queued updates, as few lines as can be (several said as one), and the queue empty */
     take(): Line[] { return queue.length ? batchLines(queue.splice(0)) : []; },

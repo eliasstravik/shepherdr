@@ -68,8 +68,9 @@ test("turned off: it gets nothing more; on again it keeps its choice; one choice
   p.choose(a.endpoint, { topics: ["needs", "assistant"] });
   p.subscribe(a); // the page gives back a subscription the server lost or already has: its choice stays
   expect(p.state(a.endpoint).topics).toEqual(["needs", "assistant"]);
-  p.choose(a.endpoint, { topics: ["needs", "autopilot"], muted: ["sp9"] }, true);
-  expect(p.state(b.endpoint)).toEqual({ on: true, topics: ["needs", "autopilot"], muted: ["sp9"], devices: 2 });
+  // 3.1's "autopilot" topic is gone: a choice that still names it (a page not reloaded, a kept subscription) loads without it
+  p.choose(a.endpoint, { topics: ["needs", "autopilot", "done"], muted: ["sp9"] }, true);
+  expect(p.state(b.endpoint)).toEqual({ on: true, topics: ["needs", "done"], muted: ["sp9"], devices: 2 });
   p.unsubscribe(a.endpoint);
   expect(p.state(a.endpoint).on).toBe(false);
   await p.send({ title: "x", topic: "needs" });
@@ -110,16 +111,15 @@ test("each alert carries its topic and space", () => {
   const a = [...alertsOf(snap).entries()].map(([k, v]) => [k, v.topic, v.place, v.title]);
   expect(a).toEqual([
     ["need:HERD-5/worker:q1", "needs", "sp1", "HERD-5 · Needs you"],
-    ["ready:HERD-4", "ready", "sp1", "HERD-4 · Finished"],
-    ["done:HERD-3", "done", "sp1", "HERD-3 · Done"],
-    ["msg:p:sp1:7", "assistant", "sp1", "tt-repo · New message"],
-    ["msg:p:sp2:3", "autopilot", "sp2", "shop · Autopilot update"],
+    ["ready:HERD-4", "ready", "sp1", "Fix login · Ready for review"],
+    ["done:HERD-3", "done", "sp1", "Old one · Done"],
+    ["msg:p:sp1:7", "assistant", "sp1", "#tt-repo · New message"],
+    // 3.2 has no Autopilot: a space's chat message is a New message, whatever an old snapshot says of a pilot
+    ["msg:p:sp2:3", "assistant", "sp2", "#shop · New message"],
   ]);
   // an Assistant's question is its Needs you alert, not a new message too
   const asks = { ...snap, needs: [{ id: "q2", chat: "p:sp1", place: "sp1", question: { kind: "Question", title: "Rerun CI?" } }] };
   expect([...alertsOf(asks).keys()].filter((k) => k.includes("p:sp1"))).toEqual(["need:p:sp1:q2"]);
-  // a message just after its Autopilot wake ended is still its update
-  const after = { ...snap, places: [{ id: "sp2", name: "shop", chat: "p:sp2", pilot: { on: true } }], needs: [], tasks: [] };
-  expect([...alertsOf(after, new Set(["sp2"])).values()].map((x) => x.topic)).toEqual(["autopilot"]);
+  const after = { ...snap, places: [{ id: "sp2", name: "shop", chat: "p:sp2" }], needs: [], tasks: [] };
   expect([...alertsOf(after).values()].map((x) => x.topic)).toEqual(["assistant"]);
 });

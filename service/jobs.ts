@@ -7,9 +7,7 @@
 //   of one machine from ever running at once);
 // - a chat open on a web page: the question hook's flag (data/chat-asks/open/<terminal>), so its cards come to the page
 //   (another machine's agent: its flag there, through herdr-core).
-// The window sees this service running (GET /api/health: jobs) and leaves the same work to it (lib/service.js), and
-// takes it back when the service is gone: one runs it at a time. While the installed window can't do that yet (a
-// 3.0 layout), the service runs none of it.
+// SHEPHERDR_JOBS=off: this service runs none of it (a test, a second service on one machine).
 import { existsSync, readdirSync, utimesSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
@@ -33,14 +31,9 @@ async function run(cmd: string[]) {
   }
 }
 
-/** Whether the window installed here leaves this work to the service: no Shepherdr window at all, or one whose tab bar
- *  asks first. */
-export function windowLeavesIt() {
-  if (process.env.SHEPHERDR_JOBS === "off") return false;
-  if (process.env.SHEPHERDR_JOBS === "on") return true;
-  // no Shepherdr layout installed here (no Herdr at all, or Herdr's own mods only): no window here does it
-  if (!existsSync(join(appHome(), "data", "shepherdr", "installed.json"))) return true;
-  return existsSync(join(appHome(), "mods", "tabs-tasks", "service.js"));
+/** Whether this service runs the background work: always, unless SHEPHERDR_JOBS=off says no. */
+export function jobsOn() {
+  return process.env.SHEPHERDR_JOBS !== "off";
 }
 
 /** Other machines with a live Assistant or an agent that comes back after a crash (label herdr.resume). */
@@ -54,7 +47,7 @@ export function agentMachines(terminals: Iterable<any>): string[] {
 }
 
 export class Jobs {
-  readonly on = windowLeavesIt();
+  readonly on = jobsOn();
   private ticking = false;
   private rounds = 0;
   private soon: ReturnType<typeof setTimeout> | null = null;
@@ -66,7 +59,7 @@ export class Jobs {
   constructor(private hub: Hub, private host: Host | null = null) {}
 
   start() {
-    if (!this.on) { console.log("background work: left to the window (its layout predates the service)"); return; }
+    if (!this.on) { console.log("background work: off (SHEPHERDR_JOBS=off)"); return; }
     console.log("background work: here");
     setInterval(() => void this.tick(), 15_000);
     void this.tick();

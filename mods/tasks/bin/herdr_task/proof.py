@@ -35,9 +35,10 @@ def artifacts_of(folder):
 
 
 def find_proof(s, t, given=None):
-    """The task's proof artifact, {id, title}: the one given (ready --proof <id>), else its newest
-    artifact titled as a proof ("HAT-2: ... · Proof") since it started. None: it made none. A proof
-    is always a recipe (the person accepts from their phone too): a custom panel is refused."""
+    """The task's proof artifact, {id, title}: the one given (ready --proof <id>), else, of the pages it
+    published since it started, the newest marked as its proof (herdr-artifact publish --proof), else the
+    newest titled as one ("HAT-2: ... · Proof"). None: it made none. From 3.2 an artifact is one kind only,
+    a page (its files include index.html), so any of them can be a proof."""
     arts = artifacts_of(s.loc["folder"])
     if given:
         a = next((a for a in arts if a.get("id") == given.strip()), None)
@@ -45,15 +46,12 @@ def find_proof(s, t, given=None):
             raise Fail(f"No artifact {given} in {s.loc['folder']} (herdr-artifact list shows them).")
     else:
         ref, since = s.ref(t).upper(), t.get("started") or 0
-        mine = [a for a in arts if (a.get("task") or "").upper() == ref and re.search(r"\bproof\b", a.get("title") or "", re.I)
-                and (a.get("at") or 0) >= since]
-        a = mine[0] if mine else None
+        mine = [a for a in arts if (a.get("task") or "").upper() == ref and (a.get("at") or 0) >= since
+                and "index.html" in (a.get("files") or [])]
+        a = next((a for a in mine if a.get("proof")), None) or \
+            next((a for a in mine if re.search(r"\bproof\b", a.get("title") or "", re.I)), None)
     if not a:
         return None
-    files = a.get("files") or []
-    if "main.js" in files or "recipe.json" not in files:
-        raise Fail(f"Your proof {a['id']} is a custom panel, which the person can't open on their phone. Make it a recipe "
-                   f"(recipe.json; `herdr-artifact guide`, A task's proof), `herdr-artifact update {a['id']} <dir>`, then run ready again.")
     return {"id": a["id"], "title": a.get("title") or a["id"]}
 
 

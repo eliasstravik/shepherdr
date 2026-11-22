@@ -1,7 +1,7 @@
-// SHEP-110: a voice call sees everything the UI shows. The guard: every data source the web app reads (its snapshot's
+// SHEP-110: a voice call sees everything the app shows. The guard: every data source the web app reads (its snapshot's
 // every part, each api/ path it fetches, each action it reads with) is reachable by the voice tools' look data, or
-// listed in NOT_DATA / WRITES with why. A new panel that reads something new fails here until voice can read it too.
-// Fake data only.
+// listed in NOT_DATA / WRITES with why. A new pane that reads something new fails here until voice can read it too;
+// so does a path or action listed here that the app no longer uses. Fake data only.
 import { expect, test } from "bun:test";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -24,34 +24,57 @@ test("every api/ path the web app fetches is a voice data source, or not data wi
   expect(paths.size).toBeGreaterThan(10);
   const missing = [...paths].filter((p) => !served.has(p) && !NOT_DATA[p]);
   expect(missing).toEqual([]);
+  // and nothing listed that the app no longer fetches (3.1's worktree, browser, commands, reach, machines...)
+  const gone = [...Object.keys(NOT_DATA), ...served].filter((p) => p.startsWith("api:") && !paths.has(p));
+  expect(gone).toEqual([]);
 });
+
+// 3.2: the one action the app's buttons send that the service does not answer yet: the Screen's (Take over, Hand back,
+// Skip, a saved picture), being wired. A voice call's act sends it the same way. Once answered it moves to WRITES.
+const WIRED_LATER: string[] = [];
+// read actions the service answers for a voice call's look (SOURCES) that the app itself doesn't send: its picker
+// reads the catalog instead
+const VOICE_ONLY = ["model-menu", "role-info", "machine-hosts"];
 
 test("every action the web app sends is a voice data source (a read) or a change (WRITES)", () => {
   const types = readFileSync(join(ROOT, "web/shared/types.ts"), "utf8");
   const union = types.slice(types.indexOf("export type Action ="), types.indexOf("\n\n", types.indexOf("export type Action =")));
-  const sent = new Set([...[...union.matchAll(/type: '([a-z.-]+)'/g)].map((m) => m[1]), ...[...WEB.matchAll(/act\(\{\s*type:\s*'([a-z.-]+)'/g)].map((m) => m[1])]);
+  // the app's own sends: act({ type: … }) and tryAct({ type: … }) (web/src/kernel.ts), with or without a type argument
+  const app = new Set([...WEB.matchAll(/\b(?:act|tryAct)(?:<[^(]*>)?\(\s*\{\s*type:\s*'([a-z.-]+)'/g)].map((m) => m[1]));
+  expect(app.size).toBeGreaterThan(25);
+  const sent = new Set([...[...union.matchAll(/type: '([a-z.-]+)'/g)].map((m) => m[1]), ...app]);
   expect(sent.size).toBeGreaterThan(30);
-  const missing = [...sent].filter((t) => !served.has(`action:${t}`) && !NOT_DATA[`action:${t}`] && !WRITES.includes(t));
+  const missing = [...sent].filter((t) => !served.has(`action:${t}`) && !NOT_DATA[`action:${t}`] && !WRITES.includes(t) && !WIRED_LATER.includes(t));
   expect(missing).toEqual([]);
+  // what is wired later is something the app really sends, and not already filed as answered
+  for (const t of WIRED_LATER) expect({ t, sent: app.has(t), filed: WRITES.includes(t) || served.has(`action:${t}`) }).toEqual({ t, sent: true, filed: false });
   // a read is never also filed as only a change
-  for (const s of served) if (s.startsWith("action:")) expect(sent.has(s.slice(7)) || s === "action:usage").toBe(true);
+  for (const s of served) if (s.startsWith("action:")) expect(sent.has(s.slice(7)) || VOICE_ONLY.includes(s.slice(7))).toBe(true);
+  for (const t of WRITES) expect(served.has(`action:${t}`) || !!NOT_DATA[`action:${t}`]).toBe(false);
+  // every change listed is one the app sends or its Action type names, each once
+  expect(WRITES.filter((t) => !sent.has(t))).toEqual([]);
+  expect(new Set(WRITES).size).toBe(WRITES.length);
+  // what the app's buttons send now is all filed: the task menu, the review card, schedules, artifacts, settings
+  for (const t of ["accept", "close", "task-start", "task-resume", "task-rename", "task-move", "archive", "delete", "stop", "answer", "automation", "space-archive", "space-remove",
+    "config", "artifact-pin", "artifact-rename", "artifact-restore", "artifact-keep", "artifact-delete"]) expect(WRITES).toContain(t);
+  // nothing of what 3.2 dropped is still listed
+  for (const t of ["mode", "autopilot-run", "tab-new", "tab-close", "tab-rename", "tab-switch", "tab-move", "fork", "worktree", "space-commit", "assistant-close", "held-drop", "held-now", "rewind", "model-pin"]) expect(WRITES.includes(t) || served.has(`action:${t}`)).toBe(false);
 });
 
 const now = Date.now();
 const snap: any = {
   host: "vm", name: "Shepherdr", user: "You",
   machines: [
-    { id: "m:vm", machine: "vm", name: "This computer", status: "idle", here: true, stats: { at: now, health: { cpu: 12, memory: 40, disk: 50 }, limits: {
+    { id: "m:vm", machine: "vm", name: "vm", ownName: "This computer", status: "idle", here: true, stats: { at: now, health: { cpu: 12, memory: 40, disk: 50 }, limits: {
       codex: { state: "ok", at: now - 60_000, plan: "pro", windows: [{ name: "5-hour", used: 37, resets_at: now + 2 * 3600_000 }, { name: "Weekly", used: 81, resets_at: now + 3 * 86400_000 }] },
       claude: { state: "signed-out", at: now - 60_000 } } } },
     { id: "m:mini", machine: "mini", name: "Mac mini", status: "idle" },
   ],
-  places: [{ id: "sp1", name: "demo", machine: "vm", chat: "p:sp1", mode: "regular", level: 2, status: "idle" }],
+  places: [{ id: "sp1", name: "demo", machine: "vm", chat: "p:sp1", level: 2, status: "idle" }],
   tasks: [{ id: "DEMO-7", name: "Make the widget blue", status: "ready", place: "sp1", summary: "The widget is blue", at: now, age: "", state: "", on: "", created: "" }],
-  needs: [], automations: {}, artifacts: [{ id: "a9", title: "DEMO-7 · Proof", place: "sp1", v: 1, at: now }], asks: {},
+  needs: [], automations: {}, artifacts: [{ id: "a9", title: "Widget · Proof", place: "sp1", v: 1, at: now }], asks: {},
+  config: { all: { agents: {}, review: false, merge: "checks", proof: true, instructions: "" }, spaces: {}, secrets: [{ name: "DEMO_API_KEY", scope: "all" }], plugins: [], plans: [] },
   settings: [
-    { name: "Window", level: "all", rows: [{ label: "Usage insights", key: "addon.insights", value: "on", options: ["on", "off"] }] },
-    { name: "Secrets", level: "all", rows: [], vault: [{ name: "DEMO_API_KEY", scope: "everywhere", where: "Everywhere" }] },
     { name: "Voice", level: "all", rows: [{ label: "Token", key: "voice.token", value: "sk-demo0000000000000000fake", token: "abc123fake" }] },
   ],
 };
@@ -85,7 +108,9 @@ test("Codex usage: look machines says the plan's numbers, look data finds and dr
   expect(m.result).toContain("Claude Code: Not signed in");
   const q = await voiceTool("look", { what: "data", query: "codex" }, web, io());
   expect(q.result).toContain("machines/m:vm/stats/limits/codex/windows/5-hour/used: 37");
-  const d = await voiceTool("look", { what: "data", path: "machines/this computer/stats/limits/codex/windows" }, web, io());
+  // 3.2's settings as the app holds them (snapshot.config)
+  expect((await voiceTool("look", { what: "data", path: "config/all" }, web, io())).result).toContain('merge: "checks"');
+  const d = await voiceTool("look", { what: "data", path: "machines/vm/stats/limits/codex/windows" }, web, io());
   expect(d.error).toBeUndefined();
   expect(d.result).toContain("[5-hour] used: 37; resets_at: in 2 hours");
   const bad = await voiceTool("look", { what: "data", path: "machines/vm/nothing" }, web, io());
@@ -108,7 +133,7 @@ test("secrets never: names yes, values and secret-looking keys hidden", async ()
   expect(r.result).not.toContain("real-looking-secret");
 });
 
-test("a panel's own data: the source is read for the task meant, and drilled into", async () => {
+test("what is read on demand: the source is read for the task meant, and drilled into", async () => {
   const x = io();
   const r = await voiceTool("look", { what: "data", path: "changes/files", id: "this" }, web, x);
   expect(x.reads).toEqual([{ source: "changes", args: { task: "DEMO-7" } }]);
@@ -118,9 +143,11 @@ test("a panel's own data: the source is read for the task meant, and drilled int
   expect(f.error).toBeUndefined();
   await voiceTool("look", { what: "data", path: "insights" }, web, x);
   expect(x.reads[2]).toEqual({ source: "insights", args: {} });
-  const art = await voiceTool("look", { what: "data", path: "artifact", id: "proof" }, web, x);
-  expect(x.reads[3]).toEqual({ source: "artifact", args: { artifact: "a9", v: 1, machine: null } });
-  expect(art.error).toBeUndefined();
+  // by the task's title, never needing its id
+  await voiceTool("look", { what: "data", path: "evidence", id: "the widget task" }, web, x);
+  expect(x.reads[3]).toEqual({ source: "evidence", args: { task: "DEMO-7" } });
+  // an artifact is a page to open, not data to read out; a role's instructions are Settings' own now
+  for (const path of ["artifact", "template"]) expect(Object.keys(SOURCES)).not.toContain(path);
   const failed = await voiceTool("look", { what: "data", path: "pr" }, web, io({ read: async () => { throw new Error("GitHub didn't answer."); } }));
   expect(failed).toEqual({ result: "GitHub didn't answer.", error: true });
 });
@@ -147,4 +174,6 @@ test("the call's agent knows: data is a look, with a path, and the prompt says i
   const look = TOOLS.find((t: any) => t.name === "look") as any;
   expect(look.parameters.properties.path).toBeTruthy();
   expect(prompt()).toContain("look data sees everything the app shows");
+  // no source is told to the voice in words the app dropped
+  expect(Object.values(SOURCES).map((s) => s.about).join(" ")).not.toMatch(/\b(Assistant|coordinator|worker|Accept|Autopilot|automation|add-on|window|tab|layout|panel)\b/i);
 });

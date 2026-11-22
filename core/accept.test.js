@@ -1,10 +1,5 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { ACCEPT, acceptLabel, docOpen, docsMore, words, readable, whereNow, commitsLine, filesLine, moreLine, proofTitle } from "./accept.js";
-
-const root = join(import.meta.dir, "..");
-const read = (p) => readFileSync(join(root, p), "utf8");
 
 test("a long old summary keeps its first sentence; the whole goes under Details", () => {
   const long = `Fixed the login. ${"More words here. ".repeat(12)}`;
@@ -33,39 +28,14 @@ test("Accept says whether it merges", () => {
   expect(acceptLabel({ merges: true })).toBe("Accept and merge");
   expect(acceptLabel({ merges: false })).toBe("Accept");
   expect(acceptLabel(undefined)).toBe("Accept"); // still being read
-  const mod = read("mods/accept-card/main.js"), web = read("web/src/screens/Accept.tsx");
-  expect(mod).toContain("acceptLabel(e)");
-  expect(web).toContain("A.acceptLabel(e)");
 });
 
-test("the window's card and the web's read their words from here, not their own", () => {
-  const mod = read("mods/accept-card/main.js"), web = read("web/src/screens/Accept.tsx");
-  expect(mod).toContain('from "./core/accept.js"');
-  expect(web).toContain("@core/accept.js");
-  for (const w of ["Reading the task", "No summary.", "No proof artifact.", "Already accepted.", "Not ready right now"]) {
-    expect(mod).not.toContain(w);
-    expect(web).not.toContain(w);
-  }
-});
-
-test("its documents: a Markdown-only task opens its first, both cards draw them, more says how many more", () => {
+test("its documents: a Markdown-only task opens its first, more says how many more", () => {
   const list = [{ path: "a.md" }, { path: "b.md" }];
   expect([docOpen({ only: true, list }, 0), docOpen({ only: true, list }, 1)]).toEqual([true, false]);
   expect(docOpen({ only: false, list }, 0)).toBe(false); // a code task's notes stay folded
   expect(docOpen(null, 0)).toBe(false);
   expect(docsMore({ count: 7, list })).toBe(5);
   expect(docsMore(undefined)).toBe(0);
-  const mod = read("mods/accept-card/main.js"), web = read("web/src/screens/Accept.tsx");
-  expect(mod).toContain("ACCEPT.documents");
-  expect(web).toContain("A.ACCEPT.documents");
-});
-
-test("the window draws a document's tables and quotes, and its words as written", () => {
-  const src = read("mods/accept-card/main.js");
-  const mdBlocks = new Function(`${src.slice(src.indexOf("function mdBlocks"), src.indexOf("const capital"))}; return mdBlocks;`)();
-  expect(mdBlocks("| A | B |\n| --- | --- |\n| 1 | 2 |\n\n> keep it\n> short\n\n<script>x</script>")).toEqual([
-    { kind: "code", text: "| A | B |\n| 1 | 2 |", table: true },
-    { kind: "quote", text: "keep it short" },
-    { kind: "para", text: "<script>x</script>" }, // text, never markup: the window has no HTML
-  ]);
+  expect(typeof ACCEPT.documents).toBe("string");
 });

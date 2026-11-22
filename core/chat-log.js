@@ -275,8 +275,8 @@ function newsOf(t) {
     ref: unattr(/\btask="([^"]*)"/.exec(a)?.[1]), event: unattr(/\bevent="([^"]*)"/.exec(a)?.[1]), text: text.trim() })).filter((n) => n.ref && n.event);
 }
 
-// An Autopilot wake (herdr-task's <herdr-autopilot reason=…>): { reason }, else null. Its words never show; the chat
-// shows one quiet line for it (pilotLine()).
+// An Autopilot wake in an older log (3.1's herdr-task sent <herdr-autopilot reason=…>; 3.2 has no Autopilot):
+// { reason }, else null. Its words never show, and nothing shows in their place.
 // Only a message that is the wake itself (the CLI may wrap it as pasted): an Assistant's brief shows the tag as an example.
 function pilotOf(t) {
   const m = /^<herdr-autopilot\b([^>]*)>/.exec(String(t).replace(/<\/?pasted_content\b[^>]*>/g, "").trim());
@@ -289,31 +289,6 @@ function cleanUser(t) {
   const u = cleanWords(t);
   const out = news.length ? { ...(u ?? { text: "" }), news } : u;
   return pilot ? { ...(out ?? { text: "" }), pilot } : out;
-}
-
-// Why Autopilot woke, in words: "on schedule", "Run now", "switched on", "HAT-4 is ready" (herdr-task's reasons).
-const EVENT_WORDS = { added: "was added", ready: "is ready", failed: "failed", "needs-you": "needs you", merged: "was merged", stalled: "stalled" };
-export function pilotWhy(reason) {
-  const r = String(reason ?? "").trim();
-  if (r === "schedule") return "on schedule";
-  if (r === "run now") return "Run now";
-  const ev = /^event:([\w-]+)\s+(.+)$/.exec(r);
-  if (ev) return `${ev[2]} ${EVENT_WORDS[ev[1]] ?? ev[1]}`;
-  return r || "on schedule";
-}
-
-// A wake's quiet line in the chat: "Autopilot woke · on schedule", then how it went once that shows in the log:
-// its why when it answered <hc no-reply why="…"/> (" · Waiting on your Accept of TG-2", SHEP-40), else " · nothing to
-// do" (a bare <hc no-reply/> without looking at anything), " · checked, nothing new" (it looked, then answered that),
-// nothing more while it works or once it said something (its words follow as its message).
-// item: { kind: "pilot", reason, steps, said, quiet, why }.
-export const PILOT_WHY_MAX = 160;
-export function pilotLine(item) {
-  const head = `Autopilot woke · ${pilotWhy(item?.reason)}`;
-  if (item?.said || !item?.quiet) return head;
-  const why = String(item.why ?? "").replace(/\s+/g, " ").trim();
-  if (why) return `${head} · ${why.length > PILOT_WHY_MAX ? why.slice(0, PILOT_WHY_MAX - 1).trimEnd() + "…" : why}`;
-  return `${head} · ${item.steps ? "checked, nothing new" : "nothing to do"}`;
 }
 
 function cleanWords(t) {
@@ -590,7 +565,7 @@ function codexStep(name, args) {
 //   { kind: "sent", id, at, to, text, how }  (a message the agent sent another agent: sendsOf())
 //   a user item's from: who sent it (another agent's address); assistant: { machine, space, reply } when it is
 //   another Assistant's (<herdr-assistant>)
-//   { kind: "pilot", id, at, reason, steps, said, quiet }  (an Autopilot wake, its quiet line: pilotLine())
+//   { kind: "pilot", id, at, reason, steps, said, quiet }  (an older log's Autopilot wake: shown nowhere)
 //   { kind: "tools", id, steps: [{ id, kind, line, out? }] }  (calls in a row, between texts;
 //                                             out: where the call's result line is)
 //   { kind: "ask", id, text, questions?, closed? }  (the agent's own question tool, Codex's with its questions; closed once its dialog
@@ -620,7 +595,7 @@ export class Conversation {
   constructor(kind) {
     this.kind = kind;
     this.items = [];
-    // The Autopilot wake whose turn runs now (its line fills in as it goes: pilotLine()).
+    // The Autopilot wake (an older log's) whose turn runs now.
     this.pilot = null;
     this.replies = new Map();
     this.calls = new Map();
@@ -707,7 +682,7 @@ export class Conversation {
     for (const r of u?.reactions ?? []) this.react("you", r);
     // Task news: an item per line, at the moment Herdr told it.
     (u?.news ?? []).forEach((n, i) => this.push({ kind: "news", id: `${id}:n${i}`, at: u.at, ...n }));
-    // An Autopilot wake: its line, which what the Assistant then does fills in (pilotLine()); anything else said to it
+    // An Autopilot wake (an older log's): an item no chat shows; anything else said to it
     // ends that wake's watch.
     this.pilot = null;
     if (u?.pilot) {

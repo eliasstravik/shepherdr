@@ -1,4 +1,4 @@
-"""Queues: tasks that come after others, and how many may run at once."""
+"""Queues: tasks that come after others, and a machine too busy to start more."""
 
 import json
 import os
@@ -7,7 +7,6 @@ import subprocess
 import sys
 
 from .base import beside_store, ENTRY, Fail, guard, HOME, now, STORE
-from .agents import agent_running, live_agents
 from .store import parse_ref, prefixes_in_use, read_list, store_path
 
 
@@ -146,30 +145,14 @@ def waiting_for(s, task):
     return [i for i in task.get("after") or [] if i in known and known[i]["state"] != "done"]
 
 
-def working(s, task):
-    """An agent is at work on it (or one started moments ago and hasn't shown up yet)."""
-    if task["state"] != "running":
-        return False
-    last = task["agents"][-1] if task["agents"] else {}
-    if now() - (last.get("at") or 0) < 30000:
-        return True
-    return any(agent_running(k) for k in live_agents(s.key(task)))
-
-
-def running_count(s, skip=None):
-    return sum(1 for t in s.data["tasks"] if t is not skip and working(s, t))
-
-
 def queue_reason(s, task):
-    """Why a start has to wait, in plain words: "after HAT-3, vm-b:WEB-5", "3 tasks are running
-    here" or its machine too busy ("vm-a's memory is 92% full", HERD-40); None when it can go."""
+    """Why a start has to wait, in plain words: "after HAT-3, vm-b:WEB-5", or its machine too busy
+    ("vm-a's memory is 92% full", HERD-40); None when it can go. Never a count: any number of tasks
+    run at once (3.2)."""
     refresh_ext(s, task)
     wait = [f"{s.prefix}-{i}" for i in waiting_for(s, task)] + waiting_ext(task)
     if wait:
         return "after " + ", ".join(wait)
-    n = running_count(s, task)
-    if n >= s.max_running():
-        return f"{n} tasks are running here" if n != 1 else "1 task is running here"
     return machine_hold()
 
 

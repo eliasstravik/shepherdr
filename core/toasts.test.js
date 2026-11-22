@@ -9,8 +9,11 @@ const read = (p) => readFileSync(join(root, p), "utf8");
 
 test("titles say who and what, as the window's", () => {
   expect(toastTitle("HERD-4", NEEDS_YOU)).toBe("HERD-4 · Needs you");
-  expect(toastTitle(assistantWho("tt-repo"), FINISHED)).toBe("tt-repo Assistant · Finished");
-  expect(assistantWho(null)).toBe("Assistant");
+  expect(toastTitle(assistantWho("tt-repo"), FINISHED)).toBe("#tt-repo · Ready for review");
+  // 3.2 never says Assistant: a space is "#name", the home space (or none) is Shepherdr itself
+  expect(assistantWho(null)).toBe("Shepherdr");
+  expect(assistantWho("Home")).toBe("Shepherdr");
+  expect(assistantWho("~")).toBe("Shepherdr");
   // this computer's task by its ref alone; another machine's with that machine's name
   expect(taskWho("SHEP-17", null)).toBe("SHEP-17");
   expect(toastTitle(taskWho("SHEP-17", "MacBook"), NEEDS_YOU)).toBe("SHEP-17 on MacBook · Needs you");
@@ -45,11 +48,6 @@ test("kept and gone", () => {
   expect(SHOWN).toBe(3);
 });
 
-test("the window's toasts say the same words as these (mods/chat, lib/ui.js), and mods/toasts reads its rules here", () => {
-  expect(read("mods/chat/main.js")).toContain('st === "blocked" ? "Needs you" : "Finished"');
-  expect(read("lib/inbox.js")).toContain("· Needs you`");
-  expect(read("lib/ui.js")).toContain("`${name} Assistant` : \"Assistant\"");
-  expect(read("mods/toasts/main.js")).toContain('from "./core/toasts.js"');
-  expect(read("web/plugins/alerts/toasts.tsx")).toContain("@core/toasts.js");
+test("the service's alerts read their words here", () => {
   expect(read("service/push.ts")).toContain("../core/toasts.js");
 });

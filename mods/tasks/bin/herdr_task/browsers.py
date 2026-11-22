@@ -1,13 +1,15 @@
-"""Tasks' browsers (HERD-57): each task has one agent-browser session, driven through herdr-browser
-(~/.config/herdr-app/bin), on the machine where the task runs. Its files are in ~/.local/state/shepherdr/browser:
-the profile folder <name> (sign-ins), <name>.task (its herdr.task key), <name>.used (the agent's or
-the person's last use), <name>.you (the person drives it), <name>.view (the panel's live viewer,
-bin/herdr-browser-view, is wanted: it ends by itself once this goes stale). A tick (browser_pass) closes:
-- a Done or removed task's browser, and forgets its sign-ins (the profile goes), once its agent has stopped using
-  it (GitHub #1138: an auto-merged task's agent still checking its proof got a blank page between two commands);
-- one idle longer than the machine's browser_idle_close minutes (Settings > Machines; 10 when not
-  set; 0 or "off": never), sign-ins kept. The agent's next command opens it again.
-Either way it leaves <name>.closed saying why: herdr-browser tells the agent once that its page and viewport start
+"""Agents' browsers (3.2; HERD-57 before it): each SPACE has one headless Chrome on one profile, so a site signed in
+to once is signed in for every agent of the space, and each task (and the space's chat's own agent) has its own page in
+it, driven through herdr-browser (~/.local/bin) on the machine where it runs. Their files are in
+~/.local/state/shepherdr/browser: the profile folders spaces/<space> (sign-ins), spaces/<space>.cdp (its Chrome runs),
+spaces/<space>.used (its last use), and per agent <name>.task (its herdr.task key, or chat:<space>), <name>.space,
+<name>.used (the agent's last command), <name>.you (the person drives it). A tick (browser_pass) closes:
+- a Done or removed task's page, once its agent has stopped using it (GitHub #1138: an auto-merged task's agent still
+  checking its proof got a blank page between two commands), and stops its own desktop (herdr-desktop). The space's
+  browser and its sign-ins stay: they are the space's, not the task's;
+- a space's browser idle longer than the machine's browser_idle_close minutes (Settings > Machines; 10 when not
+  set; 0 or "off": never), sign-ins kept. An agent's next command starts it again.
+A closed browser leaves <name>.closed saying why: herdr-browser tells the agent once that its page and viewport start
 fresh, instead of a silent about:blank (#1147)."""
 
 import hashlib
@@ -21,7 +23,7 @@ from .base import addon_off, HOME, STORE, WHERE
 
 ROOT = WHERE.path("browser")
 IDLE_MIN = 10
-YOU_FRESH_S = 120  # as herdr-browser: a take-over the panel stopped refreshing has ended
+YOU_FRESH_S = 11 * 60  # as herdr-browser: a take-over nobody refreshed that long has ended (the service hands back at 10)
 
 
 def session_of(key, name):
@@ -38,14 +40,35 @@ def browser_path():
     return None if addon_off("browser") else shutil.which("herdr-browser")
 
 
+def desktop_path():
+    """herdr-desktop on PATH, else None (also while the browser add-on is off)."""
+    return None if addon_off("browser") else shutil.which("herdr-desktop")
+
+
 def browser_line():
-    """The worker's brief: its browser's exact command, or "" where there's none."""
+    """The worker's brief: its browser's and desktop's exact commands, or "" where there's none."""
     bp = browser_path()
     if not bp:
         return ""
-    return (f" Your task has its own browser (agent-browser, kept for this task with its sign-ins; the person can watch it "
-            f"in Herdr): run `{bp} <agent-browser command>`, e.g. `{bp} open http://localhost:3000`, `{bp} snapshot -i`, "
-            f"`{bp} screenshot`; never pass --session or --profile, and its commands run without asking.")
+    text = (f" You have your own tab in your space's browser (agent-browser; sign-ins are shared with the space's other agents, and "
+            f"the person can watch it and take over in Shepherdr): run `{bp} <agent-browser command>`, e.g. `{bp} open "
+            f"http://localhost:3000`, `{bp} snapshot -i`, `{bp} screenshot`; never pass --session or --profile, and its commands "
+            f"run without asking. A step only a person can do there (a sign-in code, a captcha, a payment): `{bp} hands \"<what, in a "
+            f"few words>\"`, then stop and wait for their message.")
+    dp = desktop_path()
+    if dp:
+        text += (f" For what a page can't do (a desktop app, a file dialog) you have a desktop too: `{dp} <agent-desktop command>`, "
+                 f"e.g. `{dp} snapshot`, `{dp} click @e3`; `{dp} hands \"<what>\"` asks for the person there.")
+    return text
+
+
+def browser_env(key, space):
+    """What a worker's shell carries so herdr-browser and herdr-desktop know whose they are without asking Herdr:
+    its task and its space (bare: "sp12", not "vm/sp12")."""
+    env = [f"HERDR_BROWSER_TASK={key}"]
+    if space:
+        env.append(f"HERDR_BROWSER_SPACE={space}")
+    return env
 
 
 def idle_ms():
@@ -79,89 +102,74 @@ def _age_ms(path):
         return None
 
 
-def _close(bp, key):
+def _read(path):
     try:
-        subprocess.run([bp, "--own", "--task", key, "close"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
-    except (OSError, subprocess.SubprocessError):
-        pass
-
-
-def _agent_browser(bp):
-    """The agent-browser herdr-browser runs (Shepherdr's own copy, or the PATH's), else the PATH's."""
-    try:
-        r = subprocess.run([bp, "--bin"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, universal_newlines=True, timeout=20)
-        if r.returncode == 0 and r.stdout.strip():
-            return r.stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        pass
-    return shutil.which("agent-browser")
-
-
-def _live_sessions(bp):
-    ab = _agent_browser(bp)
-    if not ab:
-        return set()
-    try:
-        r = subprocess.run([ab, "session", "list", "--json"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                           universal_newlines=True, timeout=20)
-        return set((json.loads(r.stdout).get("data") or {}).get("sessions") or [])
-    except (OSError, ValueError, subprocess.SubprocessError, AttributeError):
-        return set()
-
-
-def _closed_note(name, why):
-    """<name>.closed: why Herdr closed it, for herdr-browser to say once on the next command."""
-    try:
-        with open(os.path.join(ROOT, name + ".closed"), "w") as f:
-            f.write(why + "\n")
+        with open(path) as f:
+            return f.read().strip()
     except OSError:
+        return ""
+
+
+def _own(argv):
+    try:
+        subprocess.run(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
+    except (OSError, subprocess.SubprocessError):
         pass
+
+
+def _forget(bp, key, space):
+    """A Done task's page closed and its files gone; its own desktop stopped. The space's browser stays."""
+    whose = ["--own", "--task", key] + (["--space", space] if space else [])
+    _own([bp] + whose + ["--forget"])
+    dp = desktop_path()
+    if dp:
+        _own([dp] + whose + ["--down"])
+
+
+def _close_space(bp, space, why):
+    """The space's browser stopped (every agent's page with it), sign-ins kept; each agent is told why once."""
+    _own([bp, "--own", "--chat", "--space", space, "--close-space", why])
 
 
 def browser_pass(report):
-    """Closes Done/removed tasks' browsers (forgetting sign-ins) and idle ones (keeping them)."""
+    """Closes Done/removed tasks' pages, and the browsers of spaces nobody used for a while (sign-ins kept)."""
+    bp = browser_path()
+    if not bp:
+        return
     try:
         names = sorted(f[:-5] for f in os.listdir(ROOT) if f.endswith(".task") and not f.startswith("."))
     except OSError:
         return
-    bp = browser_path()
-    if not names or not bp:
-        return
-    live, idle = None, idle_ms()
+    idle = idle_ms()
+    driven = set()  # spaces where the person drives an agent's page now: never closed under them
     for name in names:
-        try:
-            with open(os.path.join(ROOT, name + ".task")) as f:
-                key = f.read().strip()
-        except OSError:
-            continue
-        found, t = _task(key)
-        if not found:
-            continue
-        if t is None or t.get("state") == "done":
-            used = _age_ms(os.path.join(ROOT, name + ".used"))
-            if used is not None and used < (idle or IDLE_MIN * 60000):
-                continue  # its agent is still at work in it (checking a proof after merge): later
-            _close(bp, key)
-            shutil.rmtree(os.path.join(ROOT, name), ignore_errors=True)
-            for ext in (".used", ".you", ".view", ".new", ".session", ".task", ".closed"):
-                try:
-                    os.remove(os.path.join(ROOT, name + ext))
-                except OSError:
-                    pass
-            _closed_note(name, "the task is Done, so its browser was closed and its sign-ins forgotten")
-            report.setdefault("browsers_forgotten", []).append(key)
-            continue
-        if idle is None:
-            continue
-        if live is None:
-            live = _live_sessions(bp)
-        if session_of(key, name) not in live:
-            continue
+        key = _read(os.path.join(ROOT, name + ".task"))
+        space = _read(os.path.join(ROOT, name + ".space"))
         you = _age_ms(os.path.join(ROOT, name + ".you"))
         if you is not None and you < YOU_FRESH_S * 1000:
+            driven.add(space)
+        if not key or key.startswith("chat:"):
+            continue  # a space's chat's own: it lives as long as its space
+        found, t = _task(key)
+        if not found or not (t is None or t.get("state") == "done"):
             continue
         used = _age_ms(os.path.join(ROOT, name + ".used"))
+        if used is not None and used < (idle or IDLE_MIN * 60000):
+            continue  # its agent is still at work in it (checking a proof after merge): later
+        _forget(bp, key, space)
+        report.setdefault("browsers_forgotten", []).append(key)
+    if idle is None:
+        return
+    try:
+        spaces = sorted(f[:-4] for f in os.listdir(os.path.join(ROOT, "spaces")) if f.endswith(".cdp"))
+    except OSError:
+        return
+    for space in spaces:
+        if space in driven or os.path.exists(os.path.join(ROOT, "spaces", space + ".desk")):
+            continue
+        used = _age_ms(os.path.join(ROOT, "spaces", space + ".used"))
+        if used is None:
+            used = _age_ms(os.path.join(ROOT, "spaces", space + ".cdp"))
         if used is None or used >= idle:
-            _close(bp, key)
-            _closed_note(name, "it was closed after %g minutes unused (Settings > Machines: browser idle close)" % (idle / 60000))
-            report.setdefault("browsers_closed", []).append(key)
+            _close_space(bp, space, "it was closed after %g minutes unused (Settings > Machines: browser idle close)" % (idle / 60000))
+            report.setdefault("browsers_closed", []).append(space)

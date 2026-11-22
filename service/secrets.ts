@@ -16,8 +16,9 @@ const { NAME, ASK, asksIn, keptLine, declinedLine, SECRETS_DOC, secretsRecord, b
 const { HOST_DOC, newestHost } = HC as any;
 const VAULT = where().vault;
 const MARK = where()["secret-remote"];
-const APP = process.env.HERDR_APP_HOME || join(HOME, ".config", "herdr-app");
-const BIN = [join(APP, "bin", "herdr-secret"), join(HOME, ".local", "share", "shepherdr", "bin", "herdr-secret"), join(HOME, ".local", "bin", "herdr-secret")].find(existsSync) ?? "herdr-secret";
+// herdr-secret beside this service (Shepherdr's own folder, or a checkout), else the installed one. It runs in
+// Shepherdr's own herdr-core session, as this service does (session.ts), so both read the same record.
+const BIN = [join(import.meta.dir, "..", "bin", "herdr-secret"), join(HOME, ".local", "share", "shepherdr", "bin", "herdr-secret"), join(HOME, ".local", "bin", "herdr-secret")].find(existsSync) ?? "herdr-secret";
 
 /** herdr-secret as installed here. */
 export const secretBin = () => BIN;

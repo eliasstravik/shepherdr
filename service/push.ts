@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA, where } from "./paths.ts";
 import * as T from "../core/toasts.js";
-import { alertUrl, ACCEPT, choiceButtons, DEFAULT_TOPICS, notifies, notifyOf, pushTopics, REPLY, taskWho, WATCH_BODY, WATCH_TITLE, watchTitle, type PushAction, type PushTopic } from "../web/shared/alerts.ts";
+import { alertUrl, ACCEPT, ACCEPT_MERGE, choiceButtons, DEFAULT_TOPICS, notifies, notifyOf, pushTopics, REPLY, taskWho, WATCH_BODY, WATCH_TITLE, watchTitle, type PushAction, type PushTopic } from "../web/shared/alerts.ts";
 import { excerpt } from "../web/shared/excerpt.ts";
 import { unread } from "../web/shared/needs-you.ts";
 
@@ -20,7 +20,7 @@ type Out = {
  * What each push alert says, as the window's toasts (core/toasts.js): an agent that needs you, "HERD-4 · Needs you" or
  * "tt-repo Assistant · Needs you", why under it (an Assistant only by its space's Notify); a task whose agent finished,
  * ready to accept, "HERD-4 · Finished" under its name, a tap opening its Accept card; a task done; an Assistant's new
- * message (an Autopilot update when its Autopilot woke it: woke, the spaces whose wake was under way a moment ago).
+ * message ("New message").
  * Keyed so each goes once; each with its topic and space, which every device chooses by (Settings › Notifications).
  */
 /** a need's alert key: one per card or wait */
@@ -37,7 +37,7 @@ export function needAlert(snap: any, n: any): Out {
   return { title: watchTitle(T.toastTitle(who, T.NEEDS_YOU)), body: excerpt(T.needReason(n), WATCH_BODY), tag: n.task ?? n.chat, topic: "needs", place: n.place, waits: true, url: go, ...acts };
 }
 
-export function alertsOf(snap: any, woke: Set<string> = new Set(), said: (chat: string) => string | undefined = () => undefined): Map<string, Out> {
+export function alertsOf(snap: any, said: (chat: string) => string | undefined = () => undefined): Map<string, Out> {
   const now = new Map<string, Out>();
   for (const n of snap.needs ?? []) {
     if (snap.settings && !notifies(snap, { go: { place: n.place }, task: n.task ? true : undefined })) continue;
@@ -46,10 +46,12 @@ export function alertsOf(snap: any, woke: Set<string> = new Set(), said: (chat: 
   // a task ready for the person's Accept (Ready is only that: one Settings merge by itself shows Working meanwhile,
   // core/tasks.js readyWait), the same Accept as the Tasks panel's
   for (const t of snap.tasks ?? []) if (t.status === "ready" && !t.archived)
-    now.set(`ready:${t.id}`, { title: T.toastTitle(taskWho(snap, t.id), T.FINISHED), body: t.name, tag: t.id, topic: "ready", place: t.place, waits: true, url: `./#accept=${encodeURIComponent(t.id)}`,
-      actions: [ACCEPT], accept: { task: t.id } });
-  for (const t of snap.tasks ?? []) if (t.status === "done" && !t.archived)
-    now.set(`done:${t.id}`, { title: T.toastTitle(taskWho(snap, t.id), "Done"), body: t.name, tag: t.id, topic: "done", place: t.place, url: alertUrl({ place: t.place, task: t.id }) });
+    now.set(`ready:${t.id}`, { title: T.toastTitle(taskWho(snap, t.id), T.FINISHED), body: t.summary || "Tap to look at it.", tag: t.id, topic: "ready", place: t.place, waits: true, url: alertUrl({ place: t.place, task: t.id }),
+      // on its own branch the button merges too, and says so
+      actions: [t.repo === "branch" || (t.repo === undefined && (t.branch || t.pr)) ? ACCEPT_MERGE : ACCEPT], accept: { task: t.id } });
+  // a finished task ("Everything" on a device adds these); a schedule's run that found nothing to do sends none
+  for (const t of snap.tasks ?? []) if (t.status === "done" && !t.archived && t.quiet !== "nothing")
+    now.set(`done:${t.id}`, { title: T.toastTitle(taskWho(snap, t.id), t.merged ? "Done and merged" : "Done"), body: t.summary || "", tag: t.id, topic: "done", place: t.place, url: alertUrl({ place: t.place, task: t.id }) });
   // an Assistant's new message (its chat's last moved on, not yet read), unless its space's Notify is Off
   for (const p of snap.places ?? []) {
     // unread as everywhere else (web/shared/needs-you.ts: Needs you lists it until read)
@@ -58,8 +60,7 @@ export function alertsOf(snap: any, woke: Set<string> = new Set(), said: (chat: 
     // its question already says so (Needs you)
     if ((snap.needs ?? []).some((n: any) => n.chat === p.chat)) continue;
     if (snap.settings && notifyOf(snap, p.id) === "Off") continue;
-    const pilot = woke.has(p.id) || (p.pilot?.on && (p.pilot.inflight || p.pilot.pending));
-    now.set(`msg:${p.chat}:${last}`, { title: T.toastTitle(T.assistantWho(p.name), pilot ? "Autopilot update" : "New message"), body: said(p.chat) || "Tap to read it.", tag: `msg:${p.chat}`, topic: pilot ? "autopilot" : "assistant", place: p.id, url: alertUrl({ place: p.id }), actions: [REPLY], reply: { chat: p.chat } });
+    now.set(`msg:${p.chat}:${last}`, { title: T.toastTitle(T.assistantWho(p.name), "New message"), body: said(p.chat) || "Tap to read it.", tag: `msg:${p.chat}`, topic: "assistant", place: p.id, url: alertUrl({ place: p.id }), actions: [REPLY], reply: { chat: p.chat } });
   }
   // an agent's own alert (herdr-task alert), as its toast: a task's always, an Assistant's by its space's Notify
   for (const a of snap.alerts ?? []) if (a.notify) now.set(`alert:${a.id}`, { title: a.title, body: a.body, tag: `alert:${a.id}`, topic: "needs", ...(a.place ? { place: a.place, url: alertUrl({ place: a.place }) } : {}) });

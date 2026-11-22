@@ -8,15 +8,6 @@ export type Status = 'need' | 'ready' | 'merging' | 'work' | 'idle' | 'queued' |
 /** A chat's final segment is its role; the task ID may itself contain a machine qualifier. */
 export function taskChatId(chat: string) { const at = chat.lastIndexOf('/'); return at < 0 ? undefined : chat.slice(0, at) }
 
-/** regular, always the fallback: the coordinator does what the human asks; or Autopilot, a switch on top of it */
-export type Mode = 'regular' | 'autopilot'
-
-/** each mode, its name and what it means in a few words */
-export const MODES: [Mode, string, string][] = [
-  ['regular', 'Regular', 'Does what you ask'],
-  ['autopilot', 'Autopilot', 'Works on its own'],
-]
-
 /** the longest name a space can be given, as Slack's channels */
 export const NAME_MAX = 80
 
@@ -54,27 +45,14 @@ export function nameProblem(name: string, taken: string[] = []): string | undefi
   return undefined
 }
 
-/** what a tab's agent is doing, as Herdr's status: a spinner, needs you, done (a dot), or nothing */
-export type TabState = 'working' | 'blocked' | 'done' | 'idle'
-/** a space's tab other than its Assistant's (Shepherdr 3's tab bar) */
-export interface PlaceTab {
-  id?: string
-  name: string
-  named?: boolean
-  term: string
-  cli?: string
-  state?: TabState
-  where?: string
-  /** what its pane header calls it: "Claude Code", the program in front ("zsh"), else "Shell" */
-  prog?: string
-  /** the known agent it runs (the window's knownAgents key: "claude", "opencode", …): it can restart and switch */
-  agent?: string
-}
-
 /** A space: a folder on a machine with a name and its own coordinator, as herdr's spaces. Every machine has its home
  *  space (its home folder, ~), always first under it and never removed: its coordinator also keeps an eye on the
  *  machine, and the main machine's on every machine. Spaces are the only places with a chat. */
 export interface Place {
+  /** 3.2: archived: out of the list (the filter shows it again), its schedules stopped, nothing deleted */
+  archived?: boolean
+  /** 3.2: its chat's own agent needs the person (it asks, waits at a prompt, or stopped): counts for the space */
+  needs?: boolean
   id: string
   /** nobody named it: Herdr names it after its folder (its Rename field starts empty, this name its placeholder) */
   unnamed?: boolean
@@ -82,14 +60,6 @@ export interface Place {
   emoji?: string
   /** Shepherdr 3: the space is a git worktree of another (Remove worktree) */
   worktree?: boolean
-  /** Shepherdr 3: the space's other tabs (a terminal or an agent each), by name, with the key their terminal opens by;
-   *  as 3.0's tab bar: Herdr's tab id, whether a name was given, the agent CLI in it, its status and its folder */
-  tabs?: PlaceTab[]
-  /** Shepherdr 3: its Assistant's own tab, first in the tab bar (live: its agent runs) */
-  assistantTab?: { id?: string; name: string; named: boolean; state: TabState; live: boolean; cli?: string; agent?: string }
-  /** Shepherdr 3: its Autopilot as the Assistant's header shows it (this computer's spaces): on, its next wake, queued
-   *  (pending) or waking (inflight), its events, and blank: its heartbeat still unwritten */
-  pilot?: { on: boolean; next_run: number | null; pending: boolean; inflight: boolean; events: string[]; blank: boolean }
   /** its name, Slack-channel style ("my-project"), unique on its machine: the slug its links and commands use */
   name: string
   /** the machine it is on (its key: herdr's label for it) */
@@ -100,7 +70,6 @@ export interface Place {
    *  machine's home space, where there are more machines) */
   level: 0 | 1 | 2
   status: Status
-  mode: Mode
   /** chat key of this space's coordinator */
   chat: string
   /** its machine can't be reached: when it went quiet, as shown ("14:02") */
@@ -123,7 +92,7 @@ export interface Place {
   /** where its artifacts are kept (its repo's main folder, else its own) and that folder's name, as the window's
    *  Artifacts header ("~" at home) */
   store?: { folder: string; name: string; key?: string }
-  /** when something in its tabs last changed state (ms; Herdr's tab changed_at): Jump lists spaces newest first */
+  /** when its Assistant last changed state (ms) */
   changedAt?: number
   /** its repo's name and branch (null: detached), as the window's row */
   gitName?: string
@@ -303,6 +272,31 @@ export interface TaskAgent {
 }
 
 export interface Task {
+  /** 3.2, facts the status is worked out from (web/shared/view.ts), never guessed from a screen: */
+  /** the agent stopped: by the person (Stop), by an error or a crash, or at its plan's limit; why, in its own words */
+  stopped?: { by: 'you' | 'error' | 'limit'; why?: string }
+  /** what kind of block the agent reports (OSC 7501): none when it gives no kind */
+  blocked?: 'permission' | 'question' | 'auth' | 'prompt'
+  /** it waits for a Mac's one desktop, which another agent is using */
+  waitsDesktop?: boolean
+  /** done: its work was merged into the base branch */
+  merged?: boolean
+  /** done: a schedule's run that had nothing to do, or that only had something to say (posted in its space's chat) */
+  quiet?: 'nothing' | 'told'
+  /** done: a few words after "Done and merged" ("1 link fixed") */
+  doneNote?: string
+  /** the schedule whose run it is */
+  schedule?: string
+  /** since when it has needed the person (ms) */
+  needsAt?: number
+  /** done: when it was handed in for review (its card's place in a chat, now one quiet line) */
+  needsAtWas?: number
+  /** the last merge failed: why, in one line */
+  mergeFailed?: string
+  /** it is in a git repository, on its own branch or worktree ("branch"), or changed the folder itself ("folder") */
+  repo?: 'branch' | 'folder'
+  /** the task it waits for, by title */
+  afterTitle?: string
   /** short name, as people say it: GTM-15 */
   id: string
   name: string
@@ -372,6 +366,17 @@ export interface Task {
 
 /** An automation as a project's Tasks lists it: its name, when it runs, the task it adds */
 export interface Automation {
+  /** 3.2: its id within its space's list, and the space it runs in */
+  id?: string
+  place?: string
+  /** when it last ran, and how that run ended, in a few words ("today 9:00 · nothing to do") */
+  last?: string
+  /** when it runs next, in a few words ("in 12 min") */
+  nextWords?: string
+  /** it runs once and then leaves the list */
+  once?: boolean
+  /** the agent its tasks run on, when not the space's own */
+  agent?: AgentPick
   name: string
   /** its trigger in words: "Monday to Friday at 9:00 (Stockholm)", "When a task is merged" */
   when: string
@@ -415,6 +420,8 @@ export interface Choice {
 }
 
 export interface Question {
+  /** 3.2: a permission request: the command (or what it wants to do) in the agent's own words; choice 0 allows once */
+  command?: string
   id: string
   title: string
   kind: 'Form' | 'Question' | 'Plan'
@@ -450,7 +457,7 @@ export interface Question {
   /** answered without a pick: the words it was answered with (an Other answer, or the message that answered it) */
   said?: string
   /** answered without a pick, and not on the card: by a message in the chat, or in the CLI's own terminal */
-  via?: 'chat' | 'terminal'
+  via?: 'chat' | 'terminal' | 'voice'
   /** who asks, when it is not the agent's own message ("Claude Code asks") */
   asks?: string
   /** answered on its other copy (a task's question and its copy in its space's chat): where, and a link to that chat */
@@ -475,6 +482,10 @@ export interface MergeEvidence {
 
 /** an artifact: what an agent shows beyond words, kept in its place and updated as new versions */
 export interface Artifact {
+  /** 3.2: made as a task's proof: it stays on its task's card and thread until kept (not in Artifacts) */
+  proof?: boolean
+  /** 3.2: pinned to the top of Artifacts */
+  pinned?: boolean
   id: string
   title: string
   /** Shepherdr 3.1: recipe (recipe.json, drawn here as HTML) or gpui (a custom panel only the Herdr window runs: the
@@ -556,6 +567,8 @@ export interface Reaction {
 export interface Message {
   id: string
   who: 'you' | 'agent'
+  /** This answer was given through the voice call. */
+  byVoice?: boolean
   /** the agent's suggested next message (its reply's last line): greyed out in the box until something is typed (SHEP-186) */
   suggest?: string
   /** a live row: when it last changed; at keeps its place in the chat */
@@ -610,8 +623,6 @@ export interface Message {
   /** 3.0's quiet line for an ask or start screen that closed: what it asked and how it went ("Run: npm test · Allowed
    *  in the chat") */
   ended?: string
-  /** an Autopilot wake's quiet line ("Autopilot woke · on schedule · checked, nothing new": core/chat-log.js pilotLine) */
-  pilot?: string
   /** the tasks your message mentions (#HAT-1), as 3.0's chips under it: a press opens the task */
   mentions?: { task: string; ref: string; title: string }[]
   at?: number
@@ -759,12 +770,10 @@ export interface ReplyQuote {
 /** One small update card Shepherdr posts in a project's coordinator chat. */
 export interface UpdateCard {
   id: string
-  /** the task it is about; none on a mode card */
+  /** the task it is about */
   task?: string
   /** the task's state when last updated */
   status?: TaskStatus
-  /** a mode card: the place's coordinator went on this mode (text: "on · works on its own"); an older one may say Manual */
-  mode?: Mode
   /** a few words on one line ("Started"), or a task's state and its summary ("Ready: Dark mode works"); a task has one
       such row in a chat, updated where it stands */
   text: string
@@ -820,28 +829,16 @@ export const machineName = (machines: Machine[] | undefined, machine?: string) =
 export const doneNewestFirst = <T extends Pick<Task, 'status' | 'doneAt'>>(ts: T[]): T[] =>
   [...ts.filter((t) => t.status !== 'done'), ...ts.filter((t) => t.status === 'done').sort((a, b) => (b.doneAt ?? 0) - (a.doneAt ?? 0))]
 
-/** a mode's name: "Autopilot" */
-/** the row of a space's Autopilot settings that says why it can't run there */
-export const PILOT_BLOCKED = "Can't run"
-
 /** a typed /model: the words after it ('' for none); anything else: nothing. A CLI saves its own /model as the device's
  *  default for every later agent, so it never reaches one: it opens Restart, which changes this agent only */
 export const modelCommand = (text: string) => /^\/model(?:\s+([^]*))?$/i.exec(text.trim())?.[1]?.trim() ?? (/^\/model$/i.test(text.trim()) ? '' : undefined)
-
-export const modeName = (mode: Mode) => MODES.find(([m]) => m === mode)?.[1] ?? mode
-
-/** a mode card, Autopilot switched on or off: "Autopilot on · works on its own", "Autopilot off · does what you ask" */
-export function modeCard(id: string, mode: Mode): UpdateCard {
-  const what = MODES.find(([m]) => m === mode)?.[2] ?? ''
-  return { id, mode: 'autopilot', text: `${mode === 'autopilot' ? 'on' : 'off'} · ${what.toLowerCase()}` }
-}
 
 /** an update card as a message in the chat: its words are what a reaction or a reply quotes */
 export const cardMessage = (card: UpdateCard, at?: number): Message => ({
   id: card.id,
   who: 'agent',
   at,
-  text: `${card.task ?? (card.mode ? modeName(card.mode) : (card.health?.machine ?? card.red ?? ''))} ${card.text}`,
+  text: `${card.task ?? card.health?.machine ?? card.red ?? ''} ${card.text}`,
   card,
 })
 
@@ -1211,6 +1208,15 @@ export interface PullRequest {
 export type WorktreeAsk = { task: string } & ({ what: 'dir'; path?: string } | { what: 'marks' } | { what: 'files' } | { what: 'file'; path: string } | { what: 'diff' } | { what: 'patch'; path: string } | { what: 'pr' })
 
 export interface Snapshot {
+  /** 3.2: each chat's and task's screen where its agent has one open or needs the person's hands, by "chat:<space>",
+   *  "task:<id>" or "machine:<key>" (none: idle, and yours to use) */
+  screens?: Record<string, ScreenInfo>
+  /** 3.2: what Settings shows, for everything and for each space that set its own */
+  config?: Config
+  /** 3.2: the root space's id: one agent in a home folder on the serving machine */
+  everything?: string
+  /** 3.2: warnings for the line above Everything's message box: a plan over 75%, a machine running low or out of reach */
+  warnings?: { id: string; kind: 'usage' | 'machine'; text: string }[]
   terminalTransport?: 'core'
   name: string
   /** Main machine's stable key; its human-facing name is in machines. */
@@ -1228,12 +1234,7 @@ export interface Snapshot {
   /** everything waiting on the human, oldest first, each once: what the Needs you view lists and every count counts */
   needs: Need[]
   settings: SettingSection[]
-  /** Settings › Window's look switches, as the window follows them: the space's tabs, worktree spaces in the sidebar,
-   *  bold unread spaces, red and green counts, the Tasks status filters, the space on task rows, subagents above the box */
-  look?: { tabs: boolean; worktrees: boolean; unread: boolean; red: boolean; green: boolean; filters: boolean; place: boolean; helpers: boolean }
-  /** Shepherdr 3: Herdr's side panels the tab bar offers beside Tasks (shared "workspace.panels": "files", "changes") */
-  panels?: string[]
-  /** the web app's plugins left out (their add-on is off in Settings › Window): a page started with others reloads */
+  /** the web app's plugins left out (switched off in Settings › Plugins): a page started with others reloads */
   off?: string[]
   /** a source like demo marks its data as fictional */
   demo?: boolean
@@ -1279,8 +1280,6 @@ export type Action =
   | { type: 'artifact-delete'; place: string; artifact: string }
   /** Mark up's notes from the shared browser, sent together into the task's chat */
   | { type: 'browser-notes'; cid?: string; chat: string; url: string; title?: string; viewport?: { w: number; h: number }; notes: BrowserNote[] }
-  | { type: 'mode'; place: string; mode: Mode; keepWorkers?: boolean }
-  | { type: 'autopilot-run'; place: string }
   /** a project's automation: pause or go on, run now, remove. Only agents add or change one, through the command. By
       its place, so another machine's goes there */
   | { type: 'automation'; cid?: string; place: string; op: 'pause' | 'resume' | 'run' | 'remove'; name: string }
@@ -1322,7 +1321,7 @@ export type Action =
       tasks and chat come back if it is added again; refused while one of its tasks is working */
   | { type: 'space-remove'; place: string }
   /** the sidebar's order, dragged by the human: the machines (under 'all'), or one machine's spaces
-      (under its id), or a section's (under its id: 'pinned' for Pinned), or the sections at the top ('sections') or in a
+      (under its id), or a section's (under its id), or the sections at the top ('sections') or in a
       machine ('sections:<machine id>'). Kept by the machine the screen talks to, never sent on to another */
   | { type: 'order'; under: string; ids: string[] }
   /** a space into a section, or back under its machine (to: the machine's id), before another there or last */
@@ -1331,7 +1330,7 @@ export type Action =
       machines); renamed with 'rename'. Kept as the order is */
   | { type: 'section'; op: 'new'; name: string; emoji?: string; machine?: string }
   | { type: 'section'; op: 'delete'; id: string }
-  /** the last section deleted, back in its place (its toast's Undo, as the window's) */
+  /** the last section deleted, back in its place (its toast's Undo) */
   | { type: 'section'; op: 'restore' }
   /** a machine's or space's name as it shows everywhere ('' gives it back its own); kept by the main machine (id,
       not place: never sent on to another), and nothing else changes: its folder, repo, herdr space and task ids stay */
@@ -1379,4 +1378,86 @@ export interface UpdateStatus {
   release?: string
   error?: string
   at: number
+}
+
+/* ---------- 3.2: the picker's lists, read from each agent's own catalog on a machine, never written into Shepherdr ---------- */
+
+/** a model an agent offers: its speeds (service tiers) where it has more than one, its provider where an agent has several */
+export interface CatalogModel {
+  id: string
+  name: string
+  group?: string
+  /** 'regular' first; also 'fast', 'ultrafast' */
+  speeds?: string[]
+  efforts?: string[]
+  defaultEffort?: string | null
+}
+
+/** an agent (a harness) herdr-core can run, on one machine */
+export interface CatalogAgent {
+  id: string
+  name: string
+  installed: boolean
+  /** why it can't be picked there, when it is missing */
+  why?: string
+  models: CatalogModel[]
+  /** the effort levels it has (none: no Effort switch) */
+  efforts: string[]
+  /** its permission modes, each with one line saying what it lets the agent do without asking (none: no row) */
+  perms: { id: string; label: string; about: string }[]
+  permDefault?: string
+  defaultModel?: string
+  defaultEffort?: string
+}
+
+export interface Catalog {
+  machine: string
+  agents: CatalogAgent[]
+}
+
+/* ---------- 3.2: settings, as the settings window shows them ---------- */
+
+/** what one level sets: everything's, or a space's own on top of it */
+export interface LevelConfig {
+  /** what chats, tasks and reviews run on */
+  agents: { Chats: AgentPick; Tasks: AgentPick; Reviews: AgentPick }
+  /** a second agent reviews each task before it is handed in */
+  review: boolean
+  /** when a finished task merges: when I mark it as done, when its checks pass, or right away */
+  merge: 'done' | 'checks' | 'now'
+  /** the agent attaches proof whenever there is something to show */
+  proof: boolean
+  /** how agents should work: added to every agent's prompt as written */
+  instructions: string
+}
+
+export interface Config {
+  all: LevelConfig
+  /** a space's own values, and which of them it set itself ("agents.Chats", "merge", …): the rest are Everything's */
+  spaces: Record<string, LevelConfig & { own: string[] }>
+  /** secrets by name (never their values): for every space, or one space */
+  secrets: { name: string; scope: string; at?: number }[]
+  /** every feature is a plugin: the optional ones and whether each is on */
+  plugins: { id: string; name: string; on: boolean; always?: boolean }[]
+  /** each agent subscription's use for its current windows */
+  plans: { name: string; windows: { name: string; used: number; resets?: string }[] }[]
+  /** the one command to run on a new machine to link it */
+  addMachine?: string
+  /** machines with a real screen whose desktop can be opened (Settings › Machines) */
+  desktops?: string[]
+}
+
+/* ---------- 3.2: screens, an agent's browser and desktop ---------- */
+
+export interface ScreenInfo {
+  /** its tab in the space's browser: the address it shows */
+  b?: { url: string; title?: string }
+  /** its desktop: on which machine, its own virtual display or the Mac's one real screen (shared) */
+  d?: { of: string; own: boolean; busy?: string }
+  /** the agent is using it now (else it is idle: yours to use, with no bar at the bottom) */
+  active?: boolean
+  /** who drives: the agent, or the person after Take over */
+  driver?: 'agent' | 'you'
+  /** the agent is stuck on a step only a person can do: what, in a few words; settled: how it ended */
+  hands?: { what: string; settled?: 'done' | 'skip' }
 }
