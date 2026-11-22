@@ -51,7 +51,16 @@ export class ChatReader {
   // Finds the log of the agent this terminal runs now (t: its herdr-core record). -> true when it changed.
   async locate(t) {
     if (this.pinned) return false;
-    if (t && t.state !== "live" && this.path) return false; // keep the conversation already found when its agent ends
+    if (t && t.state !== "live") {
+      if (this.path) return false; // keep the conversation already found when its agent ends
+      // The agent's last recorded log is still readable when a page opens after it stopped.
+      let saved = null;
+      try { saved = JSON.parse(t.labels?.["herdr.resume"] || "null"); } catch {}
+      if (typeof saved?.log === "string" && saved.log.startsWith("/") && ["claude", "codex"].includes(saved.kind)) {
+        this.fixed(saved.log, saved.kind);
+        return true;
+      }
+    }
     const kind = kindOf(t);
     const pid = t?.foreground?.pid;
     if (!kind || !pid) { const was = this.state; if (was !== "none") { this.reset(); this.state = "none"; } return was !== "none"; }
