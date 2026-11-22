@@ -5,7 +5,7 @@
 // Nothing of a call is written into a chat. The mic inside the message box is dictation only.
 import { useEffect } from 'react'
 import { DictateButton } from '@client/dictate.tsx'
-import { definePlugin, getState, go, launchHref, notice, openArtifact, openSettings, openTask, setUI, useStore, useUI, type Thread } from '@client/kernel.ts'
+import { definePlugin, getState, go, launchHref, notice, openArtifact, openSettings, openTask, setUI, tryAct, useStore, useUI, type Thread } from '@client/kernel.ts'
 import { closeTop as closeLayer } from '@client/overlay.tsx'
 import { cx, I, IB } from '@client/ui.tsx'
 import { isEverything, placeOf, taskOf } from '@shared/view.ts'
@@ -116,7 +116,10 @@ function CallWhere() {
   return null
 }
 
+let demoTimers: ReturnType<typeof setTimeout>[] = []
 export function endCall() {
+  demoTimers.forEach(clearTimeout)
+  demoTimers = []
   stopCall()
   onCaption(null)
   setUI({ call: false, callMuted: false, callCap: '', voiced: null })
@@ -127,6 +130,16 @@ export function toggleCall(resume: string | null = null) {
   if (ui.call) return endCall()
   ;(document.activeElement as HTMLElement | null)?.blur?.()
   setUI({ call: true, callMuted: false, callCap: '', callError: null })
+  if (getState().snap?.demo) {
+    const later = (ms: number, f: () => void) => demoTimers.push(setTimeout(f, ms))
+    setUI({ callCap: 'Listening…' })
+    later(1800, () => setUI({ callCap: '“Open the payment question.”' }))
+    later(3200, () => { openTask('SHOP-14'); setUI({ voiced: 'SHOP-14', callCap: 'It asks: Stripe or Adyen? It would go with Stripe.' }) })
+    later(6400, () => setUI({ callCap: '“Go with Stripe.”' }))
+    later(7800, () => { void tryAct({ type: 'answer', chat: 'SHOP-14/worker', question: 'q-pay', choice: 0 }); setUI({ voiced: 'SHOP-14', callCap: 'Sent. It is carrying on.' }) })
+    later(10200, () => setUI({ callCap: 'Listening…' }))
+    return
+  }
   resetScreen()
   onCaption((text, who) => setUI({ callCap: who === 'you' ? `“${text}”` : text }))
   const fail = (m: string) => {
