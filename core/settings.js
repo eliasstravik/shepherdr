@@ -307,15 +307,6 @@ export function homeAbout(on, st) {
     : "No home space there.";
 }
 
-// ---- Usage insights ---------------------------------------------------------------------------------------------
-// Its Delete (the `setting` action's insights.delete): every machine's log.
-export const INSIGHTS = {
-  title: "Delete usage data",
-  about: "Deletes the usage log on this computer and on your other machines. It starts again from now while the add-on is on.",
-  button: "Delete",
-  done: "Deleted.",
-  missed: (names) => `Deleted here. Not reached: ${names}. Try again when they're online.`,
-};
 // ---- Web -------------------------------------------------------------------------------------------------------
 export const WEB = { title: "Shepherdr on the web", link: "Link", copy: "Copy", copied: "Copied", phone: "Open it on your phone" };
 // The Web page's state line: not read yet, no service, or what the service last said (web.json).

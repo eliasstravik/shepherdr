@@ -30,8 +30,6 @@ import { checkFlags } from "./flags.ts";
 import type { Snapshot } from "../web/shared/types.ts";
 import { catalogOf, configOf, enrich, offPlugins, pluginOn, plansOf, scheduleOf, setConfig } from "./next.ts";
 import { ensureShell, type ShellAt } from "./shells.ts";
-import { record, deleteAll, note as noteUsage, followSwitch, isOn as insightsOn, logLines } from "./usage.ts";
-import { insightsSummary } from "./voice-data.ts";
 import { Chats } from "./chats.ts";
 import { act, findMachines, hc as hcRun } from "./actions.ts";
 import { AgentWatch } from "./watch.ts";
@@ -180,9 +178,6 @@ function alertNew(snap: any) {
 }
 compat.agents = new Agents(hub);
 (compat.agents as Agents).onOffer = () => live.refresh();
-// usage insights (service/usage.ts) record unless they were switched off (the settings file's Everywhere "off" list
-// names "insights": the one thing still read from it)
-followSwitch(() => { try { const o = readSettings()?.everywhere?.off; return !(Array.isArray(o) && o.includes("insights")); } catch { return true; } });
 const machines = new Machines(hub, () => model.machineNames());
 machines.onChange = () => model.rebuild();
 compat.machineStats = (m) => machines.of(m);
@@ -328,6 +323,8 @@ model.own = { ready: () => host.serving() && store.loaded, update: (change) => s
 compat.shared = { value: (k) => model.value(k), set: (k, v) => store.set(k, v) };
 store.on(() => model.rebuild());
 void store.load().catch(() => {});
+/** the snapshot as the app shows it (with 3.2's facts): what the voice reads too */
+let shown: Snapshot | null = null;
 /** 3.2 (service/next.ts): what the new app shows on top of the model's snapshot */
 const withNext = (snap: Snapshot, b: Parameters<NonNullable<typeof model.onBuild>>[0]): Snapshot => {
   const d = pickFrom(settings.choices?.defaults) ?? { agent: "claude" };
@@ -348,7 +345,7 @@ const withNext = (snap: Snapshot, b: Parameters<NonNullable<typeof model.onBuild
     return { state: st?.state, kind: st?.kind ?? k.report?.kind };
   };
   const bar = model.value("spaces-chat") as any;
-  return enrich(snap, { spaces: b.spaces, rows: b.rows, archived: Array.isArray(bar?.archived) ? bar.archived : [], asked, reportOf, config, hostName: hostname().split(".")[0], schedules: pluginOn("schedules") ? b.automations : [] });
+  return (shown = enrich(snap, { spaces: b.spaces, rows: b.rows, archived: Array.isArray(bar?.archived) ? bar.archived : [], asked, reportOf, config, hostName: hostname().split(".")[0], schedules: pluginOn("schedules") ? b.automations : [] }));
 };
 const pickFrom = (v: any) => (v?.agent ? { agent: String(v.agent), model: v.model ?? null, effort: v.effort ?? null, fast: v.fast === "ultrafast" ? "ultrafast" as const : !!v.fast, perm: v.perm ?? null } : null);
 /** where your own terminal starts: a space's folder, or a task's (its worktree when it has one), on its machine */
@@ -500,14 +497,14 @@ function follow(addr: string) {
 
 /** What a voice call hears (voice-hear.ts): any chat by its key, kept read while it follows it. */
 const hearIO: HearIO = {
-  snap: () => compat.last,
+  snap: () => shown ?? compat.last,
   view: (key) => { const addr = compat.addrOf(key); return addr && !addr.startsWith("log:") ? chatView(addr) : null; },
   follow: (key) => { const addr = compat.addrOf(key); return addr ? follow(addr) : { stop: () => {} }; },
 };
 
 /** What a voice call's tools reach (service/voice-tools.ts): what the web app shows and does. */
 const voiceIO: VoiceIO = {
-  snap: () => compat.last,
+  snap: () => shown ?? compat.last,
   async chat(key) {
     const addr = compat.addrOf(key);
     if (!addr) return null;
@@ -525,9 +522,8 @@ const voiceIO: VoiceIO = {
       return out;
     } finally { f.stop(); }
   },
-  async send(key, text) { noteUsage("send", { from: "voice" }); await act(hub, { type: "send", chat: key, text, human: true }, compat); },
+  async send(key, text) { await act(hub, { type: "send", chat: key, text, human: true }, compat); },
   async action(body) {
-    noteUsage("act", { from: "voice", type: body?.type });
     const r = await doAction(body);
     const text = await r.text();
     if (!r.ok) throw new Error(text.trim() || "That didn't go through.");
@@ -555,7 +551,6 @@ const voiceIO: VoiceIO = {
     const path = String(a.path ?? "").replace(/^\/+/, "");
     if (/(^|\/)(\.env[^/]*|\.netrc|\.npmrc|\.pypirc|id_[a-z0-9]+|[^/]*\.(pem|key|p12|pfx)|credentials[^/]*|secrets?[^/]*)$/i.test(path)) throw new Error("That file may hold secrets: I don't read it out.");
     switch (source) {
-      case "insights": return insightsSummary(logLines(), insightsOn());
       case "evidence": return action({ type: "evidence", task: a.task });
       case "changes": return worktree(hub, tree(), "diff");
       case "patch": return worktree(hub, tree(), "patch", path);
@@ -689,12 +684,6 @@ async function doAction(body: any): Promise<Response> {
     if (moving && !moving.error) return json({ ok: false, error: `Already moving it to ${moving.to}.` });
     void serveFrom(row.here ? null : row.name).catch(() => {});
     return json({ ok: true });
-  }
-  // Usage insights (service/usage.ts): the web app's events, and their Delete (every machine's log)
-  if (body?.type === "usage") return json({ ok: true, on: record(Array.isArray(body.events) ? body.events : []) });
-  if (body?.type === "setting" && body.key === "insights.delete") {
-    const missed = await deleteAll(model.machineNames(), async (args) => (await hcRun(args)).code === 0);
-    return json(missed.length ? { ok: false, error: SC.INSIGHTS.missed(missed.join(", ")) } : { ok: true });
   }
   if (body?.type === "setting" && typeof body.key === "string") {
     try {
@@ -1013,7 +1002,6 @@ const server = Bun.serve<{ who: string }>({
         if (!d.bridge?.attach(page, d.from ?? null)) { d.bridge = null; ws.send(JSON.stringify({ type: "ended", why: "the connection was lost" })); ws.close(); }
         return;
       }
-      if (d.voice) noteUsage("feature", { from: "web", type: "voice-call" });
       if (d.voice) d.bridge = voiceCall(hub, { io: voiceIO, hear: hearIO, where: { client: "web", call: d.voice.key, machine: me?.host ?? null },
         who: String(d.who ?? ""), from: d.from ?? null }, page);
       else if (d.term) d.bridge = terminalBridge(hub, d.term, page, !!d.own);
