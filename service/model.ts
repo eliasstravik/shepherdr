@@ -12,6 +12,7 @@ import { READ_LISTS, taskLists } from "../core/tasklists.js";
 import { carryOver, IMPORTED } from "./carry-over.ts";
 import { HOME } from "./paths.ts";
 import * as T from "../core/tasks.js";
+import { FIND } from "../core/chat-log.js";
 import { isHelper, subagentsOf } from "../core/chat-view.js";
 // The core is plain JavaScript; its defaults read as narrow types to TypeScript.
 const { place, refOf, taskKey, autoPrefix, reportOf, secondLine, leftOf, queueReason, machineOf } = T as any;
@@ -137,6 +138,41 @@ export class Model {
     finally { client.close(); }
   }
 
+  legacyHistory: ((machine: string | null) => Promise<Record<string, { path: string; kind: string }>>) | null = null;
+  private async oldHistory(machine: string | null) {
+    if (this.legacyHistory) return this.legacyHistory(machine);
+    const session = process.env.SHEPHERDR_FROM_SESSION || "default";
+    const state = process.env.XDG_STATE_HOME || join(HOME, ".local", "state");
+    if (!existsSync(join(state, "herdr-core", session, "core.json"))) return {};
+    const client = await CoreClient.endpoint({ binary: process.env.SHEPHERDR_HC || "hc", ...(session !== "default" ? { session } : {}) });
+    try {
+      const { terminals } = await client.call<{ terminals: any[] }>("terminal.list", {}, 8000);
+      const found: Record<string, { path: string; kind: string }> = {};
+      for (const t of terminals) {
+        const labels = t.labels ?? {}, address = String(t.address ?? "");
+        const on = address.includes("/") ? address.split("/")[0] : null;
+        if (on !== machine || labels["herdr.role"] !== "coordinator" || !labels["herdr.coordinator.space"]) continue;
+        let resume: any = {};
+        try { resume = JSON.parse(labels["herdr.resume"] || "{}"); } catch {}
+        let path = resume.log, kind = resume.kind;
+        if (!path && t.state === "live") {
+          const detail: any = await client.call("terminal.get", { terminal: address }, 8000);
+          const fg = detail.foreground ?? detail.terminal?.foreground;
+          const name = String(fg?.name ?? "").replace("-code", "");
+          if ((name === "claude" || name === "codex") && fg?.pid) {
+            kind = name;
+            path = (await sh(this.hub, FIND, ["chat", kind, String(fg.pid)], machine)).stdout.trim().split("\n").pop();
+          }
+        }
+        if (typeof path === "string" && path.startsWith("/") && (kind === "claude" || kind === "codex")) {
+          const space = String(labels["herdr.coordinator.space"]);
+          found[machine ? `${machine}/${space}` : space] = { path, kind };
+        }
+      }
+      return found;
+    } finally { client.close(); }
+  }
+
   private carrying = false;
   /** The Herdr window's spaces, carried over once per machine (service/carry-over.ts): each machine not in the marker
    *  yet has its "herdr-app" document read (this computer's, and every connected machine's: one that is offline now is
@@ -161,16 +197,19 @@ export class Model {
     this.carrying = true;
     try {
       const docs = new Map<string | null, any>();
+      const history: Record<string, { path: string; kind: string }> = {};
       await Promise.all(todo.map(async (m) => {
         try {
           const current = (await this.hub.call<{ value: any }>("doc.get", { name: "herdr-app", ...(m ? { on: m } : {}) }, 8000)).value ?? null;
           // A missing copy does not mean the old session had no spaces. Read it before marking this machine done.
           const old = current == null || Object.keys(current).length === 0 ? await this.oldSpaces(m) : current;
+          const prior = await this.oldHistory(m);
+          Object.assign(history, prior);
           docs.set(m, old ?? {});
         } catch { /* unavailable or uncertain: retry without marking it imported */ }
       }));
       // against the document as it is when written (a space made meanwhile stays)
-      if (docs.size) await this.own.update((v) => { const r = carryOver(v.spaces, v[IMPORTED], docs); return r ? { ...v, spaces: r.spaces, [IMPORTED]: r.imported } : v; });
+      if (docs.size) await this.own.update((v) => { const r = carryOver(v.spaces, v[IMPORTED], docs); return r ? { ...v, spaces: r.spaces, [IMPORTED]: r.imported, "chat.history": { ...history, ...(v["chat.history"] ?? {}) } } : v; });
     } catch {} finally { this.carrying = false; }
   }
 

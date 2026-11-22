@@ -124,6 +124,7 @@ test("the model carries the window's spaces over once per machine, then never re
   };
   const put: Record<string, any> = {};
   const m = new Model(hub, { put: (k: string, v: any) => { put[k] = v; } } as any);
+  m.legacyHistory = async () => ({});
   const doc: Record<string, any> = { "spaces-chat": { sections: [{ id: "g1", name: "Work", spaces: ["sp1"] }] } };
   let ready = false;
   m.doc = () => doc;
@@ -164,10 +165,12 @@ test("a missing copied document waits for the old session and imports it on retr
   m.own = { ready: () => true, update: async (change) => Object.assign(doc, change(doc)) };
   let available = false;
   m.legacySpaces = async () => { if (!available) throw new Error("unavailable"); return { spaces: [{ id: "sp1", name: "Old", folder: "/old" }] }; };
+  m.legacyHistory = async () => ({ sp1: { path: "/old/session.jsonl", kind: "claude" } });
   await m.refresh();
   expect(doc[IMPORTED]).toBeUndefined();
   available = true;
   await m.refresh();
   expect(doc.spaces).toMatchObject([{ id: "sp1", name: "Old", folder: "/old" }]);
   expect(doc[IMPORTED]).toEqual([""]);
+  expect(doc["chat.history"].sp1).toEqual({ path: "/old/session.jsonl", kind: "claude" });
 });

@@ -286,6 +286,15 @@ export class Compat {
     this.sends.set(addr, [...(this.sends.get(addr) ?? []).filter((x) => x.cid !== s.cid && Date.now() - x.at < 30 * 60_000), s].slice(-20));
   }
 
+  historyOf(key: string): string | null {
+    if (!key.startsWith("p:")) return null;
+    const space = key.slice(2).replace(":", "/");
+    const h = this.shared?.value("chat.history")?.[space];
+    if (!h || typeof h.path !== "string" || !h.path.startsWith("/") || !["claude", "codex"].includes(h.kind)) return null;
+    const machine = space.includes("/") ? space.split("/")[0] : "";
+    return `log:${machine}|${h.kind}|${h.path}`;
+  }
+
   addrOf(key: string) { return this.chats.get(key) ?? null; }
 
   snapshot(input: { host: string; user: string; machines: { name: string; here: boolean; state: string }[]; spaces: Space[]; sections: any[]; rows: Row[]; artifacts?: any[]; settings?: SettingSection[]; offPlugins?: string[]; automations?: any[] }): Snapshot {
