@@ -43,7 +43,9 @@ function action(a: Record<string, any>): unknown {
     const clean = (v: string) => { const t = v.trim().replace(/[\s,.;]+$/, ''); return t ? t[0]!.toUpperCase() + t.slice(1) : '' }
     const repeating = /\bevery\s+(.+?)[.!]?$/i.exec(text)
     const day = /\b(tomorrow|tonight|next week|(?:on\s+)?(?:mon|tues|wednes|thurs|fri|satur|sun)day)\b/i.exec(text)
-    if (/\bremind me\b/i.test(text) || repeating || day) {
+    if (/^File this feedback as an issue on the Shepherdr GitHub repository:/i.test(text)) {
+      setTimeout(() => say(a.chat, { text: "Filed as issue #1262 on Shepherdr's GitHub repository." }), 500)
+    } else if (/\bremind me\b/i.test(text) || repeating || day) {
       const raw = text.replace(/^(please\s+)?remind me\s+(to\s+)?/i, '').replace(/[\s,]*\bevery\s+.+$/i, '').replace(/[\s,]*\b(?:tomorrow|tonight|next week|(?:on\s+)?(?:mon|tues|wednes|thurs|fri|satur|sun)day)\b.*$/i, '')
       const title = clean(raw) || 'Reminder', id = `EV-S${++n}`
       const when = repeating ? `Every ${repeating[1]}` : `Once · ${clean((day?.[1] ?? 'tomorrow').replace(/^on\s+/i, ''))} 9:00`
