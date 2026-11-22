@@ -1251,6 +1251,19 @@ class RemoteSwitchGuard(unittest.TestCase):
             result = mod.remote_working_tasks("/fake/home", run=fake)
         self.assertEqual(result, ["mac: SHOP-3 Fix cart", "laptop: cannot check its tasks"])
         self.assertEqual(calls[1][:4], ["hc", "exec", "--on", "mac"])
+        self.assertNotIsInstance(result[0], mod.UncheckedMachine)
+        self.assertIsInstance(result[1], mod.UncheckedMachine)
+        self.assertNotIsInstance("SHOP-3 cannot check its tasks", mod.UncheckedMachine)
+
+    def test_warning_distinguishes_task_titles_and_unchecked_machines(self):
+        mod = installer()
+        text = mod.switch_blocked_message("3.1", ["SHOP-3 cannot check its tasks", mod.UncheckedMachine("vm: cannot check its tasks")])
+        self.assertIn("1 task is still working", text)
+        self.assertIn("Couldn't check these machines", text)
+        self.assertIn("SHOP-3 cannot check its tasks", text)
+        only = mod.switch_blocked_message("3.1", [mod.UncheckedMachine("vm: cannot check its tasks")])
+        self.assertIn("Couldn't check these machines", only)
+        self.assertNotIn("task is still working", only)
 
     def test_machine_list_failure_does_not_allow_switch(self):
         from unittest import mock
@@ -1258,3 +1271,4 @@ class RemoteSwitchGuard(unittest.TestCase):
         with mock.patch.object(mod, "real_home", return_value="/fake/home"):
             result = mod.remote_working_tasks("/fake/home", run=lambda *a, **kw: subprocess.CompletedProcess(a, 1, "", "offline"))
         self.assertEqual(result, ["linked machines: cannot check their tasks"])
+        self.assertIsInstance(result[0], mod.UncheckedMachine)

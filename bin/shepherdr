@@ -1085,6 +1085,10 @@ for folder in (os.path.join(data, "tasks"), os.path.join(home, ".herdr/tasks")):
             raise SystemExit("Could not read a task list")
 print(json.dumps(out))'''
 
+class UncheckedMachine(str):
+    """A machine whose tasks could not be checked, distinct from a task title."""
+
+
 def remote_working_tasks(root, run=subprocess.run):
     """Check every machine in the old session before replacing its task engine."""
     if os.path.realpath(root) != os.path.realpath(real_home()):
@@ -1099,15 +1103,26 @@ def remote_working_tasks(root, run=subprocess.run):
             if m.get("temporary"): continue
             name = m.get("name")
             if not name or m.get("state") != "connected":
-                out.append("%s: cannot check its tasks" % (name or "a linked machine")); continue
+                out.append(UncheckedMachine("%s: cannot check its tasks" % (name or "a linked machine"))); continue
             r = run(["hc", "exec", "--on", name, "--timeout", "30", "python3", "-c", _REMOTE_WORKING], capture_output=True, text=True, env=env, timeout=40)
-            if r.returncode: out.append("%s: cannot check its tasks" % name); continue
+            if r.returncode: out.append(UncheckedMachine("%s: cannot check its tasks" % name)); continue
             tasks = json.loads(r.stdout)
             if not isinstance(tasks, list) or not all(isinstance(t, str) for t in tasks): raise ValueError("invalid task list")
             out.extend("%s: %s" % (name, t) for t in tasks)
         return out
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
-        return ["linked machines: cannot check their tasks"]
+        return [UncheckedMachine("linked machines: cannot check their tasks")]
+
+
+def switch_blocked_message(prev, working):
+    unchecked = [x for x in working if isinstance(x, UncheckedMachine)]
+    busy = [x for x in working if not isinstance(x, UncheckedMachine)]
+    parts = []
+    if busy:
+        parts.append(f"{len(busy)} task{'s are' if len(busy) != 1 else ' is'} still working on the old version:\n  " + "\n  ".join(busy[:40]))
+    if unchecked:
+        parts.append("Couldn't check these machines:\n  " + "\n  ".join(unchecked[:40]))
+    return f"Shepherdr {VERSION} replaces {prev} in one switch. " + "\n".join(parts) + "\nNothing was changed. Try again once the tasks have finished and the machines can be checked (--force switches now)."
 
 def carry_old(rec, old):
     """What of 3.1's record still stands after the switch: the files it put outside the Herdr app (Shepherdr's own
@@ -1295,15 +1310,7 @@ def cmd_install(a, update=False):
     switching = bool(prev) and version_tuple(prev)[:2] < (3, 2)
     working = (working_tasks(root) + remote_working_tasks(root)) if switching else []
     if working and not a.force and not a.dry_run:
-        unchecked = [x for x in working if x.endswith("cannot check its tasks") or x == "linked machines: cannot check their tasks"]
-        busy = [x for x in working if x not in unchecked]
-        parts = []
-        if busy:
-            parts.append(f"{len(busy)} task{'s are' if len(busy) != 1 else ' is'} still working on the old version:\n  " + "\n  ".join(busy[:40]))
-        if unchecked:
-            parts.append("Couldn't check these machines:\n  " + "\n  ".join(unchecked[:40]))
-        raise Stop(f"Shepherdr {VERSION} replaces {prev} in one switch. " + "\n".join(parts)
-                   + "\nNothing was changed. Try again once the tasks have finished and the machines can be checked (--force switches now).")
+        raise Stop(switch_blocked_message(prev, working))
     say(f"Shepherdr {VERSION} {'update' if update else 'install'} from {src}")
     say(f"  into {root}{' (dry run: nothing is written)' if a.dry_run else ''}")
     if working:
