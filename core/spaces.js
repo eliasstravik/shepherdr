@@ -29,7 +29,7 @@ export function assistantOf(space, ts) {
   const id = String(space.id).split("/").pop();
   const matches = ts.filter((k) => k.labels?.["herdr.role"] === "coordinator"
     && k.labels?.["herdr.coordinator.space"] === id && machineOf(k.address) === (space.machine ?? null));
-  return matches.find((k) => k.state === "live") ?? matches.at(-1) ?? null;
+  return matches.find((k) => k.state === "live") ?? matches.reduce((latest, k) => !latest || (Number(k.created_ms) || 0) >= (Number(latest.created_ms) || 0) ? k : latest, null);
 }
 
 // The turn last read. Before any mark: the turn the window last saw it done at (its "chat.seen").

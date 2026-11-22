@@ -13,6 +13,12 @@ const socks = new Set<Sock>()
 const state = { normal: snapshot('normal'), empty: snapshot('empty'), down: snapshot('down') }
 const chats: Record<string, Chat> = structuredClone(seed)
 let n = 1000
+function resetDemo() {
+  for (const mode of ['normal', 'empty', 'down'] as const) state[mode] = snapshot(mode)
+  for (const key of Object.keys(chats)) delete chats[key]
+  Object.assign(chats, structuredClone(seed))
+  n = 1000
+}
 
 const push = () => socks.forEach((s) => s.send(JSON.stringify({ type: 'snapshot', snapshot: state[s.data.mode] })))
 const pushChat = (key: string) => socks.forEach((s) => s.data.watch.includes(key) && s.send(JSON.stringify({ type: 'chat', chat: chatFor(s, key) })))
@@ -30,18 +36,28 @@ function action(a: Record<string, any>): unknown {
   if (a.type === 'catalog') return { ok: true, catalog: catalog(a.machine) }
   if (a.type === 'send') {
     say(a.chat, { who: 'you', text: a.text, cid: a.cid })
-    const text = String(a.text ?? '')
-    const place = state.normal.places.some((p) => p.chat === a.chat) ? state.normal.places.find((p) => p.chat === a.chat)!.id : EV
-    if (/add a task to /i.test(text)) {
-      const title = text.replace(/^.*?add a task to /i, '').replace(/,?\s*(?:and )?don['’]?t start it yet.*$/i, '').trim() || 'New task'
-      const later = /don['’]?t start|not yet/i.test(text), id = `DEMO-${++n}`
-      each((snap) => { snap.tasks = [...snap.tasks, { id, name: title, place, status: later ? 'todo' : 'work', state: later ? 'todo' : 'work', on: snap.places.find((p) => p.id === place)?.machine ?? snap.host, created: '', age: '', ...(later ? {} : { started: Date.now(), report: { msg: 'Just started' }, agent: { chat: `${id}/worker`, role: 'worker', cli: 'claude', status: 'work', running: true, age: '', note: '' } }) }] })
-      setTimeout(() => say(a.chat, { text: later ? `Added ${title} to Up next.` : `Started ${title}.` }), 500)
-    } else if (/remind me /i.test(text)) {
-      const id = `DEMO-S${++n}`, title = text.replace(/^.*?remind me to /i, '').replace(/\s+(?:on|every)\s+.*$/i, '').trim() || 'Reminder'
-      const when = /every\s+(.+)$/i.exec(text)?.[1] ?? /on\s+(.+)$/i.exec(text)?.[1] ?? 'Once'
-      each((snap) => { (snap.automations[place] ??= []).push({ id, name: title, place, when, what: text, on: true, next: [] }) })
-      setTimeout(() => say(a.chat, { text: `I'll remind you ${when}.` }), 500)
+    const text = String(a.text ?? '').trim()
+    const from = state.normal.places.find((p) => p.chat === a.chat)?.id ?? EV
+    const place = from === EV ? state.normal.places.find((p) => p.name === 'shop')?.id ?? EV : from
+    const sp = state.normal.places.find((p) => p.id === place)
+    const clean = (v: string) => { const t = v.trim().replace(/[\s,.;]+$/, ''); return t ? t[0]!.toUpperCase() + t.slice(1) : '' }
+    const repeating = /\bevery\s+(.+?)[.!]?$/i.exec(text)
+    const day = /\b(tomorrow|tonight|next week|(?:on\s+)?(?:mon|tues|wednes|thurs|fri|satur|sun)day)\b/i.exec(text)
+    if (/\bremind me\b/i.test(text) || repeating || day) {
+      const raw = text.replace(/^(please\s+)?remind me\s+(to\s+)?/i, '').replace(/[\s,]*\bevery\s+.+$/i, '').replace(/[\s,]*\b(?:tomorrow|tonight|next week|(?:on\s+)?(?:mon|tues|wednes|thurs|fri|satur|sun)day)\b.*$/i, '')
+      const title = clean(raw) || 'Reminder', id = `EV-S${++n}`
+      const when = repeating ? `Every ${repeating[1]}` : `Once · ${clean((day?.[1] ?? 'tomorrow').replace(/^on\s+/i, ''))} 9:00`
+      each((snap) => { (snap.automations[from] ??= []).push({ id, name: title, place: from, when, what: text, on: true, next: [], once: !repeating }) })
+      const spoken = when.replace('Once · ', 'once, ').replace(/^Every/, 'every')
+      setTimeout(() => say(a.chat, { text: `Scheduled “${title}”: ${spoken}. It is in Tasks under Scheduled${repeating ? '.' : ' and leaves the list after it runs.'}` }), 500)
+    } else if (/\b(add|make|build|fix|create|change|update|write|research|check)\b/i.test(text) && !a.chat.endsWith('/worker')) {
+      const later = /\b(later|not yet|up next|don'?t start|do not start|without starting|not start)\b/i.test(text)
+      const raw = text.replace(/^(please\s+)?(?:add|make|create)\s+(?:a\s+)?(?:new\s+)?task\s+(?:to\s+|for\s+|that\s+)?/i, '').replace(/[\s,.;]*(?:(?:but|and)\s+)?(?:don'?t|do not|without)\s+start(?:ing)?\b.*$/i, '').replace(/[\s,.;]*(?:for\s+|until\s+)?(?:later|up next)\b.*$/i, '')
+      const title = clean(raw).slice(0, 60) || 'New task', id = `${(sp?.name ?? 'SHOP').toUpperCase().slice(0, 6)}-${++n}`
+      each((snap) => { snap.tasks = [...snap.tasks, { id, name: title, place, status: later ? 'todo' : 'work', state: later ? 'todo' : 'work', on: sp?.machine ?? snap.host, created: '', age: '', ...(later ? {} : { started: Date.now(), report: { msg: 'Just started' }, agent: { chat: `${id}/worker`, role: 'worker', cli: 'claude', status: 'work', running: true, age: '', note: '' } }) }] })
+      say(`${id}/worker`, { text: later ? 'Added. Start it when you want.' : "Started. I'll tell you when it's ready for review." })
+      const where = from === EV ? ` in #${sp?.name ?? 'shop'}` : ''
+      setTimeout(() => say(a.chat, { text: later ? `Added ${id} to Up next${where}. It waits until you start it.` : `Added ${id}${from === EV ? ` to #${sp?.name ?? 'shop'}` : ''} and started it.` }), 500)
     } else setTimeout(() => say(a.chat, { text: a.chat.endsWith('/worker') ? "Thanks. I'll take that on board and carry on." : 'Got it. This demo only shows the screens: nothing is wired to a real agent.' }), 1200)
     return { ok: true, at: Date.now() }
   }
@@ -108,10 +124,10 @@ function action(a: Record<string, any>): unknown {
 }
 
 const PAGES: Record<string, string> = {
-  'a-mock': `<h2>Your basket</h2><div class="r"><span>Garden gloves</span><span><button id="m">−</button> <b id="q">1</b> <button id="p">+</button></span></div><div class="r"><span>Total</span><b id="t">€12</b></div><button class="pay" id="pay">Pay now</button><p>A real page the agent made. You can use it here.</p><script>let q=1,paid=false;const u=()=>{document.getElementById('q').textContent=q;document.getElementById('t').textContent='€'+12*q;document.getElementById('pay').textContent=paid?'Paid':'Pay now'};m.onclick=()=>{q=Math.max(1,q-1);paid=false;u()};p.onclick=()=>{q++;paid=false;u()};pay.onclick=()=>{paid=!paid;u()}</script>`,
+  'a-mock': `<h2>Your basket</h2><div class="r"><span>Garden gloves</span><span class="qty"><button id="m" aria-label="Fewer">−</button><b id="q">1</b><button id="p" aria-label="More">+</button></span></div><div class="r"><span>Total</span><b id="t">€12</b></div><button class="pay" id="pay">Pay now</button><p>A real page the agent made. You can use it here.</p><script>let q=1,paid=false;const u=()=>{document.getElementById('q').textContent=q;document.getElementById('t').textContent='€'+12*q;document.getElementById('pay').textContent=paid?'Paid':'Pay now'};m.onclick=()=>{q=Math.max(1,q-1);paid=false;u()};p.onclick=()=>{q++;paid=false;u()};pay.onclick=()=>{paid=!paid;u()}</script>`,
   'a-shop12': `<h2>Faster product search · Proof</h2><div class="bar" style="width:100%"></div><p>Before · 400 ms</p><div class="bar g" style="width:20%"></div><p>After · 80 ms</p><p>214 tests pass. 3 files changed.</p>`,
 }
-const page = (id: string) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{color-scheme:light dark}body{margin:0;padding:16px;font:16px/24px system-ui,sans-serif}h2{font-size:18px;margin:0 0 12px}.r{display:flex;justify-content:space-between;align-items:center;min-height:40px;border-top:1px solid #8883}.pay{margin-top:12px;height:40px;padding:0 12px;border:0;border-radius:8px;background:CanvasText;color:Canvas;font:inherit;font-weight:500}.l{height:8px;border-radius:4px;background:#8884;margin:12px 0}.bar{height:6px;border-radius:3px;background:#8886}.bar.g{background:#15803d}p{color:#737373;font-size:14px}</style>${PAGES[id] ?? `<h2>${artifacts.find((x) => x.id === id)?.title ?? id}</h2>${[92, 78, 85, 40, 88, 64].map((w) => `<div class="l" style="width:${w}%"></div>`).join('')}`}`
+const page = (id: string) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{color-scheme:light dark}body{margin:0;padding:16px;font:16px/24px system-ui,sans-serif}h2{font-size:18px;margin:0 0 12px}.r{display:flex;justify-content:space-between;align-items:center;min-height:40px;border-top:1px solid #8883}.qty{display:flex;align-items:center;gap:8px}.qty button{display:grid;place-items:center;width:32px;height:32px;border:0;border-radius:6px;background:color-mix(in srgb, CanvasText 5%, Canvas);color:CanvasText;font:inherit}.pay{margin-top:12px;height:40px;padding:0 12px;border:0;border-radius:8px;background:CanvasText;color:Canvas;font:inherit;font-weight:500}.l{height:8px;border-radius:4px;background:#8884;margin:12px 0}.bar{height:6px;border-radius:3px;background:#8886}.bar.g{background:#15803d}p{color:#737373;font-size:14px}</style>${PAGES[id] ?? `<h2>${artifacts.find((x) => x.id === id)?.title ?? id}</h2>${[92, 78, 85, 40, 88, 64].map((w) => `<div class="l" style="width:${w}%"></div>`).join('')}`}`
 
 /** a stand-in for the live picture of an agent's browser: one still frame */
 const shotFile = (key: string) => join(fileURLToPath(new URL('./shots/', import.meta.url)), key.includes('SHOP-17') ? 'login.jpg' : 'checkout.jpg')
@@ -145,6 +161,8 @@ Bun.serve<{ mode: 'normal' | 'empty' | 'down'; watch: string[] }, never>({
     if (m?.[2] === 'thumb') return new Response(thumb(decodeURIComponent(m[1]!), url.searchParams.has('dark')), { headers: { 'content-type': 'image/svg+xml' } })
     if (m) return new Response(page(decodeURIComponent(m[1]!)), { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "sandbox allow-scripts allow-forms" } })
     if (path.startsWith('/api/')) return new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } })
+    // The fictional day starts over when the demo is reloaded.
+    if (req.headers.get('sec-fetch-dest') === 'document' || (req.headers.get('accept') ?? '').includes('text/html')) { resetDemo(); push() }
     // under any path (tailscale serve --set-path /name): the file as asked, else without its first part
     for (const p of [url.pathname, url.pathname.replace(/^\/[\w-]+(?=\/)/, '')]) {
       const f = Bun.file(join(dist, p.endsWith('/') ? `${p}index.html` : p))

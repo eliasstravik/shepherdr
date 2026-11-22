@@ -88,4 +88,6 @@ test("an ended assistant stays visible until a new one starts", () => {
   const live = { ...old, address: "t2", state: "live" };
   expect(assistantOf(space, [old])).toEqual(old);
   expect(assistantOf(space, [old, live])).toEqual(live);
+  const newer = { ...old, address: "t3", created_ms: 200 };
+  expect(assistantOf(space, [newer, { ...old, created_ms: 100 }])).toEqual(newer);
 });

@@ -16,11 +16,11 @@ const P = { shop: 'p:mac-mini:shop', blog: 'p:mac-mini:blog', notes: 'p:mac-mini
 const task = (id: string, name: string, pl: string, status: Task['status'], x: Partial<Task> = {}): Task => ({ id, name, place: pl, status, state: status, on: pl === P.garden ? 'vm' : 'mac-mini', created: '', age: '', agent: { chat: `${id}/worker`, role: 'worker', cli: pl === P.garden ? 'codex' : 'claude', status: status === 'need' ? 'need' : 'work', running: true, age: '', note: '' }, ...x })
 
 export const tasks: Task[] = [
-  task('SHOP-12', 'Faster product search', P.shop, 'ready', { needsAt: today(7, 30) + 1000, repo: 'branch', branch: 'task/shop-12', pr: { number: 212, url: 'https://github.com/example/shop/pull/212' }, summary: 'Results show in about 80 ms, down from 400.', proof: 'a-shop12' }),
-  task('BLOG-10', 'Fix typo on the About page', P.blog, 'ready', { needsAt: today(7, 30) + 2000, repo: 'folder', summary: 'Fixed the typo and two more I found on the same page.' }),
-  task('NOTES-4', 'Compare supplier quotes', P.notes, 'ready', { needsAt: today(7, 30) + 3000, summary: 'Brightpack is cheapest at your volume. Norbox ships fastest.', proof: 'a-quotes' }),
+  task('SHOP-12', 'Faster product search', P.shop, 'ready', { needsAt: NOW - 8 * hour, repo: 'branch', branch: 'task/shop-12', pr: { number: 212, url: 'https://github.com/example/shop/pull/212' }, summary: 'Results show in about 80 ms, down from 400.', proof: 'a-shop12' }),
+  task('BLOG-10', 'Fix typo on the About page', P.blog, 'ready', { needsAt: NOW - hour, repo: 'folder', summary: 'Fixed the typo and two more I found on the same page.' }),
+  task('NOTES-4', 'Compare supplier quotes', P.notes, 'ready', { needsAt: NOW - 3 * hour, summary: 'Brightpack is cheapest at your volume. Norbox ships fastest.', proof: 'a-quotes' }),
   task('SHOP-14', 'Switch payment provider', P.shop, 'need', { needsAt: NOW - 2 * hour, blocked: 'question', repo: 'branch', report: { msg: 'Which provider, Stripe or Adyen?' } }),
-  task('vm:GARDEN-4', 'Photo upload', P.garden, 'need', { needsAt: NOW - 5 * min, blocked: 'permission', repo: 'branch', report: { msg: 'Wants to run a command' } }),
+  task('vm:GARDEN-4', 'Photo upload', P.garden, 'need', { agent: { chat: 'vm:GARDEN-4/worker', role: 'worker', cli: 'claude', status: 'need', running: true, age: '', note: '' }, needsAt: NOW - 5 * min, blocked: 'permission', repo: 'branch', report: { msg: 'Wants to run a command' } }),
   task('SHOP-17', "Download last month's invoices", P.shop, 'need', { needsAt: NOW - 4 * min, blocked: 'auth', report: { msg: 'Needs your hands: enter the sign-in code' } }),
   task('SHOP-15', 'Bigger checkout button on phones', P.shop, 'work', { started: NOW - 10 * min, repo: 'branch', pr: { number: 214, url: 'https://github.com/example/shop/pull/214' }, report: { msg: 'Changing the button', progress: 50 }, blocked: 'prompt' }),
   task('SHOP-16', 'Dependency check', P.shop, 'work', { started: NOW - 10 * min, schedule: 'Dependency check', report: { msg: 'Updating 3 packages', progress: 67 } }),
@@ -153,7 +153,7 @@ export const chats: Record<string, Chat> = Object.fromEntries(
     chat('SHOP-12/worker', [a('Search is done. I added an index and cached the top queries.', { suggest: 'Looks good. Mark it as done and merge' })], opus),
     chat('BLOG-10/worker', [a('Fixed it straight in the blog folder, as this space is set up.')], opus),
     chat('NOTES-4/worker', [a('I read the three quotes in your notes folder and wrote up a comparison.')], opus),
-    chat('vm:GARDEN-4/worker', permQ().map((x, i) => (i ? x : { ...x, suggest: 'Allow it once' })), gpt),
+    chat('vm:GARDEN-4/worker', permQ().map((x, i) => (i ? x : { ...x, suggest: 'Allow it once' })), opus),
     chat('SHOP-17/worker', [a("I'm downloading October's invoices. The billing portal sent a sign-in code to your phone, so I need you for this one step.")], opus),
     chat('SHOP-15/worker', [a('Started. Making the checkout button full width on phones.'), did(NOW - 8 * min, [['read', 'Read checkout.css', ''], ['edit', 'Edit checkout.css', '+6 −2'], ['run', 'Run bun test', 'passed'], ['edit', 'Edit checkout.test.ts', '+12']], 'Ran 4 commands · edited 2 files'), a('Changing the button now. About 10 minutes left.', { suggest: 'Show me a screenshot when it is done' })], opus, { working: true, doing: 'Changing the checkout button', live: { id: 'live', at: NOW, rows: [], steps: 0 } }),
     chat('SHOP-16/worker', [a('Updating three packages. None are breaking changes.')], opus, { working: true, live: { id: 'live', at: NOW, rows: [], steps: 0 }, doing: 'Updating 3 packages' }),

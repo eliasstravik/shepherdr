@@ -189,16 +189,12 @@ function DemoPicture({ k, drive, desktop, idle, onContinued }: { k: string; driv
   const [code, setCode] = useState('')
   const [continued, setContinued] = useState(false)
   const [paid, setPaid] = useState(false)
+  const phone = useUI((u) => u.phone)
   const login = k.includes('SHOP-17') && !desktop
-  return <div className="scr" style={{ position: 'relative', aspectRatio: '8 / 5', background: '#fff' }}>
-    {!idle && !desktop && <img src={shotUrl(k, 'b')} alt="Demo browser" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
-    {desktop && <div style={{ position: 'absolute', inset: 0, color: '#111', background: '#c8d4df', fontSize: 'clamp(10px, 1.5vw, 18px)' }}><div style={{ background: '#eee', padding: '1% 3%' }}>Simulator　 File　 Edit <span style={{ float: 'right' }}>9:41</span></div><div style={{ background: '#fff', margin: '8% auto', width: '60%', borderRadius: 8, overflow: 'hidden' }}><div style={{ background: '#eee', padding: '2% 4%' }}>● ● ●　 garden-app</div><div style={{ padding: '6%' }}><strong>Today</strong><p>Water the tomatoes <span style={{ float: 'right' }}>18:00</span></p><p>Feed the roses <span style={{ float: 'right' }}>19:30</span></p></div></div></div>}
-    {!login && !desktop && !idle && drive && <button type="button" onClick={() => setPaid(true)} style={{ position: 'absolute', left: '3.75%', top: '35%', width: '92.5%', height: '9%', background: '#141414', color: 'white', border: 0, borderRadius: 8, fontSize: 'clamp(12px, 2vw, 26px)' }}>{paid ? 'Paid' : 'Pay now'}</button>}
-    {login && drive && !continued && <>
-      <input aria-label="Sign-in code" inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} style={{ position: 'absolute', left: '31.25%', top: '43.75%', width: '37.5%', height: '9%', fontSize: 'clamp(12px, 2vw, 26px)', padding: '0 1.5%', background: 'white', color: '#111', border: '1px solid #ccc', borderRadius: 8 }} />
-      <button type="button" aria-label="Continue" onClick={() => { if (code) { setContinued(true); onContinued() } }} style={{ position: 'absolute', left: '31.25%', top: '55%', width: '37.5%', height: '9%', opacity: 0 }} />
-    </>}
-    {login && continued && <div style={{ position: 'absolute', inset: 0, color: '#111', background: '#fff', padding: '7% 12%', fontSize: 'clamp(12px, 2vw, 24px)' }}><strong>Invoices</strong>{[['October 2026', '€1,240.00'], ['September 2026', '€980.00'], ['August 2026', '€1,105.00']].map(([date, total]) => <div key={date} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #ddd', padding: '4% 0' }}><span>{date}</span><span>{total}</span></div>)}</div>}
+  const line: React.CSSProperties = { display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #e5e5e5', padding: '8px 0' }
+  const primary: React.CSSProperties = { width: '100%', height: 40, border: 0, borderRadius: 6, background: '#171717', color: '#fff', font: 'inherit', fontWeight: 500 }
+  return <div className="scr" style={{ position: 'relative', aspectRatio: phone ? '4 / 3' : '16 / 10', background: desktop ? '#52525b' : '#fff', color: '#171717', fontSize: phone ? 14 : 13, lineHeight: 1.4, overflow: 'hidden' }}>
+    {desktop ? <><div style={{ background: '#e5e5e5', padding: '4px 12px', fontSize: 11 }}>Simulator　 File　 Edit <span style={{ float: 'right' }}>9:41</span></div><div style={{ background: '#fff', margin: '8% auto', width: '62%', borderRadius: 8, overflow: 'hidden' }}><div style={{ background: '#f5f5f5', padding: '6px 10px' }}>● ● ●　 garden-app</div><div style={{ padding: '12px 16px' }}><strong>Today</strong><div style={line}><span>Water the tomatoes</span><span>18:00</span></div><div style={line}><span>Feed the roses</span><span>19:30</span></div></div></div></> : !idle && login && !continued ? <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', width: 'min(80%, 280px)', display: 'grid', gap: 10 }}><strong style={{ fontSize: '1.25em' }}>Check your phone</strong><span style={{ color: '#525252' }}>Enter the 6-digit code we sent you.</span><input aria-label="Sign-in code" inputMode="numeric" placeholder="000000" disabled={!drive} value={code} onChange={(e) => setCode(e.target.value)} style={{ height: 40, padding: '0 10px', border: '1px solid #d4d4d4', borderRadius: 6, background: '#fff', color: '#171717', font: 'inherit' }} /><button type="button" disabled={!drive} onClick={() => { setContinued(true); onContinued() }} style={primary}>Continue</button></div> : !idle ? <div style={{ padding: '20px' }}><strong style={{ fontSize: '1.25em' }}>{continued ? 'Invoices' : 'Your basket'}</strong>{(continued ? [['October 2026', '€1,240.00'], ['September 2026', '€980.00'], ['August 2026', '€1,105.00']] : [['Garden gloves', '€12.00'], ['Total', '€12.00']]).map(([label, value]) => <div key={label} style={line}><span>{label}</span><span>{value}</span></div>)}{!continued && <button type="button" disabled={!drive} onClick={() => setPaid(true)} style={primary}>{paid ? 'Paid' : 'Pay now'}</button>}</div> : null}
     {!drive && <button type="button" className="veil" aria-label="Live view. Take over to click and type" onClick={() => notice('Take over to click and type')} />}
   </div>
 }
@@ -383,9 +379,10 @@ function Thumb({ k, src }: { k: string; src: 'b' | 'd' }) {
     const t = setInterval(() => document.visibilityState === 'visible' && setN((x) => x + 1), 5000)
     return () => clearInterval(t)
   }, [])
+  const demo = useSnap()?.demo
   return (
     <button type="button" className="thumb" aria-label="Open the live view" onClick={() => openScreen(k)}>
-      <img src={`${shotUrl(k, src)}&n=${n}`} alt="" />
+      {demo ? <div style={{ aspectRatio: '2 / 1', background: '#fff', color: '#171717', textAlign: 'left', padding: '10px 14px', fontSize: 9, overflow: 'hidden' }}>{k.includes('SHOP-17') ? <div style={{ width: '80%', maxWidth: 180, margin: 'auto', display: 'grid', gap: 4 }}><strong>Check your phone</strong><span>Enter the 6-digit code we sent you.</span><span style={{ border: '1px solid #ddd', padding: 4 }}>000000</span><span style={{ background: '#171717', color: '#fff', padding: 4, textAlign: 'center' }}>Continue</span></div> : <><strong>Your basket</strong><div style={{ borderTop: '1px solid #ddd', marginTop: 4 }}>Garden gloves <span style={{ float: 'right' }}>€12.00</span></div><div style={{ borderTop: '1px solid #ddd' }}>Total <span style={{ float: 'right' }}>€12.00</span></div><div style={{ background: '#171717', color: '#fff', textAlign: 'center', padding: 3 }}>Pay now</div></>}</div> : <img src={`${shotUrl(k, src)}&n=${n}`} alt="" />}
     </button>
   )
 }

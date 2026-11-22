@@ -690,15 +690,16 @@ async function doAction(body: any): Promise<Response> {
     if (sp && body.on !== false) {
       const bare = String(sp.id).split("/").pop();
       // a task that would not stop, or schedules that would not pause: said plainly, and the space stays as it is
-      const failed: string[] = [];
+      const failed: string[] = [], stopped: string[] = [];
       for (const r of (model.rows as any[]).filter((x) => x.section === "working" && (x.space ? x.space === sp.id : (x.machine ?? null) === (sp.machine ?? null) && x.folder === sp.folder))) {
         const out: any = await act(hub, { type: "stop", chat: `${r.machine ? `${r.machine}:${r.ref}` : r.ref}/worker` }, compat).catch((e) => ({ ok: false, error: (e as Error).message }));
-        if (out?.ok === false) failed.push(r.title);
+        if (out?.ok === false) failed.push(r.title); else stopped.push(r.title);
       }
-      if (failed.length) return json({ ok: false, error: `Couldn't stop ${failed.map((t) => `“${t}”`).join(", ")}. Nothing was ${body.type === "space-remove" ? "removed" : "archived"}: stop ${failed.length === 1 ? "it" : "them"} first, or try again.` });
+      const stoppedWords = stopped.length ? ` ${stopped.map((t) => `“${t}”`).join(", ")} ${stopped.length === 1 ? "was" : "were"} stopped.` : "";
+      if (failed.length) return json({ ok: false, error: `Couldn't stop ${failed.map((t) => `“${t}”`).join(", ")}. Nothing was ${body.type === "space-remove" ? "removed" : "archived"}.${stoppedWords} Try again.` });
       // an archived or removed space's schedules stop
       const paused = await Bun.spawn(["herdr-task", ...(sp.machine ? ["--on", sp.machine] : []), "auto", "pause", "--space", bare, "--all", "--folder", sp.folder, "--json"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" }).exited.catch(() => 1);
-      if (paused !== 0) return json({ ok: false, error: `Couldn't stop its schedules. Nothing was ${body.type === "space-remove" ? "removed" : "archived"}: try again.` });
+      if (paused !== 0) return json({ ok: false, error: `Couldn't stop its schedules. Nothing was ${body.type === "space-remove" ? "removed" : "archived"}.${stoppedWords} Try again.` });
     } else if (sp && body.type === "space-archive") {
       await Bun.spawn(["herdr-task", ...(sp.machine ? ["--on", sp.machine] : []), "auto", "resume", "--space", String(sp.id).split("/").pop()!, "--all", "--folder", sp.folder, "--json"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" }).exited.catch(() => null);
     }
