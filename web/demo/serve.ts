@@ -25,7 +25,7 @@ const pushChat = (key: string) => socks.forEach((s) => s.data.watch.includes(key
 const chatFor = (s: Sock, key: string): Chat => {
   if (s.data.mode === 'empty') return { key, messages: chats[key]?.messages.filter((m) => m.id.startsWith('n')) ?? [], cli: 'claude', top: true, agent: chats[key]?.agent ?? chats[EV]!.agent }
   const chat = chats[key] ?? { key, messages: [], cli: 'claude' as const, top: true, agent: chats[EV]!.agent }
-  return s.data.mode === 'down' && key === EV ? { ...chat, messages: chat.messages.map(({ suggest, ...m }) => m) } : chat
+  return s.data.mode === 'down' ? { ...chat, messages: chat.messages.map(({ suggest, ...m }) => m) } : chat
 }
 const each = (f: (snap: Snapshot) => void) => { for (const s of Object.values(state)) f(s); push() }
 const taskOf = (id: string) => state.normal.tasks.find((t) => t.id === id || `${t.id}/worker` === id)
