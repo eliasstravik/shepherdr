@@ -17,18 +17,13 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   refusal: `sudo sysctl user.max_user_namespaces=0`, then restore the old value.
 - Read-only sandbox check: `chmod 555` a scratch dir, run herdr-task with `HERDR_TASK_STORE=<dir>`; a read must not
   need the lock file to be writable.
-- Never run herdr-app or herdr-task with a changed `HOME` or `HERDR_APP_HOME`, never start a second herdr-app window,
-  and never install into the real `~/.config/herdr-app` for a try: use `./install.sh --root <scratch>`. A window or
-  scheduler on another home can overwrite every machine's spaces.
-- `herdr-app check <mod folder>` runs a mod's `init()` for real: never for `shepherdr-settings` (its init pushes
-  settings to other machines).
-- Window-mod methods (e.g. chat's `refocus()`) can be tested by extracting the method text from `mods/chat/main.js`
-  and running it in node with stubs (see `test/test_chat_refocus.py`).
-- Mark up (`mods/artifacts/markup.js`) imports must be listed in `MARKUP_HELPERS` in `mods/artifacts/bin/herdr-artifact`
-  so each published artifact carries them; `test_every_installed_import_resolves` checks the imports.
-- Header layout checks: the web app keeps its pinned-lists and sidebar state across page loads, so a stub page can
-  start with leftovers; set localStorage then reload, or use a new port. Never `pkill -f` a stub: it matches your own
-  shell.
+- Never run the service or herdr-task with a changed `HOME`, and never install into the real home for a try: use
+  `./install.sh --root <scratch>`. A scheduler on another home can overwrite every machine's spaces.
+- The one Herdr mod (`herdr/open-shepherdr`) is only parsed here (`node --input-type=module --check`): `herdr-app
+  check` needs the Herdr app's runtime.
+- Layout checks: the app keeps `shepherdr.ui`, `shepherdr.at` and `shepherdr.drafts` in localStorage across page
+  loads, so a page can start with leftovers; set localStorage then reload, or use a new port. Never `pkill -f` a
+  server by its path: it matches your own shell.
 - GitHub runs the whole check on every pull request to main and after each merge: the Check workflow
   (`.github/workflows/check.yml`). Merging waits for it. A failure's log is `gh run view <run> --log-failed`.
 - Still write tests with your change: the installer's in `test/test_install.py`, the repo's rules in
@@ -51,17 +46,18 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   `tailscale serve --set-path`, proxying `/api` (changeOrigin, origin header) to the serving machine's `/shepherdr`
   (`shepherdr web status` says which). Put the Mac mini back on the release the same way from
   `~/.local/share/shepherdr`.
-- A test space's Assistant without the window: `hc run` it with the chat slot labels from the newest
-  `data/backups/*/sidebar.json` (`coordinator.slots`), as `service/actions.ts` does; answer the folder-trust prompt
-  with `hc keys <t> down enter`.
-- No Shepherdr service runs on the dev VM: to screenshot a web dialog, serve `web/dist` with a tiny Bun stub answering
-  only the APIs it needs, never the full service: upgrade `/api/ws` and send
-  `{type:'snapshot',snapshot:{places,machines,tasks,...}}`; 404 other `/api`. A later pushed `chat` event (setTimeout) makes
-  replies arrive while scrolled up (the Latest pill's count). Run the stub in the background, or it dies with the shell call. Each
-  place in the snapshot needs a `chat` field (else a blank crash); open a viewer with `?artifact=<id>`, a task with
-  `?task=<id>`. Answer the client's `watch` message with `{type:'chat',chat}` per key; `sections: []` lists places
-  under their machine in the sidebar. A stub chat message can carry any Message field (brief, activity, news) to
-  screenshot quiet rows without a real log.
+- The demo: `bun run build`, then `bun web/demo/serve.ts [port]` serves `web/dist` with a fictional day instead of
+  the service, on 127.0.0.1 (7799 unless named). `?case=empty` and `?case=down` show "nothing yet" and a machine
+  that can't be reached. Open an artifact with `?artifact=<id>`, a task with `?task=<id>`. Run it in the background,
+  or it dies with the shell call. Its data is `web/demo/data.ts`: add a row there to screenshot a new state.
+- A throwaway real service, with the real HOME: env `SHEPHERDR_SESSION=<throwaway> HC_SESSION=<same> SHEPHERDR_PORT=<port>
+  SHEPHERDR_WEB=off SHEPHERDR_DATA=<scratch> HERDR_TASK_STORE=<scratch> HERDR_TASK_SETTINGS=<scratch file>
+  SHEPHERDR_NO_MIGRATE=1 bun service/main.ts`, with wrapper scripts for herdr-task and herdr-artifact first on PATH
+  (they run this checkout's copies with the same env). Then `bun web/demo/live.ts <port> <SHEPHERDR_DATA>/token <port2>`
+  puts a page in front of it on 127.0.0.1:<port2>. To stop it, never `lsof -t -i:<port>` without `-sTCP:LISTEN`: it
+  also kills the go-between.
+- A scratch repo for such a run needs a unique folder name: its task worktrees go under the real
+  `~/.local/share/shepherdr/worktrees/<name>`. Remove that folder after.
 - Two throwaway cores on one VM: `herdr-task --on <it>` installs its bundle into the real `~/.local/bin/herdr-task` unless
   `$HERDR_TASK_STORE/.remote/<machine>` already says `source`; write that first.
 - A cross-machine send without ssh: two throwaway cores (`HC_SESSION=a`/`b`, clean `env -i`) and
@@ -83,38 +79,25 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   with `mock.patch.object(..., create=True)` so the same test runs on both.
 - Tests that run accept or merge with the real `finish()` must stub `github.live_agents` and `live_helpers` (hc is
   refused under test).
-- Bun.spawn ignores a PATH changed inside a test: point the service at fakes with `SHEPHERDR_HERDR_APP` / `SHEPHERDR_HC`.
+- Bun.spawn ignores a PATH changed inside a test: point the service at fakes with `SHEPHERDR_HC` /
+  `SHEPHERDR_HERDR_ARTIFACT`.
 - `bun test` from service/ alone skips bunfig's preload (2 false failures): run `bun test service core web` from the repo root.
-- Window-mod methods that need `cx.spawn`'s result in a bun test: give the stub cx a spawn that keeps the promise (see the
-  #1010 tests in service/spaces-sidebar.test.ts). ShepherdrSettings menus go through `mods/shepherdr-settings/over.js`.
-- Window-mod render tests: `bun test` in service/ with `mock.module` for gpui-kit/gpui-base and herdr via
-  service/fake-herdr.ts (bun's mocks are per process, so every herdr stand-in needs every name); see
-  service/spaces-sidebar.test.ts.
-- No herdr-app window runs on the dev VM: window-mod UI can only be syntax-checked here, not screenshot. No ImageMagick
-  either: crop proof screenshots with python3 PIL. Stop a background stub with `kill $(lsof -t -i:<port>)`, never
-  `pkill -f` on its path (it matches the calling shell).
-- Autopilot wake replay: print `herdr_task.autopilot.message()` (patch `heartbeat_of`/`direction_of`), then
-  `claude -p --append-system-prompt templates/assistant.md` in a scratch repo with fake herdr-task/hc on PATH.
-- Web stub: a place's `chat` is its chat key string (the chat object goes only in the watch reply). Headless screenshots
-  never show native `title=` tooltips: check with `document.querySelectorAll('[title]')`.
-- `herdr-artifact preview` with a branch's viewer: copy mods/artifacts into a scratch folder with `web/dist/artifact-viewer.html`
-  beside it as viewer.html, and run that copy with `HOME=<scratch>` so it uses a throwaway store.
-- Viewer CSS: `web/src/styles.css` must list `./screens` (`@source`) or the artifact viewer build drops `Recipe.tsx`
-  classes such as `@lg:`.
-- Before/after web screenshots: build main's version of the changed files into a scratch dist (`git checkout main --
-  <files>`, `bun run build`, copy `web/dist`, `git checkout HEAD -- web`) and run one stub per dist on different ports.
+- No ImageMagick on the dev VM: crop proof screenshots with python3 PIL. Stop a background server with
+  `kill $(lsof -t -i:<port> -sTCP:LISTEN)`, never `pkill -f` on its path (it matches the calling shell).
+- The app has no hover tooltips (`test/test_repo.py` checks); headless screenshots never show native `title=` ones.
+- Before/after web screenshots: `git worktree add <scratch> <the other commit>`, build there too, and run one demo per
+  build on different ports.
 - Real Codex in a throwaway hc session: `env -i HOME PATH TERM HC_SESSION=x CODEX_HOME=<scratch with auth.json symlinked> hc run --bg ...`;
-  herdr-task's own code refuses hc under a changed HC_SESSION, so feed it saved `hc ls`/`hc get` JSON instead.
+  herdr-task refuses hc when HC_SESSION is neither unset, `default` nor its own session: give it
+  `SHEPHERDR_SESSION=x` too, or feed it saved `hc ls`/`hc get` JSON.
 - Crash recovery for real: a throwaway core, `HC_SESSION=<name> hc ...` with `HC_TERMINAL_SOCKET` and Claude's
   `CLAUDE_*` env unset (`CLAUDE_CODE_CHILD_SESSION` turns off transcripts).
-- Service code against a throwaway core (`HC_SESSION=x`): Hub ignores `HC_SESSION`, so pass `new Hub(<wrapper script
-  that exports HC_SESSION and execs hc>)` and set `SHEPHERDR_HC` to it; start that core from `env -i` or its agents
-  inherit `CLAUDE_CODE_CHILD_SESSION` (no transcripts).
-- A real `herdr-task switch` test without touching people's tasks: a fake hc on PATH exporting `HC_SESSION=<name>`,
+- Service code against a throwaway core: the service and herdr-task use the herdr-core session named by
+  `SHEPHERDR_SESSION` (default `shepherdr`; `service/session.ts`, `herdr_task/base.py`), so set it to the throwaway
+  name. Start that core from `env -i` or its agents inherit `CLAUDE_CODE_CHILD_SESSION` (no transcripts).
+- A real `herdr-task switch` test without touching people's tasks: `SHEPHERDR_SESSION=<name>`,
   `HERDR_TASK_STORE=<tmp>`, a scratch git repo with `add --here` and `start --space <any>`; answer the trust prompt with
   `hc keys <t> down enter`. Claude refuses a plain sleep, so give the brief a busy step.
-- Web stub: localStorage `shepherdr.lists` = `{pinned:true,chips:[],at:null}` opens `?task=<id>` in the middle column
-  (same width as the Assistant's) instead of the side.
 
 ## Other machines
 
@@ -125,12 +108,15 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Reach map tests: `test/test_reach.py` puts logging fake ssh/tailscale/hc on PATH and runs the real probe; reuse it for
   anything that might contact other hosts.
 
-## Add-ons
+## Plugins
 
-- `lib/addons.json` lists every mod by add-on; a new mod goes in one (the tests check). Shared modules have one
-  source in `lib/`: edit it, run `bin/sync-shared`. The add-ons' switches and how they work: [docs/addons.md](docs/addons.md).
-- Mod names, the layout's node ids and `keys.json` contexts are what people's state and keys hang on: change them
-  with care and say so in your done summary.
+- Every feature is a plugin: `web/plugins.json` lists them, each a `client.tsx` under `web/plugins/<name>/`, filling
+  the places in `web/src/kernel.ts` (`Registry`). How to add one, and the switches: [docs/plugins.md](docs/plugins.md).
+  `lib/addons.json` is only a marker 3.1's `shepherdr update` looks for.
+- `bin/sync-shared` now only writes layout.py's paths into the one-file helpers (herdr-secret, herdr-artifact): edit
+  `layout.py`, never a block.
+- Plugin ids (`plugins_off` in the settings file), the settings file's keys, the Herdr mod's name `open-shepherdr`
+  and its key are what people's state hangs on: change them with care and say so in your done summary.
 
 ## README
 
@@ -148,23 +134,21 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - From SHEP-240: a second visible browser page on the dev VM: run ~/.agent-browser/browsers/chrome-*/chrome --headless=new --remote-debugging-port=<p> <url> in the background and screenshot over CDP (Page.captureScreenshot); herdr-browser's --headers don't reach WebSockets.
 - From SHEP-258: Codex's model list comes from its own catalog: npm i --prefix <scratch> @openai/codex@<ver> and run its codex debug models to see a newer CLI's models and service_tiers without touching the installed one.
 - From SHEP-259: Python's zipimport reopens a zipapp by path on every import: test a swap by starting the zipapp, replacing its file, then importing (test/test_zipapp_swap.py).
-- From SHEP-263: a real service on a throwaway core: HOME=<scratch home> (with ~/.local/share/shepherdr/LAYOUT copied), SHEPHERDR_HC=<wrapper exporting HC_SESSION, exec hc> (the hub drops HC_SESSION: without it the service attaches to the REAL core), fake herdr-task/herdr-app/tailscale first on PATH.
+- From SHEP-263, changed by SHEP-292: a real service on a throwaway core keeps the real HOME and names its session with SHEPHERDR_SESSION (see Trying a change); without it the service attaches to Shepherdr's REAL session.
 
 - Run `bun install` in a fresh worktree before `bun test core/`: core tests that import marked fail without it. (from SHEP-268)
 
 - The dev VM's sh is busybox (/exe.dev/bin/sh): its lsof applet ignores a fake lsof on PATH, so test macOS lsof paths under bash. (from SHEP-267)
 
-- Accept card screenshots with real evidence: run herdr_task.proof.evidence on a scratch repo (mock artifacts_of), dump the JSON, and serve it from a stub's /api/action evidence reply. (from SHEP-273)
+- Review card screenshots with real evidence: run herdr_task.proof.evidence on a scratch repo (mock artifacts_of) and dump the JSON to see what the card gets. (from SHEP-273)
 
 - A real herdr-task CLI run with HERDR_TASK_STORE=<tmp>, a fake gh via HERDR_TASK_GH and a fake hc on PATH still makes worktrees under the real ~/.local/share/shepherdr/worktrees/<repo folder name>: give the scratch repo a unique name and rm that folder after. (from SHEP-271)
 
-- A real herdr-task start in worktree mode without touching people's tasks: env -i with HERDR_TASK_STORE, HERDR_TASK_SETTINGS (tasks.worktree_root to scratch), SHEPHERDR_NO_MIGRATE=1 and a fake hc exporting HC_SESSION; start --argv '["sh","-c","..."]' stands in for the agent. (from SHEP-272)
+- A real herdr-task start in worktree mode without touching people's tasks: env -i with HERDR_TASK_STORE, HERDR_TASK_SETTINGS (tasks.worktree_root to scratch), SHEPHERDR_NO_MIGRATE=1 and SHEPHERDR_SESSION=<throwaway> (or a fake hc); start --argv '["sh","-c","..."]' stands in for the agent. (from SHEP-272)
 
 - Fake a dropped herdr-core link: hc machine add --via <script> --session b on a throwaway core, make the script fail while a flag file exists, kill the core's `herdr-core connect` child; hc machine login only retries with a terminal (give it a pty). (from SHEP-276)
 
-- Web viewer before/after on the dev VM: `bunx vite build --config web/vite.viewer.config.ts` writes a single-file web/dist/artifact-viewer.html; serve it with a tiny Bun stub answering /api/artifacts/<id> and /recipe. (from SHEP-274)
-
-- herdr-task --detach/_job (window actions as local jobs): test with TMPDIR=<scratch> and HERDR_TASK_ACTION_WAIT to keep job files and waits throwaway (see DetachedActions). (from SHEP-277)
+- herdr-task --detach/_job (actions as local jobs): test with TMPDIR=<scratch> and HERDR_TASK_ACTION_WAIT to keep job files and waits throwaway (see DetachedActions). (from SHEP-277)
 
 - Real Codex versions for repros: `npm i --prefix <scratch> @openai/codex@<ver>`, then hc run it with env PATH=<scratch>/node_modules/.bin:<node dir>:$PATH (hc run children get a bare PATH and do not inherit the caller's). (from SHEP-278)
 
@@ -175,7 +159,3 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Codex sandbox repros without an agent: `codex sandbox -c sandbox_mode='"workspace-write"' [-c sandbox_workspace_write.writable_roots=[...]] -- <cmd>` runs a command in the same bwrap+seccomp a worker gets (unix socket connect is refused there). (from SHEP-285)
 
 - Never pkill -f a pattern that appears in your own command line (e.g. a unittest name): it kills your shell; use TaskStop or kill by pid. (from SHEP-288)
-
-- Window-mod methods that read terminals()/subagentsOf can be tested like chat's refocus(): extract the method from mods/chat/main.js and stub those two (see test/test_chat_jobs.py). (from SHEP-284)
-
-- bin/sync-shared (no --check) can wrongly call a mods/*/core copy "edited by hand" in a worktree: when git diff main shows the copy untouched, cp core/<file> over the copies instead of using --from (that would undo your change). (from SHEP-287)

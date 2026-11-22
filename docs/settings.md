@@ -1,146 +1,62 @@
-# Settings: Everywhere and a space's own
+# Settings
 
-Every setting has a value for **Everywhere**, the default. A setting that makes sense per space can also be set for
-one **space**: the space's own wins there, and a setting the space doesn't set is inherited from Everywhere. Reset
-drops the space's own, and it inherits again. A few settings are one for every space, or one per machine.
+Settings is one window. Open it from the foot of the list. On a phone it is a list of sections that each push in.
 
-## Where you set them
+## The sections
 
-- **Settings, the level switch.** At the top of each page a space can set its own of (Agents, Tasks, Autopilot,
-  Notify, Secrets): *Applies to: Everywhere ⌄*. The picker lists Everywhere, then every space by machine (a Find box
-  once there are many). Pages that are one for every space (Machines, Window, Web) say so instead.
-- **A space's menu › Space settings…** opens Settings on that space, in the window and on the web.
-- **Under each row, in a space:** *Inherited from Everywhere*, or *Set for this space · Reset*. On Everywhere, a row
-  that some spaces set their own of says *2 spaces set their own*, which lists them (each opens that space's).
-- **The header's Autopilot switch** turns Autopilot on or off in its space; *Write a heartbeat* opens that space's
-  Autopilot page.
+| Section | What is in it |
+|---|---|
+| General | Theme, Chat width, Motion, and "Alerts on this device": Needs me, Everything or Off. Kept in that browser |
+| Agents | What Chats, Tasks and Reviews run on. Each row opens the picker: Agent, Model, Permissions, Effort, Speed |
+| Tasks | Review by a second agent, Merge ("When I mark it as done", "When checks pass", "Right away"), Proof |
+| Instructions | How every agent should work, in your own words |
+| Secrets | Add or replace a secret. Agents use it by name and never see it |
+| Machines | Each machine's agents, processor, memory and disk. Add a machine. Open desktop, where a machine has one |
+| Usage | How much of each plan your agents have used, with reset times |
+| Plugins | A switch for Terminal, Screens, Voice, Schedules and Reactions ([Plugins](plugins.md)) |
 
-## The audit
+## A space's own settings
 
-| Page | Setting | Level | Why |
-|---|---|---|---|
-| Agents | Assistant (CLI, model, effort, fast, permissions) | Everywhere, space | A repo may want a stronger model or another CLI |
-| Agents | Workers | Everywhere, space | The same: what a task in this space runs on |
-| Agents | Reviewer | Everywhere, space | The same |
-| Agents | Backup agent | Everywhere, space | A space whose work shouldn't move to the other CLI |
-| Agents | Reactions (every agent reacts with an emoji; on) | Everywhere, space | A space may want a plainer chat |
-| Agents | Instructions (assistant.md, worker.md, reviewer.md) | Everywhere only | Repo rules belong in the repo's AGENTS.md or CLAUDE.md, which every agent there reads |
-| Tasks | Merge, Review, Must fix, Proof | Everywhere, space | How much care a repo needs differs |
-| Tasks | Tasks at once | Everywhere, space | It counts per folder already |
-| Tasks | Archive Done after | Everywhere, space | Some repos keep done work in view longer |
-| Tasks | Worktrees | Everywhere, space | A folder that isn't a repo, or one that can't take worktrees |
-| Tasks | Base branch | Space only | A branch only means something in one repo |
-| Tasks | Branch names (a pattern: `{n}`, `{key}`, `{slug}`; empty: `task/{n}-{slug}`; a task's own `--branch` wins) | Everywhere, space | A team may name branches after its tickets |
-| Tasks | Run automations | Everywhere, space | Pause one repo's automations |
-| Tasks | Before the agent starts (a shell command) | Everywhere, space | A repo's dependencies, needed before its agent loads |
-| Tasks | When a task starts / finishes | Everywhere, space | Setup and cleanup steps are a repo's |
-| Tasks | When a task is accepted (a shell command Herdr runs in the repo once a task is done) | Everywhere, space | What a repo's tasks leave behind (test databases, containers) is the repo's |
-| Autopilot | Heartbeat, Schedule, Events | Everywhere, space | Each space works toward its own goal, at its own pace |
-| Autopilot | On or off | Space only | The header's switch: Everywhere never turns a space on |
-| Notify | All / Needs me / Off | Everywhere, space | A busy space can be quiet |
-| Secrets | A secret | Everywhere, machine, space | A key for one repo, or one machine's own |
-| Secrets | Kept on | All machines | One vault every machine's agents and voice calls use; follows Serve from unless picked |
-| Machines | When new tasks wait (memory, CPU, disk), low priority, memory cap per worker | All machines, machine | About a machine's hardware, not a space's work |
-| Machines | Home Assistant | Machine only | One per machine |
-| Window | Tabs, sidebar, counts, filters, subagents, Assistant in new spaces | Everywhere only | How the screen looks; the last is about spaces not made yet |
-| Window | Add-ons | Everywhere only | Which mods run: the window's, for every space |
-| Web | Serve from, link | Everywhere only | One web app for every machine |
+A space's menu › Settings opens the window for that space. It shows Agents, Tasks, Instructions and Secrets only.
 
-**No Machine level for the rest.** A space already lives on one machine, so a space's own covers "this machine's
-repos" without a third layer, and one less layer keeps "where does this value come from" one line long. What a machine
-genuinely differs in (its hardware, its home space, a key only it has) is already on Machines and Secrets. Agent and
-task values a machine set before (the old machine scope) still apply there until Reset, and say so on Machines.
+A space starts with Everything's settings. Under each row it says "Same as Everything", or "Set here" with Reset,
+which puts the row back. A space's Instructions are added to the ones for every space. A secret added there is for
+that space only.
 
-## Where they're kept, and how they travel
+The picker in a message box changes that one chat or task. What new chats and tasks start with is set in Agents.
 
-- `~/.config/shepherdr/settings.json`: `everywhere` and `spaces[<space id>]` (another machine's space as `<machine>/<id>`), each
-  with `coordinator`, `worker`, `reviewer`, `backup`, `tasks`, `automations`, `agents` (`{ reactions }`) and
-  `autopilot` (`{ every, events, heartbeat }`). The window pushes each machine its share (Everywhere's and its spaces' by their
-  ids there), and when the web app is served from another machine its service keeps the file in step with that host
-  (`service/sync.ts`). So a space on any machine, and the web on the Mac mini, see the same values. On a machine
-  still on an older Shepherdr the file is `~/.herdr/shepherdr.json`; pushes and syncs find it there.
-- `tasks.accept_command` (#1102): run by herdr-task itself (`after_accept.py`), once per task, as it becomes Done
-  (accepted and merged, merged on GitHub, or nothing to merge), in the background with `/bin/sh -c` in the repo's main
-  folder, at most 10 min. It gets `HERDR_TASK_ID` (SHEP-4), `HERDR_TASK_NUMBER`, `HERDR_TASK_TITLE`, `HERDR_TASK_BRANCH`,
-  `HERDR_TASK_BASE`, `HERDR_TASK_WORKTREE` (which may already be removed) and `HERDR_TASK_FOLDER`. How it went is kept on
-  the task (`after_accept`: running, ok or failed, its exit code and last lines; the whole output in
-  `<tasks>/.after-accept/<list>-<n>.log`). A failure never undoes the Done: its row says "Cleanup failed", `herdr-task
-  show` says why, and its space's Assistant is told once (news event `accept-failed`).
-- `tasks.worktree_root` (in `everywhere`, a machine's or a space's `tasks`; no row in the window yet): the folder new
-  task worktrees go in, e.g. a bigger disk (`~` allowed). Unset: `~/.local/share/shepherdr/worktrees`. A task keeps
-  the worktree it has.
-- `tasks.setup` (Tasks › Before the agent starts, #1197): a shell command herdr-task runs in each new task worktree,
-  in the agent's own terminal just before the agent (e.g. `bun install`, or linking the main folder's `node_modules`),
-  so an agent that loads project code at startup finds it there. Its output shows in that terminal and is kept in
-  `~/.local/share/shepherdr/tasks/.setup/<list>-<id>.log`. It fails: the agent isn't started, and the task shows Needs
-  you with the exit code, the output's last line and the log (`herdr-task _setup-failed`); starting it again runs the
-  setup again. It never runs for a task working in the folder itself, nor again in a worktree whose setup passed.
-- Secrets live in one vault, `~/.local/share/shepherdr/secrets/vault.json` on the machine that keeps them (Secrets › Kept on). Which one:
-  herdr-core document `shepherdr.secrets` = `{ id, at, by }` on every machine, handed on by each service as
-  `shepherdr.host` is (`core/secrets.js`). `herdr-secret` on any other machine passes `set`, `rm` and `names` there
-  over herdr-core (the value on stdin, scopes renamed into that machine's words); that machine's service answers every
-  agent's request even with no window open, and voice calls read the ElevenLabs key from there into memory only.
-  `shepherdr secrets move-to <machine>` moves the vault (a backup on both sides; `move-to here --restore` on the old
-  one rolls back when the other is gone). By default the secrets follow Serve from (Kept on says "Same as Serve from:
-  <machine>"): with no machine picked, each service names where the secrets are now (the machine whose vault has
-  some, else the one serving the web app: `autoKeeper`, a record with `auto: true`) and hands it on, so voice calls
-  and agents work with no setup; then the machine serving the web app moves them to itself with `move-to` (backup,
-  verified copy, rollback), and does so again when Serve from moves. Picking another machine in Kept on stops the
-  following; picking the Serve from machine starts it again. Voice calls with no record yet ask each linked machine
-  for the key. No record and nothing to decide yet: the machine without `~/.local/share/shepherdr/secrets/remote` keeps them.
-- Notify is in the shared document (`notify`), kept in step the same way.
-- herdr-task reads the effective value: `settings_for()` for agents and tasks (the Settings block every brief ends
-  with names who set each line), `autopilot.resolve()` for Autopilot (`herdr-task autopilot show` lists which parts are
-  the space's own). Autopilot's schedule and events from before Settings kept them (`~/.local/share/shepherdr/tasks/.autopilot.json`
-  `everywhere`) and its heartbeat file (`~/.config/herdr-core/autopilot/everywhere.md`) are what Everywhere inherits
-  until it's set.
+## Where they are kept
 
-## Reactions
+`~/.config/shepherdr/settings.json` on the serving machine: `everywhere`, and `spaces[<space id>]` for a space's own.
+`herdr-task` reads it each time, and turns Review, Merge and Proof into lines of each task's brief. When the app is
+served from another machine, its service keeps the file in step with that machine (`service/sync.ts`).
 
-Agents › Reactions, on by default: every agent reacts to some of your messages with one emoji, as a person would:
-Assistants, task workers, automation runs and plain agent tabs, on every machine. It picks the most specific,
-delightful or funny one that fits, not a generic 👍 or 👀 by default (🚀 for a launch, 🔥 for a great result, 🐛 for a
-bug report, 🧹 for a cleanup ask, 🫡 for a direct order, 🤌 for a nice detail, 🍿 for drama). Tasteful: most messages
-get none, never more than one, and never instead of an answer you need. Off, none reacts. The reactions show on your messages in every chat, the
-Assistant's, a task's and an agent tab's, in the window and on the web (`core/chat-log.js`).
+Secrets live in one vault, `~/.local/share/shepherdr/secrets/vault.json`, on the machine that keeps them.
 
-- **Kept as** `agents.reactions` at each level. SHEP-42 kept it as the Assistant's, `assistant.reactions`: it still
-  applies where a level has no `agents.reactions` (herdr-task, the window's chain), and the window and the web app
-  move it there when they read the file (`upgradeReactions` in `core/settings.js`), so their next change writes it.
-- **How it's told.** The chat's SessionStart hook (`mods/chat/session-note.sh`) asks `herdr-task _session-note` for
-  every agent's extra words: an Assistant's settings block (below) ends with them, any other agent gets just them
-  (`herdr_task/reactions.py`): the when-and-how paragraph (GUIDE) when on, "never react" when off, by its space (its
-  terminal's space or task-space label, else the space whose folder holds its folder, else Everywhere's). It runs at
-  every start, resume and compaction, for Claude Code and Codex, and labels the terminal `herdr.reactions=on|off`. The
-  role instructions (`assistant.md`, `worker.md`, `reviewer.md`) don't carry it: they are your words to edit, and the
-  hook is the one start path that knows the setting now.
-- **Changed mid-session.** A `<herdr-setting name="reactions" value scope>` line: an Assistant's comes with its other
-  changed settings (below); every other live agent its hook taught gets it alone from herdr-task's news pass
-  (`reactions_pass`), once, ending "carry on with what you were doing; if nothing, reply only `<hc no-reply/>`", so a
-  worker mid-task keeps working. One started before this isn't told until it starts again.
-- **Reviewers** run as their worker's own helper agents (an hc child, shown as a subagent in its chat): their hook
-  teaches them too, but your messages rarely reach them, so they seldom react.
-- **A reaction only.** A reply of a `<hc react … />` line and `<hc no-reply/>` shows just the reaction on your
-  message.
+## Settings from 3.1 with no row
 
-## What the Assistant is told
+These have no row in the window. They still apply from the settings file. To change one, ask in a chat and its agent
+edits the file, or edit it yourself.
 
-A space's Assistant knows the settings that shape how it makes and runs tasks, resolved for its space (Everywhere's,
-then the space's own), without guessing (`herdr_task/assistant_settings.py`):
+| In the file | What it does |
+|---|---|
+| `backup.agent` | The other agent takes over a task once when its own can't go on; `"off"` turns that off |
+| `agents.reactions` | Agents react to some of your messages with an emoji |
+| `agents.suggestions` | An agent may end its message with one suggested reply |
+| `agents.feedback`, `agents.feedback_repo` | Agents offer once to file a problem with Shepherdr, and where |
+| `tasks.review_rounds`, `tasks.must_fix` | How many review rounds, and what a review must get fixed |
+| `tasks.archive_after` | Days before a Done task is archived |
+| `tasks.worktrees` | Off: tasks work in the folder itself |
+| `tasks.worktree_root` | The folder new task worktrees go in |
+| `tasks.base` | A space's base branch |
+| `tasks.branch` | The pattern for new task branches (`{n}`, `{key}`, `{slug}`; empty: `task/{n}-{slug}`) |
+| `tasks.claude_flags`, `tasks.codex_flags` | Extra flags for a task's agent |
+| `tasks.setup` | A shell command run in each new worktree before its agent starts |
+| `tasks.start_notes`, `tasks.finish_notes` | Steps a task's agent does first and last |
+| `tasks.accept_command` | A shell command run in the repo once a task is Done |
+| `automations.enabled` | Off: schedules don't run |
+| `machine.start_memory`, `machine.start_load`, `machine.start_disk` | A machine's limits before new tasks start there |
+| `machine.low_priority`, `machine.worker_memory` | How task agents run on a machine |
 
-- **At every start, resume, compaction and handoff** the chat's SessionStart hook (`mods/chat/session-note.sh`) asks
-  `herdr-task _session-note` for a "Your settings" block, like the Settings block a worker's brief ends with: Review
-  (rounds, must fix, reviewer), Merge, Proof, Task agent, Base branch, Worktrees, Tasks at once, Task notes (start and
-  finish notes set or not), Autopilot (on or off, schedule, direction) and Reactions, one line each. A line that differs
-  from Herdr's default says who set it (*set for this space*, *your setting everywhere*). The terminal is labelled
-  `herdr.settings` with a short hash of each line.
-- **Changed while it runs** (in the window or on the web, Everywhere or the space): herdr-task's news pass (on a
-  settings change, and every minute for Autopilot's switch) sends each live Assistant whose lines differ one message,
-  a line per changed setting: `<herdr-setting name="review" value="on" scope="everywhere|space">Review is now on, …
-  Tasks you add from now on get it; running ones keep their brief.</herdr-setting>`, the last ending "reply only
-  `<hc no-reply/>`". A save that changes nothing for its space says nothing. One started before this (no label) gets the
-  whole block once it has had a turn. Busy with the person: next pass.
-- **The chat hides them**, as every Herdr tag (`core/chat-log.js`), and the `<hc no-reply/>` after: a settings change
-  already shows where it was made, so a news row would only repeat it.
-- **Other agents get only Reactions** (above): a worker's brief's Settings block is fixed when it starts.
-
+Ignored from 3.2 on, wherever a file still has them: `autopilot`, `tasks.max_running` (Tasks at once), the add-ons'
+`off` list and Notify.

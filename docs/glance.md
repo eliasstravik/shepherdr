@@ -5,9 +5,9 @@ widgets, the lock screen card, the watch tile, notifications with buttons). The 
 snapshot (~720 KB) on every change, about 12.7 MB a minute: far too much for a phone. The glance doc is ~15 KB and goes
 out only when what the person sees changes, and calmly. Added in SHEP-246; the code is `service/glance.ts`.
 
-All three endpoints go through the web app's gate like the page's own writes: from the tailnet, the machine owner's
+All three endpoints go through the app's gate like the page's own writes: from the tailnet, the machine owner's
 login, on the machine's tailnet name, with `Origin: https://<name>[:port]` and `x-shepherdr: 1`. Only the machine that
-serves the web app answers (another one redirects there).
+serves the app answers (another one redirects there).
 
 ## `GET /api/glance`
 
@@ -62,8 +62,8 @@ Unchanged from the web push buttons (SHEP-243): `POST /api/action` with
   "urgent": "1xpxeyin8gdj7",       // changes only with what notifies (alerts, their words, the counts)
   "at": 1794937795469,             // when it was built (ms)
   "counts": { "needs": 3, "working": 4, "ready": 0, "done": 24 },   // what each section lists, even past the 40 items
-  "order": ["needs", "ready", "working", "done"],   // the sections, in the web app's Tasks panel order: show them so
-  "groups": [                      // the same sections in that order, with the Tasks panel's names and the counts
+  "order": ["needs", "ready", "working", "done"],   // the sections, in the feed's own order: show them so
+  "groups": [                      // the same sections in that order, with their names and the counts
     { "kind": "needs", "label": "Needs you", "count": 3 },
     { "kind": "ready", "label": "Ready", "count": 0 },
     { "kind": "working", "label": "Working", "count": 4 },
@@ -90,36 +90,34 @@ Unchanged from the web push buttons (SHEP-243): `POST /api/action` with
       "reply":  { "chat": "ELIA-53/worker" }          // also on an agent's own alert that has a chat
     }
   ],
-  "unread": 2                      // Assistants' chats with a new message not yet read: a Chat badge, not Needs you
+  "unread": 2                      // chats with a new message not yet read: a Chat badge, not Needs you
 }
 ```
 
 ## What it lists: what the app shows
 
-The feed never says more than Shepherdr's own screens, so phone, watch and app agree. Needs you is one rule for every
-view (SHEP-250, `web/shared/needs-you.ts` `needsYou`): the web app's Tasks panel lists the same things under Needs you,
-in the same order, and its counts and badges count them.
+The feed never says more than Shepherdr's own screens, so phone, watch and app agree. Needs you is one rule
+(SHEP-250, `web/shared/needs-you.ts` `needsYou`). One difference from the app: the feed keeps Ready as a section of
+its own, where the app lists "Ready for review" under Needs you.
 
 - Needs you lists only tasks (SHEP-255), oldest first, each once (its oldest card stands for it): a task's agent's
   card or wait (`type: "need"`), a task whose status says Needs you with no card (`type: "task"`), and a task's
   agent's own `herdr-task alert` while it stands (`type: "alert"`; a helper labelled `herdr.task` counts as its task's).
-- What is no task's is not in it, here or in the Tasks panel: an Assistant's card, a helper's alert of no task (the VM
-  sign-in helper's), a machine's memory alert, a failed automation (its row in Automations says so). Their toasts and
-  web pushes still go as before.
-- An Assistant's new message is not a task, so it is not in Needs you (SHEP-253), here or in the Tasks panel: it
-  belongs to Chat. `unread` counts the Assistants' chats with a new message not yet read (their space not muted, no
-  card of their own waiting), for a Chat badge; its web push still goes as before.
+- What is no task's is not in it: a chat's own card, a helper's alert of no task (the VM sign-in helper's), a
+  machine's memory alert, a schedule that failed to start. Their web pushes still go as before.
+- A chat's new message is not a task, so it is not in Needs you (SHEP-253): it belongs to Chat. `unread` counts the
+  chats with a new message not yet read (no card of their own waiting), for a Chat badge; its web push still goes as
+  before.
 - A task in Needs you is in no other section: a working task with a standing alert is under needs (its alert item) and
-  back under working once the alert goes. An agent's alert is a moment, as in the app (a toast, once): it stands only
+  back under working once the alert goes. An agent's alert is a moment: it stands only
   for 15 minutes, only while its terminal still runs and its task isn't done, and a machine's memory alert only while
   that machine's memory is still over 75%.
 - Each leaves everywhere at the same moment: answered, or its alert over.
 - `counts` are what each section lists, item for item (all of them, even past the 40 items): a header's number never
-  differs from its list, nor from the web app's Needs you, its sidebar's red counts or its app icon's count.
-- `order` lists the sections' kinds in the order of the web app's Tasks panel (Status view: Needs you, Ready,
-  Working, Done last): an app shows its sections in that order, not a fixed one. `groups` are the same sections in
-  the same order, with the Tasks panel's names and each count. Both come from the list the Tasks panel uses
-  (`web/shared/types.ts` `GROUPS`; Merging is listed under Working). Every section is always there, an empty one with
+  differs from its list, nor from its app icon's count.
+- `order` lists the sections' kinds (Needs you, Ready, Working, Done last): an app shows its sections in that order,
+  not a fixed one. `groups` are the same sections in the same order, with their names and each count. Both come
+  from one list (`web/shared/types.ts` `GROUPS`; Merging is listed under Working). Every section is always there, an empty one with
   count 0.
 
 Titles and bodies are the web push's own words (`service/push.ts` `alertsOf`), so a native notification says exactly

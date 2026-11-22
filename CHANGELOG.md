@@ -1,5 +1,73 @@
 # Changelog
 
+## 3.2.0
+
+Shepherdr is now one web app, on phone, tablet and desktop, private on your tailnet. The Herdr-window layout and its
+mods are gone; the Herdr app gets one "Open Shepherdr" button.
+
+### The new app
+
+- The list: Everything on top, then your machines as headings, with groups and spaces under them. A space shows how
+  many things need you. Drag spaces into order. New space, Feedback and Settings sit at the foot.
+- Chats: Everything's chat reaches every space on every machine; each space has its own. The message box shows the
+  agent, model, effort and speed, and opens the picker.
+- The Tasks pane has two tabs. Now groups tasks under Needs you, Working, Up next and Done. Scheduled lists your
+  schedules, with when each runs, its next run and its last.
+- A task opens as a thread in the pane, with its own reply box, and can take the middle.
+- "Ready for review" is one review card, in the task, its space's chat and Everything's chat. Its button reads "Mark
+  as done and merge" on a branch and "Mark as done" otherwise. One answer clears it everywhere.
+- Screens: every chat and task has a Screen button for the agent's browser and desktop. Watch, Take over, Hand back.
+- Your own terminal in every space and task, in a drawer under the message box (Ctrl+`). An agent's own terminal is
+  behind "Switch to terminal".
+- Artifacts are real web pages. One opens in the pane with its versions, Pin and Mark up: point at a spot, then write.
+- Settings is one window: General, Agents, Tasks, Instructions, Secrets, Machines, Usage and Plugins. A space has its
+  own Agents, Tasks, Instructions and Secrets, and says "Same as Everything" or "Set here".
+- The pickers: Agent, Model and Permissions as searchable lists, read from each agent's own catalog on that machine.
+- Voice runs over the app: it opens things, sends messages and answers for you, and asks before it deletes, merges or
+  stops anything. In a call the button becomes Mute and End call.
+- Search (Ctrl+K) finds spaces, tasks and artifacts by name.
+- Every feature is a plugin. Screens, Voice, Schedules, Reactions and Terminal can be switched off in Settings ›
+  Plugins.
+
+### What is gone
+
+- The Herdr-window layout and all its mods.
+- Autopilot. A repeating schedule does that now, and a schedule can also start on an event, such as a merge.
+- Tasks at once. A task starts the moment it is asked to.
+- Automatic retry and restart. An agent that stopped stays stopped, says why, and has a Restart button.
+- The recipe format for artifacts. Old artifacts are converted to pages once, at the update.
+- The Files and Changes panels, tabs, pinned spaces, per-space Notify, usage insights and the keyboard-shortcuts page.
+
+### What carries over
+
+- Your spaces; sections become groups.
+- Tasks, schedules (the old automations), settings and secrets.
+- Each chat's history, above a "New session" line.
+
+### The update
+
+- `git pull --ff-only`, then `shepherdr update`. It waits while tasks are working and names them; `--force` switches
+  anyway.
+- It takes out what 3.1 put in the Herdr app. A file you changed there is backed up first.
+- If Shepherdr's layout was selected in Herdr, pick another one there.
+- Shepherdr's agents now run in their own herdr-core session. They no longer show in the Herdr app, and terminals
+  opened in the Herdr app don't show in Shepherdr.
+- Settings from 3.1 with no row in the new window still apply. [Settings](docs/settings.md) lists them.
+
+### For people who changed the window
+
+- Mods removed (28): accept-card, artifacts, chat, chat-call, chat-image, chat-models, chat-react, confirm-chat,
+  coordinator, jump, keybinds, machine-add-chat, menu-tasks, new-menu-tasks, newspace, pane-chat, prompt-chat,
+  shepherdr-settings, spaces-chat, tabs-tasks, task-artifacts, task-browser, task-pr, tasks, tasks-menu, toasts,
+  workspace-chrome-shepherdr, workspace-status-chat.
+- Layout `shepherdr` removed, with its node ids (33): root, sidebar, brand, sidebar-lists, spaces, sidebar-footer,
+  work, tabs, work-body, main, panel, panel-body, files, changes, tasks, tasks-list, tasks-thread, tasks-thread-head,
+  tasks-thread-body, tasks-thread-chat, tasks-thread-term, tasks-thread-pr, tasks-thread-browser,
+  tasks-thread-browser-host, tasks-thread-artifacts, artifacts, artifacts-list, artifacts-view, artifacts-view-head,
+  artifacts-view-body, chat-call, toasts, status.
+- `keys.json` contexts removed: global (24 keys), terminal (ctrl-v), mod:chat (3), layout:shepherdr (4).
+- New: one Herdr mod, `open-shepherdr`, and the key `global ctrl-shift-o` (only if that key is free).
+
 ## 3.1.46
 
 The rest of the 21 November triage: steadier task status, a smoother ready and pull request flow, fewer Codex hangs,
