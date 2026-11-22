@@ -9,6 +9,7 @@ import { confirm, openDialog, openMenu } from './overlay.tsx'
 import { AgentField, MachineField, pickFor, type Pick } from './picker.tsx'
 import { Btn, Cnt, I, IB, Row } from './ui.tsx'
 import { DictateButton } from './dictate.tsx'
+import { press } from './drag.ts'
 
 const FILTERS: Filter[] = ['Active', 'Archived', 'All']
 
@@ -271,13 +272,32 @@ function groupMenu(anchor: Element, id: string, name: string) {
   )
 }
 
-function SpaceRow({ snap, p, sub }: { snap: Snapshot; p: Space; sub?: boolean }) {
+/** Spaces are dragged into the order you want: among those beside them, or onto another group of the same machine
+ *  (its heading, or a row in it: before that one). `under`: the group's id, or its machine's ("m:<key>"). */
+function dragSpace(snap: Snapshot, p: Space, under: string, siblings: string[]) {
+  return (e: React.PointerEvent<HTMLElement>) => {
+    if ((e.target as HTMLElement).closest('.ib')) return
+    press(e, {
+      id: p.id,
+      siblings,
+      level: 'project',
+      drop: (ids) => void tryAct({ type: 'order', under, ids }),
+      into: {
+        group: under,
+        may: (g) => g !== under && (g === `m:${p.machine}` || (snap.sections ?? []).some((s) => s.id === g && (s.machine ?? snap.host) === p.machine)),
+        go: (g, before) => void tryAct({ type: 'move', id: p.id, to: g, ...(before ? { before } : {}) }),
+      },
+    })
+  }
+}
+
+function SpaceRow({ snap, p, sub, under, siblings }: { snap: Snapshot; p: Space; sub?: boolean; under: string; siblings: string[] }) {
   const at = useUI((u) => u.at)
   const wide = useUI((u) => u.wide)
   const n = needsCount(snap, p.id)
   const dim = !!placeDown(snap, p.id) || p.archived
   return (
-    <div className="rowx">
+    <div className="rowx" data-project={p.id} data-drop={under} onPointerDown={dragSpace(snap, p, under, siblings)}>
       <Row icon="hash" label={p.name} className={[sub ? 'sub' : '', dim ? 'dim' : ''].join(' ')} current={at === p.id && !wide} end={<Cnt n={n} />} onClick={() => go(p.id)} />
       <IB
         icon="dots"
@@ -340,18 +360,18 @@ export function List({ snap }: { snap: Snapshot }) {
                 <I n="warn" c="c-ask s16" />
               </button>
             ) : (
-              <div className="lab">{machineLabel(snap, machine.machine)}</div>
+              <div className="lab" data-heading={`m:${machine.machine}`} data-drop={`m:${machine.machine}`}>{machineLabel(snap, machine.machine)}</div>
             ))}
           {groups.map((g) => (
             <div key={g.id} style={{ display: 'contents' }}>
-              <div className="rowx">
+              <div className="rowx" data-heading={g.id} data-drop={g.id}>
                 <Row icon={ui.shut[g.id] ? 'right' : 'down'} label={g.name} expanded={!ui.shut[g.id]} onClick={() => setUI({ shut: { ...ui.shut, [g.id]: !ui.shut[g.id] } })} />
                 <IB icon="dots" label={`More for ${g.name}`} aria-haspopup="menu" onClick={(e) => groupMenu(e.currentTarget, g.id, g.name)} />
               </div>
-              {!ui.shut[g.id] && g.spaces.map((p) => <SpaceRow key={p.id} snap={snap} p={p} sub />)}
+              {!ui.shut[g.id] && g.spaces.map((p) => <SpaceRow key={p.id} snap={snap} p={p} sub under={g.id} siblings={g.spaces.map((x) => x.id)} />)}
             </div>
           ))}
-          {spaces.map((p) => <SpaceRow key={p.id} snap={snap} p={p} />)}
+          {spaces.map((p) => <SpaceRow key={p.id} snap={snap} p={p} under={`m:${machine.machine}`} siblings={spaces.map((x) => x.id)} />)}
         </div>
       ))}
       <div className="foot">
