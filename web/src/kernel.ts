@@ -221,6 +221,8 @@ export interface UI {
   offline: number | null
   /** a message or card to bring into view once its chat shows it (an alert's link) */
   jump: string | null
+  /** the task the voice opened: marked "opened by voice" in its status line */
+  voiced: string | null
   /** the artifacts grid's search box: null is closed */
   artq: string | null
   /** the warnings line was dismissed (until tomorrow, or a new warning): the day, and what it said */
@@ -300,6 +302,7 @@ let state: State = {
     offline: null,
     jump: params.get('focus'),
     artq: null,
+    voiced: null,
     banner: null,
     ...stored<Partial<UI>>('shepherdr.ui', {}),
   },

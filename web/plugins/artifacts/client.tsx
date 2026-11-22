@@ -99,9 +99,20 @@ function menu(anchor: Element, a: Artifact, v: number) {
 
 /** The page, in a frame that cannot reach the app. Marking up: tap the page to drop a pin, then write. */
 function Page({ a, v, markup, pin, setPin }: { a: Artifact; v: number; markup: boolean; pin: { x: number; y: number } | null; setPin: (p: { x: number; y: number } | null) => void }) {
+  const frame = useRef<HTMLIFrameElement>(null)
+  // a page can send the person's answer back to its agent: parent.postMessage({ shepherdr: 'answer', text }, '*')
+  useEffect(() => {
+    const on = (e: MessageEvent) => {
+      const d = e.data as { shepherdr?: string; text?: unknown } | null
+      if (e.source !== frame.current?.contentWindow || d?.shepherdr !== 'answer' || typeof d.text !== 'string' || !d.text.trim()) return
+      void tryAct({ type: 'artifact-say', place: a.place, artifact: a.id, v, text: d.text.slice(0, 4000) }, 'Sent to the agent that made it')
+    }
+    addEventListener('message', on)
+    return () => removeEventListener('message', on)
+  }, [a.id, a.place, v])
   return (
     <div style={{ position: 'relative', flex: 1, display: 'flex', minHeight: 0 }}>
-      <iframe className="page" title={a.title} src={pageUrl(a, v)} sandbox="allow-scripts allow-forms allow-popups" referrerPolicy="no-referrer" />
+      <iframe ref={frame} className="page" title={a.title} src={pageUrl(a, v)} sandbox="allow-scripts allow-forms allow-popups" referrerPolicy="no-referrer" />
       {markup && (
         <div
           role="button"

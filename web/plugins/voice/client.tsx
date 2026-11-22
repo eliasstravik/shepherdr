@@ -71,7 +71,7 @@ export async function voiceNav(nav: Nav): Promise<NavAck> {
     if (!t) return no("this app doesn't list that task")
     setUI(OFF)
     openTask(t.id)
-    byVoice.set(t.id, 'opened by voice')
+    setUI({ voiced: t.id })
     if (str(nav.tab) === 'screen' || str(nav.tab) === 'browser') setUI({ pane: 'screen', scr: { key: `task:${t.id}`, src: 'b', drive: false } })
     return check(getState().ui.task === t.id, "the task didn't open")
   }
@@ -108,10 +108,6 @@ export async function voiceNav(nav: Nav): Promise<NavAck> {
   return no("this app can't show that")
 }
 
-/** what voice did, marked in small print where it shows ("opened by voice"), for a few minutes */
-const byVoice = new Map<string, string>()
-export const voiceMark = (taskId: string) => byVoice.get(taskId)
-
 function CallWhere() {
   const where = useStore((s) => (s.ui.call && s.snap ? JSON.stringify(whereNow()) : ''))
   useEffect(() => {
@@ -123,7 +119,7 @@ function CallWhere() {
 export function endCall() {
   stopCall()
   onCaption(null)
-  setUI({ call: false, callMuted: false, callCap: '' })
+  setUI({ call: false, callMuted: false, callCap: '', voiced: null })
 }
 
 export function toggleCall(resume: string | null = null) {
