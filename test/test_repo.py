@@ -157,7 +157,8 @@ class Repo(unittest.TestCase):
                 if not f.endswith((".ts", ".js")) or re.search(r"\.test\.[tj]s$", f) or rel == "service/spawn.ts":
                     continue
                 with open(path, encoding="utf-8") as fh:
-                    src = fh.read()
+                    # its code, not its comments
+                    src = re.sub(r"/\*.*?\*/|(?<![:\"'`])//[^\n]*", "", fh.read(), flags=re.S)
                 if re.search(r"\bBun\s*\.\s*(spawn|spawnSync\b|\$)", src):
                     bad.append(f"{rel}: Bun.spawn (use ./spawn.ts)")
                 if re.search(r"""["'](node:)?child_process["']""", src):
