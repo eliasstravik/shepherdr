@@ -8,7 +8,7 @@ import { partsOf, placesOf, keyOf } from '@client/outbox.ts'
 import { confirm, openMenu } from '@client/overlay.tsx'
 import { AgentLine, openPicker, pickFor, pickWords, type Pick } from '@client/picker.tsx'
 import { attach, detach, dropOut, retry, send } from '@client/send.ts'
-import { cx, Empty, I, IB, useGrow } from '@client/ui.tsx'
+import { Btn, cx, Empty, I, IB, useGrow } from '@client/ui.tsx'
 import { isImage, isVideo } from '@shared/files.ts'
 import type { Chat, Message, Snapshot, TurnActivity } from '@shared/types.ts'
 import { isEverything, placeOf, taskOf } from '@shared/view.ts'
@@ -320,6 +320,23 @@ function WorkingTail({ chat }: { chat: Chat | undefined }) {
   )
 }
 
+/** A chat's own agent that crashed or was cut off is treated like a task's: a card in that chat with the reason and
+ *  Restart. Shepherdr never starts it again on its own. */
+function StoppedChat({ chat, thread }: { chat: Chat | undefined; thread: Thread }) {
+  const snap = useSnap()
+  if (!chat || !snap || thread.task || (chat.notice !== 'ended' && chat.notice !== 'gone') || !chat.messages.length) return null
+  const pick = pickOf(snap, chat, thread)
+  return (
+    <div className="card" data-card={`stopped:${chat.key}`}>
+      <span className="t c-red">Stopped</span>
+      <span>{chat.note || 'Its agent is no longer running.'}</span>
+      <div className="acts">
+        <Btn kind="pri" onClick={() => void tryAct({ type: 'restart', chat: chat.key, kind: pick.agent, model: pick.model ?? undefined, effort: pick.effort ?? undefined })}>Restart</Btn>
+      </div>
+    </div>
+  )
+}
+
 /** "…" while it writes */
 function TypingTail({ chat }: { chat: Chat | undefined }) {
   return chat && !working(chat) && typing(chat) ? <p className="b gap" aria-label="Writing">…</p> : null
@@ -484,7 +501,7 @@ export default definePlugin({
   setup(reg) {
     reg.views.messages = Messages
     reg.views.box = Box
-    reg.chatTail.push({ order: 10, View: WorkingTail }, { order: 95, View: TypingTail })
+    reg.chatTail.push({ order: 10, View: WorkingTail }, { order: 15, View: StoppedChat }, { order: 95, View: TypingTail })
   },
 })
 
