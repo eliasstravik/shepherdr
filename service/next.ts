@@ -206,6 +206,10 @@ export interface Facts {
   config: Config;
   /** this machine's own name */
   hostName?: string;
+  /** each chat's and task's screen where its agent has one open or needs the person's hands (service/screens.ts) */
+  screens?: Snapshot["screens"];
+  /** the screen keys ("task:<id>") waiting for a Mac's one desktop */
+  waiting?: string[];
   /** every schedule as herdr-task keeps it (its list's folder and machine with it) */
   schedules?: any[];
 }
@@ -222,7 +226,8 @@ export function enrich(snap: Snapshot, f: Facts): Snapshot {
   });
   const rowOf = new Map(f.rows.map((r) => [r.machine ? `${r.machine}:${r.ref}` : r.ref, r]));
   const titleOf = (r: any, id: unknown) => f.rows.find((x) => x.folder === r.folder && (x.machine ?? null) === (r.machine ?? null) && String(x.id) === String(id))?.title;
-  const tasks: Task[] = snap.tasks.map((t) => {
+  const tasks: Task[] = snap.tasks.map((t0) => {
+    let t = t0;
     const r = rowOf.get(t.id);
     if (!r) return t;
     const x = r.x ?? {};
@@ -230,7 +235,10 @@ export function enrich(snap: Snapshot, f: Facts): Snapshot {
     const chat = t.agent?.chat ?? `${t.id}/worker`;
     const card = f.asked(chat);
     const rep = f.reportOf(r.worker);
-    const blocked = t.status !== "need" ? undefined : card ?? (rep?.kind === "auth" ? "auth" : rep?.kind === "permission" || rep?.kind === "question" ? rep.kind : rep?.state === "blocked" ? "prompt" : undefined);
+    // stuck on a step only a person can do, asked through its browser or desktop tools: Needs you · Needs your hands
+    const hands = !!f.screens?.[`task:${t.id}`]?.hands && !f.screens[`task:${t.id}`]!.hands!.settled && t.status === "work";
+    if (hands) t = { ...t, status: "need" };
+    const blocked = t.status !== "need" ? undefined : hands ? "auth" : card ?? (rep?.kind === "auth" ? "auth" : rep?.kind === "permission" || rep?.kind === "question" ? rep.kind : rep?.state === "blocked" ? "prompt" : undefined);
     const stopped = x.stopped_by && t.status !== "done" && t.status !== "work" ? { by: x.stopped_by as "you" | "error" | "limit", ...(x.stopped_why ? { why: String(x.stopped_why).slice(0, 200) } : {}) } : undefined;
     const after = Array.isArray(x.after) && x.after.length ? titleOf(r, x.after[0]) : undefined;
     return {
@@ -247,13 +255,14 @@ export function enrich(snap: Snapshot, f: Facts): Snapshot {
       ...(t.status === "done" && r.ready_at ? { needsAtWas: r.ready_at } : {}),
       ...(x.merge_failed ? { mergeFailed: String(x.merge_failed).slice(0, 200) } : {}),
       ...(after ? { afterTitle: after } : {}),
+      ...(f.waiting?.includes(`task:${t.id}`) ? { waitsDesktop: true } : {}),
     };
   });
   const automations = f.schedules ? schedulesOf(f.schedules, f.spaces, everything, (ref, machine) => snap.tasks.find((t) => t.id === (machine ? `${machine}:${ref}` : ref))) : {};
   const plans = f.config.plans;
   // a machine is named by its own name, this one too (never "This computer": the app is opened from other devices)
   const machines = snap.machines.map((m) => (m.here && (m.name === "This computer" || !m.name) ? { ...m, name: f.hostName || m.machine } : m));
-  return { ...snap, machines, places, tasks, automations, ...(everything ? { everything } : {}), config: f.config, warnings: warningsOf(snap, plans), off: offPlugins() };
+  return { ...snap, machines, places, tasks, automations, ...(f.screens && Object.keys(f.screens).length ? { screens: f.screens } : {}), ...(everything ? { everything } : {}), config: f.config, warnings: warningsOf(snap, plans), off: offPlugins() };
 }
 
 /* ---------- schedules ---------- */

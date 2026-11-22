@@ -40,7 +40,7 @@ import { Jobs } from "./jobs.ts";
 import { terminalBridge } from "./terminal.ts";
 import { worktree } from "./worktree.ts";
 import * as SPm from "../core/spaces.js";
-import { browserRelay } from "./browser.ts";
+import { createScreens } from "./screens.ts";
 import { voiceCall, callToResume, callsOn, handOff, type ChatView } from "./voice.ts";
 import type { HearIO } from "./voice-hear.ts";
 import type { VoiceIO } from "./voice-tools.ts";
@@ -345,7 +345,7 @@ const withNext = (snap: Snapshot, b: Parameters<NonNullable<typeof model.onBuild
     return { state: st?.state, kind: st?.kind ?? k.report?.kind };
   };
   const bar = model.value("spaces-chat") as any;
-  return (shown = enrich(snap, { spaces: b.spaces, rows: b.rows, archived: Array.isArray(bar?.archived) ? bar.archived : [], asked, reportOf, config, hostName: hostname().split(".")[0], schedules: pluginOn("schedules") ? b.automations : [] }));
+  return (shown = enrich(snap, { spaces: b.spaces, rows: b.rows, archived: Array.isArray(bar?.archived) ? bar.archived : [], asked, reportOf, config, screens: pluginOn("screens") ? screens.screensOf() : {}, waiting: pluginOn("screens") ? screens.waiting() : [], hostName: hostname().split(".")[0], schedules: pluginOn("schedules") ? b.automations : [] }));
 };
 const pickFrom = (v: any) => (v?.agent ? { agent: String(v.agent), model: v.model ?? null, effort: v.effort ?? null, fast: v.fast === "ultrafast" ? "ultrafast" as const : !!v.fast, perm: v.perm ?? null } : null);
 /** where your own terminal starts: a space's folder, or a task's (its worktree when it has one), on its machine */
@@ -357,8 +357,35 @@ function shellAt(key: string): ShellAt | null {
   const s = (model.spaces as any[]).find((x) => x.id === key.slice(3));
   return s?.folder ? { folder: s.folder, machine: s.machine ?? null } : null;
 }
-/** the machines with a real screen whose desktop can be opened (Settings › Machines): filled by the screens relay */
-let desktopsOf: () => string[] = () => [];
+/** Screens (service/screens.ts): each chat's and task's browser tab and desktop, to watch and take over. A key names
+ *  whose: "chat:<space id>", "task:<task id>", "machine:<key>". */
+const screens = createScreens({
+  who(key) {
+    const bare = (id: string) => id.slice(id.lastIndexOf("/") + 1);
+    if (key.startsWith("task:")) {
+      const id = key.slice(5), r = (model.rows as any[]).find((x) => (x.machine ? `${x.machine}:${x.ref}` : x.ref) === id);
+      if (!r) return null;
+      const sp = r.space ?? (model.spaces as any[]).find((x) => (x.machine ?? null) === (r.machine ?? null) && x.folder === r.folder)?.id ?? "";
+      const k: any = r.worker ? hub.terminals.get(r.worker) : null, st = typeof k?.status === "object" ? k.status : null;
+      return { task: `${r.slug}#${r.id}`, space: bare(String(sp)), machine: r.machine ?? null, address: r.worker ?? null, title: r.title, auth: st?.state === "blocked" && (st?.kind ?? k?.report?.kind) === "auth" };
+    }
+    if (key.startsWith("chat:")) {
+      const s = (model.spaces as any[]).find((x) => x.id === key.slice(5));
+      return s ? { space: bare(String(s.id)), machine: s.machine ?? null, address: s.assistant ?? null, title: s.name } : null;
+    }
+    return null;
+  },
+  keyOf(who) {
+    if (who.startsWith("chat:")) { const s = (model.spaces as any[]).find((x) => !x.machine && String(x.id) === who.slice(5)); return s ? `chat:${s.id}` : null; }
+    const r = (model.rows as any[]).find((x) => !x.machine && `${x.slug}#${x.id}` === who);
+    return r ? `task:${r.ref}` : null;
+  },
+  machine: me?.host ?? "this machine",
+  send: (m) => void hub.send(m.address, m.text).catch(() => null),
+  changed: () => model.rebuild(),
+});
+if (pluginOn("screens")) screens.start();
+let desktopsOf: () => string[] = () => (pluginOn("screens") ? screens.desktops() : []);
 const snapshotOf = (b: Parameters<NonNullable<typeof model.onBuild>>[0]) => live.setSnapshot(alertNewAnd(withNext(compat.snapshot({
   host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows, artifacts: artifacts.list, automations: b.automations,
   settings: [...settings.sections(webNow ?? ownLink(), b.spaces.map((s: any) => ({ id: s.id, name: s.name, machine: s.machine ?? null })), b.machines, me?.host ?? "this machine"),
@@ -612,6 +639,18 @@ async function doAction(body: any): Promise<Response> {
       return json({ ok: true, catalog: catalogOf(machine ?? me?.host ?? "", (await compat.agents!.choices(machine)) as any[], { claude: check.claude !== "missing", codex: check.codex !== "missing" }) });
     } catch (err) { return json({ ok: false, error: (err as Error).message }); }
   }
+  // a screen's own actions: Take over, Hand back (or "I'm done"), Skip, a screenshot kept, Open on the desktop instead
+  if (body?.type === "screen" && typeof body.key === "string") {
+    if (!pluginOn("screens")) return json({ ok: false, error: "Screens is switched off in Settings › Plugins." });
+    try {
+      const r: any = await screens.screenAction(body);
+      // what the agent is told (to look again and carry on, or to find another way)
+      if (r?.send?.address) await hub.send(r.send.address, r.send.text).catch(() => null);
+      model.rebuild();
+      const { send: _s, ...rest } = r ?? {};
+      return json({ ok: true, ...rest });
+    } catch (err) { return json({ ok: false, error: (err as Error).message }); }
+  }
   // a schedule's own menu: Run now, Pause, Resume; Edit sends the new words to that space's agent, which sets the
   // trigger exactly as when it is asked in a chat (if it can't make sense of them it says so there, and the schedule
   // keeps running as before)
@@ -772,7 +811,7 @@ const server = Bun.serve<{ who: string }>({
       const there = host.hostLink();
       return there ? Response.redirect(there, 302) : new Response("Shepherdr's web app is served from another machine now.", { status: 404 });
     }
-    const socket = path === "/api/ws" || path === "/api/terminal" || path === "/api/browser" || path === "/api/voice";
+    const socket = path === "/api/ws" || path === "/api/terminal" || path === "/api/screen" || path === "/api/desktop" || path === "/api/voice";
     const viaTailnet = req.headers.has("tailscale-user-login");
     // the glance feed (SHEP-246) is read by the phone's own app: checked as a write (its origin, x-shepherdr: 1)
     const native = path === "/api/glance" && url.searchParams.get("native") === "1";
@@ -782,11 +821,12 @@ const server = Bun.serve<{ who: string }>({
       if (why !== pass.why && why !== saidPeer) console.error(`web: ${(saidPeer = why)}`);
       return new Response(why, { status: pass.status });
     }
-    if (path === "/api/browser") {
-      // a task's browser (2.1's Browser panel): this machine's tasks
-      const t = compat.taskOf(url.searchParams.get("task") ?? "");
-      if (!t || t.machine) return new Response("no such browser here", { status: 404 });
-      return srv.upgrade(req, { data: { who: pass.who, browser: t.key } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
+    if (path === "/api/screen" || path === "/api/desktop") {
+      // an agent's browser tab or desktop, live (the Screens plugin): relayed from this machine only, never a raw port
+      const key = (url.searchParams.get("key") ?? "").slice(0, 300);
+      if (!pluginOn("screens") || !/^(chat|task|machine):[\w.:/#~-]+$/.test(key)) return new Response("no such screen", { status: 404 });
+      const desk = path === "/api/desktop";
+      return srv.upgrade(req, { ...(desk ? { headers: { "Sec-WebSocket-Protocol": "binary" } } : {}), data: { who: pass.who, [desk ? "desktop" : "screen"]: key } as any }) ? undefined : new Response("upgrade failed", { status: 400 });
     }
     if (path === "/api/terminal") {
       // a live terminal (2.1's terminal plugin): only a running one a chat names
@@ -860,6 +900,11 @@ const server = Bun.serve<{ who: string }>({
     // an artifact's page, its files and its picture (service/artifacts.ts artifactRoute)
     const art = path.startsWith("/api/artifacts/") ? await artifactRoute(req, url) : null;
     if (art) return art;
+    if (path === "/api/screen/shot") {
+      // the picture now of an agent's browser tab or desktop: a card's and a thread's small live picture
+      const shot = pluginOn("screens") ? await screens.shotOf((url.searchParams.get("key") ?? "").slice(0, 300), url.searchParams.get("src") === "d" ? "d" : "b").catch(() => null) : null;
+      return shot ? new Response(shot.body as any, { headers: { "content-type": shot.type, "cache-control": "no-store" } }) : new Response("no picture", { status: 404 });
+    }
     if (path === "/api/upload" && req.method === "POST") {
       // a file from the message box (+, the camera, a paste or a drop): kept in data/chat-attach until it goes with a message as its path (another machine's agent gets a copy there)
       const form = await req.formData().catch(() => null);
@@ -1005,10 +1050,11 @@ const server = Bun.serve<{ who: string }>({
       if (d.voice) d.bridge = voiceCall(hub, { io: voiceIO, hear: hearIO, where: { client: "web", call: d.voice.key, machine: me?.host ?? null },
         who: String(d.who ?? ""), from: d.from ?? null }, page);
       else if (d.term) d.bridge = terminalBridge(hub, d.term, page, !!d.own);
-      else if (d.browser) d.bridge = browserRelay(d.browser, page);
+      else if (d.screen) d.bridge = screens.screenRelay(d.screen, page);
+      else if (d.desktop) d.bridge = screens.desktopRelay(d.desktop, { send: (b: Uint8Array) => { ws.sendBinary(b); }, close: () => ws.close(), buffered: () => ws.getBufferedAmount() });
       else live.join(ws);
     },
-    message(ws, msg) { const d: any = ws.data; if (d.voice) d.bridge?.message(msg); else if (d.bridge) d.bridge.message(String(msg)); else live.message(ws, String(msg)); },
+    message(ws, msg) { const d: any = ws.data; if (d.voice || d.desktop) d.bridge?.message(msg); else if (d.bridge) d.bridge.message(String(msg)); else live.message(ws, String(msg)); },
     // a call's page that went without ending it holds the call for it to come back (SHEP-102)
     close(ws) { const d: any = ws.data; if (d.voice) d.bridge?.detach(d.page); else if (d.bridge) d.bridge.end(); else live.leave(ws); },
     // SHEP-173: a muted call sends nothing for minutes (Bun's default closes a quiet socket after 120 s); pages ping too

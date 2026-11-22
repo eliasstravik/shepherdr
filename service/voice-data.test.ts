@@ -31,7 +31,7 @@ test("every api/ path the web app fetches is a voice data source, or not data wi
 
 // 3.2: the one action the app's buttons send that the service does not answer yet: the Screen's (Take over, Hand back,
 // Skip, a saved picture), being wired. A voice call's act sends it the same way. Once answered it moves to WRITES.
-const WIRED_LATER = ["screen"];
+const WIRED_LATER: string[] = [];
 // read actions the service answers for a voice call's look (SOURCES) that the app itself doesn't send: its picker
 // reads the catalog instead
 const VOICE_ONLY = ["model-menu", "role-info", "machine-hosts"];

@@ -55,6 +55,8 @@ export const WRITES = [
   "accept", "close", "delete", "archive", "reopen", "task-start", "task-resume", "task-rename", "task-move", "schedule", "pause", "pin",
   // schedules: Run now, Pause, Resume, Edit
   "automation",
+  // screens: Take over, Hand back, Skip, a screenshot kept, Open on the desktop instead
+  "screen",
   // artifacts: a note or words to its agent, Pin, Rename, Keep a proof, Restore a version, Delete
   "artifact-send", "artifact-note", "artifact-say", "artifact-pin", "artifact-rename", "artifact-keep", "artifact-restore", "artifact-delete",
   "page-send", "page-note", "browser-notes",
