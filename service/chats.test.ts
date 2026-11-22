@@ -64,7 +64,7 @@ test("a followed task chat moves to its worker's new terminal by itself", async 
   const map = new Map([["DEMO-1/worker", "t1y"]]);
   const live = new Live(h, { on() {}, load: async () => ({}) } as any, () => null, "test");
   live.chats = new Chats(h);
-  live.compat = { addrOf: (k: string) => map.get(k) ?? null, chat: (k: string, r: any) => ({ key: k, state: r.state, path: r.path ?? null }) } as any;
+  live.compat = { historyOf: () => null, addrOf: (k: string) => map.get(k) ?? null, chat: (k: string, r: any) => ({ key: k, state: r.state, path: r.path ?? null }) } as any;
   const got: any[] = [];
   const ws: any = { data: { who: "demo" }, readyState: 1, getBufferedAmount: () => 0, send: (t: string) => { const m = JSON.parse(t); if (m.type === "chat") got.push(m.chat); } };
   live.join(ws);
