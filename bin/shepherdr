@@ -1065,6 +1065,50 @@ def working_tasks(root):
     return out
 
 
+
+_REMOTE_WORKING = r'''import glob, json, os
+home = os.path.expanduser("~")
+base = os.environ.get("SHEPHERDR_HOME")
+data = os.path.join(base, "data") if base and os.path.isabs(base) else os.path.join(os.environ.get("XDG_DATA_HOME") if os.path.isabs(os.environ.get("XDG_DATA_HOME", "")) else os.path.join(home, ".local/share"), "shepherdr")
+seen, out = set(), []
+for folder in (os.path.join(data, "tasks"), os.path.join(home, ".herdr/tasks")):
+    real = os.path.realpath(folder)
+    if real in seen: continue
+    seen.add(real)
+    for path in glob.glob(os.path.join(folder, "*.json")):
+        try:
+            with open(path) as f: doc = json.load(f)
+            for task in doc.get("tasks", []):
+                if task.get("state") == "running" and not task.get("archived"):
+                    out.append("%s-%s %s" % (doc.get("prefix") or "TASK", task.get("id"), task.get("title") or ""))
+        except (OSError, ValueError, AttributeError, TypeError):
+            raise SystemExit("Could not read a task list")
+print(json.dumps(out))'''
+
+def remote_working_tasks(root, run=subprocess.run):
+    """Check every machine in the old session before replacing its task engine."""
+    if os.path.realpath(root) != os.path.realpath(real_home()):
+        return []
+    env = {k: v for k, v in os.environ.items() if k not in ("HC_SESSION", "HC_SOCKET", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "HC_CORE_ID")}
+    try:
+        result = run(["hc", "machine", "ls", "--json"], capture_output=True, text=True, env=env, timeout=30)
+        if result.returncode: raise ValueError("machine list unavailable")
+        machines = json.loads(result.stdout)["machines"]
+        out = []
+        for m in machines:
+            if m.get("temporary"): continue
+            name = m.get("name")
+            if not name or m.get("state") != "connected":
+                out.append("%s: cannot check its tasks" % (name or "a linked machine")); continue
+            r = run(["hc", "exec", "--on", name, "--timeout", "30", "python3", "-c", _REMOTE_WORKING], capture_output=True, text=True, env=env, timeout=40)
+            if r.returncode: out.append("%s: cannot check its tasks" % name); continue
+            tasks = json.loads(r.stdout)
+            if not isinstance(tasks, list) or not all(isinstance(t, str) for t in tasks): raise ValueError("invalid task list")
+            out.extend("%s: %s" % (name, t) for t in tasks)
+        return out
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        return ["linked machines: cannot check their tasks"]
+
 def carry_old(rec, old):
     """What of 3.1's record still stands after the switch: the files it put outside the Herdr app (Shepherdr's own
     folder, the role instructions, the service's unit), its port, the helpers it set aside, the files it made."""
@@ -1249,7 +1293,7 @@ def cmd_install(a, update=False):
     # From 3.1 or older (either kind of install): one hard switch. Tasks that are working finish on the old version first.
     prev = (rec or old or {}).get("version")
     switching = bool(prev) and version_tuple(prev)[:2] < (3, 2)
-    working = working_tasks(root) if switching else []
+    working = (working_tasks(root) + remote_working_tasks(root)) if switching else []
     if working and not a.force and not a.dry_run:
         raise Stop(f"Shepherdr {VERSION} replaces {prev} in one switch, and {len(working)} task{'s are' if len(working) != 1 else ' is'} "
                    "still working on the old version:\n  " + "\n  ".join(working[:40])

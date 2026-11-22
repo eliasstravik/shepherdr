@@ -1236,3 +1236,25 @@ class AgentBrowser(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class RemoteSwitchGuard(unittest.TestCase):
+    def test_checks_linked_machines_and_waits_when_unreachable(self):
+        from unittest import mock
+        mod = installer()
+        calls = []
+        def fake(argv, **kwargs):
+            calls.append(argv)
+            if argv[1:3] == ["machine", "ls"]:
+                return subprocess.CompletedProcess(argv, 0, json.dumps({"machines": [{"name": "mac", "state": "connected"}, {"name": "laptop", "state": "disconnected"}]}), "")
+            return subprocess.CompletedProcess(argv, 0, json.dumps(["SHOP-3 Fix cart"]), "")
+        with mock.patch.object(mod, "real_home", return_value="/fake/home"):
+            result = mod.remote_working_tasks("/fake/home", run=fake)
+        self.assertEqual(result, ["mac: SHOP-3 Fix cart", "laptop: cannot check its tasks"])
+        self.assertEqual(calls[1][:4], ["hc", "exec", "--on", "mac"])
+
+    def test_machine_list_failure_does_not_allow_switch(self):
+        from unittest import mock
+        mod = installer()
+        with mock.patch.object(mod, "real_home", return_value="/fake/home"):
+            result = mod.remote_working_tasks("/fake/home", run=lambda *a, **kw: subprocess.CompletedProcess(a, 1, "", "offline"))
+        self.assertEqual(result, ["linked machines: cannot check their tasks"])
