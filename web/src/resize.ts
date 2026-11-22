@@ -27,7 +27,7 @@ function save(sizes: Partial<Record<Edge, number>>) {
 export function limit(edge: Edge, v: number, width: number, chatHeight: number): number {
   if (edge === 'side') return clamp(v, 180, Math.min(440, width * 0.4))
   if (edge === 'pane') return clamp(v, 280, Math.min(820, width * 0.6))
-  return clamp(v, 80, Math.max(200, Math.min(720, chatHeight - 260)))
+  return clamp(v, 80, Math.max(80, chatHeight - 260))
 }
 
 /** put the remembered sizes on the page */

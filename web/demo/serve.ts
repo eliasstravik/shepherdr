@@ -31,7 +31,7 @@ function action(a: Record<string, any>): unknown {
   if (a.type === 'send') {
     say(a.chat, { who: 'you', text: a.text, cid: a.cid })
     const text = String(a.text ?? '')
-    const place = a.chat.startsWith('p:') ? a.chat.slice(2).replace(':', '/') : EV
+    const place = state.normal.places.some((p) => p.chat === a.chat) ? state.normal.places.find((p) => p.chat === a.chat)!.id : EV
     if (/add a task to /i.test(text)) {
       const title = text.replace(/^.*?add a task to /i, '').replace(/,?\s*(?:and )?don['’]?t start it yet.*$/i, '').trim() || 'New task'
       const later = /don['’]?t start|not yet/i.test(text), id = `DEMO-${++n}`
