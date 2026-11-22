@@ -374,8 +374,45 @@ class CarryOver(unittest.TestCase):
                     docs[p["name"]] = {"value": p["value"], "version": have + 1}
                     out.append({"version": have + 1})
             return out
+        # each session's live terminals (hc ls / get / kill / run through co.hc_in), and what was asked of them
+        self.terms = {co.OLD_SESSION: {}, co.SESSION: {}}
+        self.hc_calls = []
+
+        def hc_in(session, *args, timeout=60):
+            self.hc_calls.append((session, list(args)))
+            t = self.terms[session]
+            if args[0] == "ls":
+                return 0, json.dumps({"terminals": [{"address": a, "state": "live"} for a in t]}), ""
+            if args[0] == "get":
+                return (0, json.dumps(t[args[1]]), "") if args[1] in t else (1, "", "no such terminal")
+            if args[0] == "kill":
+                return (0, "", "") if t.pop(args[1], None) else (1, "", "no such terminal")
+            if args[0] == "run":
+                rest = list(args[1:])
+                argv = rest[rest.index("--") + 1:]
+                opts, labels, i = {}, {}, 0
+                while rest[i] != "--":
+                    if rest[i] in ("--label", "--on", "--cwd", "--name"):
+                        if rest[i] == "--label":
+                            k, _, v = rest[i + 1].partition("=")
+                            labels[k] = v
+                        else:
+                            opts[rest[i]] = rest[i + 1]
+                        i += 2
+                    else:
+                        opts[rest[i]] = True
+                        i += 1
+                if self.run_fails:
+                    return 1, "", "the machine said no"
+                addr = f"t{len(t) + 50}"
+                t[(opts["--on"] + "/" if "--on" in opts else "") + addr] = {"address": addr, "state": "live", "labels": labels, "argv": argv,
+                                                                          "cwd": opts.get("--cwd"), "name": opts.get("--name"), "keep": bool(opts.get("--keep")),
+                                                                          "foreground": {"name": "claude"}, "status": {"state": "idle"}}
+                return 0, json.dumps({"address": addr}), ""
+            return 1, "", "unknown"
+        self.run_fails = False
         import herdr_task.machines as m
-        for target, name, value in ((co, "rpc", rpc), (co, "core_dir", lambda s: os.path.join(self.dir, "herdr-core", s)),
+        for target, name, value in ((co, "hc_in", hc_in), (co, "rpc", rpc), (co, "core_dir", lambda s: os.path.join(self.dir, "herdr-core", s)),
                                     (co, "old_scheduler", lambda dry: "none"), (m, "adopt", lambda dry=False: [{"name": "mini", "state": "here"}]),
                                     (co, "FOREIGN_SESSION", False), (co.time, "sleep", lambda s: None)):
             p = mock.patch.object(target, name, value)
@@ -478,6 +515,105 @@ class CarryOver(unittest.TestCase):
             self.assertEqual(co.old_scheduler(False), "not ours")
             self.assertEqual(len(calls), n + 1)
 
+    # ---- SHEP-295: Shepherdr's agents left in the default session ----
+
+    LAUNCH = ["env", "HERDR_BROWSER_TASK=shop#3", "/bin/bash", "-ic", '"$@"; exec "$0" -i', "/bin/bash", "claude", "--model", "opus", "Your brief"]
+
+    def agent(self, addr, labels, status="idle", session="c0ffee", **more):
+        lb = dict(labels)
+        if session:
+            lb["herdr.resume"] = json.dumps({"kind": "claude", "session": session, "argv": ["claude", "--model", "opus"]})
+        self.terms[self.co.OLD_SESSION][addr] = {"address": addr, "state": "live", "labels": lb, "argv": list(self.LAUNCH), "cwd": "/w/shop",
+                                                 "name": f"n-{addr.replace('/', '-')}", "keep": True, "foreground": {"name": "claude"},
+                                                 "status": {"state": status}, **more}
+
+    def runs(self):
+        return [(sess, a) for sess, a in self.hc_calls if a[0] in ("kill", "run")]
+
+    def test_idle_agents_move_into_shepherdrs_session_on_their_own_conversation(self):
+        co = self.co
+        self.agent("t1", {"herdr.role": "coordinator", "herdr.coordinator.space": "sp1", "herdr.space": "sp1"}, session="aaa")
+        self.agent("t2", {"herdr.task": "shop#3", "herdr.task.space": "sp1"}, status="done", session="bbb")
+        self.terms[co.OLD_SESSION]["t3"] = {"address": "t3", "state": "live", "labels": {}, "argv": ["vim"], "foreground": {"name": "vim"}}
+        dry = co.carry_over(dry=True)
+        self.assertEqual({x["address"]: x["state"] for x in dry["agents"]}, {"t1": "would-move", "t2": "would-move"})
+        self.assertEqual(self.runs(), [], "a dry run ends and starts nothing")
+        out = co.carry_over()
+        self.assertTrue(out["ok"])
+        self.assertEqual({x["address"]: x["state"] for x in out["agents"]}, {"t1": "moved", "t2": "moved"})
+        self.assertEqual(set(self.terms[co.OLD_SESSION]), {"t3"}, "only Shepherdr's agents leave the default session")
+        new = {k["labels"].get("herdr.role") or "worker": k for k in self.terms[co.SESSION].values()}
+        self.assertEqual(new["coordinator"]["argv"], self.LAUNCH[:6] + ["claude", "--model", "opus", "--resume", "aaa"])
+        self.assertEqual(new["worker"]["argv"][-2:], ["--resume", "bbb"])
+        self.assertEqual(new["worker"]["labels"], {"herdr.task": "shop#3", "herdr.task.space": "sp1"}, "same labels, its old record left behind")
+        self.assertEqual((new["worker"]["cwd"], new["worker"]["name"], new["worker"]["keep"]), ("/w/shop", "n-t2", True))
+        # each ended in the default session before it started in Shepherdr's (one conversation, never two at once)
+        order = [(sess, a[0]) for sess, a in self.runs()]
+        self.assertEqual(order, [(co.OLD_SESSION, "kill"), (co.SESSION, "run")] * 2)
+        # again: nothing left to move, nothing ended or started
+        n = len(self.runs())
+        self.assertEqual(co.carry_over()["agents"], [])
+        self.assertEqual(len(self.runs()), n)
+
+    def test_an_agent_at_work_or_already_in_shepherdrs_session_is_left_and_said(self):
+        co = self.co
+        self.agent("t1", {"herdr.task": "shop#3"}, status="working")
+        self.agent("t2", {"herdr.task": "shop#4"}, status="blocked")
+        self.agent("t4", {"herdr.role": "coordinator", "herdr.coordinator.space": "sp1"})
+        self.agent("t5", {"herdr.task": "shop#5"}, session=None)   # no record of its conversation
+        self.terms[co.SESSION]["t9"] = {"address": "t9", "state": "live", "labels": {"herdr.role": "coordinator", "herdr.coordinator.space": "sp1"},
+                                        "foreground": {"name": "claude"}}
+        out = co.carry_over()
+        rows = {x["address"]: x for x in out["agents"]}
+        self.assertEqual({a: x["state"] for a, x in rows.items()}, {"t1": "waiting", "t2": "waiting", "t4": "kept", "t5": "stuck"})
+        self.assertEqual(self.runs(), [], "nothing ended, nothing in Shepherdr's session replaced")
+        self.assertIn("once it's idle", rows["t1"]["why"])
+        self.assertIn("runs its own already", rows["t4"]["why"])
+        self.assertIn("hc kill t4", rows["t4"]["why"])
+        self.assertIn("herdr-task resume", rows["t5"]["why"])
+        self.assertEqual(rows["t1"]["name"], "task #3 (shop)")
+        self.assertTrue(out["ok"], "what waits isn't a failure")
+
+    def test_the_terminal_running_it_and_a_parent_whose_children_stay_are_never_ended(self):
+        co = self.co
+        self.agent("t1", {"herdr.role": "coordinator", "herdr.coordinator.space": "sp1"})
+        self.agent("t2", {"herdr.task": "shop#3"}, parent="t1", die_with_parent=True)
+        self.agent("t3", {"herdr.task": "shop#4"}, status="working", parent="t1", die_with_parent=True)
+        with self.mock.patch.dict(os.environ, {"SHEPHERDR_CARRY_CALLER": "t2"}):
+            rows = {x["address"]: x for x in co.carry_over()["agents"]}
+        self.assertEqual({a: x["state"] for a, x in rows.items()}, {"t1": "waiting", "t2": "waiting", "t3": "waiting"})
+        self.assertIn("runs this carry-over", rows["t2"]["why"])
+        self.assertIn("would end with it", rows["t1"]["why"])
+        self.assertEqual(self.runs(), [])
+        # its children idle now: they move first, then it
+        self.terms[co.OLD_SESSION]["t3"]["status"] = {"state": "idle"}
+        rows = {x["address"]: x["state"] for x in co.carry_over()["agents"]}
+        self.assertEqual(rows, {"t1": "moved", "t2": "moved", "t3": "moved"})
+        kills = [a[1] for sess, a in self.runs() if a[0] == "kill"]
+        self.assertEqual(kills[-1], "t1")
+
+    def test_another_machines_agent_moves_there_and_a_failed_start_says_how_to_go_on(self):
+        co = self.co
+        self.agent("mini/t3", {"herdr.task": "shop#3"})
+        out = co.carry_over()
+        [row] = out["agents"]
+        self.assertEqual((row["state"], row["to"], row["name"]), ("moved", "mini/t50", "task #3 (shop) on mini"))
+        [(_, run)] = [(s, a) for s, a in self.runs() if a[0] == "run"]
+        self.assertEqual(run[run.index("--on") + 1], "mini")
+        self.agent("t4", {"herdr.task": "shop#4"})
+        self.run_fails = True
+        out = co.carry_over()
+        [row] = out["agents"]
+        self.assertEqual(row["state"], "failed")
+        self.assertIn("herdr-task resume", row["why"])
+        self.assertFalse(out["ok"])
+
+    def test_agents_only_is_doctors_read_only_look(self):
+        self.agent("t1", {"herdr.task": "shop#3"})
+        out = self.co.carry_over(dry=True, agents_only=True)
+        self.assertEqual(([x["state"] for x in out["agents"]], out["documents"], out["machines"]), (["would-move"], [], []))
+        self.assertEqual(self.runs(), [])
+
     def test_the_default_session_is_asked_without_a_session_name(self):
         from unittest import mock
         with mock.patch.dict(os.environ, {"HC_SESSION": "shepherdr", "HC_TERMINAL_ID": "t1", "HC_SOCKET": "/x"}):
@@ -518,11 +654,11 @@ class InstallerCarriesOver(unittest.TestCase):
         self.assertEqual(argv[1:], [os.path.join(os.path.dirname(argv[1]), "herdr-task"), "carry-over", "--json"])
         self.assertTrue(argv[1].endswith(".local/share/shepherdr/mods/tasks/bin/herdr-task"), argv[1])
         self.assertNotIn("HC_SESSION", env)
-        self.assertEqual((rec, notes), ({"carry_over": "done"}, []))
+        self.assertEqual((rec, notes), ({"carry_over": "done", "carry_over_agents": "done"}, []))
 
     def test_what_waits_is_a_note_and_the_next_update_tries_again(self):
         _, rec, notes = self.go({"ok": True, "machines": [], "documents": [{"name": "shepherdr.host", "state": "waiting", "why": "it names mini"}], "scheduler": "none"})
-        self.assertEqual(rec, {"carry_over": "waiting"})
+        self.assertEqual(rec, {"carry_over": "waiting", "carry_over_agents": "done"})
         self.assertIn("shepherdr.host (it names mini)", notes[0])
         for bad in (None, OSError("no python")):
             _, rec, notes = self.go(bad, code=1)
@@ -539,7 +675,51 @@ class InstallerCarriesOver(unittest.TestCase):
         body = text[text.index("def cmd_install("):text.index("# ---- doctor")]
         self.assertLess(body.index("move_data(r, a, home)"), body.index("carry_over_session(r, rec, home)"))
         self.assertLess(body.index("carry_over_session(r, rec, home)"), body.index("install_service(r, rec, home)"))
-        self.assertIn('if switching or rec.get("carry_over") == "waiting":', body)
+        self.assertIn('if switching or rec.get("carry_over") == "waiting" or rec.get("carry_over_agents") != "done":', body)
+
+    def test_agents_left_in_the_default_session_are_said_and_the_next_update_looks_again(self):
+        _, rec, notes = self.go({"ok": True, "machines": [], "documents": [], "scheduler": "none", "agents": [
+            {"name": "the Assistant of space sp1", "address": "t1", "state": "moved", "to": "t7"},
+            {"name": "task #3 (shop)", "address": "t2", "state": "waiting", "why": "it's at work now"}]})
+        self.assertEqual(rec, {"carry_over": "done", "carry_over_agents": "waiting"})
+        self.assertEqual(notes, ["task #3 (shop) (t2) still runs in herdr-core's default session, outside Shepherdr: it's at work now"])
+
+    def test_an_agent_running_the_update_in_the_default_session_is_named_to_herdr_task(self):
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"HC_TERMINAL_ID": "t4", "HC_SESSION": "default"}):
+            ran, _, _ = self.go({"ok": True})
+        self.assertEqual(ran[0][1].get("SHEPHERDR_CARRY_CALLER"), "t4")
+        self.assertNotIn("HC_TERMINAL_ID", ran[0][1])
+        with mock.patch.dict(os.environ, {"HC_TERMINAL_ID": "t4", "HC_SESSION": "shepherdr"}):
+            ran, _, _ = self.go({"ok": True})
+        self.assertNotIn("SHEPHERDR_CARRY_CALLER", ran[0][1], "a terminal in Shepherdr's session isn't in the default one")
+
+    def test_doctor_asks_herdr_task_read_only_and_names_each_agent_left(self):
+        root = scratch(self)
+        helper = os.path.join(root, self.sh.SHARE, "mods", "tasks", "bin", "herdr-task")
+        os.makedirs(os.path.dirname(helper))
+        open(helper, "w").close()
+        ran = []
+        answer = {"agents": [{"name": "the Assistant of space sp1", "address": "t1", "state": "would-move"},
+                             {"name": "task #3 (shop)", "address": "t2", "state": "kept", "why": "Shepherdr's session runs its own already"}]}
+
+        def run(argv, **k):
+            ran.append(argv)
+            return subprocess.CompletedProcess(argv, 0, json.dumps(answer), "")
+        from unittest import mock
+        with mock.patch.object(self.sh.shutil, "which", lambda n: "/x/hc"):
+            lines = self.sh.agents_left_behind(root, run=run)
+            self.assertEqual(ran[0][1:], [helper, "carry-over", "--agents", "--dry-run", "--json"])
+            self.assertEqual(lines, ["the Assistant of space sp1 (t1) still runs in herdr-core's default session, outside Shepherdr: "
+                                     "`herdr-task carry-over` moves it into Shepherdr's session",
+                                     "task #3 (shop) (t2) still runs in herdr-core's default session, outside Shepherdr: "
+                                     "Shepherdr's session runs its own already"])
+            answer = {"agents": []}
+            self.assertEqual(self.sh.agents_left_behind(root, run=run), [])
+        with open(os.path.join(ROOT, "bin", "shepherdr")) as f:
+            text = f.read()
+        doctor = text[text.index("def cmd_doctor("):text.index("# ---- uninstall")]
+        self.assertIn("bad += agents_bad", doctor, "an agent left behind isn't whole")
 
 
 class TaskSpaceByRepo(unittest.TestCase):

@@ -1,6 +1,7 @@
 """The installer against scratch roots (--root): install, run again, update with a changed file, the switch from a
 3.1 Herdr-window install, uninstall. Never touches the real home."""
 import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
+import contextlib
 import re
 import json
 import os
@@ -9,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import fake_ab
 from importlib.machinery import SourceFileLoader
 
@@ -637,6 +639,118 @@ class Install(unittest.TestCase):
         finally:
             sh.bun_path, sh.calls_on, sh.subprocess.run, sh.service_answers = saved
             shutil.rmtree(root, ignore_errors=True)
+
+    def test_the_unit_puts_the_service_in_shepherdrs_session(self):
+        """SHEP-295: the service and every agent it starts land in Shepherdr's herdr-core session ("shepherdr"), never in
+        the default one: the unit says HC_SESSION, an update writes it again (keeping a hand-added one the same), and
+        doctor finds a unit without it."""
+        sh = installer()
+        for platform, want in (("darwin", "<key>HC_SESSION</key><string>shepherdr</string>"), ("linux", "Environment=HC_SESSION=shepherdr\n")):
+            with mock.patch.object(sh.sys, "platform", platform):
+                rel, text = sh.unit_text(self.root, "/usr/bin/bun")
+                self.assertIn(want, text, platform)
+                self.assertNotIn("SHEPHERDR_SESSION", text, "Shepherdr's own session needs no name of its own")
+        # the real home with another session named (a throwaway core): that one, both ways
+        with mock.patch.object(sh, "real_home", lambda: self.root), mock.patch.dict(os.environ, {"SHEPHERDR_SESSION": "try"}):
+            self.assertEqual(sh.session_env(self.root), {"HC_SESSION": "try", "SHEPHERDR_SESSION": "try"})
+        run("install", "--root", self.root, "--yes")
+        unit = self.p(UNIT)
+        self.assertIn("HC_SESSION", open(unit).read())
+        self.assertNotIn("HC_SESSION=shepherdr", run("doctor", "--root", self.root, ok=False).stdout)
+        # a unit an older install wrote: doctor says it, and the update writes it again
+        with open(unit) as f:
+            old = "".join(line for line in f if "HC_SESSION" not in line).replace("<key>HC_SESSION</key><string>shepherdr</string>", "")
+        with open(unit, "w") as f:
+            f.write(old)
+        d = run("doctor", "--root", self.root, ok=False)
+        self.assertEqual(d.returncode, 1, d.stdout)
+        self.assertIn("✗ the Shepherdr service's unit doesn't set HC_SESSION=shepherdr", d.stdout)
+        run("update", "--root", self.root)
+        self.assertIn("HC_SESSION", open(unit).read())
+        self.assertNotIn("HC_SESSION=shepherdr", run("doctor", "--root", self.root, ok=False).stdout)
+
+    def install_in_place(self, platform="linux", fail_at=None, no_bun=False):
+        """cmd_install as on the real home (this scratch root stands in for it), with fake systemctl/launchctl and
+        nothing reaching herdr-core: [(event, what)] in the order they happened."""
+        sh = installer()
+        events = []
+        real_write = sh.atomic_write
+
+        def fake_run(argv, **k):
+            events.append(("run", list(argv)))
+            return subprocess.CompletedProcess(argv, 1 if "print" in argv else 0, "", "")
+
+        def write(path, data, mode=None):
+            events.append(("write", os.path.relpath(path, self.root)))
+            return real_write(path, data, mode)
+
+        def install_service(r, rec, home):
+            events.append(("install_service", home))
+            if not no_bun:
+                r.service_started = True
+
+        def boom(*a, **k):
+            raise sh.Stop("can't remove something: Permission denied")
+        patches = [(sh, "real_home", lambda: self.root), (sh.sys, "platform", platform), (sh.subprocess, "run", fake_run),
+                   (sh, "atomic_write", write), (sh, "install_service", install_service), (sh, "has_unit", lambda root: True),
+                   (sh, "service_running", lambda root: True), (sh, "calls_on", lambda root: 0), (sh, "check_tools", lambda home: ([], [])),
+                   (sh, "move_data", lambda r, a, home: None), (sh, "carry_over_session", lambda r, rec, home: None),
+                   (sh, "say_web", lambda *a: None), (sh, "ensure_agent_browser", lambda r, home: None), (sh, "say", lambda *a: None),
+                   (sh, "install_checks", lambda r, rec: ([], [])), (sh.time, "sleep", lambda s: None)]
+        if fail_at:
+            patches.append((sh, fail_at, boom))
+        with contextlib.ExitStack() as st:
+            for target, name, value in patches:
+                st.enter_context(mock.patch.object(target, name, value))
+            code = sh.main(["install", "--root", self.root, "--no-build", "--yes"])
+        return code, events
+
+    def test_the_service_stops_while_files_move_and_starts_after(self):
+        """SHEP-295: the running service read files while an update moved them and crashed (ENOENT). It stops before
+        the first file changes; install_service starts it again on the new files."""
+        code, events = self.install_in_place()
+        self.assertEqual(code, 0)
+        stop = events.index(("run", ["systemctl", "--user", "stop", "shepherdr.service"]))
+        first = next(i for i, e in enumerate(events) if e[0] == "write" and e[1].startswith(".local/share/shepherdr/"))
+        self.assertLess(stop, first, "stopped before the first file changes")
+        self.assertGreater(events.index(("install_service", True)), first)
+        self.assertNotIn(("run", ["systemctl", "--user", "start", "shepherdr.service"]), events, "install_service started it")
+
+    def test_an_update_failing_halfway_starts_the_service_again(self):
+        for platform, start in (("linux", ["systemctl", "--user", "start", "shepherdr.service"]),
+                                ("darwin", ["launchctl", "bootstrap", f"gui/{os.getuid()}", self.p("Library/LaunchAgents/dev.shepherdr.service.plist")])):
+            with self.subTest(platform):
+                code, events = self.install_in_place(platform, fail_at="link_helpers")
+                self.assertEqual(code, 1)
+                runs = [e[1] for e in events if e[0] == "run"]
+                stopped = [x for x in runs if x[:2] in (["systemctl", "--user"], ["launchctl", "bootout"]) and ("stop" in x or "bootout" in x)]
+                self.assertTrue(stopped, runs)
+                self.assertIn(start, runs, "the service comes back after a failed update")
+                self.assertNotIn(("install_service", True), events)
+        # no bun: install_service writes no unit and starts nothing; the old one comes back
+        code, events = self.install_in_place(no_bun=True)
+        self.assertIn(("run", ["systemctl", "--user", "start", "shepherdr.service"]), events)
+
+    def test_a_service_that_wasnt_running_or_a_voice_call_isnt_stopped(self):
+        sh = installer()
+        r = sh.Run(self.root, False)
+        with mock.patch.object(sh.subprocess, "run", lambda argv, **k: self.fail(f"ran {argv}")):
+            with mock.patch.object(sh, "has_unit", lambda root: True), mock.patch.object(sh, "service_running", lambda root: False):
+                self.assertFalse(sh.stop_service(r, True))
+            with mock.patch.object(sh, "has_unit", lambda root: True), mock.patch.object(sh, "service_running", lambda root: True), \
+                    mock.patch.object(sh, "calls_on", lambda root: 1):
+                self.assertFalse(sh.stop_service(r, True))
+            self.assertFalse(sh.stop_service(r, False), "a scratch root runs no service")
+
+    def test_the_new_installer_does_the_stopping(self):
+        """An update runs the installed copy, which hands over to the source's own bin/shepherdr (hand_over) before it
+        does anything: the stop is in cmd_install, which the new side runs."""
+        with open(SHEPHERDR) as f:
+            text = f.read()
+        main = text[text.index("def main("):]
+        self.assertLess(main.index("hand_over(a, argv)"), main.index("cmd_install(a, update="))
+        body = text[text.index("def cmd_install("):text.index("def finish_install(")]
+        self.assertIn("stopped = stop_service(r, home)", body)
 
     def test_unit_path_has_hc(self):
         """GitHub #1048: the unit's PATH holds the folder hc was found in, wherever that is (a Nix profile, not

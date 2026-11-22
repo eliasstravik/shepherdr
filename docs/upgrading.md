@@ -19,7 +19,10 @@ What the update does, in order:
    hooks. A file you changed there goes to the backup folder first, and the update says where. Shepherdr's own files
    go in `~/.local/share/shepherdr`.
 4. It carries your spaces, groups and linked machines into Shepherdr's own herdr-core session, and removes 3.1's
-   scheduler from the default one. `herdr-task carry-over` tries again when a machine couldn't be reached.
+   scheduler from the default one. Shepherdr's agents still in the default session (an Assistant, a task's agent)
+   move too, each on its own conversation, once it's idle; one at work waits, and the update says so.
+   `herdr-task carry-over` tries again when a machine couldn't be reached or an agent was busy. `shepherdr doctor`
+   names any agent still left behind.
 5. It starts the service and prints the app's link.
 6. It converts old artifacts to pages, once. `herdr-artifact convert --all` tries again if that failed.
 
@@ -49,7 +52,8 @@ machine that serves the app, or had its own 3.1 install, is switched with `sheph
 
 ## Later updates
 
-The same three commands. Shepherdr's own folder is replaced whole. An instructions file you changed stays, with the
+The same three commands. The service stops while the files change and starts again after, also when an update fails
+halfway. Shepherdr's own folder is replaced whole. An instructions file you changed stays, with the
 new one beside it as `.new`. Agents keep running in herdr-core. Until `shepherdr doctor` passes, the sync to other
 machines waits.
 
