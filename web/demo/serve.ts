@@ -47,7 +47,7 @@ function action(a: Record<string, any>): unknown {
       const raw = text.replace(/^(please\s+)?remind me\s+(to\s+)?/i, '').replace(/[\s,]*\bevery\s+.+$/i, '').replace(/[\s,]*\b(?:tomorrow|tonight|next week|(?:on\s+)?(?:mon|tues|wednes|thurs|fri|satur|sun)day)\b.*$/i, '')
       const title = clean(raw) || 'Reminder', id = `EV-S${++n}`
       const when = repeating ? `Every ${repeating[1]}` : `Once · ${clean((day?.[1] ?? 'tomorrow').replace(/^on\s+/i, ''))} 9:00`
-      each((snap) => { (snap.automations[from] ??= []).push({ id, name: title, place: from, when, what: text, on: true, next: [], once: !repeating }) })
+      each((snap) => { (snap.automations[`demo:${id}`] ??= []).push({ id, name: title, place: from, when, what: text, on: true, next: [], once: !repeating }) })
       const spoken = when.replace('Once · ', 'once, ').replace(/^Every/, 'every')
       setTimeout(() => say(a.chat, { text: `Scheduled “${title}”: ${spoken}. It is in Tasks under Scheduled${repeating ? '.' : ' and leaves the list after it runs.'}` }), 500)
     } else if (/\b(add|make|build|fix|create|change|update|write|research|check)\b/i.test(text) && !a.chat.endsWith('/worker')) {
