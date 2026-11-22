@@ -201,6 +201,17 @@ function Messages({ thread }: { thread: Thread }) {
     const sc = end.current?.closest<HTMLElement>('.scroll')
     if (sc && stuck.current) sc.scrollTop = sc.scrollHeight
   })
+  // a picture that loads later (a card's, a tile's) grows the chat: it stays at the newest message
+  useEffect(() => {
+    const sc = end.current?.closest<HTMLElement>('.scroll')
+    const box = end.current?.parentElement
+    if (!sc || !box) return
+    const ro = new ResizeObserver(() => {
+      if (stuck.current) sc.scrollTop = sc.scrollHeight
+    })
+    ro.observe(box)
+    return () => ro.disconnect()
+  }, [thread.chat])
   useEffect(() => {
     if (!jump) return
     const el = document.querySelector(`[data-msg="${CSS.escape(jump)}"], [data-card="${CSS.escape(jump)}"]`)

@@ -1255,6 +1255,9 @@ export interface PullRequest {
 export type WorktreeAsk = { task: string } & ({ what: 'dir'; path?: string } | { what: 'marks' } | { what: 'files' } | { what: 'file'; path: string } | { what: 'diff' } | { what: 'patch'; path: string } | { what: 'pr' })
 
 export interface Snapshot {
+  /** 3.2: each chat's and task's screen where its agent has one open or needs the person's hands, by "chat:<space>",
+   *  "task:<id>" or "machine:<key>" (none: idle, and yours to use) */
+  screens?: Record<string, ScreenInfo>
   /** 3.2: what Settings shows, for everything and for each space that set its own */
   config?: Config
   /** 3.2: the root space's id: one agent in a home folder on the serving machine */
@@ -1496,4 +1499,19 @@ export interface Config {
   addMachine?: string
   /** machines with a real screen whose desktop can be opened (Settings › Machines) */
   desktops?: string[]
+}
+
+/* ---------- 3.2: screens, an agent's browser and desktop ---------- */
+
+export interface ScreenInfo {
+  /** its tab in the space's browser: the address it shows */
+  b?: { url: string; title?: string }
+  /** its desktop: on which machine, its own virtual display or the Mac's one real screen (shared) */
+  d?: { of: string; own: boolean; busy?: string }
+  /** the agent is using it now (else it is idle: yours to use, with no bar at the bottom) */
+  active?: boolean
+  /** who drives: the agent, or the person after Take over */
+  driver?: 'agent' | 'you'
+  /** the agent is stuck on a step only a person can do: what, in a few words; settled: how it ended */
+  hands?: { what: string; settled?: 'done' | 'skip' }
 }

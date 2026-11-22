@@ -1,5 +1,6 @@
 @import "inter-ui/inter-variable.css";
 @import "./ds.css";
+@import "@xterm/xterm/css/xterm.css";
 
 /* ---- beyond the design system's own sheet: what real content needs ---- */
 

@@ -105,6 +105,12 @@ export function snapshot(mode: 'normal' | 'empty' | 'down' = 'normal'): Snapshot
     settings: [],
     config,
     warnings: empty ? [] : down ? [{ id: 'm:vm', kind: 'machine', text: "Can't reach vm · last seen 14:02" }] : [{ id: 'u:claude', kind: 'usage', text: "You've used 76% of this week's Claude plan" }, { id: 'm:vm', kind: 'machine', text: 'vm: disk nearly full' }],
+    screens: empty ? {} : {
+      'task:SHOP-17': { b: { url: 'https://billing.example.com/login' }, d: { of: 'mac-mini', own: false, busy: 'Bigger checkout button on phones' }, active: true, driver: 'agent', hands: { what: 'Enter the sign-in code' } },
+      'task:SHOP-15': { b: { url: 'http://localhost:3000/checkout' }, d: { of: 'mac-mini', own: false }, active: true, driver: 'agent' },
+      'task:vm:GARDEN-3': { d: { of: 'vm', own: true }, active: true, driver: 'agent' },
+      'machine:mac-mini': { d: { of: 'mac-mini', own: false, busy: 'Bigger checkout button on phones' } },
+    },
     off: [],
   }
 }

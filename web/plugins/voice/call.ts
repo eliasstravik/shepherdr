@@ -242,11 +242,17 @@ function connect(resume: boolean) {
       playAt = 0
       phase = 'listening'
     }
+    // the caption line: what it heard and what it says (nothing of a call is written into a chat)
+    if ((m.type === 'said' || m.type === 'heard') && typeof m.text === 'string') caption?.(m.text, m.type === 'heard' ? 'you' : 'voice')
     if (m.type === 'error') { ws = null; h.onError(m.message ?? 'The voice call could not start.') }
     if (m.type === 'ended') { over = true; overWhy = typeof m.why === 'string' ? m.why.slice(0, 200) : null }
   }
   sock.onclose = () => dropped(sock)
 }
+
+/** who listens for the caption line's words */
+let caption: ((text: string, who: 'you' | 'voice') => void) | null = null
+export const onCaption = (f: typeof caption) => void (caption = f)
 
 /** SHEP-173: a muted call sends nothing; a word now and then keeps every hop (the service, the proxy) from taking the
  *  socket for idle */

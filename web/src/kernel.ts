@@ -109,6 +109,8 @@ export interface Registry {
   drawer: { when: (ui: UI, thread: Thread) => boolean; View: FC<{ thread: Thread }> }[]
   /** the list's brand row, before Search */
   sideHead: FC[]
+  /** takes the whole middle column (an artifact expanded to the middle) */
+  middle: { when: (ui: UI) => boolean; View: FC }[]
   /** whole-screen layers */
   overlays: FC[]
   /** thin lines at the very top (the link is gone) */
@@ -125,7 +127,7 @@ export const registry: Registry = {
   views: {},
   header: [], taskHeader: [], panes: [], bar: [], barEnd: [], barAbove: [], spaceMenu: [], taskMenu: [], messageParts: [], messageEdge: [],
   messageMenu: [], chatTail: [], chatBody: [], aboveBox: [], boxButtons: [], drawer: [], sideHead: [], overlays: [], topBars: [], settings: [],
-  keys: [], voiceWake: null,
+  keys: [], voiceWake: null, middle: [],
 }
 
 export interface ClientPlugin {

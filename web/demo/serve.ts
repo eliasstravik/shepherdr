@@ -97,6 +97,24 @@ const PAGES: Record<string, string> = {
 }
 const page = (id: string) => `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{color-scheme:light dark}body{margin:0;padding:16px;font:16px/24px system-ui,sans-serif}h2{font-size:18px;margin:0 0 12px}.r{display:flex;justify-content:space-between;align-items:center;min-height:40px;border-top:1px solid #8883}.pay{margin-top:12px;height:40px;padding:0 12px;border:0;border-radius:8px;background:CanvasText;color:Canvas;font:inherit;font-weight:500}.l{height:8px;border-radius:4px;background:#8884;margin:12px 0}.bar{height:6px;border-radius:3px;background:#8886}.bar.g{background:#15803d}p{color:#737373;font-size:14px}</style>${PAGES[id] ?? `<h2>${artifacts.find((x) => x.id === id)?.title ?? id}</h2>${[92, 78, 85, 40, 88, 64].map((w) => `<div class="l" style="width:${w}%"></div>`).join('')}`}`
 
+/** a stand-in for the live picture of an agent's browser */
+function shot(key: string) {
+  const login = key.includes('SHOP-17')
+  const t = (x: number, y: number, text: string, size = 13, fill = '#171717', weight = 400) => `<text x="${x}" y="${y}" font-family="system-ui,sans-serif" font-size="${size}" font-weight="${weight}" fill="${fill}">${text}</text>`
+  const body = login
+    ? t(200, 70, 'Check your phone', 16, '#171717', 600) + t(200, 94, 'Enter the 6-digit code we sent you.', 12, '#525252') + '<rect x="200" y="108" width="240" height="34" rx="6" fill="#fff" stroke="#d4d4d4"/>' + t(212, 130, '000000', 13, '#a3a3a3') + '<rect x="200" y="152" width="240" height="34" rx="6" fill="#171717"/>' + t(292, 174, 'Continue', 13, '#fff', 500)
+    : t(24, 40, 'Your basket', 16, '#171717', 600) + '<path d="M24 56H616M24 96H616" stroke="#e5e5e5"/>' + t(24, 82, 'Garden gloves') + t(566, 82, '€12.00') + t(24, 122, 'Total') + t(566, 122, '€12.00') + '<rect x="24" y="140" width="592" height="34" rx="6" fill="#171717"/>' + t(294, 162, 'Pay now', 13, '#fff', 500)
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 ${login ? 260 : 320}"><rect width="640" height="320" fill="#fff"/>${body}</svg>`
+}
+
+/** a stand-in for the picture taken of a page when it is published */
+function thumb(id: string, dark: boolean) {
+  const [bg, ink, soft] = dark ? ['#1e1e1e', '#a3a3a3', '#3a3a3a'] : ['#f5f5f5', '#737373', '#dcdcdc']
+  const bar = (y: number, w: number, c = soft, h = 6) => `<rect x="16" y="${y}" width="${w}" height="${h}" rx="3" fill="${c}"/>`
+  const body = id === 'a-mock' ? bar(16, 150, ink, 10) + bar(38, 170) + bar(52, 110) + `<rect x="16" y="70" width="120" height="20" rx="5" fill="${dark ? '#fafafa' : '#0a0a0a'}"/>` : id === 'a-shop12' ? bar(20, 260) + bar(36, 84, '#15803d') : id === 'a-deck' ? `<rect x="64" y="70" width="190" height="10" rx="5" fill="${ink}"/><rect x="100" y="94" width="110" height="6" rx="3" fill="${soft}"/>` : bar(16, 150, ink, 10) + bar(38, 260) + bar(52, 170) + bar(66, 260) + bar(80, 110)
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200"><rect width="320" height="200" fill="${bg}"/>${body}</svg>`
+}
+
 Bun.serve<{ mode: 'normal' | 'empty' | 'down'; watch: string[] }, never>({
   hostname: '127.0.0.1',
   port,
@@ -107,10 +125,12 @@ Bun.serve<{ mode: 'normal' | 'empty' | 'down'; watch: string[] }, never>({
       const ref = new URL(req.headers.get('referer') ?? url).searchParams.get('case') ?? url.searchParams.get('case')
       return server.upgrade(req, { data: { mode: ref === 'empty' || ref === 'down' ? ref : 'normal', watch: [] } }) ? undefined : new Response('no', { status: 400 })
     }
+    if (path === '/api/screen/shot') return new Response(shot(url.searchParams.get('key') ?? ''), { headers: { 'content-type': 'image/svg+xml' } })
     if (path === '/api/me') return Response.json({ login: 'sam', off: [] })
     if (path === '/api/action') return Response.json(action((await req.json()) as Record<string, any>) ?? { ok: true })
     if (path === '/api/upload') return Response.json({ path: `/tmp/demo/${Date.now()}`, name: 'file' })
     const m = /^\/api\/artifacts\/([^/]+)\/(page|thumb)/.exec(path)
+    if (m?.[2] === 'thumb') return new Response(thumb(decodeURIComponent(m[1]!), url.searchParams.has('dark')), { headers: { 'content-type': 'image/svg+xml' } })
     if (m) return new Response(page(decodeURIComponent(m[1]!)), { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "sandbox allow-scripts allow-forms" } })
     if (path.startsWith('/api/')) return new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } })
     // under any path (tailscale serve --set-path /name): the file as asked, else without its first part

@@ -87,7 +87,6 @@ function ChatColumn({ snap }: { snap: Snapshot }) {
       <div className="foot">
         {!down && registry.aboveBox.map((a, i) => <a.View key={i} thread={thread} />)}
         {!down && !Body && Box && <Box thread={thread} placeholder={placeholderOf(snap, thread)} />}
-        {down && isEverything(snap, thread.place) ? null : null}
       </div>
       {drawer && (
         <>
@@ -190,6 +189,7 @@ export function App() {
   if (!snap) return <div className="app"><div className="device" /></div>
   const hidden = sideHidden(ui)
   const Search = registry.views.search
+  const Middle = registry.middle.find((m) => m.when(ui))
   return (
     <div className={cx('app', ui.phone && 'phone')}>
       <div className="device">
@@ -200,7 +200,7 @@ export function App() {
               <List snap={snap} />
             </nav>
           )}
-          <ChatColumn snap={snap} />
+          {Middle ? <section className="col chat"><Middle.View /></section> : <ChatColumn snap={snap} />}
           {ui.pane && <PaneColumn />}
           <div className="rz rzs" {...edge('side')} />
           <div className="rz rzp" {...edge('pane')} />
