@@ -265,7 +265,10 @@ function Messages({ thread }: { thread: Thread }) {
       if (m.question.title && !m.question.command && !m.question.plan && !m.question.parts?.length && m.question.sent === undefined && !m.question.closed) out.push(<div key={`q:${k}`} className={cx('b', gap && 'gap')}>{m.question.title}</div>)
       out.push(<QuestionCard key={k} q={m.question} chat={m.question.by?.chat ?? thread.chat} place={place} />)
     } else if (m.secret) out.push(<SecretCard key={k} ask={m.secret} chat={thread.chat} />)
-    else if (m.news || m.card) {
+    else if (m.news && (m.news.mark === 'started' || m.news.mark === 'ready' || m.news.mark === 'done')) {
+      // what the app shows by itself from the task's status (its review card, its Done line): not said twice
+      continue
+    } else if (m.news || m.card) {
       const taskId = m.news?.task ?? m.card?.task
       const t = taskOf(snap, taskId)
       if (t && !thread.task && t.id !== lastRef) out.push(<TaskRef key={`r:${k}`} id={t.id} title={t.name} />)
@@ -274,6 +277,7 @@ function Messages({ thread }: { thread: Thread }) {
       if (text) out.push(<Bubble key={k} msg={{ ...m, text }} chat={stub} thread={thread} gap={false} />)
     }
     // when its agent was started again, earlier messages stay, above a thin "New session" line
+    else if (m.brief && thread.task && !/new session/i.test(m.brief.label)) continue
     else if (m.brief) out.push(/new session/i.test(m.brief.label) ? <div key={k} className="time" role="separator">New session</div> : <div key={k} className="ref"><I n="note" c="s16" /><span>{m.brief.label}</span></div>)
     else if (m.ended) out.push(<DoneRow key={k}>{m.text ?? 'Ended'}</DoneRow>)
     else if (m.error) out.push(<div key={k} className="ref c-red"><I n="warn" c="s16" /><span>{m.text}</span></div>)

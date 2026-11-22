@@ -221,7 +221,8 @@ export function StoppedCard({ t }: { t: Task }) {
 /** In a chat: the cards of the tasks that need the person there (a review, a stopped agent), each where it came up.
  *  The app puts them there from each task's status, not an agent. In a task: its own review or stopped card. */
 function taskCards(snap: Snapshot, thread: Thread): { key: string; at?: number; node: ReactNode }[] {
-  const reviewing = (t: Task) => tstate(t) === 'ready' || t.status === 'merging' || !!t.accepting
+  // a task handed in: its card while it waits, and where the card was, one quiet line once it is done
+  const reviewing = (t: Task) => tstate(t) === 'ready' || t.status === 'merging' || !!t.accepting || (tstate(t) === 'done' && !t.quiet && !!t.needsAtWas)
   const halted = (t: Task) => tstate(t) === 'ask' && !!t.stopped && t.stopped.by !== 'you'
   if (thread.task) {
     const t = thread.task
@@ -229,7 +230,7 @@ function taskCards(snap: Snapshot, thread: Thread): { key: string; at?: number; 
   }
   const mine = tasksIn(snap, thread.place)
   return [
-    ...mine.filter(reviewing).map((t) => ({ key: `review:${t.id}`, at: t.needsAt, node: <ReviewCard t={t} ctx="chat" /> })),
+    ...mine.filter(reviewing).map((t) => ({ key: `review:${t.id}`, at: t.needsAt ?? t.needsAtWas, node: <ReviewCard t={t} ctx="chat" /> })),
     ...mine.filter(halted).map((t) => ({
       key: `stopped:${t.id}`,
       at: t.needsAt,

@@ -235,7 +235,8 @@ export function enrich(snap: Snapshot, f: Facts): Snapshot {
     const after = Array.isArray(x.after) && x.after.length ? titleOf(r, x.after[0]) : undefined;
     return {
       ...t,
-      repo: r.branch || r.pr || (r.worktree && r.worktree !== r.folder) ? "branch" : s?.git ? "folder" : undefined,
+      // on its own branch or worktree (also one set to, not started yet), changed in the folder itself, or not a repo
+      repo: r.branch || r.pr || (r.worktree && r.worktree !== r.folder) || (x.mode === "worktree" && s?.git) ? "branch" : s?.git ? "folder" : undefined,
       ...(stopped ? { stopped, status: "need" as const } : {}),
       ...(blocked ? { blocked } : {}),
       ...(x.merged ? { merged: true } : {}),
@@ -243,6 +244,7 @@ export function enrich(snap: Snapshot, f: Facts): Snapshot {
       ...(x.told && x.quiet === "told" ? { doneNote: `told you in ${t.place === everything ? "Everything" : `#${places.find((p) => p.id === t.place)?.name ?? "its space"}`}` } : {}),
       ...(x.automation ? { schedule: String(x.automation) } : {}),
       ...(t.status === "need" || t.status === "ready" || stopped ? { needsAt: x.attention_at ?? r.ready_at ?? r.started ?? undefined } : {}),
+      ...(t.status === "done" && r.ready_at ? { needsAtWas: r.ready_at } : {}),
       ...(x.merge_failed ? { mergeFailed: String(x.merge_failed).slice(0, 200) } : {}),
       ...(after ? { afterTitle: after } : {}),
     };

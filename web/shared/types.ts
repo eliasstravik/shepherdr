@@ -289,6 +289,8 @@ export interface Task {
   schedule?: string
   /** since when it has needed the person (ms) */
   needsAt?: number
+  /** done: when it was handed in for review (its card's place in a chat, now one quiet line) */
+  needsAtWas?: number
   /** the last merge failed: why, in one line */
   mergeFailed?: string
   /** it is in a git repository, on its own branch or worktree ("branch"), or changed the folder itself ("folder") */
