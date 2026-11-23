@@ -5,7 +5,7 @@
 // A sheet on a phone, a 560 px dialog on a desktop; an open list takes the form's place, with a back arrow.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { AgentPick, Catalog, CatalogAgent, CatalogModel, Snapshot } from '@shared/types.ts'
-import { everything, isEverything, isTilde, machineLabel, machineOf, spaceName, spacesOf, unreachable } from '@shared/view.ts'
+import { everything, isEverything, machineLabel, machineOf, spaceName, spacesOf, unreachable } from '@shared/view.ts'
 import { act, getState } from './kernel.ts'
 import { openDialog } from './overlay.tsx'
 import { Btn, I, IB, Logo, Row } from './ui.tsx'
@@ -437,7 +437,7 @@ function SpacePicker({ value, onPick, close }: { value: string; onPick: (place: 
   const row = (id: string, name: string, root: boolean, machine: string) => (
     <Row
       key={id}
-      icon={root ? 'layers' : name === '~' ? 'folder' : 'hash'}
+      icon={root ? 'layers' : 'hash'}
       label={name}
       value={root ? machineLabel(snap, machine) : undefined}
       current={value === id}
@@ -481,7 +481,7 @@ export function SpaceField({ value, onChange }: { value: string; onChange: (plac
     <div className="fld">
       <span>Space</span>
       <button type="button" className="fake" aria-label={`Space: ${name} on ${mach}. Change`} onClick={() => openDialog((close) => <SpacePicker value={value} onPick={onChange} close={close} />, { wide: true, bare: true, label: 'Space' })}>
-        <I n={root ? 'layers' : p && isTilde(snap, p) ? 'folder' : 'hash'} />
+        <I n={root ? 'layers' : 'hash'} />
         <span className="n"><b>{name}</b> <span>{mach}</span></span>
         <I n="right" c="s16" />
       </button>

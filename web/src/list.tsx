@@ -357,7 +357,7 @@ function SpaceRow({ snap, p, sub, under, siblings, section }: { snap: Snapshot; 
   const tilde = isTilde(snap, p)
   return (
     <div className="rowx" data-project={p.id} data-section={section} data-drop={under} onPointerDown={dragSpace(snap, p, under, siblings)}>
-      <Row icon={tilde ? 'folder' : 'hash'} label={tilde ? '~' : p.name} {...(tilde ? { 'aria-label': spaceLabel(snap, p.id) } : {})} className={[sub ? 'sub' : '', dim ? 'dim' : ''].join(' ')} current={at === p.id && !wide} end={<Cnt n={n} />} onClick={() => go(p.id)} />
+      <Row icon="hash" label={tilde ? '~' : p.name} {...(tilde ? { 'aria-label': spaceLabel(snap, p.id) } : {})} className={[sub ? 'sub' : '', dim ? 'dim' : ''].join(' ')} current={at === p.id && !wide} end={<Cnt n={n} />} onClick={() => go(p.id)} />
       <IB
         icon="dots"
         label={`More for ${tilde ? spaceLabel(snap, p.id) : p.name}`}

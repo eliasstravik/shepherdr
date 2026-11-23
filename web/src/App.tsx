@@ -4,7 +4,7 @@
 // places; the layout itself is the design system's (ds.css).
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import type { Snapshot } from '@shared/types.ts'
-import { downWords, isEverything, isTilde, needsCount, placeDown, placeOf, spaceLabel, spaceName, taskOf, type Space } from '@shared/view.ts'
+import { downWords, isEverything, needsCount, placeDown, placeOf, spaceLabel, spaceName, taskOf, type Space } from '@shared/view.ts'
 import { getState, openSettings, registry, setUI, sideHidden, togglePane, useNotice, useSnap, useUI, type Thread } from './kernel.ts'
 import { List, spaceMenu } from './list.tsx'
 import { HeaderPath } from './where.tsx'
@@ -39,7 +39,7 @@ function ChatHeader({ snap, thread, place, scrolled }: { snap: Snapshot; thread:
       {phone ? <IB icon="burger" label="Spaces" onClick={() => setUI({ drawer: true })} /> : hidden ? <IB icon="panel" label="Show the list" onClick={showList} /> : null}
       <div className="ttl">
         <button type="button" className="tbtn" aria-haspopup="menu" onClick={(e) => spaceMenu(e.currentTarget, place.id, true)}>
-          {!every && <I n={isTilde(snap, place) ? 'folder' : 'hash'} c="s16" />}
+          {!every && <I n="hash" c="s16" />}
           <span>{every ? 'Everything' : spaceName(snap, place)}</span>
           <I n="down" c="s16 c-mute" />
         </button>

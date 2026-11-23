@@ -35,7 +35,7 @@ function SendTo({ from, close }: { from: string; close: () => void }) {
       <div className="list">
         {spaces.length > 0 && <div className="lab">Spaces</div>}
         {spaces.map((p) => (
-          <Row key={p.id} icon={p.root ? 'layers' : p.name === '~' ? 'folder' : 'hash'} label={p.name} value={machineLabel(snap, p.machine)} current={p.chat === from} end={p.chat === from ? <I n="check" /> : undefined} onClick={to({ key: p.chat, place: p.id })} />
+          <Row key={p.id} icon={p.root ? 'layers' : 'hash'} label={p.name} value={machineLabel(snap, p.machine)} current={p.chat === from} end={p.chat === from ? <I n="check" /> : undefined} onClick={to({ key: p.chat, place: p.id })} />
         ))}
         {tasks.length > 0 && <div className="lab">Tasks</div>}
         {tasks.map((t) => (

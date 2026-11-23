@@ -102,6 +102,17 @@ test("every other machine's home space is its first row, as ~; this computer's i
   expect(part(html, 'mini')).not.toContain('data-project="home"')
 })
 
+test("a machine's home space carries the # icon like any space, its name still ~; Everything keeps layers", async () => {
+  const { IC } = await import('./icons.ts')
+  const html = draw()
+  const row = (id: string) => html.slice(html.indexOf(`data-project="${id}"`)).split('data-project=')[1]!
+  for (const id of ['vmh', 'pih']) {
+    expect(row(id)).toContain(IC.hash)
+    expect(row(id)).not.toContain(IC.folder)
+  }
+  expect(html.slice(0, html.indexOf('data-machine='))).toContain(IC.layers)
+})
+
 test("a machine's home space is a space like any other: named, it shows its name with #; archived, it leaves the list", () => {
   const named = { ...snap, places: snap.places.map((p) => (p.id === 'vmh' ? { ...p, name: 'vm-box', unnamed: undefined } : p.id === 'pih' ? { ...p, archived: true } : p)) }
   const html = renderToStaticMarkup(<List snap={named} />)
