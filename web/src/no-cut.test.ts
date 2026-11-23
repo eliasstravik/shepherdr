@@ -22,7 +22,7 @@ test("the chat header's space name has all the room its buttons leave: no cap be
 })
 
 test("a task row's title and its line under it wrap to two lines before they are cut, in the panel, on cards and on a phone", () => {
-  for (const sel of ['.row.tk .l1', '.row.tk .l2:not(.rline)', '.rowx[data-project]>.row>.n', '.tile>.l1', '.banner .n:not(button)', '.hd .ttl>.t1:only-child']) {
+  for (const sel of ['.row.tk .l1', '.row.tk .l2:not(.rline)', '.tile>.l1', '.banner .n:not(button)', '.hd .ttl>.t1:only-child']) {
     expect(rule(sel)).toContain('-webkit-line-clamp:2')
     expect(rule(sel)).toContain('white-space:normal')
   }
@@ -30,6 +30,19 @@ test("a task row's title and its line under it wrap to two lines before they are
   expect(rule('.banner')).toContain('min-height:max(40px,var(--row))')
   // its whole-banner button still fills it, top to bottom (a tap anywhere on it)
   expect(rule('.banner>button.n')).toContain('align-self:stretch')
+})
+
+test("a space's name in the list is one line, cut with an ellipsis like a machine's: never two lines or a break at a hyphen", () => {
+  expect(rule('.rowx[data-project]>.row>.n')).toBe('')
+  for (const prop of ['overflow:hidden', 'text-overflow:ellipsis', 'white-space:nowrap']) expect(rule('.row .n')).toContain(prop)
+  expect(css).not.toMatch(/\.rowx\[data-project\][^{]*\{[^}]*line-clamp/)
+})
+
+test("the list never scrolls sideways, and on a touch layout it is wide enough for a short machine name beside its buttons", () => {
+  expect(rule('.side')).toContain('overflow-x:hidden')
+  expect(rule('.app')).toContain('--sidec:max(var(--side-min),var(--side-w,var(--side)))')
+  expect(rule('.app.tap')).toContain('--side-min:232px')
+  expect(rule('.shell')).toContain('grid-template-columns:var(--sidec) minmax(0,1fr)')
 })
 
 const task = (x: Partial<Task>): Task => ({ id: 'T-1', name: 'Release', place: 'shop', status: 'queued', state: 'queued', on: 'mini', created: '', age: '', ...x })

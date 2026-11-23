@@ -21,10 +21,13 @@ p,h2,h3{margin:0}small{font-size:inherit}
    thing on .tap is at least --hit across, either itself or through its ::before pad, with no neighbour's pad over it
    (web/demo/tap-check.ts measures it). Text: 16 px body and 14 px second lines on touch, never smaller to tap. */
 .app{--ui:14px;--uil:20px;--sec:13px;--secl:18px;--hd:48px;--row:32px;--row2:52px;--btn:32px;--btns:28px;--ib:28px;--tab:28px;--ic:16px;--gut:16px;--h1:16px;--chip:32px;
-  --hit:44px;--field:32px;--side:240px;--tgw:36px;--tgh:20px;--key:24px;--send:32px;--rz:12px;--ath:72px;
+  --hit:44px;--field:32px;--side:240px;--side-min:180px;--tgw:36px;--tgh:20px;--key:24px;--send:32px;--rz:12px;--ath:72px;
   width:100%;font-size:var(--ui);line-height:var(--uil)}
+/* the list's width: a dragged one, never under --side-min, so a short machine name beside its two buttons is not cut on
+   a touch layout (a finger's buttons are wider) */
+.app{--sidec:max(var(--side-min),var(--side-w,var(--side)))}
 .app.tap{--ui:16px;--uil:24px;--sec:14px;--secl:20px;--hd:56px;--row:44px;--row2:56px;--btn:40px;--btns:36px;--ib:44px;--tab:44px;--ic:20px;--h1:18px;--chip:40px;
-  --field:44px;--side:288px;--tgw:44px;--tgh:24px;--key:36px;--send:40px;--rz:16px;--ath:80px}
+  --field:44px;--side:288px;--side-min:232px;--tgw:44px;--tgh:24px;--key:36px;--send:40px;--rz:16px;--ath:80px}
 .app.phone{--hd:52px;--row:48px}
 
 /* atoms */
@@ -81,16 +84,16 @@ button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"])
 /* frame */
 .device{position:relative;display:grid;border-radius:16px}
 .app.phone .device{border-radius:24px;box-shadow:inset 0 0 0 1px var(--line2);overflow:clip}
-.shell{position:relative;display:grid;grid-template-columns:var(--side-w,var(--side)) minmax(0,1fr);align-items:start;min-width:0}
-.shell.has-pane{grid-template-columns:var(--side-w,var(--side)) minmax(0,1fr) var(--pane-w,380px)}
+.shell{position:relative;display:grid;grid-template-columns:var(--sidec) minmax(0,1fr);align-items:start;min-width:0}
+.shell.has-pane{grid-template-columns:var(--sidec) minmax(0,1fr) var(--pane-w,380px)}
 .shell.noside{grid-template-columns:minmax(0,1fr)}.shell.noside.has-pane{grid-template-columns:minmax(0,1fr) var(--pane-w,380px)}
 .app.phone .shell,.app.phone .shell.has-pane{grid-template-columns:minmax(0,1fr)}
 .shell.noside .side,.app.phone .shell .side,.app.phone .shell.has-pane .chat{display:none}
 .col{display:flex;flex-direction:column;min-width:0}.scroll{flex:1;min-height:0}.foot{flex:none}
-.side{display:flex;flex-direction:column;gap:1px;padding:8px;border-right:1px solid var(--line);min-width:0}
+.side{display:flex;flex-direction:column;gap:1px;padding:8px;border-right:1px solid var(--line);min-width:0;overflow-x:hidden}
 .pane{border-left:1px solid var(--line)}.app.phone .pane{border-left:0}
 /* SHEP-336: the chat swapped to the right of the pane; the list stays at the far left */
-.shell.swap.has-pane{grid-template-columns:var(--side-w,var(--side)) var(--pane-w,380px) minmax(0,1fr)}.shell.swap.noside.has-pane{grid-template-columns:var(--pane-w,380px) minmax(0,1fr)}
+.shell.swap.has-pane{grid-template-columns:var(--sidec) var(--pane-w,380px) minmax(0,1fr)}.shell.swap.noside.has-pane{grid-template-columns:var(--pane-w,380px) minmax(0,1fr)}
 .shell.swap .pane{border-left:0;border-right:1px solid var(--line)}
 .hd{display:flex;align-items:center;gap:4px;height:var(--hd);padding:0 12px;flex:none;min-width:0}
 .hd{border-bottom:1px solid transparent}.hd.sc{border-bottom-color:var(--line)}
@@ -285,9 +288,9 @@ h3+.srow,.hint+.srow,.banner+.srow{border-top:0}
    Android keeps it after a tap, which left a thick light line on the swapped divider (SHEP-352) */
 .rz.on::after{background:var(--muted)}
 @media (hover:hover) and (pointer:fine){.rz:hover::after{background:var(--muted)}}
-.app:not(.phone) .shell:not(.noside) .rzs{display:block;left:calc(var(--side-w,var(--side)) - var(--rz)/2)}
+.app:not(.phone) .shell:not(.noside) .rzs{display:block;left:calc(var(--sidec) - var(--rz)/2)}
 .app:not(.phone) .shell.has-pane .rzp{display:block;right:calc(var(--pane-w,380px) - var(--rz)/2)}
-.app:not(.phone) .shell.swap.has-pane .rzp{right:auto;left:calc(var(--side-w,var(--side)) + var(--pane-w,380px) - var(--rz)/2)}
+.app:not(.phone) .shell.swap.has-pane .rzp{right:auto;left:calc(var(--sidec) + var(--pane-w,380px) - var(--rz)/2)}
 .app:not(.phone) .shell.swap.noside.has-pane .rzp{left:calc(var(--pane-w,380px) - var(--rz)/2)}
 .rzh{height:8px;margin-top:-4px;cursor:row-resize;touch-action:none;position:relative;z-index:15}
 .rzh:hover,.rzh.on{background:var(--control2)}
@@ -525,9 +528,10 @@ textarea.cin{overflow-y:auto}
 .app.tap .emo{gap:0}.app.tap .emo button{min-width:var(--hit)}
 .app.tap :not(.msgs)>:is(.fold,.ref){min-height:var(--row)}.app.tap .ref{margin-top:0}
 /* Text gets the room there is (SHEP-356): a name or title wraps to a second line before it is cut, and is cut only where
-   that second line ends too. Where it is still cut, a tap opens the thing that shows it whole. */
-.row.tk .l1,.row.tk .l2:not(.rline),.rowx[data-project]>.row>.n,.tile>.l1,.banner .n:not(button),.hd .ttl>.t1:only-child{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;overflow-wrap:anywhere}
-.rowx[data-project]>.row{padding-block:6px}.banner{padding-block:4px}.hd .ttl>.t1:only-child{line-height:20px}
+   that second line ends too. Where it is still cut, a tap opens the thing that shows it whole. A space's name in the list
+   stays one line, cut with an ellipsis like a machine's (its ⋯ menu shows it whole). */
+.row.tk .l1,.row.tk .l2:not(.rline),.tile>.l1,.banner .n:not(button),.hd .ttl>.t1:only-child{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;overflow-wrap:anywhere}
+.banner{padding-block:4px}.hd .ttl>.t1:only-child{line-height:20px}
 /* The chat's one rhythm and one left edge (SHEP-383). Rows (a turn's "Ran a command", a task's line, a settled card's
    "Done and merged", news, messages between agents) share one icon column (16 px at the chat's edge) and one text
    column 8 px after it, and 4 px of air above and below inside the row. Between any two things that differ (a bubble
