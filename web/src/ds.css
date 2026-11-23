@@ -478,14 +478,14 @@ textarea.cin{overflow-y:auto}
    the chips of what is on */
 /* a menu's group (MenuGroup): its quiet name 8 px under the hairline before it, 4 px over its rows; the filter menus'
    one rhythm (the Tasks panel's and each machine's in the list) */
-.mg{display:grid}.mg+.mg::before{content:"";height:1px;margin:4px 8px;background:var(--line)}
+.mg{display:grid;grid-template-columns:minmax(0,1fr)}.mg+.mg::before{content:"";height:1px;margin:4px 8px;background:var(--line)}
 .pop .mg .cap{padding:8px 8px 4px}.pop .mg:first-child>.cap{padding-top:4px}
 /* the Tasks filter: as wide as its rows (kept inside its panel by the popover), its body scrolling with no system bar,
    fading at an edge with more; Clear on a hairline at its foot */
 .pop:not(.sheet):has(>.tfm){display:flex;flex-direction:column;width:max-content;max-width:280px;max-height:640px;min-width:min(240px,100%);overflow:hidden}
 .sheet:has(>.tfm){display:flex;flex-direction:column;overflow:hidden}
 .tfm{display:flex;flex-direction:column;min-height:0;flex:1 1 auto}
-.tfb{min-height:0;flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none;--fu:0px;--fd:0px;-webkit-mask-image:linear-gradient(to bottom,transparent,#000 var(--fu),#000 calc(100% - var(--fd)),transparent);mask-image:linear-gradient(to bottom,transparent,#000 var(--fu),#000 calc(100% - var(--fd)),transparent)}
+.tfb{min-height:0;flex:1 1 auto;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none;--fu:0px;--fd:0px;-webkit-mask-image:linear-gradient(to bottom,transparent,#000 var(--fu),#000 calc(100% - var(--fd)),transparent);mask-image:linear-gradient(to bottom,transparent,#000 var(--fu),#000 calc(100% - var(--fd)),transparent)}
 .tfb::-webkit-scrollbar{display:none}.tfb[data-up]{--fu:24px}.tfb[data-down]{--fd:40px}
 .tff{flex:none;display:grid}.tff::before{content:"";height:1px;margin:4px 8px;background:var(--line)}
 .tfm .row .n:has(>.tft){display:flex;align-items:baseline;gap:8px}
