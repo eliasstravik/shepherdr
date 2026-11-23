@@ -3,8 +3,9 @@ import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { Chat, Message, TurnActivity } from '@shared/types.ts'
 
-// the formatted words need a browser (DOMPurify): here they are drawn as they are
-mock.module('./markdown.tsx', () => ({ Markdown: ({ text }: { text: string }) => <div className="md">{text}</div>, toHtml: (t: string) => t, linked: (t: string) => t }))
+// the formatted words need a browser (DOMPurify): here they are drawn as they are; every other export stays the real one
+const realMarkdown = await import('./markdown.tsx')
+mock.module('./markdown.tsx', () => ({ ...realMarkdown, Markdown: ({ text }: { text: string }) => <div className="md">{text}</div>, toHtml: (t: string) => t, linked: (t: string) => t }))
 const { WorkingSign } = await import('./client.tsx')
 
 // SHEP-343: the working sign is three dots in an agent-side speech bubble, the step quiet beside it, never inside.

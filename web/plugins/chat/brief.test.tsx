@@ -3,8 +3,9 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import type { Chat, Message, Task, TaskBrief } from '@shared/types.ts'
 import { briefFrom, deliveryWord, looksLong, startWords } from './brief.ts'
 
-// the formatted words need a browser (DOMPurify): here they are drawn as they are
-mock.module('./markdown.tsx', () => ({ Markdown: ({ text }: { text: string }) => <div className="md">{text}</div>, toHtml: (t: string) => t, linked: (t: string) => t, withLinks: (t: string) => [t] }))
+// the formatted words need a browser (DOMPurify): here they are drawn as they are; every other export stays the real one
+const realMarkdown = await import('./markdown.tsx')
+mock.module('./markdown.tsx', () => ({ ...realMarkdown, Markdown: ({ text }: { text: string }) => <div className="md">{text}</div>, toHtml: (t: string) => t, linked: (t: string) => t }))
 const { BriefMessage } = await import('./client.tsx')
 
 // SHEP-330: a task's page is never blank. Its brief is the first message; until its agent is at work, words say why.
