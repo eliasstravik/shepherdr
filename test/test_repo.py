@@ -131,6 +131,17 @@ class Repo(unittest.TestCase):
                             found.append(f"{rel}:{src.count(chr(10), 0, m.start()) + 1}: sets a title")
         self.assertFalse(found, "hover tooltips (use aria-label, or show the words):\n" + "\n".join(found))
 
+    def test_text_boxes_show_focus_quietly(self):
+        """No square outline around a text box on focus (SHEP-300: a phone drew one inside the rounded composer).
+        Text fields drop the global outline; their box shows focus instead."""
+        with open(J("web/src/ds.css"), encoding="utf-8") as fh:
+            css = fh.read()
+        for tag in ("input", "textarea"):
+            self.assertRegex(css, r"(?m)^[^{\n]*(?<![\w.-])" + tag + r":focus-visible[^{\n]*\{outline:0\}",
+                             f"{tag} still gets the global focus outline")
+        self.assertIn(".cbox:focus-within{", css)
+        self.assertIn(".inp:focus{", css)
+
     def test_no_leftovers(self):
         for p in text_files():
             name = os.path.basename(p)

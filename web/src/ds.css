@@ -8,7 +8,7 @@ button,input{font:inherit;color:inherit;letter-spacing:inherit}
 button{position:relative;margin:0;padding:0;border:0;background:none;cursor:pointer;text-align:inherit}
 @media(pointer:coarse){button::before{content:"";position:absolute;left:50%;top:50%;width:max(100%,44px);height:max(100%,44px);transform:translate(-50%,-50%)}}
 :focus-visible{outline:2px solid var(--fg);outline-offset:2px}
-input:focus-visible{outline:0}
+input:focus-visible,textarea:focus-visible{outline:0}
 p,h2,h3{margin:0}small{font-size:inherit}
 
 /* sizes: desktop by default, phone when .phone */
