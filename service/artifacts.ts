@@ -112,6 +112,8 @@ export class Artifacts {
   /** herdr-core, and the connected other machines (service/model.ts), set by main: other machines' artifacts */
   hub: Hub | null = null;
   machines: () => string[] = () => [];
+  /** is a page open (service/live.ts anyone): only pages show artifacts, so with none they aren't read (#1325) */
+  watched: () => boolean = () => true;
 
   constructor(store: string = where().artifacts) {
     this.store = store;
@@ -122,8 +124,8 @@ export class Artifacts {
 
   start() {
     if (existsSync(this.store)) watch(this.store, () => { this.timer ??= setTimeout(() => { this.timer = null; void this.read(); }, 300); });
-    setInterval(() => void this.read(), 15_000);
-    setInterval(() => void this.readThere(), 15_000);
+    setInterval(() => { if (this.watched()) void this.read(); }, 15_000);
+    setInterval(() => { if (this.watched()) void this.readThere(); }, 15_000);
     void this.read();
     // once the machines are known
     setTimeout(() => void this.readThere(), 3_000);

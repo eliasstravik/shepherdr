@@ -6,7 +6,7 @@ import { watch, existsSync } from "node:fs";
 import { join } from "node:path";
 import { CoreClient } from "./hc/client.ts";
 import type { Hub } from "./hub.ts";
-import type { Live } from "./live.ts";
+import { readDue, type Live } from "./live.ts";
 import { where } from "./paths.ts";
 import { READ_LISTS, taskLists } from "../core/tasklists.js";
 import { carryOver, IMPORTED } from "./carry-over.ts";
@@ -62,7 +62,9 @@ export class Model {
     });
     const tasks = where().tasks;
     if (existsSync(tasks)) watch(tasks, () => this.soon(() => this.readLists(null)));
-    setInterval(() => void this.refresh(), 10_000);
+    // every 10 s while a page is open, else every 2 minutes (alerts); a page opening reads at once (#1325)
+    setInterval(() => { if (readDue(this.live.anyone(), this.readAt)) void this.refresh(); }, 10_000);
+    this.live.onFirstPage(() => void this.refresh());
     void this.refresh();
   }
 
@@ -109,7 +111,9 @@ export class Model {
     return this.spaces.some((s) => s.id === id);
   }
 
+  private readAt = 0;
   async refresh() {
+    this.readAt = Date.now();
     try {
       const r = await this.hub.call<{ machines: any[] }>("machine.list", {});
       this.machines = r.machines.filter((m) => m.state === "connected").map((m) => m.name);

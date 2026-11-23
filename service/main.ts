@@ -195,6 +195,8 @@ machines.voiceUsage = async () => {
   if (r?.state === "unknown") refused(r.why);
   return r;
 };
+machines.watched = () => live.anyone();
+live.onFirstPage(() => void machines.poll());
 machines.start();
 const secrets = new Secrets(hub);
 compat.secrets = secrets;
@@ -292,6 +294,8 @@ compat.artifacts = artifacts;
 // other machines' artifacts, read there through herdr-core
 artifacts.hub = hub;
 artifacts.machines = () => model.machineNames();
+artifacts.watched = () => live.anyone();
+live.onFirstPage(() => { void artifacts.read(); void artifacts.readThere(); });
 artifacts.on(() => model.rebuild());
 // a task's chat logs, for its older artifacts that name no task (its Artifacts tab)
 const taskLogs = new TaskLogs();

@@ -17,6 +17,8 @@ export class Machines {
   stats = new Map<string | null, any>();
   private busy = false;
   onChange: () => void = () => {};
+  /** is a page open (service/live.ts anyone) */
+  watched: () => boolean = () => true;
 
   /** SHEP-128: the ElevenLabs plan's read (core/voice.js readUsage), null when voice isn't set up; main.ts gives it. */
   voiceUsage: () => Promise<any | null> = async () => null;
@@ -29,7 +31,8 @@ export class Machines {
 
   start() {
     void this.poll();
-    setInterval(() => void this.poll(), 30_000);
+    // health and limits only pages show: read while one is open, and at once when one opens (#1325)
+    setInterval(() => { if (this.watched()) void this.poll(); }, 30_000);
   }
 
   /** Reads every machine's plan limits again now (the limits list's refresh): those older than a minute. */
@@ -53,7 +56,7 @@ export class Machines {
     }
   }
 
-  private async poll() {
+  async poll() {
     const voice = this.readVoice();
     if (this.busy || !SCRIPT) { if (await voice) this.onChange(); return; }
     this.busy = true;

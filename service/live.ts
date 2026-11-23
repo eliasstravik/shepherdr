@@ -24,6 +24,12 @@ export const WAKE_HELD_MS = 15_000;
 /** a page on screen whose socket dropped (a phone's network blinking) still counts as on screen this long (SHEP-338) */
 export const LOOK_GRACE_MS = 15_000;
 
+/** With no page open, what only pages show (other machines' task lists, artifacts, health) is read this seldom, not
+ *  every few seconds: each read starts processes on that machine (#1325). Task lists still come this often for alerts. */
+export const IDLE_READ_MS = 120_000;
+/** Is a read due: always while a page is open, else once IDLE_READ_MS passed since the last. */
+export const readDue = (watched: boolean, last: number, now = Date.now(), idle = IDLE_READ_MS) => watched || now - last >= idle;
+
 export class Live {
   private pages = new Set<WS>();
   private views = new Map<string, string>();   // name -> its JSON, as last sent
@@ -71,9 +77,17 @@ export class Live {
     for (const ws of this.pages) if (ws.readyState === 1) ws.send(text);
   }
 
+  /** Is any page open now: the reads only pages show run while one is (#1325). */
+  anyone() { return this.pages.size > 0; }
+  /** told when the first page opens after none: what was read seldom is read again at once */
+  private firstPage = new Set<() => void>();
+  onFirstPage(fn: () => void) { this.firstPage.add(fn); }
+
   join(ws: WS) {
     ws.data.seen = Date.now();
+    const first = this.pages.size === 0;
     this.pages.add(ws);
+    if (first) for (const fn of this.firstPage) try { fn(); } catch {}
     const me = this.me();
     ws.send(JSON.stringify({ type: "hello", version: this.version, login: ws.data.who, machine: me?.host ?? null, link: this.link() }));
     const build = this.buildText();
