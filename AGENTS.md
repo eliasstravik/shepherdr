@@ -175,3 +175,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - herdr-browser's headless Chrome reports prefers-reduced-motion: reduce by default: run `herdr-browser set media dark` before checking animations, `set media dark reduced-motion` for the reduced case. (from SHEP-304)
 
 - To see a Claude Code at phone width on a throwaway session: keep `sleep 600 | script -q -c 'stty cols 45 rows 50; hc attach <t>' /dev/null` running in the background (hc takes the attached client's size). (from SHEP-306)
+
+- A throwaway service serves `web/dist` from its own checkout (`live.ts` only proxies): for a before shot, swap in main's built `web/dist`; a `--init-script` that drops `{type:"chat"}` socket messages shows the label before a chat loads. (from SHEP-298)
