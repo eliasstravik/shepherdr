@@ -62,6 +62,10 @@ async function measure(page: Page, allow: string[]) {
       if (r.bottom <= 0 || r.top >= innerHeight || r.right <= 0 || r.left >= innerWidth) continue
       const top = document.elementFromPoint(cx, cy)
       if (!top || !(el === top || el.contains(top) || top.contains(el))) continue
+      // cut off by the edge of what scrolls it: a scroll away from whole, not measured
+      let sc = el.parentElement
+      while (sc && !/(auto|scroll)/.test(getComputedStyle(sc).overflowY)) sc = sc.parentElement
+      if (sc) { const v = sc.getBoundingClientRect(); if (r.top < v.top - 0.5 || r.bottom > v.bottom + 0.5) continue }
       // partly under a surface (scrolled behind the message box or a header): a scroll away from whole, not measured
       const target = (t: Element | null) => !!t && !!t.closest(SEL)
       const qx = r.width / 4, qy = r.height / 4 // a quarter in: inside a round button's circle too
