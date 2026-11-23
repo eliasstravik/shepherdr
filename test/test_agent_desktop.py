@@ -10,6 +10,7 @@ import io
 import json
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -392,6 +393,57 @@ class MachinesSync(unittest.TestCase):
         with mock.patch.object(machines, "_remote_python", remote), mock.patch.object(machines, "core_name", lambda: "here"):
             r = machines.sync_machine("vm", m)
         self.assertEqual((r["state"], r["details"]), ("current", ["agent-desktop: failed: offline"]))
+
+    def test_every_sync_call_stays_within_hc_exec_limit(self):
+        # hc exec refuses --timeout above 600 s ("at most 600 s, not 900"): a sync that installs agent-desktop
+        # must ask for no more, and the helper's own install must end before the call does.
+        seen = []
+
+        def run(argv, **kw):
+            seen.append(int(argv[argv.index("--timeout") + 1]))
+            out = {"files": {"x": "current"}, "links": {}, "ensure": {".local/bin/herdr-desktop": "missing" if len(seen) == 1 else "installed"}}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(out) + "\n", "")
+        m = {"version": "v", "files": [{"path": "x", "data": b"", "sha": "", "mode": 0o644, "at": 1}], "links": [], "touch": [],
+             "ensure": [".local/bin/herdr-desktop"]}
+        with mock.patch.object(machines.subprocess, "run", run), mock.patch.object(machines, "guard", lambda a: None), \
+                mock.patch.object(machines, "core_name", lambda: "here"):
+            r = machines.sync_machine("vm", m)
+        self.assertEqual(r["state"], "current")
+        self.assertEqual(len(seen), 2)
+        self.assertTrue(all(0 < t <= 600 for t in seen), seen)
+        self.assertEqual(machines.EXEC_MAX, 600)
+        # every literal timeout in the code given to hc exec or _remote_python is one hc accepts
+        src = open(machines.__file__).read()
+        asked = [int(t) for t in re.findall(r"_remote_python\([^\n]*timeout=(\d+)", src)]
+        asked += [int(t) for t in re.findall(r"timeout=(\d+) if missing", src)]
+        self.assertTrue(asked and all(t <= 600 for t in asked), asked)
+        self.assertNotIn("timeout=900", src)
+        inner = [int(t) for t in re.findall(r'helper\("--install", (\d+)\)', machines.INSTALL)]
+        self.assertTrue(inner and all(t < machines.EXEC_MAX - 60 for t in inner), inner)
+        # and an asked-for longer one is cut to hc's limit, never sent as is
+        seen.clear()
+        with mock.patch.object(machines.subprocess, "run", run), mock.patch.object(machines, "guard", lambda a: None):
+            machines._remote_python("vm", "", {}, timeout=900)
+        self.assertEqual(seen, [600])
+
+    def test_refused_call_says_why_not_cant_reach(self):
+        m = {"version": "v", "files": [{"path": "x", "data": b"", "sha": "", "mode": 0o644, "at": 1}], "links": [], "touch": [], "ensure": []}
+
+        def answer(rc, err):
+            return lambda argv, **kw: subprocess.CompletedProcess(argv, rc, "", json.dumps({"error": err}) + "\n")
+        with mock.patch.object(machines, "guard", lambda a: None), mock.patch.object(machines, "core_name", lambda: "here"):
+            with mock.patch.object(machines.subprocess, "run", answer(6, {"kind": "invalid_params", "message": "timeout must be more than 0 and at most 600 s, not 900"})):
+                r = machines.sync_machine("vm", m)
+            self.assertEqual(r["state"], "failed")
+            self.assertIn("timeout must be more than 0 and at most 600 s", r["details"][0])
+            self.assertIn("refused", r["details"][0])
+            # a real reach problem still reads as one
+            with mock.patch.object(machines.subprocess, "run", answer(5, {"kind": "unavailable", "message": "the machine is offline"})):
+                r = machines.sync_machine("vm", m)
+            self.assertEqual(r["state"], "unreachable")
+            with mock.patch.object(machines.subprocess, "run", answer(4, {"kind": "machine_unknown", "message": "unknown machine"})):
+                r = machines.sync_machine("vm", m)
+            self.assertEqual(r["state"], "unreachable")
 
     def test_manifest_asks_for_it_where_herdr_desktop_goes(self):
         here = tempfile.mkdtemp(prefix="shepherdr-ad-m-")

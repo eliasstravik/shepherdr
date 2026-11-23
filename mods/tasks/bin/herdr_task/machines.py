@@ -290,7 +290,7 @@ for e in ([] if source else x.get("ensure") or []):
     if rc == 0:
         st = "ready"
     elif x["op"] == "install":
-        rc, said = helper("--install", 600)
+        rc, said = helper("--install", 480)   # within the sync's one hc exec (EXEC_MAX), files and all
         lines = [l for l in said.splitlines() if l.strip()]
         st = "installed" if rc == 0 else "failed: " + (lines[-1] if lines else "it didn't say why").replace(os.path.basename(p) + ": ", "", 1)
     else:
@@ -341,8 +341,29 @@ def connected_machines():
     return [m for m in (hc_json("machine", "ls") or {}).get("machines") or [] if not m.get("temporary")]
 
 
+EXEC_MAX = 600   # herdr-core's longest `hc exec --timeout` (it refuses more: "at most 600 s")
+REACH_KINDS = ("unavailable", "machine_unknown")   # hc's errors that are about the link, not the call
+
+
+class Refused(Fail):
+    """hc refused or failed the call for a reason that isn't reach (bad parameters, an error there)."""
+
+
+def _hc_error(r):
+    """hc's own error {kind, message} from a failed call's output, or None."""
+    for text in (r.stderr, r.stdout):
+        try:
+            err = json.loads((text or "").strip().splitlines()[-1]).get("error")
+        except (ValueError, AttributeError, IndexError):
+            continue
+        if isinstance(err, dict) and err.get("kind"):
+            return err
+    return None
+
+
 def _remote_python(machine, script, payload, timeout=120):
     guard(["hc"])
+    timeout = max(1, min(int(timeout), EXEC_MAX))
     try:
         r = subprocess.run(["hc", "exec", "--on", machine, "--stdin", "--timeout", str(timeout), "--", "python3", "-c", script],
                            input=json.dumps(payload), stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
@@ -350,6 +371,9 @@ def _remote_python(machine, script, payload, timeout=120):
     except subprocess.TimeoutExpired:
         raise Fail("timed out")
     if r.returncode != 0:
+        err = _hc_error(r)
+        if err and err["kind"] not in REACH_KINDS:
+            raise Refused(f"hc refused the call ({err['kind']}): {err.get('message') or 'no reason given'}")
         raise Fail((r.stderr or r.stdout).strip()[-300:] or f"hc exec failed ({r.returncode})")
     try:
         return json.loads(r.stdout.strip().splitlines()[-1])
@@ -384,12 +408,14 @@ def sync_machine(machine, m, op="install", force=False):
         if op == "install" and (state not in ("current", "source") or (missing and state == "current")):
             need = {p for p, s in res["files"].items() if s in ("missing", "behind")}
             send = [{**bare(f), "data": base64.b64encode(f["data"]).decode()} if f["path"] in need else bare(f) for f in m["files"]]
-            res = _remote_python(machine, INSTALL, {**me, "op": "install", "files": send}, timeout=900 if missing else 180)
+            res = _remote_python(machine, INSTALL, {**me, "op": "install", "files": send}, timeout=EXEC_MAX if missing else 180)
             state, details = _verdict(res)
             for f in m["files"]:
                 mark = {".local/bin/herdr-task": STORE, f"{ARTIFACT_HOME}/bin/herdr-artifact": WHERE.path("artifacts")}.get(f["path"])
                 if mark and res["files"].get(f["path"]) in ("current", "installed"):
                     _mark(os.path.join(mark, ".remote", machine), hashlib.sha1(f["data"]).hexdigest())
+    except Refused as e:   # reached, but the call itself failed: said as it is, never "can't reach"
+        return {"machine": machine, "state": "failed", "details": [str(e)], "version": m["version"]}
     except Fail as e:
         return {"machine": machine, "state": "unreachable", "details": [str(e)], "version": m["version"]}
     # what a helper installs itself: said, never the machine's state (an offline machine stays current, and says why)
