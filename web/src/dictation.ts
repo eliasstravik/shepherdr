@@ -20,6 +20,12 @@ export interface Dictation {
 let current: Dictation | null = null
 let level: AnalyserNode | null = null
 
+/** the time recorded, m:ss (the bottom row's time while it records) */
+export const clock = (ms: number) => {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
 export function canDictate() {
   return typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
 }

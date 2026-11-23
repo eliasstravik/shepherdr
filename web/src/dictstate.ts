@@ -1,6 +1,6 @@
-// The dictation surface's states (SHEP-314, SHEP-334): idle (the mic), starting (pressed, no audio yet: neutral),
-// asking (only when the browser really asks for the microphone), on (listening: the wave, no words), writing (after
-// Done, until the clean text lands) and error (why it didn't work, in words). One step function, so the rules are
+// The dictation surface's states (SHEP-314, SHEP-334): idle (the mic), starting (pressed, no audio yet: the row as it
+// is, no words), asking (only when the browser really asks for the microphone), on (recording: the wave and the time,
+// no words), writing (after Done, until the clean text lands) and error (why it didn't work, in words). One step function, so the rules are
 // tested apart from the page: Cancel writes nothing, whatever the recording sends after a Cancel is dropped, and the
 // words are written once.
 import type { Phase } from './dictation.ts'
@@ -9,15 +9,15 @@ export type DictState =
   | { k: 'idle' }
   | { k: 'starting' }
   | { k: 'asking' }
-  | { k: 'on' }
-  | { k: 'writing' }
+  | { k: 'on'; since: number }
+  | { k: 'writing'; took: number }
   | { k: 'error'; why: string }
 
 export type DictEvent =
   /** the mic tapped (or Try again) */
   | { t: 'start' }
   /** what the recording says it is doing now */
-  | { t: 'phase'; p: Phase }
+  | { t: 'phase'; p: Phase; at: number }
   /** the recording's end: its words, or null (cancelled, or after a failure) */
   | { t: 'end'; text: string | null }
   /** why it didn't work */
@@ -36,8 +36,8 @@ export function step(s: DictState, e: DictEvent): { s: DictState; write?: string
       return s.k === 'idle' || s.k === 'error' ? { s: { k: 'starting' } } : { s }
     case 'phase':
       if (e.p === 'asking' && s.k === 'starting') return { s: { k: 'asking' } }
-      if (e.p === 'on' && (s.k === 'starting' || s.k === 'asking')) return { s: { k: 'on' } }
-      if (e.p === 'writing' && s.k === 'on') return { s: { k: 'writing' } }
+      if (e.p === 'on' && (s.k === 'starting' || s.k === 'asking')) return { s: { k: 'on', since: e.at } }
+      if (e.p === 'writing' && s.k === 'on') return { s: { k: 'writing', took: Math.max(0, e.at - s.since) } }
       return { s }
     case 'end': {
       // after a Cancel (idle) or a failure (error) the recording has nothing more to say

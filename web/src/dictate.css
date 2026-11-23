@@ -1,48 +1,31 @@
-/* Dictation (SHEP-334): while it is on, the composer is the dictation surface. Its bottom row becomes Cancel, the wave
-   and Done (where Send was); everything else in the row steps aside. The box keeps what was typed, isn't typed into,
-   and when empty says what dictation is doing instead of its placeholder. No words while you talk, no dot, no timer. */
+/* Dictation (SHEP-314): while it records, the box's bottom row becomes the recording: Cancel, the wave and the time,
+   Done where Send was. Everything else in the row steps aside meanwhile. SHEP-334: no words above it while you talk
+   (no "Listening…", no live words); only an error, or the browser really asking for the microphone, says something. */
 .cbar:has(>.dsurf)>:not(.dsurf){display:none}
-.dsurf{position:relative;flex:1;display:flex;align-items:center;gap:8px;min-width:0;min-height:var(--btn);animation:fade .15s ease-out}
+.dsurf{position:relative;flex:1;display:grid;gap:2px;min-width:0;animation:fade .15s ease-out}
 
-/* the box while it is the surface: its own placeholder steps aside for what dictation is doing */
-.cbox[data-dict]{position:relative}
-.cbox[data-dict] .kbd{display:none}
-.cbox[data-dict] .cin{cursor:default}
-.cbox[data-dict] .cin::placeholder{color:transparent}
-.cbox[data-dict]:has(.cin:placeholder-shown)::before{position:absolute;top:10px;left:16px;right:16px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--muted);font-size:16px;line-height:24px;pointer-events:none}
-.cbox[data-dict]:has(.cin.fb:placeholder-shown)::before{top:12px}
-.cbox[data-dict=starting]::before{content:"Starting…"}
-.cbox[data-dict=asking]::before{content:"Waiting for the microphone…"}
-.cbox[data-dict=on]::before{content:"Listening…"}
-.cbox[data-dict=writing]::before{content:"Writing it down…"}
+/* the words, only when something must be read: an error, or the browser asking for the microphone */
+.dwords{padding:4px 10px 0;font-size:var(--ui);line-height:var(--uil);overflow-wrap:anywhere}
+.dhint{color:var(--muted)}
+.derr{display:flex;align-items:flex-start;gap:8px;color:var(--fg)}
+.derr .i{margin-top:calc((var(--uil) - 16px) / 2);color:var(--red)}
 
-/* Cancel and Done: round, the same size as Send, with a hit area of at least 48px on a touch screen */
-.dbtn,.ddone{position:relative;display:grid;place-items:center;width:var(--btn);height:var(--btn);border-radius:50%;flex:none}
-.dbtn{background:var(--control);color:var(--fg)}
-.dbtn:hover{background:var(--control2)}
-@media(pointer:coarse){.dbtn::after,.ddone::after,.dagain::after{content:"";position:absolute;top:50%;left:50%;width:max(100%,48px);height:max(100%,48px);transform:translate(-50%,-50%)}}
-
-/* the wave, drawn from the microphone; still dots before the first sound and while it writes */
+/* the controls: Cancel, the wave, the time, Done */
+.dctl{display:flex;align-items:center;gap:8px;min-height:var(--btn)}
 .dwave{flex:1;min-width:0;height:24px;color:var(--fg)}
 .app.phone .dwave{height:28px}
 .dwave.off{color:var(--muted)}
+.dtime{display:inline-flex;align-items:center;gap:6px;min-width:5ch;color:var(--sub);font-size:var(--sec);line-height:var(--secl);font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ddot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.ddot.rec{background:var(--red);animation:calm 1.6s ease-in-out infinite}
 
-/* Done: the one filled button meanwhile (Send steps aside), a check, never Send's arrow or Stop's square */
-.ddone{background:var(--fg);color:var(--canvas)}
-.ddone:disabled{opacity:.35;cursor:default}
+/* Done: the one filled button while it records (Send steps aside), labelled so it can't pass for Send */
+.ddone{display:inline-flex;align-items:center;gap:6px;height:var(--btn);padding:0 14px 0 10px;border-radius:999px;background:var(--fg);color:var(--canvas);font-size:var(--sec);line-height:var(--secl);font-weight:600;white-space:nowrap;flex:none}
+.ddone:disabled{opacity:.4;cursor:default}
 .ddone.wr{background:var(--control2);color:var(--sub);cursor:default}
 .dspin{width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;flex:none;animation:turn .8s linear infinite}
-@media(pointer:coarse){.ddone:not(:disabled):not(.wr):active,.dbtn:active,.dagain:active{opacity:.6}}
-
-/* what it says in the row: the browser asking for the microphone, or why it didn't work */
-.dsay{flex:1;display:flex;align-items:flex-start;gap:8px;min-width:0;padding:6px 0;color:var(--sub);font-size:var(--sec);line-height:var(--secl)}
-.dsay .i{flex:none;margin-top:calc((var(--secl) - 16px) / 2)}
-.dsay.err{color:var(--fg)}
-.dsay.err .i{color:var(--red)}
-.dsurf.error{align-items:flex-start}
-.dsurf.error>button{margin-top:max(0px,calc((var(--secl) + 12px - var(--btn)) / 2))}
-.dagain{position:relative;display:inline-flex;align-items:center;gap:6px;height:var(--btn);padding:0 14px 0 10px;border-radius:999px;background:var(--fg);color:var(--canvas);font-size:var(--sec);line-height:var(--secl);font-weight:600;white-space:nowrap;flex:none}
+@media(pointer:coarse){.ddone:not(:disabled):not(.wr):active{opacity:.6}}
 
 .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 
-@media(prefers-reduced-motion:reduce){.dsurf{animation:none}.dspin{animation:calm 2s ease-in-out infinite}}
+@media(prefers-reduced-motion:reduce){.dsurf,.ddot.rec{animation:none}.dspin{animation:calm 2s ease-in-out infinite}}

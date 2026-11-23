@@ -1,16 +1,16 @@
 // The mic in a message box (and in Feedback): dictation only. A voice call is the other thing (the wave button).
-// SHEP-334: while it listens, the composer itself is the dictation surface, the way ChatGPT's and Claude's mobile
-// composers and Wispr Flow do it: its bottom row becomes Cancel (an X that drops this dictation), a wave drawn from the
-// microphone's real level, and Done (a check, where Send was). No record dot, no timer, and no words while you talk:
-// the box says "Listening…" and keeps what you typed. On Done, a short "Writing it down…", then the clean text lands
-// at the cursor in one go. "Allow the microphone" shows only when the browser really asks (dictation.ts askWhen).
-// Every way it fails says why, there. Escape cancels; leaving the chat cancels.
+// SHEP-314: while it records, the box's bottom row becomes the recording itself, the way ChatGPT's, Claude's and
+// WhatsApp's composers do it: Cancel on the left, a wave drawn from the microphone's real level and the time in the
+// middle, Done on the right where Send was. SHEP-334: that row is all it shows. No "Listening…" and no words while you
+// talk; on Done the clean text lands at the box's cursor in one go, what was typed stays. "Allow the microphone" shows
+// only when the browser really asks (dictation.ts askWhen). Every way it fails says why, there. Escape cancels;
+// leaving the chat cancels.
 import { useEffect, useRef, useState } from 'react'
-import { canDictate, dictate, dictSample, SAY, type Dictation } from './dictation.ts'
+import { canDictate, clock, dictate, dictSample, SAY, type Dictation } from './dictation.ts'
 import { IDLE, insertAt, step, type DictEvent, type DictState } from './dictstate.ts'
 import { getState, has } from './kernel.ts'
 import { escapeFirst } from './overlay.tsx'
-import { I } from './ui.tsx'
+import { I, IB } from './ui.tsx'
 import { Wave } from './wave.tsx'
 import './dictate.css'
 
@@ -37,9 +37,6 @@ function ownWords(): string[] {
   return [...(snap.places ?? []).map((p) => p.name), ...(snap.machines ?? []).map((m) => m.name)].filter((w): w is string => typeof w === 'string')
 }
 
-/** what the box says while it is the dictation surface (when nothing was typed in it) */
-const SAYS: Partial<Record<DictState['k'], string>> = { starting: 'Starting…', asking: 'Waiting for the microphone…', on: 'Listening…', writing: 'Writing it down…' }
-
 /** setText: the box's whole new text (the words go in at its cursor, what was typed stays) */
 export function DictateButton({ setText, scope }: { setText: (value: string) => void; scope?: string }) {
   const mic = useRef<HTMLButtonElement>(null)
@@ -55,6 +52,7 @@ export function DictateButton({ setText, scope }: { setText: (value: string) => 
     landed.current = r.caret
   })
   const live = useRef<Dictation | null>(null)
+  const [, tick] = useState(0)
   const active = s.k !== 'idle'
 
   const cancel = () => {
@@ -83,7 +81,7 @@ export function DictateButton({ setText, scope }: { setText: (value: string) => 
         dispatch({ t: 'fail', why })
       },
       undefined,
-      (p) => dispatch({ t: 'phase', p }),
+      (p) => dispatch({ t: 'phase', p, at: Date.now() }),
       ownWords(),
     )
     live.current = d
@@ -93,6 +91,12 @@ export function DictateButton({ setText, scope }: { setText: (value: string) => 
   // gone (the box closed) or another chat's box: stop, write nothing
   useEffect(() => () => live.current?.cancel(), [])
   useEffect(() => () => cancel(), [scope])
+  // the time moves while it records
+  useEffect(() => {
+    if (s.k !== 'on') return
+    const t = setInterval(() => tick((n) => n + 1), 250)
+    return () => clearInterval(t)
+  }, [s.k])
   // Escape cancels (or closes the error), before anything else on the page hears it (a dialog it's in stays open)
   useEffect(() => {
     if (!active) return
@@ -104,20 +108,13 @@ export function DictateButton({ setText, scope }: { setText: (value: string) => 
     escapeFirst.add(take)
     return () => void escapeFirst.delete(take)
   }, [active, s.k])
-  // the box is the surface meanwhile: it says what dictation is doing, and isn't typed into (the words go where its
-  // cursor was)
+  // the box isn't typed into meanwhile: the words go where its cursor was, and what was typed stays as it is
   useEffect(() => {
     const box = boxOf()
-    const cbox = box?.closest<HTMLElement>('.cbox')
-    if (!box || !cbox) return
-    if (active) cbox.dataset.dict = s.k
-    else delete cbox.dataset.dict
-    box.readOnly = active && s.k !== 'error'
+    if (box) box.readOnly = active && s.k !== 'error'
   }, [active, s.k])
   useEffect(() => () => {
     const box = boxOf()
-    const cbox = box?.closest<HTMLElement>('.cbox')
-    if (cbox) delete cbox.dataset.dict
     if (box) box.readOnly = false
   }, [])
   // focus: on the surface's main button while it shows (keyboard: Enter is Done; a phone's keyboard steps aside),
@@ -147,49 +144,55 @@ export function DictateButton({ setText, scope }: { setText: (value: string) => 
       </button>
     )
 
-  const asking = s.k === 'asking'
   return (
     <div ref={surf} className={`dsurf ${s.k}`} role="group" aria-label="Dictation">
-      {s.k === 'error' ? (
-        <>
-          <button type="button" className="dbtn" aria-label="Close" onClick={() => dispatch({ t: 'dismiss' })}>
-            <I n="x" />
-          </button>
-          <p className="dsay err" role="alert">
-            <I n="warn" c="s16" />
-            <span>{s.why}</span>
-          </p>
-          <button type="button" className="dagain" data-main onClick={start}>
-            <I n="mic" c="s16" />
-            <span>Try again</span>
-          </button>
-        </>
-      ) : (
-        <>
-          <button type="button" className="dbtn" aria-label="Cancel dictation" onClick={cancel}>
-            <I n="x" />
-          </button>
-          {asking ? (
-            <p className="dsay">
-              <I n="mic" c="s16" />
-              <span>{SAY.asking}</span>
+      {/* only words that need reading: why it didn't work, or the browser really asking for the microphone */}
+      {(s.k === 'error' || s.k === 'asking') && (
+        <div className="dwords">
+          {s.k === 'error' ? (
+            <p className="derr" role="alert">
+              <I n="warn" c="s16" />
+              <span>{s.why}</span>
             </p>
           ) : (
-            <Wave on={s.k === 'on'} sample={dictSample} />
+            <p className="dhint">{SAY.asking}</p>
           )}
-          {s.k === 'writing' ? (
-            <button type="button" className="ddone wr" data-main aria-label="Writing it down" aria-disabled="true" onClick={() => undefined}>
-              <i className="dspin" aria-hidden />
-            </button>
-          ) : (
-            <button type="button" className="ddone" data-main aria-label="Done" disabled={s.k !== 'on'} onClick={done}>
-              <I n="check" />
-            </button>
-          )}
-        </>
+        </div>
       )}
+      <div className="dctl">
+        {s.k === 'error' ? (
+          <>
+            <IB icon="x" label="Close" onClick={() => dispatch({ t: 'dismiss' })} />
+            <span className="sp" />
+            <button type="button" className="ddone" data-main onClick={start}>
+              <I n="mic" c="s16" />
+              <span>Try again</span>
+            </button>
+          </>
+        ) : (
+          <>
+            <IB icon="x" label="Cancel dictation" onClick={cancel} />
+            <Wave on={s.k === 'on'} sample={dictSample} />
+            <span className="dtime" aria-hidden>
+              <i className={`ddot${s.k === 'on' ? ' rec' : ''}`} />
+              {s.k === 'on' ? clock(Date.now() - s.since) : s.k === 'writing' ? clock(s.took) : '0:00'}
+            </span>
+            {s.k === 'writing' ? (
+              <button type="button" className="ddone wr" data-main aria-label="Writing it down" aria-disabled="true" onClick={() => undefined}>
+                <i className="dspin" aria-hidden />
+                <span>Writing</span>
+              </button>
+            ) : (
+              <button type="button" className="ddone" data-main aria-label="Done, write it down" disabled={s.k !== 'on'} onClick={done}>
+                <I n="check" c="s16" />
+                <span>Done</span>
+              </button>
+            )}
+          </>
+        )}
+      </div>
       <span className="vh" role="status">
-        {s.k === 'error' ? '' : asking ? SAY.asking : (SAYS[s.k] ?? '')}
+        {s.k === 'asking' ? SAY.asking : s.k === 'on' ? 'Recording' : s.k === 'writing' ? 'Writing it down' : ''}
       </span>
     </div>
   )
