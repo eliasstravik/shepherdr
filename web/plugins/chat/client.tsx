@@ -609,11 +609,14 @@ function StartLine({ chat, thread }: { chat: Chat | undefined; thread: Thread })
 
 /** The working sign at the chat's end (SHEP-313, SHEP-343), as Claude Duet shows its agent at work: three dots that
  *  bounce in turn inside a small agent-side speech bubble, where its words will land. The step it is on, when Shepherdr
- *  knows it, stays quiet text beside the bubble, never in it (nothing the agent wrote). When words arrive the bubble
+ *  knows it, stays quiet text beside the bubble, never in it (nothing the agent wrote), in plain words: a task's own
+ *  status line, else the tool at work (typing.ts stepWords), never a command line. When words arrive the bubble
  *  goes and they take its place; keyed on the message count, a new one comes back under them a beat later if it still
  *  works, so the bubble seems to turn into the message. */
-export function WorkingSign({ chat }: { chat: Chat | undefined }) {
-  const sign = signOf(chat)
+export function WorkingSign({ chat, thread }: { chat: Chat | undefined; thread?: Thread }) {
+  // a task's own status line, what its agent last said it does (not while it waits on you)
+  const report = thread?.task?.report
+  const sign = signOf(chat, report && !report.paused ? report.msg : undefined)
   if (!sign) return null
   return (
     <div key={chat?.messages.length ?? 0} className="wsign" role="status" aria-label={sign.step || 'Working'}>

@@ -22,14 +22,57 @@ export function working(chat: Chat) {
   return !asks(chat)
 }
 
-/** The working sign at the chat's end: null when it doesn't show; else the step it is on, one line ('' when nothing is
- *  known: the sign alone). It goes with the turn: once herdr says it stopped working, it ended or crashed, or a card of
- *  its waits on you. Words that arrive mid-turn land above it; it stays below them while the next step runs. */
-export function signOf(chat: Chat | undefined): { step: string } | null {
+// Programs a step can name, as plain words for the working sign (SHEP-357): a command line never shows there.
+const PROGRAMS: [RegExp, string][] = [
+  [/^(python3?|node|bun|deno|ruby|perl) (-|-c|-e|<<|--eval)/, 'Running a script'],
+  [/(^|\s)(test|pytest|unittest|jest|vitest|mocha)\b|\b(bun|npm|pnpm|yarn|go|cargo|deno) test\b/, 'Running tests'],
+  [/^(npm|pnpm|yarn|bun|pip3?|uv|cargo|go|brew|apt(-get)?) (i|install|add|ci|sync|get)\b/, 'Installing packages'],
+  [/\b(build|tsc|make|vite build|webpack|esbuild)\b/, 'Building'],
+  [/^git\b/, 'Using git'],
+  [/^gh\b/, 'Using GitHub'],
+  [/^(curl|wget)\b/, 'Fetching a page'],
+  [/^sleep\b/, 'Waiting'],
+  [/^(ls|cat|head|tail|sed|grep|rg|ugrep|find|fd|wc|tree|less|stat|diff|jq|awk)\b/, 'Looking through files'],
+  [/^(python3?|node|bun|deno|ruby|perl|php|bash|sh|zsh)\b/, 'Running a script'],
+]
+
+// a run of words a person wrote ("the build", "Unit tests"), not a command line ("python3 - <<'EOF' p='web", "git
+// status", "ls"): letters only, and its first word no program's name
+const words = (s: string) => /^[\p{L}\d'’,. ]+$/u.test(s) && !/[.,]$/.test(s.split(' ')[0])
+const NAMES = new Set('git gh bun bunx npm npx pnpm yarn node deno python python3 pip pip3 uv go cargo rustc make cmake ls cat head tail sed grep rg ugrep find fd wc jq awk curl wget sleep echo printf cd cp mv rm mkdir touch chmod tar zip unzip docker kubectl ssh scp rsync tsc vite pytest jest vitest sh bash zsh hc brew apt sudo env kill ps lsof tmux open xdg-open'.split(' '))
+const plain = (s: string) => words(s) && s.includes(' ') && !NAMES.has(s.split(' ')[0]) && !/\d/.test(s.split(' ')[0])
+
+/** A step as plain words: what a tool does ("Reading app.ts", "Running tests"), or its agent's own words, never a
+ *  command line, a regular expression or a long path. */
+export function stepWords(raw: string): string {
+  const s = raw.replace(/\s+/g, ' ').trim()
+  const run = /^(Running|Ran|Started|Watching) (.+)$/.exec(s)
+  if (run) {
+    const [, verb, what] = run
+    if (plain(what)) return s
+    const cmd = what.replace(/^(sudo|env( \w+=\S*)*|time|timeout \S+|nohup|\w+=\S*) /, '')
+    const known = PROGRAMS.find(([re]) => re.test(cmd))?.[1]
+    if (verb === 'Started') return 'Started a command in the background'
+    if (verb === 'Watching') return 'Watching a command'
+    return known ?? 'Running a command'
+  }
+  const find = /^(Searching for|Looking for) (.+)$/.exec(s)
+  if (find) return words(find[2].replace(/[“”"]/g, '')) && find[2].length <= 40 ? s : find[1] === 'Looking for' ? 'Looking for files' : 'Searching the code'
+  // anything else that looks like code (a tool's own raw input) reads as the tool at work
+  if (/[<>|&;$`{}\\]|=['"]|\s--?\w/.test(s)) return 'Working'
+  return s
+}
+
+/** The working sign at the chat's end: null when it doesn't show; else the step it is on, one line of plain words
+ *  ('' when nothing is known: the sign alone). Its agent's own status line (`said`, a task's herdr-task status) comes
+ *  first, then what its log says it does now. It goes with the turn: once herdr says it stopped working, it ended or
+ *  crashed, or a card of its waits on you. Words that arrive mid-turn land above it; it stays below them while the next
+ *  step runs. */
+export function signOf(chat: Chat | undefined, said?: string): { step: string } | null {
   if (!chat || chat.notice === 'ended' || chat.notice === 'gone') return null
   const live = working(chat)
   if (!live && !typing(chat)) return null
   const now = live ? chat.live?.now : undefined
-  const step = chat.doing || now?.doing || now?.title || ''
-  return { step: step.replace(/\s+/g, ' ').trim() }
+  const own = said?.replace(/\s+/g, ' ').trim()
+  return { step: own || stepWords(chat.doing || now?.doing || now?.title || '') }
 }
