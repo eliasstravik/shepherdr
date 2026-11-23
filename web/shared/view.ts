@@ -42,6 +42,17 @@ export function folderOf(snap: Snapshot, p: Pick<Place, 'machine' | 'where' | 'f
 
 /** a folder as it shows: its path as it is, ~ for the home folder and / for the root, never a made-up name */
 export const folderName = (path: string) => path || '/'
+/** what a chat's header says of where it is (SHEP-360): the folder, Home / Root in a word (short: the header is
+ *  narrow, its menu says it whole; a path's start gives way: `cut`), and its machine when that adds something:
+ *  another machine, or Everything's own home */
+export function headerWhere(snap: Snapshot, p: Pick<Place, 'id' | 'machine' | 'where' | 'folder'>): { path: string; cut: boolean; full: string; machine: string | null } | null {
+  const f = folderOf(snap, p)
+  const every = isEverything(snap, p.id)
+  if (!f.short && !every) return null
+  const short = every && !f.short ? '~' : f.short
+  const path = short === '~' ? 'Home' : short === '/' ? 'Root' : short
+  return { path, cut: path === f.short, full: f.full || '~', machine: f.machine ?? (every ? machineLabel(snap, p.machine) : null) }
+}
 export const machineLabel = (snap: Snapshot, key: string) => machineOf(snap, key)?.name ?? key
 
 /** a machine the serving one can't reach now */

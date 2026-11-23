@@ -249,7 +249,7 @@ function FolderTop({ f }: { f: { short: string; full: string; machine: string | 
 
 const copyFolder = (full: string): MenuRow => ({ icon: 'copy', label: 'Copy folder path', run: () => void copyText(full).then((ok) => ok && notice('Copied')) })
 
-/** The header's folder chip's menu (SHEP-316): the whole path and its machine, and Copy */
+/** The header's folder line's menu (SHEP-316, SHEP-360): the whole path and its machine, and Copy */
 export function folderMenu(anchor: Element, placeId: string) {
   const snap = getState().snap
   const p = snap && placeOf(snap, placeId)
@@ -264,7 +264,7 @@ export function spaceMenu(anchor: Element, placeId: string, head = false) {
   const snap = getState().snap
   const p = snap && placeOf(snap, placeId)
   if (!snap || !p) return
-  // no folder here (SHEP-328): the header's folder chip shows it and copies it
+  // no folder here (SHEP-328): the header's folder line shows it and copies it
   const first = [...registry.spaceMenu.flatMap((m) => m.rows(p)), ...(head ? swapRow(getState().ui) : [])]
   const line = first.length > 0
   if (isEverything(snap, p.id)) return openMenu(anchor, [...first, { icon: 'gear', label: 'Settings', line, run: () => openSettings('all') }], { label: 'Everything' })
