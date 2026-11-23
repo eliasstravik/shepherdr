@@ -602,15 +602,17 @@ function StartLine({ chat, thread }: { chat: Chat | undefined; thread: Thread })
   )
 }
 
-/** The working sign at the chat's end (SHEP-313), as Claude Duet shows its agent at work: three dots that rise in turn,
- *  where its words will land, and gone the moment they do. Shepherdr's own form: no bubble around them (nothing the
- *  agent wrote), and the step it is on beside them when Shepherdr knows it. */
-function WorkingSign({ chat }: { chat: Chat | undefined }) {
+/** The working sign at the chat's end (SHEP-313, SHEP-343), as Claude Duet shows its agent at work: three dots that
+ *  bounce in turn inside a small agent-side speech bubble, where its words will land. The step it is on, when Shepherdr
+ *  knows it, stays quiet text beside the bubble, never in it (nothing the agent wrote). When words arrive the bubble
+ *  goes and they take its place; keyed on the message count, a new one comes back under them a beat later if it still
+ *  works, so the bubble seems to turn into the message. */
+export function WorkingSign({ chat }: { chat: Chat | undefined }) {
   const sign = signOf(chat)
   if (!sign) return null
   return (
-    <div className="wsign" role="status" aria-label={sign.step || 'Working'}>
-      <span className="wdots" aria-hidden="true"><i /><i /><i /></span>
+    <div key={chat?.messages.length ?? 0} className="wsign" role="status" aria-label={sign.step || 'Working'}>
+      <span className="b wbub" aria-hidden="true"><span className="wdots"><i /><i /><i /></span></span>
       {sign.step && <span className="wstep">{sign.step}</span>}
     </div>
   )
