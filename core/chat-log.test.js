@@ -268,16 +268,16 @@ test("an empty suggest line counts as none, and a suggest line inside a code blo
   expect(agents[1].text).toContain('<hc suggest="x"/>');
 });
 
-test("three suggest lines are three replies in order; more than three keep the first three; two and one stay as they are", async () => {
+test("three suggest lines are three replies in order; more than five keep the first five; two and one stay as they are", async () => {
   const c = await read([
     person,
     reply("m1", [text('Merge it?\n\n<hc suggest="Yes, merge it"/>\n<hc suggest="Show me the diff"/>\n<hc suggest="status?"/>')]),
-    reply("m2", [text('Next?\n<hc suggest="a"/>\n<hc suggest="b"/>\n<hc suggest="c"/>\n<hc suggest="d"/>')]),
+    reply("m2", [text('Next?\n<hc suggest="a"/>\n<hc suggest="b"/>\n<hc suggest="c"/>\n<hc suggest="d"/>\n<hc suggest="e"/>\n<hc suggest="f"/>')]),
     reply("m3", [text('Two?\n<hc suggest="one"/>\n<hc suggest="two"/>')]),
   ]);
   const agents = c.items.filter((x) => x.kind === "agent");
   expect(agents.map((x) => x.text)).toEqual(["Merge it?", "Next?", "Two?"]);
-  expect(agents.map((x) => x.suggests)).toEqual([["Yes, merge it", "Show me the diff", "status?"], ["a", "b", "c"], ["one", "two"]]);
+  expect(agents.map((x) => x.suggests)).toEqual([["Yes, merge it", "Show me the diff", "status?"], ["a", "b", "c", "d", "e"], ["one", "two"]]);
 });
 
 test("odd characters and quotes in a suggestion come through as written; a repeat counts once", async () => {
