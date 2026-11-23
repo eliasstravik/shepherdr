@@ -259,5 +259,106 @@ class MissingLibraries(unittest.TestCase):
         self.assertNotIn("ready", p.stdout)
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux arm64's fallback")
+class Arm64Chromium(unittest.TestCase):
+    """Linux arm64 has no Chrome for Testing to download (GitHub #1264): with no Chrome of agent-browser's own, the
+    task browser uses a Chromium already here (Playwright's, else the system's, never Ubuntu's snap), or says the one
+    command that installs one."""
+    setUp = MissingLibraries.setUp
+    tearDown = MissingLibraries.tearDown
+    fake_ldd = MissingLibraries.fake_ldd
+    ldd_checked = MissingLibraries.ldd_checked
+    os_release = MissingLibraries.os_release
+
+    def run_hb(self, *args, arch="aarch64", extra=None):
+        # PATH: this machine's tools minus any real Chrome or Chromium, so only the test's fakes can be found
+        tools = os.path.join(self.tmp, "tools")
+        if not os.path.isdir(tools):
+            os.makedirs(tools)
+            for d in ("/usr/bin", "/bin"):
+                for n in os.listdir(d) if os.path.isdir(d) else []:
+                    if "chrom" in n or n.startswith("google-chrome") or os.path.exists(os.path.join(tools, n)):
+                        continue
+                    os.symlink(os.path.join(d, n), os.path.join(tools, n))
+        env = {"HOME": self.home, "PATH": f"{self.fakes}:{self.bin}:{tools}", "HERDR_BROWSER_ARCH": arch,
+               "HERDR_BROWSER_BIN": self.ab, "HERDR_BROWSER_OS_RELEASE": self.osr, "HERDR_BROWSER_NEW_WINDOW": "echo T1",
+               "HERDR_BROWSER_USERNS_SYSCTL": os.path.join(self.tmp, "no-such-sysctl"),
+               "HERDR_BROWSER_APPARMOR_D": os.path.join(self.tmp, "no-apparmor.d"), **(extra or {})}
+        return subprocess.run([os.path.join(tools, "sh"), HB, *args], capture_output=True, text=True, env=env,
+                              stdin=subprocess.DEVNULL, timeout=60)
+
+    def exe(self, path, text="#!/bin/sh\necho chromium\n"):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(text)
+        os.chmod(path, 0o755)
+        return path
+
+    def no_own_chrome(self):
+        shutil.rmtree(os.path.join(self.home, ".agent-browser"))
+
+    def test_system_chromium_is_used(self):
+        self.no_own_chrome()
+        self.fake_ldd(RESOLVED)
+        self.os_release("ID=debian\n")
+        sys_chromium = self.exe(os.path.join(self.fakes, "chromium"))
+        p = self.run_hb("--task", "a#1", "open", "x")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("ran --session herdr-a-1", p.stdout)
+        self.assertEqual(self.ldd_checked(), sys_chromium)
+        self.assertTrue(self.run_hb("--install").returncode == 0)
+
+    def test_playwright_chromium_comes_first(self):
+        self.no_own_chrome()
+        self.fake_ldd(RESOLVED)
+        self.exe(os.path.join(self.fakes, "chromium"))
+        pw = os.path.join(self.home, ".cache/ms-playwright")
+        self.exe(os.path.join(pw, "chromium-1100/chrome-linux/chrome"))
+        newest = self.exe(os.path.join(pw, "chromium-1200/chrome-linux/chrome"))
+        self.exe(os.path.join(pw, "chromium_headless_shell-1200/chrome-linux/headless_shell"))
+        p = self.run_hb("--task", "a#1", "open", "x")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(self.ldd_checked(), newest)
+
+    def test_own_chrome_and_a_set_path_win(self):
+        self.fake_ldd(RESOLVED)
+        self.exe(os.path.join(self.fakes, "chromium"))
+        p = self.run_hb("--task", "a#1", "open", "x")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(self.ldd_checked(), self.chrome)
+        mine = self.exe(os.path.join(self.tmp, "my-chrome"))
+        p = self.run_hb("--task", "a#1", "open", "x", extra={"AGENT_BROWSER_EXECUTABLE_PATH": mine})
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertEqual(self.ldd_checked(), mine)
+
+    def test_snap_chromium_is_skipped_and_the_fix_is_said(self):
+        self.no_own_chrome()
+        self.fake_ldd(RESOLVED)
+        self.exe(os.path.join(self.fakes, "chromium-browser"), "#!/bin/sh\nexec /snap/bin/chromium \"$@\"\n")
+        for osr, fix in [("ID=ubuntu\nID_LIKE=debian\n", "npx playwright install chromium"),
+                         ("ID=debian\n", "sudo apt-get install -y chromium"),
+                         ("ID=fedora\n", "sudo dnf install -y chromium")]:
+            with self.subTest(os=osr):
+                self.os_release(osr)
+                p = self.run_hb("--task", "a#1", "open", "x")
+                self.assertEqual(p.returncode, 127, p.stdout + p.stderr)
+                self.assertIn("there's no Chrome download for Linux arm64, and no Chromium here. Fix it: " + fix,
+                              p.stderr)
+                self.assertNotIn("ran ", p.stdout)
+                p = self.run_hb("--install")
+                self.assertEqual(p.returncode, 1, p.stdout + p.stderr)
+                self.assertIn("Fix it: " + fix, p.stderr)
+                self.assertNotIn("downloading Chrome", p.stderr)
+
+    def test_x64_keeps_downloading(self):
+        # elsewhere nothing changes: no Chrome yet means agent-browser installs one, a system Chromium isn't picked
+        self.no_own_chrome()
+        self.fake_ldd(RESOLVED)
+        self.exe(os.path.join(self.fakes, "chromium"))
+        p = self.run_hb("--task", "a#1", "open", "x", arch="x86_64")
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertFalse(os.path.exists(self.ldd_args), "no Chrome was picked for the library check")
+
+
 if __name__ == "__main__":
     unittest.main()
