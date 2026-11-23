@@ -526,7 +526,7 @@ function ScreenButton({ thread }: { thread: Thread }) {
 export default definePlugin({
   name: 'screens',
   setup(reg) {
-    reg.header.push({ order: 20, phone: true, View: ScreenButton })
+    reg.header.push({ order: 70, phone: true, View: ScreenButton })
     reg.taskHeader.push({ order: 20, View: ScreenButton })
     reg.panes.push({ id: 'screen', View: ScreenPane })
     reg.chatTail.push({ order: 30, View: InThread })

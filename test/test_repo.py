@@ -518,3 +518,20 @@ class TestsOnAThrowawayHome(unittest.TestCase):
         # this repo's own files are fine, wherever its worktree lives
         open(J("README.md")).close()
         subprocess.run(["true"], check=True)
+
+
+class HeaderButtonOrder(unittest.TestCase):
+    """A chat's header: Tasks, Artifacts, voice, then Terminal and Screen last, at the far right."""
+
+    def orders(self):
+        found = {}
+        for name in ('tasks', 'artifacts', 'voice', 'terminal', 'screens'):
+            with open(os.path.join(ROOT, 'web', 'plugins', name, 'client.tsx')) as f:
+                m = re.search(r'reg\.header\.push\(\{ order: (\d+)', f.read())
+            self.assertIsNotNone(m, name)
+            found[name] = int(m.group(1))
+        return found
+
+    def test_terminal_and_screen_come_last(self):
+        o = self.orders()
+        self.assertEqual(sorted(o, key=o.get), ['tasks', 'artifacts', 'voice', 'terminal', 'screens'])

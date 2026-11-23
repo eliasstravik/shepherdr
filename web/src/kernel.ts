@@ -77,7 +77,7 @@ export interface Registry {
     search?: FC<{ close: () => void }>
     /** the picker row a dialog shows for an agent choice lives in picker.tsx; the settings window in settings.tsx */
   }
-  /** buttons at the right of a chat's header, in order: Terminal, Screen, Tasks, Artifacts, voice. `phone`: also in a
+  /** buttons at the right of a chat's header, in order: Tasks, Artifacts, voice, Terminal, Screen. `phone`: also in a
    *  phone's header (Terminal and Screen; the rest live in its bottom bar) */
   header: { order: number; phone?: boolean; View: FC<{ thread: Thread }> }[]
   /** buttons in an open task's header, after its title (Terminal, Screen) */
