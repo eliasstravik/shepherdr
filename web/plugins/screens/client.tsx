@@ -677,32 +677,32 @@ function HandsCard({ k, sc, t, ref_ }: { k: string; sc: ScreenInfo; t: Task; ref
   )
 }
 
+/** the small live picture while its task works: an aside under the newest message, as the working sign */
 function InThread({ thread }: { chat: Chat | undefined; thread: Thread }) {
   const snap = useSnap()
-  if (!snap) return null
-  if (thread.task) {
-    const t = thread.task
+  if (!snap || !thread.task) return null
+  const t = thread.task
+  const k = `task:${t.id}`
+  const sc = snap.screens?.[k]
+  if (!sc || sc.hands || tstate(t) !== 'working' || !sc.active) return null
+  const src = sc.b ? 'b' : 'd'
+  return (
+    <div className="card live">
+      <Thumb k={k} src={src} />
+      <span className="s"><i className="dot" />{src === 'b' ? `Browser · ${shortUrl(sc.b!.url)}` : `Desktop · ${machineLabel(snap, sc.d!.of)}`}</span>
+    </div>
+  )
+}
+
+/** Needs your hands: a card where it was asked among the messages, never held at the end (SHEP-419) */
+export function handsCards(snap: Snapshot, thread: Thread) {
+  const list = thread.task ? [thread.task] : tasksIn(snap, thread.place).filter((t) => !t.archived)
+  return list.flatMap((t) => {
     const k = `task:${t.id}`
     const sc = snap.screens?.[k]
-    if (!sc) return null
-    if (sc.hands) return <HandsCard k={k} sc={sc} t={t} ref_={false} />
-    if (tstate(t) !== 'working' || !sc.active) return null
-    const src = sc.b ? 'b' : 'd'
-    return (
-      <div className="card live">
-        <Thumb k={k} src={src} />
-        <span className="s"><i className="dot" />{src === 'b' ? `Browser · ${shortUrl(sc.b!.url)}` : `Desktop · ${machineLabel(snap, sc.d!.of)}`}</span>
-      </div>
-    )
-  }
-  return (
-    <>
-      {tasksIn(snap, thread.place).map((t) => {
-        const sc = snap.screens?.[`task:${t.id}`]
-        return sc?.hands && !t.archived ? <HandsCard key={t.id} k={`task:${t.id}`} sc={sc} t={t} ref_ /> : null
-      })}
-    </>
-  )
+    if (!sc?.hands || (!thread.task && sc.hands.settled)) return []
+    return [{ key: `hands:${t.id}`, at: t.needsAt ?? t.needsAtWas, node: <HandsCard k={k} sc={sc} t={t} ref_={!thread.task} /> }]
+  })
 }
 
 export default definePlugin({
@@ -712,6 +712,7 @@ export default definePlugin({
     reg.taskMenu.push({ order: 6, rows: (t, where) => (where === 'thread' ? [screenRow(getState().ui, screenKey(t.place, t.id), openScreen)] : []) })
     reg.panes.push({ id: 'screen', View: ScreenPane })
     reg.chatTail.push({ order: 30, View: InThread })
+    reg.chatCards.push({ order: 30, cards: handsCards })
     reg.taskMenu.push({ order: 20, rows: (t, where) => (where === 'row' ? [{ icon: 'screen', label: 'Show screen', run: () => openScreen(`task:${t.id}`) }] : []) })
   },
 })

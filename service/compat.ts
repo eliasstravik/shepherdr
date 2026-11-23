@@ -174,6 +174,18 @@ export function artifactOf(a: any, spaces: Space[], program: (addr: string) => s
 
 /** Codex's own questions (a log's ask item with its questions) as a question card: its id cq:<item id>, answered on
  *  Codex's screen (service/actions.ts, core/asks.js codexSteps). */
+/** Cards the chat's log doesn't hold (an agent's open question, a secret it asks for, a start screen, how each closed),
+ *  each where it was asked among the messages, never held at the end: newer messages come under it. Each goes before
+ *  the first message timed after it; messages with no time stay where they are. */
+export function placeByTime(messages: Message[], cards: Message[]): Message[] {
+  const out = [...messages];
+  for (const c of [...cards].sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity))) {
+    const next = typeof c.at === "number" ? out.findIndex((m) => typeof m.at === "number" && m.at > c.at!) : -1;
+    out.splice(next < 0 ? out.length : next, 0, c);
+  }
+  return out;
+}
+
 export function codexQuestion(x: any, key: string): Question {
   const qs: any[] = x.questions ?? [];
   const choices = (q: any) => q.choices.map(codexChoice);
@@ -285,6 +297,15 @@ export class Compat {
   secrets: { asks(): { address: string; name: string; why: string }[] } | null = null;
 
   /** A secret ask as 2.1's masked card: kept for this space, this machine, or Everywhere. */
+  /** when a secret ask was first seen (its labels hold no time), so its card keeps its place */
+  private asked = new Map<string, number>();
+  askedAt(id: string) {
+    if (!this.asked.has(id)) {
+      if (this.asked.size > 500) this.asked.clear();
+      this.asked.set(id, Date.now());
+    }
+    return this.asked.get(id)!;
+  }
   secretAsk(a: { address: string; name: string; why: string }) {
     const t: any = (this as any).terminalsOf?.(a.address);
     const sp = ["herdr.space", "herdr.task.space", "herdr.coordinator.space"].map((k) => t?.labels?.[k]).find(Boolean);
@@ -688,10 +709,11 @@ export class Compat {
         messages.splice(next < 0 ? messages.length : next, 0, answer);
       }
     }
-    // what the agent asks now, as cards at the end of its chat
+    // what the agent asks now, as cards where they were asked (placeByTime below)
+    const cardsFrom = messages.length;
     for (const a of addr ? this.asks?.of(addr) ?? [] : []) messages.push({ id: `ask:${a.id}`, who: "agent", at: a.at, question: this.question(a, key) });
     if (codexCard) messages.push({ id: `ask:cq:${codexCard.id}`, who: "agent", at: codexCard.at ?? Date.now(), question: codexQuestion(codexCard, key) });
-    for (const a of (this.secrets?.asks() ?? []).filter((x) => x.address === addr)) messages.push({ id: `secret:${a.address}:${a.name}`, who: "agent", at: Date.now(), secret: this.secretAsk(a) } as Message);
+    for (const a of (this.secrets?.asks() ?? []).filter((x) => x.address === addr)) messages.push({ id: `secret:${a.address}:${a.name}`, who: "agent", at: this.askedAt(`secret:${a.address}:${a.name}`), secret: this.secretAsk(a) } as Message);
     // asks that closed, as the window's quiet lines ("✓ Run: npm test · Allowed in the chat"); a question's own line is
     // its "Asked you" box, from the log
     const watch = (this as any).watch;
@@ -711,11 +733,14 @@ export class Compat {
       const by = { ref: r.ref, title: r.title, chat: `${taskId(r)}/worker` };
       const a = (this.asks?.of(r.worker) ?? []).sort((p: any, q: any) => p.at - q.at)[0];
       if (a) messages.push({ id: `ask:${a.id}`, who: "agent", at: a.at, question: { ...this.question(a, key), by } as any });
-      else for (const s of (this.secrets?.asks() ?? []).filter((x) => x.address === r.worker)) messages.push({ id: `secret:${s.address}:${s.name}`, who: "agent", at: Date.now(), secret: { ...this.secretAsk(s), by } } as Message);
+      else for (const s of (this.secrets?.asks() ?? []).filter((x) => x.address === r.worker)) messages.push({ id: `secret:${s.address}:${s.name}`, who: "agent", at: this.askedAt(`secret:${s.address}:${s.name}`), secret: { ...this.secretAsk(s), by } } as Message);
       // SHEP-322: by its title, never its key
       for (const e of (this.asks as any)?.endsOf?.(r.worker) ?? []) messages.push(quiet(`ae:${e.id}`, e.at, `${r.title} · ${e.title} · ${e.how}`));
       screens(r.worker, r.title, by);
     }
+    // a card never sticks to the end (SHEP-419): newer messages come under it
+    const placed = placeByTime(messages.slice(0, cardsFrom), messages.slice(cardsFrom));
+    messages.splice(0, messages.length, ...placed);
     const st = t?.status?.state ?? null;
     // the CLI's own subagents still at work, then its background shells and watchers, above the box (3.0: the helpers
     // list; core/bg-jobs.js)

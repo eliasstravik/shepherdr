@@ -338,7 +338,8 @@ function taskCards(snap: Snapshot, thread: Thread): { key: string; at?: number; 
   const halted = (t: Task) => tstate(t) === 'ask' && !!t.stopped && t.stopped.by !== 'you'
   if (thread.task) {
     const t = thread.task
-    return [...(reviewing(t) ? [{ key: `review:${t.id}`, node: <ReviewCard t={t} ctx="thread" /> }] : []), ...(halted(t) ? [{ key: `stopped:${t.id}`, node: <StoppedCard t={t} /> }] : [])]
+    // each where it came up among the messages, never held at the end (SHEP-419)
+    return [...(reviewing(t) ? [{ key: `review:${t.id}`, at: t.needsAt ?? t.needsAtWas, node: <ReviewCard t={t} ctx="thread" /> }] : []), ...(halted(t) ? [{ key: `stopped:${t.id}`, at: t.needsAt, node: <StoppedCard t={t} /> }] : [])]
   }
   // cards stay in the chat that asked (SHEP-325): a space's Tasks also holds what works in its folder, its chat does not
   const mine = tasksIn(snap, thread.place).filter((t) => isEverything(snap, thread.place) || t.place === thread.place)
