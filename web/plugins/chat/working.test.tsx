@@ -96,6 +96,11 @@ test('Stop sits on the working row while it works (the box\'s round button is th
   installPlugins([], [])
   expect(html).toContain('aria-label="Stop"')
   expect(html).toContain('wstop')
+  // a true stop sign: a ring around a filled square, on a round button
+  const { IC } = await import('@client/icons.ts')
+  expect(IC.stop).toContain('<circle')
+  expect(IC.stop).toMatch(/<rect[^>]*fill="currentColor"/)
+  expect(rule('.wrow>.wstop')).toContain('border-radius:50%')
   expect(draw(chat({ working: false }, msgs({ who: 'you', text: 'go' }, { text: 'Done.' })))).toBe('')
 })
 
