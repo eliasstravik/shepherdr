@@ -149,7 +149,8 @@ function del(t: Task) {
 
 /** A task's menu, on its row and in its thread: in its thread first Terminal and Screen (its header has no buttons for
  *  them); Reply, Open task, Show in #space, Show screen, Move to (only before it has started), Mark as done, Rename,
- *  Stop, Switch to terminal, then Archive and Delete. */
+ *  Stop, then Archive and Delete. In its thread, View as terminal / View as chat follows Terminal and Screen below a line:
+ *  it changes this chat's view rather than opening one beside it. */
 export function taskMenu(anchor: Element, t: Task, where: 'row' | 'thread') {
   const snap = getState().snap
   if (!snap) return
@@ -159,14 +160,16 @@ export function taskMenu(anchor: Element, t: Task, where: 'row' | 'thread') {
   const every = isEverything(snap, t.place)
   const extra = registry.taskMenu.flatMap((m) => m.rows(t, where))
   const views = extra.filter((r) => r.on !== undefined)
+  const viewSwitch = extra.filter((r) => r.icon === 'viewswap')
   const rows: MenuRow[] = [
     ...views,
+    ...viewSwitch,
     ...(th ? [] : [
       // Reply opens it with the reply box ready to type in
       { icon: 'reply' as const, label: 'Reply', run: () => { open(t); setTimeout(() => document.querySelector<HTMLTextAreaElement>(`textarea[data-box="${CSS.escape(chat)}"]`)?.focus(), 60) } },
       { icon: 'chat' as const, label: 'Open task', run: () => open(t) },
     ]),
-    { icon: every ? 'layers' : 'hash', label: `Show in ${spaceLabel(snap, t.place)}`, line: views.length > 0, run: () => go(t.place) },
+    { icon: every ? 'layers' : 'hash', label: `Show in ${spaceLabel(snap, t.place)}`, line: views.length + viewSwitch.length > 0, run: () => go(t.place) },
     ...(t.work ? [{ icon: 'folder' as const, label: `All tasks in ${workName(t)}`, run: () => showRepo(workKey(t)) }] : []),
     ...extra.filter((r) => r.label === 'Show screen'),
     ...(s === 'next' ? [{ icon: 'folder' as const, label: 'Move to', sub: spacesOf(snap).filter((p) => p.id !== t.place && !p.archived).map((p) => ({ label: `#${p.name}`, run: () => void tryAct({ type: 'task-move', chat, place: p.id }) })) }] : []),
@@ -175,7 +178,7 @@ export function taskMenu(anchor: Element, t: Task, where: 'row' | 'thread') {
     { icon: 'pen', label: 'Rename', run: () => renameDialog(t.name, (name) => tryAct({ type: 'task-rename', chat, name })) },
     // Stop pauses the agent, like pressing Esc: it drops what it was doing and waits
     ...(s === 'working' ? [{ icon: 'stop' as const, label: 'Stop', run: () => void tryAct({ type: 'stop', chat }) }] : []),
-    ...extra.filter((r) => r.label !== 'Show screen' && r.on === undefined),
+    ...extra.filter((r) => r.label !== 'Show screen' && r.on === undefined && r.icon !== 'viewswap'),
     { icon: 'archive', label: t.archived ? 'Unarchive' : 'Archive', line: true, run: () => { void tryAct({ type: 'archive', chat, on: !t.archived }); if (!t.archived && getState().ui.task === t.id) setUI({ task: null, wide: false }) } },
     { icon: 'bin', label: 'Delete', danger: true, run: () => del(t) },
   ]

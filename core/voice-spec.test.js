@@ -216,7 +216,7 @@ test("SHEP-113: the person's ask holds the updates until it is answered, tools a
 test("3.2: the app's own words: Everything, spaces, tasks by title, Ready for review, Mark as done; nothing of what was dropped", () => {
   const p = prompt();
   for (const w of ["Everything is the root chat", 'written "#shop", said "shop"', "named by its title", "Needs you", "Ready for review", '"Mark as done and merge"', '"Not now"', "Stopped by you", "Up next",
-    '"nothing to do"', "Take over", "Hand back", "Needs your hands", "Switch to terminal", "your terminal", "Tasks, Scheduled"]) expect(p).toContain(w);
+    '"nothing to do"', "Take over", "Hand back", "Needs your hands", "View as terminal", "your terminal", "Tasks, Scheduled"]) expect(p).toContain(w);
   expect(p).toContain("You are Shepherdr speaking, in the first person");
   expect(p).toContain("Name a task by its title, never by an id or number");
   // every word the voice agent is given: the prompt, each tool, each parameter and choice

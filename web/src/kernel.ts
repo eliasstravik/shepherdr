@@ -93,7 +93,7 @@ export interface Registry {
   /** the phone's bottom pill, after Chat */
   bar: { order: number; pane: string; label: string; icon: IconName; count?: (snap: Snapshot, place: string) => number }[]
   /** rows of a space's menu, first, before Settings: Terminal and Screen (only from the header's name: `head`), then
-   *  Switch to terminal */
+   *  View as terminal */
   spaceMenu: { order: number; rows: (place: Space, head: boolean) => MenuRow[] }[]
   /** rows of a task's menu (its row's and its thread's) */
   taskMenu: { order: number; rows: (task: Task, where: 'row' | 'thread') => MenuRow[] }[]
