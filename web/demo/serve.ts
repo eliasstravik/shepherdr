@@ -9,7 +9,7 @@ import { artifacts, catalog, chats as seed, config, EV, snapshot } from './data.
 
 const dist = join(fileURLToPath(new URL('../', import.meta.url)), 'dist')
 const port = Number(process.argv[2] || 7799)
-type Sock = { send(s: string): void; data: { mode: 'normal' | 'empty' | 'down' | 'more'; watch: string[] } }
+type Sock = { send(s: string): void; data: { mode: 'normal' | 'empty' | 'down' | 'more'; watch: string[]; app?: string } }
 const socks = new Set<Sock>()
 const state = { normal: structuredClone(snapshot('normal')), empty: structuredClone(snapshot('empty')), down: structuredClone(snapshot('down')) }
 const chats: Record<string, Chat> = structuredClone(seed)
@@ -31,7 +31,9 @@ function toggled(list: NonNullable<Message['reactions']>, emoji: string): NonNul
 const pushChat = (key: string) => socks.forEach((s) => s.data.watch.includes(key) && s.send(JSON.stringify({ type: 'chat', chat: chatFor(s, key) })))
 const chatFor = (s: Sock, key: string): Chat => {
   if (s.data.mode === 'empty') return { key, messages: chats[key]?.messages.filter((m) => m.id.startsWith('n')) ?? [], cli: 'claude', top: true, agent: chats[key]?.agent ?? chats[EV]!.agent }
-  const chat = chats[key] ?? { key, messages: [], cli: 'claude' as const, top: true, agent: chats[EV]!.agent }
+  let chat = chats[key] ?? { key, messages: [], cli: 'claude' as const, top: true, agent: chats[EV]!.agent }
+  // a link to the app itself (APP/?artifact=…) gets this page's own address, as `herdr-artifact link` prints it (SHEP-339)
+  if (s.data.app) chat = { ...chat, messages: chat.messages.map((m) => (m.text?.includes('APP/') ? { ...m, text: m.text.replaceAll('APP/', s.data.app!) } : m)) }
   return s.data.mode === 'down' ? { ...chat, messages: chat.messages.map(({ suggest, ...m }) => m) } : chat
 }
 const each = (f: (snap: Snapshot) => void) => { for (const s of Object.values(state)) f(s); push() }
@@ -156,7 +158,7 @@ function thumb(id: string, dark: boolean) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200"><rect width="320" height="200" fill="${bg}"/>${body}</svg>`
 }
 
-Bun.serve<{ mode: 'normal' | 'empty' | 'down' | 'more'; watch: string[] }, never>({
+Bun.serve<Sock['data'], never>({
   hostname: '127.0.0.1',
   port,
   async fetch(req, server) {
@@ -167,7 +169,8 @@ Bun.serve<{ mode: 'normal' | 'empty' | 'down' | 'more'; watch: string[] }, never
     if (path === '/api/ws') {
       // which day to show: the page was opened with ?case=empty or ?case=down (kept in a cookie: the app rewrites its address)
       const c = /(?:^|;\s*)demo-case=(\w+)/.exec(req.headers.get('cookie') ?? '')?.[1]
-      return server.upgrade(req, { data: { mode: c === 'empty' || c === 'down' || c === 'more' ? c : 'normal', watch: [] } }) ? undefined : new Response('no', { status: 400 })
+      const app = `${req.headers.get('origin') ?? url.origin}${url.pathname.slice(0, -'api/ws'.length)}`
+      return server.upgrade(req, { data: { mode: c === 'empty' || c === 'down' || c === 'more' ? c : 'normal', watch: [], app } }) ? undefined : new Response('no', { status: 400 })
     }
     if (path === '/api/screen/shot') return new Response(Bun.file(shotFile(url.searchParams.get('key') ?? '')), { headers: { 'content-type': 'image/jpeg', 'cache-control': 'no-store' } })
     if (path === '/api/me') return Response.json({ login: 'sam', off: [] })

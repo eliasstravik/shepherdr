@@ -7,6 +7,7 @@ import type { Action, Chat, Message, ReplyQuote, ServerEvent, Snapshot, Task, Up
 import { everything, placeOf, taskChat, taskOf, type Space } from '@shared/view.ts'
 import { clean, NO_FILTER, type TaskFilter } from '@shared/task-filter.ts'
 import type { IconName } from './icons.ts'
+import { catchLink } from './applink.ts'
 import { OPEN_WITHIN, PONG_WITHIN, retryIn, SAY_LOST_AFTER } from './link.ts'
 import { expire, loadOutbox, prune, saveOutbox, settle, type Outgoing } from './outbox.ts'
 import { setupGuarded } from './guard.tsx'
@@ -406,13 +407,15 @@ function urlOf(s: Step) {
 }
 
 let written = ''
+/** the next change is a step of its own, which Back undoes (a link followed in the app) */
+let stepNext = false
 function writeUrl(replace: boolean) {
   if (typeof history === 'undefined') return
   const step = stepOf(state.ui)
   const key = JSON.stringify(step)
   if (key === written) return
   // going deeper is a step Back undoes; anything else takes the place of the one on screen
-  const deeper = !replace && written !== '' && depth(step) > depth(JSON.parse(written) as Step)
+  const deeper = !replace && written !== '' && (stepNext || depth(step) > depth(JSON.parse(written) as Step))
   written = key
   if (deeper) history.pushState({ shep: 2, step }, '', urlOf(step))
   else history.replaceState({ shep: 2, step }, '', urlOf(step))
@@ -435,14 +438,39 @@ if (typeof window !== 'undefined') {
   MQ2?.addEventListener('change', sized)
 }
 
-/** go where a link points (an alert's): its space, task and card */
-export function openLink(href: string) {
+/** go where a link points (an alert's, or a link in the app to the app): its space, task, artifact or card.
+    `step`: a step of its own, so Back returns to what was on screen (SHEP-339). */
+export function openLink(href: string, step = false) {
   const q = new URL(href, location.href).searchParams
   const place = q.get('place')
   const task = q.get('task')
   const art = q.get('artifact')
-  setUI({ settings: null, drawer: false, search: false, ...(place ? { at: place } : {}), task, art, pane: art ? 'artifacts' : task ? 'tasks' : state.ui.phone ? null : state.ui.pane, wide: false, artWide: false, jump: q.get('focus') })
+  const pane = q.get('pane')
+  stepNext = step
+  try {
+    setUI({
+      settings: null,
+      drawer: false,
+      search: false,
+      ...(place ? { at: place } : {}),
+      task,
+      art,
+      ...(art ? { artV: null } : {}),
+      pane: art ? 'artifacts' : task ? 'tasks' : pane && pane !== 'screen' ? pane : state.ui.phone ? null : state.ui.pane,
+      wide: false,
+      artWide: false,
+      jump: q.get('focus'),
+    })
+  } finally {
+    stepNext = false
+  }
 }
+
+// a tap on a link to this same app opens it here, never reloading the page; another site's goes to a new tab
+if (typeof document !== 'undefined')
+  document.addEventListener('click', (e) =>
+    catchLink(e, location.href, (u) => openLink(u.href, true), (href) => void window.open(href, '_blank', 'noopener,noreferrer')),
+  )
 
 /* ---------- the link to the server ---------- */
 

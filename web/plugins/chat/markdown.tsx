@@ -1,9 +1,10 @@
-// An agent's reply, drawn from markdown: links open in a new tab (the app stays where it is), a code block has a copy
+// An agent's reply, drawn from markdown: a link to this app opens in it, any other in a new tab (kernel.ts catches
+// the tap: SHEP-339; the app stays where it is), a code block has a copy
 // button (the design system's code block), a tap on a bit of `code` copies it, and task names and #spaces are links
 // that open them.
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
-import { useMemo, type MouseEvent } from 'react'
+import { useMemo, type MouseEvent, type ReactNode } from 'react'
 import { copyText } from '@client/copy.ts'
 import { IC } from '@client/icons.ts'
 import { go, notice, openTask, useSnap } from '@client/kernel.ts'
@@ -13,7 +14,7 @@ import { parseTask } from '@core/mentions.js'
 
 marked.setOptions({ gfm: true, breaks: false })
 
-// a link goes to a new tab, never in place of the app
+// a link goes to a new tab, never in place of the app; one to this app is caught by kernel.ts and opens in it
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (node.tagName !== 'A' || !node.getAttribute('href')) return
   node.setAttribute('target', '_blank')
@@ -142,4 +143,20 @@ export function Markdown({ text, mentions, plain }: { text: string; mentions?: M
     return snap?.places.some((p) => p.id === place) ? go(place) : notice('That space is not in your list here.')
   }
   return <div className="md" onClick={open} dangerouslySetInnerHTML={{ __html: html }} />
+}
+
+/** your own words as you typed them, with their web addresses as links (one to this app opens in it) */
+export function withLinks(text: string): ReactNode[] {
+  return text.split(/(https?:\/\/[^\s<>"]+)/).flatMap((part, i): ReactNode[] => {
+    if (i % 2 === 0) return part ? [part] : []
+    // a full stop, comma or bracket at the end is the sentence's
+    const end = part.match(/[.,;:!?)\]'"]+$/)?.[0] ?? ''
+    const url = end ? part.slice(0, -end.length) : part
+    return [
+      <a key={i} href={url} target="_blank" rel="noopener noreferrer">
+        {url}
+      </a>,
+      ...(end ? [end] : []),
+    ]
+  })
 }
