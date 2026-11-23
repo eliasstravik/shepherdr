@@ -127,9 +127,11 @@ button.b{cursor:pointer}
 .ref{display:inline-flex;align-items:center;gap:6px;margin-top:12px;color:var(--muted);font-size:14px;line-height:20px}
 .lk{text-decoration:underline;text-decoration-color:var(--line2);text-underline-offset:3px;cursor:pointer}
 /* a message: its bubble slides right to reply (the Reply panel grows behind it), the quick bar sits on its open side */
-.bw{position:relative;display:grid;justify-self:start;max-width:min(82%,560px)}.bw.mine{justify-self:end}
-.pane .bw{max-width:92%}.bw>.bmv>.b{max-width:none}
-.bmv{display:grid;justify-items:start}.bw.mine>.bmv{justify-items:end}
+/* its one column never grows past the wrapper's cap (minmax(0,1fr), not auto), and the bubble and its chips stay inside
+   it: a quote's one line (white-space:nowrap) would otherwise widen both to its full length, past the chat column */
+.bw{position:relative;display:grid;grid-template-columns:minmax(0,1fr);justify-self:start;max-width:min(82%,560px)}.bw.mine{justify-self:end}
+.pane .bw{max-width:92%}.bw>.bmv>.b,.bw>.bmv>.rxs{max-width:100%}
+.bmv{display:grid;grid-template-columns:minmax(0,1fr);justify-items:start}.bw.mine>.bmv{justify-items:end}
 .bmv.settle{transition:transform 320ms cubic-bezier(.25,1.12,.4,1)}
 .rpl{position:absolute;inset-block:0;left:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;overflow:hidden;border-radius:18px;background:var(--control2);color:var(--fg);font-size:var(--sec);line-height:var(--secl);font-weight:600;white-space:nowrap;pointer-events:none}
 .rpl.on{background:var(--fg);color:var(--canvas)}
