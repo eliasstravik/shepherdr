@@ -866,7 +866,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
           }}
         />
         {sug && !text && (
-          <button type="button" className="kbd" aria-label="Use suggestion" aria-keyshortcuts="Tab" onPointerDown={keepFocus} onMouseDown={keepFocus} onClick={() => useSug()}>
+          <button type="button" className="ib kbd" aria-label="Use suggestion" aria-keyshortcuts="Tab" onPointerDown={keepFocus} onMouseDown={keepFocus} onClick={() => useSug()}>
             <I n="tab" c="s16" />
           </button>
         )}
