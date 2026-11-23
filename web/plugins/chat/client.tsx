@@ -868,7 +868,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
           <BoxEnd thread={thread} setText={setText} filled={filled} send={() => go()} />
         ) : stop ? (
           <button type="button" className="send" aria-label="Stop" onClick={() => void tryAct({ type: 'stop', chat: key })}>
-            <I n="stop" c="s16" />
+            <I n="square" c="s16" />
           </button>
         ) : (
           <button type="button" className="send" aria-label="Send" onClick={() => go()}>
