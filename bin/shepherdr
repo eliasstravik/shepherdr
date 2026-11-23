@@ -1336,6 +1336,40 @@ def agents_left_behind(root, run=subprocess.run):
             for x in rows or [] if isinstance(x, dict)]
 
 
+# SHEP-305: the records doctor checks for a machine id no machine has (shepherdr.web's is the host's own, rewritten by it)
+STALE_RECORDS = {"shepherdr.secrets": ("Shepherdr's record of which machine keeps the secrets", "secrets, voice calls and dictation can't find them",
+                                       "on the machine that has the secrets, run `shepherdr secrets move-to here --restore`"),
+                 "shepherdr.host": ("Shepherdr's record of which machine serves the web app", "the machines can't agree which one serves it",
+                                    "on the machine that should serve it, run `shepherdr web serve-from here`")}
+
+
+def records_naming_nobody(root, run=subprocess.run):
+    """doctor's lines for a record (who keeps the secrets, Serve from) in Shepherdr's session that names a machine by an
+    id no machine has: the installed herdr-task's `carry-over --records --dry-run`, read-only. [] when none does, or it
+    can't be asked (no hc, an older herdr-task)."""
+    helper = os.path.join(root, SHARE, "mods", "tasks", "bin", "herdr-task")
+    if not os.path.isfile(helper) or not shutil.which("hc"):
+        return []
+    try:
+        p = run([sys.executable, helper, "carry-over", "--records", "--dry-run", "--json"], capture_output=True, text=True,
+                env=carry_env(), stdin=subprocess.DEVNULL, timeout=120)
+        out = json.loads(p.stdout.strip().splitlines()[-1])
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return []
+    lines = []
+    for x in (out.get("records") if isinstance(out, dict) else None) or []:
+        if not isinstance(x, dict) or x.get("name") not in STALE_RECORDS or x.get("state") not in ("would-repair", "unknown"):
+            continue
+        what, harm, fix = STALE_RECORDS[x["name"]]
+        on = f" on {x['machine']}" if x.get("machine") else ""
+        if x["state"] == "would-repair":
+            lines.append(f"{what}{on} still names a machine by its id from before 3.2, so {harm}: `herdr-task carry-over` changes it to that machine's id now")
+        else:
+            lines.append(f"{what}{on} names a machine none here knows (id {str(x.get('id'))[:12]}), so {harm}: "
+                         f"`herdr-task carry-over` repairs it when the old id is still known; if it stays, {fix}")
+    return lines
+
+
 def carry_over_session(r, rec, home, run=subprocess.run):
     """At the switch, once the files are in place and before the service starts: what 3.1 kept in herdr-core's
     default session (the shared document with the spaces, who keeps the secrets, Serve from, the window's spaces,
@@ -1379,10 +1413,23 @@ def carry_over_session(r, rec, home, run=subprocess.run):
             for x in rows if x.get("state") in ("waiting", "failed", "wrong-session")]
     say("  session: " + (f"carried over {', '.join(copied)}" if copied else "nothing to carry over")
         + ("; 3.1's scheduler removed" if out.get("scheduler") == "removed" else ""))
+    records = out.get("records") or []
+    fixed = [x.get("name", "?") + (f" on {x['machine']}" if x.get("machine") else "") for x in records if x.get("state") == "repaired"]
+    if fixed:
+        say("  session: changed to each machine's id now (it named one by its id from before 3.2): " + ", ".join(fixed))
+    # SHEP-305: a record naming a machine none here knows is said with its fix; doctor says it too
+    for x in records:
+        if x.get("state") == "unknown" and x.get("name") in STALE_RECORDS:
+            what, harm, fix = STALE_RECORDS[x["name"]]
+            r.notes.append(f"{what} names a machine none here knows, so {harm}: {fix}")
+    left += [x.get("name", "?") + (f" on {x['machine']}" if x.get("machine") else "") + f" ({x.get('why') or 'not changed'})"
+             for x in records if x.get("state") in ("waiting", "failed")]
     if left or out.get("scheduler") == "failed":
         r.notes.append("not carried over into Shepherdr's own herdr-core session yet: " + "; ".join(left or ["3.1's scheduler in the default session"])
                        + ". The next update, or `herdr-task carry-over`, tries again")
     rec["carry_over"] = "waiting" if left or not out.get("ok", True) else "done"
+    # an older herdr-task says no records: it doesn't look at them, and the next update asks again
+    rec["carry_over_records"] = "done" if "records" in out and not any(x.get("state") in ("waiting", "failed") for x in records) else "waiting"
 
 
 def convert_artifacts(r):
@@ -1534,7 +1581,8 @@ def finish_install(a, r, rec, old, src, home, root, actions, old_files, gone, bu
     rec["button"] = bool(button)
     rec["hooks"] = set_hooks(r, rec, None if a.no_hooks else True)
     move_data(r, a, home)   # before the service starts again: it then finds the data where it now is
-    if switching or rec.get("carry_over") == "waiting" or rec.get("carry_over_agents") != "done":
+    # SHEP-305: an install switched by 3.2.0 has no carry_over_records yet: its records may name old ids, so once more
+    if switching or rec.get("carry_over") == "waiting" or rec.get("carry_over_agents") != "done" or rec.get("carry_over_records") != "done":
         carry_over_session(r, rec, home)   # and its documents and machines in Shepherdr's own herdr-core session
     set_port(a, rec)
     set_https_port(a, root)
@@ -1775,6 +1823,7 @@ def cmd_doctor(a):
     if home:
         agents_bad = agents_left_behind(root)
         bad += agents_bad
+        bad += records_naming_nobody(root)
     t_notes = d_notes + t_notes
     if home:
         s_bad, s_notes = serve_check(root)
