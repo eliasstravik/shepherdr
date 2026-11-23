@@ -1,6 +1,7 @@
-// The on-screen keyboard. iOS doesn't shrink the page for it: it slides the whole page up, under the status bar.
-// So the app takes the height of what's visible (window.visualViewport), keeps the page from scrolling, and tells
-// the layout when the keyboard is up, so the phone can hide its bottom bar and put the message box on the keyboard.
+// The on-screen keyboard. Android shrinks the page for it (the viewport meta's interactive-widget=resizes-content), and
+// the app's 100dvh follows in the same frame, so nothing is set from here there. iOS doesn't: it slides the whole page
+// up, under the status bar. There the app takes the height of what's visible (window.visualViewport), keeps the page
+// from scrolling, and tells the layout when the keyboard is up, so the message box sits on the keyboard.
 
 /** a keyboard is taller than this; browser bars that come and go are shorter */
 const KEYBOARD = 150
@@ -19,6 +20,13 @@ export function keyboardWatch() {
     full.set(w, f)
     return (up = f - h > KEYBOARD)
   }
+}
+
+/** The app's height (--app-h): none where the page is as tall as what shows (the browser shrank the page itself, or no
+ *  keyboard: CSS's 100dvh, with no script between the window and the layout), else the visible height (iOS, keyboard
+ *  up). layout: the page's own height (documentElement.clientHeight, which iOS keeps while the keyboard is up). */
+export function appHeight(visible: number, layout: number): string | null {
+  return layout - visible > 1 ? `${visible}px` : null
 }
 
 /**
@@ -50,7 +58,10 @@ export function watchViewport(onKeyboard: (up: boolean) => void) {
     // and only while typing, so a guessed full height after turning the phone can't keep the bar hidden
     const now = up(vv.width, vv.height) && !!document.activeElement?.matches('input, textarea, [contenteditable]')
     const apply = () => {
-      document.documentElement.style.setProperty('--app-h', `${vv.height}px`)
+      const root = document.documentElement
+      const h = appHeight(vv.height, root.clientHeight)
+      if (h) root.style.setProperty('--app-h', h)
+      else root.style.removeProperty('--app-h')
       if (scrollY || vv.offsetTop) scrollTo(0, 0)
     }
     // the keyboard coming or going (not the phone turning): what moves glides
