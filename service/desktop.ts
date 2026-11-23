@@ -7,16 +7,33 @@
 // The service ends the screen server's handshake itself (so a password never reaches the page, and the page always
 // sees a server that asks for none), then passes bytes both ways. What the page sends is read message by message:
 // while the person isn't driving, its keys, pointer and clipboard are dropped here, whatever the page's client does.
-// This machine's desktops only: herdr-core's exec returns a command's output when it ends, so it can't carry a live
-// stream from another machine.
+// Another machine's desktop comes the same way through a forward on this machine's 127.0.0.1 (service/link.ts).
 import { createCipheriv } from "node:crypto";
 import { deflateSync } from "node:zlib";
 
 export type Bytes = Uint8Array<ArrayBufferLike>;
 /** the page's end of api/desktop: binary both ways */
 export type DesktopPage = { send(bytes: Bytes): void; close(): void; buffered(): number };
-/** where a desktop's screen server listens on this machine, or why there is none to show */
-export type DesktopTarget = { ok: true; port: number; own: boolean; password?: string } | { ok: false; why: string };
+/** Why a desktop can't be shown, one plain reason each (the page says it and offers the fix that goes with it). */
+export type DesktopCode =
+  | "elsewhere"      // on a machine this one doesn't know
+  | "offline"        // its machine can't be reached now
+  | "no-screen"      // a machine with no screen of its own (each agent has its own desktop)
+  | "no-tool"        // herdr-desktop isn't on that machine
+  | "missing"        // no virtual display to start (Xvnc, or Xvfb with x11vnc)
+  | "start"          // the display didn't start
+  | "starting"       // it is starting now
+  | "sharing-off"    // a Mac's Screen Sharing is off
+  | "mac-auth"       // a Mac that lets only Apple's own sign-in in ("VNC viewers may control screen with password" off)
+  | "password"       // the screen asks for a password and none is set
+  | "password-wrong" // the password set was refused
+  | "refused"        // the screen server said no
+  | "gone";          // nothing answered where the display was (it stopped)
+/** where a desktop's screen server listens (on this machine's 127.0.0.1: its own, or a forward to another machine's),
+ *  or why there is none to show. close(): the forward it came through, if any, is no longer needed. */
+export type DesktopTarget = { ok: true; port: number; own: boolean; password?: string; close?(): void } | { ok: false; why: string; code: DesktopCode };
+/** a screen server that said no during the handshake, and why in plain words */
+export class DesktopError extends Error { constructor(public code: DesktopCode, why: string) { super(why); } }
 /** The one interface a desktop's picture comes through. */
 export interface DesktopDriver {
   name: string;
@@ -24,6 +41,8 @@ export interface DesktopDriver {
   relay(target: Extract<DesktopTarget, { ok: true }>, page: DesktopPage, gate: Gate): { message(bytes: Bytes): void; end(): void };
   /** the screen now, as a PNG */
   shot(target: Extract<DesktopTarget, { ok: true }>): Promise<Bytes | null>;
+  /** can it be shown: null, or why not (a sign-in it can't make, a password refused, nothing there) */
+  check?(target: Extract<DesktopTarget, { ok: true }>): Promise<{ code: DesktopCode; why: string } | null>;
 }
 /** who may act: driving() is asked for every key, click and paste; input() is told of each one let through */
 export type Gate = { driving(): boolean; input?(): void };
@@ -74,7 +93,7 @@ class Wire {
   async read(n: number): Promise<Bytes> {
     if (n === 0) return new Uint8Array(0);
     const b = await new Promise<Bytes | null>((done) => { this.waiting = { n, done }; if (this.closed) done(null); else this.feed(); });
-    if (!b) throw new Error("the screen server closed the connection");
+    if (!b) throw new DesktopError("gone", "The desktop closed the connection.");
     return b;
   }
   /** what was read past the handshake, then every byte as it comes */
@@ -100,24 +119,24 @@ export function vncAnswer(password: string, challenge: Bytes): Bytes {
 /** The service's own handshake with a screen server, up to the point where the client says hello (ClientInit). */
 export async function handshake(w: Wire, password?: string) {
   const ver = new TextDecoder().decode(await w.read(12));
-  if (!ver.startsWith("RFB ")) throw new Error("not a screen server");
+  if (!ver.startsWith("RFB ")) throw new DesktopError("refused", "Something else answers where the desktop should be.");
   const old = ver < "RFB 003.007";
   w.write(text(old ? "RFB 003.003\n" : "RFB 003.008\n"));
   let type: number;
   if (old) type = u32(await w.read(4));
   else {
     const n = (await w.read(1))[0]!;
-    if (!n) throw new Error(new TextDecoder().decode(await w.read(u32(await w.read(4)))) || "the screen server refused");
+    if (!n) { const said = new TextDecoder().decode(await w.read(u32(await w.read(4)))).trim(); throw new DesktopError("refused", said ? `The desktop said no: "${said}"` : "The desktop said no."); }
     const types = [...(await w.read(n))];
     type = types.includes(1) ? 1 : types.includes(2) ? 2 : 0;
-    if (!type) throw new Error(`the screen server wants a sign-in Shepherdr doesn't speak (types ${types.join(", ")}): on a Mac, turn on "VNC viewers may control screen with password"`);
+    if (!type) throw new DesktopError("mac-auth", "This Mac lets in only Apple's own sign-in, which Shepherdr can't use.");
     w.write(new Uint8Array([type]));
   }
   if (type === 2) {
-    if (!password) throw new Error("the screen server wants a password, and none is set for this machine");
+    if (!password) throw new DesktopError("password", "This screen asks for a password, and Shepherdr has none for it.");
     w.write(vncAnswer(password, await w.read(16)));
-  } else if (type !== 1) throw new Error("the screen server refused");
-  if (!(old && type === 1) && u32(await w.read(4)) !== 0) throw new Error(type === 2 ? "the screen server refused the password" : "the screen server refused");
+  } else if (type !== 1) throw new DesktopError("refused", "The desktop said no.");
+  if (!(old && type === 1) && u32(await w.read(4)) !== 0) throw type === 2 ? new DesktopError("password-wrong", "This screen refused the password Shepherdr has for it.") : new DesktopError("refused", "The desktop said no.");
 }
 
 /** How long the client's next message is, once enough of it is here to know; 0: more bytes needed; -1: unknown. */
@@ -204,6 +223,17 @@ export const vnc: DesktopDriver = {
       end,
     };
   },
+  async check(target) {
+    let w: Wire | null = null;
+    const timer = setTimeout(() => w?.close(), 10_000);
+    try {
+      w = await Wire.open(target.port).catch(() => { throw new DesktopError("gone", "Nothing answers where the desktop should be."); });
+      await handshake(w, target.password);
+      return null;
+    } catch (e) {
+      return e instanceof DesktopError ? { code: e.code, why: e.message } : { code: "gone" as const, why: "Nothing answers where the desktop should be." };
+    } finally { clearTimeout(timer); w?.close(); }
+  },
   async shot(target) {
     let w: Wire | null = null;
     const timer = setTimeout(() => w?.close(), 8000);
@@ -263,14 +293,16 @@ export function png(px: Bytes, width: number, height: number): Bytes {
 }
 
 /** One page's view of a desktop (ws api/desktop): `target` says where its screen server is (bin/herdr-desktop --own
- *  --up, through service/screens.ts); a desktop that can't be shown closes the page's connection at once. */
+ *  --up, through service/screens.ts); a desktop that can't be shown closes the page's connection at once (the page asks
+ *  why first: screens.ts desktopCheck). */
 export function desktopRelay(target: DesktopTarget | Promise<DesktopTarget>, page: DesktopPage, gate: Gate, driver: DesktopDriver = vnc) {
-  let ended = false, inner: { message(b: Bytes): void; end(): void } | null = null;
+  let ended = false, inner: { message(b: Bytes): void; end(): void } | null = null, done: (() => void) | undefined;
   const early: Bytes[] = [];
   void Promise.resolve(target).then((t) => {
-    if (ended) return;
+    if (ended) { if (t.ok) t.close?.(); return; }
     if (!t.ok) { ended = true; try { page.close(); } catch {} return; }
-    inner = driver.relay(t, page, gate);
+    done = t.close;
+    inner = driver.relay(t, { ...page, close: () => { done?.(); done = undefined; page.close(); } }, gate);
     for (const b of early) inner.message(b);
   }).catch(() => { ended = true; try { page.close(); } catch {} });
   return {
@@ -279,6 +311,6 @@ export function desktopRelay(target: DesktopTarget | Promise<DesktopTarget>, pag
       const bytes = b instanceof Uint8Array ? b : new Uint8Array(b);
       if (inner) inner.message(bytes); else if (early.length < 64) early.push(bytes);
     },
-    end() { ended = true; inner?.end(); },
+    end() { ended = true; inner?.end(); done?.(); done = undefined; },
   };
 }

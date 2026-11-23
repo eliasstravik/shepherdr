@@ -24,6 +24,17 @@ const BIN = [join(import.meta.dir, "..", "bin", "herdr-secret"), join(HOME, ".lo
 /** herdr-secret as installed here. */
 export const secretBin = () => BIN;
 
+/** One secret's value for the service's own use (a Mac's Screen Sharing password: service/screens.ts), never shown
+ *  nor logged. herdr-secret run masks a value in what it prints, so it comes back here as base64. undefined: none is
+ *  set, or the vault can't be reached. */
+export async function secretValue(name: string): Promise<string | undefined> {
+  if (!NAME.test(name)) return undefined;
+  const p = spawn([BIN, "run", name, "--", "python3", "-c", "import base64,os,sys; sys.stdout.write(base64.b64encode(os.environ[sys.argv[1]].encode()).decode())", name], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+  const out = await new Response(p.stdout).text();
+  if ((await p.exited) !== 0) return undefined;
+  return Buffer.from(out.trim(), "base64").toString("utf8") || undefined;
+}
+
 async function run(args: string[], input?: string) {
   const p = spawn([BIN, ...args], { stdin: input === undefined ? "ignore" : "pipe", stdout: "pipe", stderr: "pipe" });
   if (input !== undefined) { (p.stdin as any).write(input); (p.stdin as any).end(); }

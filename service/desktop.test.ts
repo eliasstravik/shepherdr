@@ -3,7 +3,7 @@
 // are dropped until the person drives, and a thumbnail is read as a PNG.
 import { afterAll, expect, test } from "bun:test";
 import { inflateSync } from "node:zlib";
-import { clientGate, clientMessageLength, desktopRelay, vnc, vncAnswer, type Bytes } from "./desktop.ts";
+import { clientGate, clientMessageLength, desktopRelay, vnc, vncAnswer, type Bytes, type DesktopTarget } from "./desktop.ts";
 
 const servers: { stop(): void }[] = [];
 afterAll(() => servers.forEach((s) => s.stop()));
@@ -126,7 +126,7 @@ test("a password is answered by the service, never by the page", async () => {
 
 test("a desktop that can't be shown closes at once, and one that isn't there too", async () => {
   const a = page();
-  desktopRelay({ ok: false, why: "This machine has no Xvnc." }, a, { driving: () => true });
+  desktopRelay({ ok: false, code: "missing", why: "This machine has no Xvnc." }, a, { driving: () => true });
   await until(() => a.closed);
   const b = page();
   const gone = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
@@ -144,4 +144,58 @@ test("the screen now, as a PNG", async () => {
   expect([v.getUint32(16), v.getUint32(20)]).toEqual([2, 2]);
   const at = Buffer.from(png).indexOf("IDAT"), len = v.getUint32(at - 4);
   expect([...inflateSync(png.slice(at + 4, at + 4 + len))]).toEqual([0, 255, 0, 0, 0, 255, 0, 0, 0, 0, 255, 255, 255, 255]);
+});
+
+/** A screen server that refuses at the start, as macOS Screen Sharing does: it offers only Apple's own sign-in types
+ *  (30, 33, 35, 36) while "VNC viewers may control screen with password" is off, or says no with its reason. */
+function refusing(how: { types?: number[]; reason?: string }) {
+  const srv = Bun.listen<{ n: number }>({
+    hostname: "127.0.0.1", port: 0,
+    socket: {
+      open(s) { s.data = { n: 0 }; s.write("RFB 003.889\n"); },
+      data(s, d) {
+        s.data.n += d.length;
+        if (s.data.n < 12) return;
+        if (how.reason) { const t = new TextEncoder().encode(how.reason); s.write(new Uint8Array([0, 0, 0, 0, t.length, ...t])); s.end(); return; }
+        s.write(new Uint8Array([how.types!.length, ...how.types!]));
+      },
+    },
+  });
+  servers.push(srv);
+  return srv.port;
+}
+
+test("each way a screen server says no has its own reason (SHEP-347)", async () => {
+  const at = (port: number, password?: string) => vnc.check!({ ok: true, port, own: false, ...(password ? { password } : {}) });
+  // a Mac with only Apple's sign-in: the switch to turn on, not a password
+  expect((await at(refusing({ types: [30, 33, 36, 35] }), "s3cret"))?.code).toBe("mac-auth");
+  // a password asked for and none set; one set and refused; the right one
+  const mac = fakeVnc("s3cret");
+  expect(await at(mac.port)).toEqual({ code: "password", why: "This screen asks for a password, and Shepherdr has none for it." });
+  expect((await at(mac.port, "nope"))?.code).toBe("password-wrong");
+  expect(await at(mac.port, "s3cret")).toBeNull();
+  // its own words, when it says why
+  expect(await at(refusing({ reason: "Too many security failures" }))).toEqual({ code: "refused", why: 'The desktop said no: "Too many security failures"' });
+  // nothing there (the display stopped)
+  const gone = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
+  const port = gone.port;
+  gone.stop();
+  expect((await at(port))?.code).toBe("gone");
+  // an Xvnc of the agent's own: fine, no sign-in
+  expect(await at(fakeVnc().port)).toBeNull();
+});
+
+test("a forward a desktop came through is closed with the page, and when it can't be shown", async () => {
+  let closed = 0;
+  const srv = fakeVnc(), p = page();
+  const r = desktopRelay({ ok: true, port: srv.port, own: true, close: () => closed++ }, p, { driving: () => false });
+  await until(() => p.sent.length >= 12);
+  r.end();
+  expect(closed).toBe(1);
+  const late = page();
+  let resolve!: (t: DesktopTarget) => void;
+  const r2 = desktopRelay(new Promise<DesktopTarget>((ok) => { resolve = ok; }), late, { driving: () => false });
+  r2.end();                                               // the page left before the desktop was found
+  resolve({ ok: true, port: srv.port, own: true, close: () => closed++ });
+  await until(() => closed === 2);
 });

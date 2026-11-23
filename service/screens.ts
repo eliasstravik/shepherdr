@@ -9,13 +9,16 @@
 //   look again; ten minutes without input hand back by themselves, and say so.
 //   Needs your hands: <name>.hands (the agent asked through its tools), or its report "blocked, auth" while a browser
 //   or desktop is open. Skip tells the agent to find another way.
-// This machine's screens only: a live stream can't come through herdr-core's exec from another machine (it returns a
-// command's output when it ends). A key on another machine gets a plain "can't be shown here" instead.
+// Another machine's screens (SHEP-347) come through service/link.ts: its helpers run there over the machine's own link
+// (ssh or its `via` command), and its browser stream and screen server are forwarded from that machine's 127.0.0.1 to
+// this one's. They are view-only until Take over, which sets the same <name>.you there (the agent there is refused).
+// Its files can't be read here every few seconds, so the snapshot marks it as the agent's while a page watches it.
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { DATA, HOME, where } from "./paths.ts";
-import { desktopRelay as relayDesktop, vnc, type Bytes, type DesktopDriver, type DesktopPage, type DesktopTarget } from "./desktop.ts";
+import { desktopRelay as relayDesktop, vnc, type Bytes, type DesktopCode, type DesktopDriver, type DesktopPage, type DesktopTarget } from "./desktop.ts";
+import { forward as linkForward, runThere, type Forward, type Link } from "./link.ts";
 import { spawn } from "./spawn.ts";
 
 /** ten minutes without input hand a screen back by themselves (the plan's constant; the page counts the same) */
@@ -63,8 +66,13 @@ export type Deps = {
   send?(s: Send): void;
   /** the screens changed (a hand back by itself): build the snapshot again */
   changed?(): void;
-  /** a Mac's Screen Sharing password ("VNC viewers may control screen with password"), from Settings */
-  password?(): string | undefined;
+  /** a Mac's Screen Sharing password ("VNC viewers may control screen with password"): the secret
+   *  SCREEN_SHARING_PASSWORD (Settings › Secrets), never shown */
+  password?(): string | undefined | Promise<string | undefined>;
+  /** the other machines as herdr-core reaches them (hc machine ls) */
+  machines?(): Promise<Link[]>;
+  /** how another machine is reached (tests give their own) */
+  there?: { run: typeof runThere; forward(m: Link, port: number): Forward };
   root?: string;
   browserBin?: string;
   desktopBin?: string;
@@ -83,6 +91,13 @@ export const sessionOf = (key: string, name = safe(key)) =>
   name.length <= 32 ? `herdr-${name}` : `herdr-${name.slice(-20).replace(/^-+/, "")}-${createHash("sha256").update(key).digest("hex").slice(0, 8)}`;
 /** the name its files carry, as bin/herdr-browser and bin/herdr-desktop make it */
 export const nameOf = (w: Pick<Who, "task" | "space">) => (w.task ? safe(w.task) : `chat-${safe(w.space)}`);
+/** what Desktop › check answers: it can be shown, or why not */
+export type DesktopCheck = { ok: true } | { ok: false; code: DesktopCode; why: string };
+/** the secret that holds a Mac's Screen Sharing password (herdr-desktop's doctor looks for the same name) */
+export const SCREEN_PASSWORD = "SCREEN_SHARING_PASSWORD";
+// a take-over of another machine's screen is kept here under this name (its <name>.you is there)
+const farName = (key: string) => `@${key}`;
+const far = (name: string) => name.startsWith("@");
 // (a throwaway service names its own: SHEPHERDR_HERDR_BROWSER / SHEPHERDR_HERDR_DESKTOP, as SHEPHERDR_HC for hc)
 const bin = (name: string) => process.env[`SHEPHERDR_${name.toUpperCase().replace(/-/g, "_")}`] || ([join(import.meta.dir, "..", "bin", name), join(HOME, ".local", "bin", name)].find(existsSync) ?? name);
 
@@ -92,6 +107,7 @@ export function createScreens(deps: Deps) {
   const HB = deps.browserBin ?? bin("herdr-browser"), HD = deps.desktopBin ?? bin("herdr-desktop");
   const shared = deps.shared ?? process.platform === "darwin";
   const driver = deps.driver ?? vnc;
+  const there = deps.there ?? { run: runThere, forward: linkForward };
   const file = (name: string, ext: string) => join(root, name + ext);
   const read = (f: string) => { try { return readFileSync(f, "utf8").trim(); } catch { return ""; } };
   const age = (f: string) => { const st = statSync(f, { throwIfNoEntry: false }); return st ? now() - st.mtimeMs : Infinity; };
@@ -109,6 +125,21 @@ export function createScreens(deps: Deps) {
 
   const local = (w: Who | null): w is Who => !!w && !w.machine;
   const args = (w: Who) => (w.task ? ["--task", w.task, "--space", w.space] : ["--chat", "--space", w.space]);
+  /** how its machine is reached now, or why it can't be */
+  async function reach(machine: string): Promise<{ ok: true; link: Link } | { ok: false; code: DesktopCode; why: string }> {
+    const m = (await deps.machines?.().catch(() => []) ?? []).find((x) => x.name === machine);
+    if (!m) return { ok: false, code: "elsewhere", why: `This is on ${machine}, which this machine doesn't reach.` };
+    if (m.state && m.state !== "connected") return { ok: false, code: "offline", why: m.state === "needs_login" ? `${machine} needs you to log in again (Settings › Machines).` : `${machine} can't be reached now.` };
+    return { ok: true, link: m };
+  }
+  /** a helper (herdr-browser, herdr-desktop) on the machine `w` runs on: here, or there over its link */
+  async function helper(w: Who | null, argv: string[], env: Record<string, string> = {}, ms = 120_000): Promise<{ code: number; out: string; err: string; offline?: string; unreached?: { code: DesktopCode; why: string } }> {
+    if (!w?.machine) return run(argv, env, ms);
+    const at = await reach(w.machine);
+    if (!at.ok) return { code: 255, out: "", err: at.why, offline: at.why, unreached: at };
+    const r = await there.run(at.link, [argv[0]!.replace(/^.*\//, ""), ...argv.slice(1)], { env, ms });
+    return { ...r, err: r.err.replace(/^herdr-(browser|desktop): /, "") };
+  }
   async function run(argv: string[], env: Record<string, string> = {}, ms = 120_000) {
     const p = spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore", env: { ...(deps.env ?? process.env), ...env } as Record<string, string> });
     const timer = setTimeout(() => p.kill(), ms);
@@ -119,10 +150,17 @@ export function createScreens(deps: Deps) {
   }
   const json = (s: string) => { try { return JSON.parse(s); } catch { return null; } };
   /** herdr-browser as Shepherdr's own: never refused, never counted as the agent's use */
-  const hb = (w: Who, rest: string[], env?: Record<string, string>) => run([HB, "--own", ...args(w), ...rest], env);
-  const hd = (key: string, w: Who | null, rest: string[]) => run([HD, "--own", ...(key.startsWith("machine:") ? ["--machine"] : args(w!)), ...rest], {}, 30_000);
+  const hb = (w: Who, rest: string[], env?: Record<string, string>) => helper(w, [HB, "--own", ...args(w), ...rest], env);
+  const hd = (key: string, w: Who | null, rest: string[]) => helper(w, [HD, "--own", ...(key.startsWith("machine:") ? ["--machine"] : args(w!)), ...rest], {}, 30_000);
+  /** sets or clears <name>.you on another machine, where its agent's herdr-browser and herdr-desktop look */
+  const youThere = (w: Who, on: boolean) => helper(w, ["sh", "-c", `j=$(herdr-browser --own "$@" --name) || exit 1
+f=$(printf %s "$j" | python3 -c 'import json,os,sys; d=json.load(sys.stdin); print(os.path.join(os.path.dirname(os.path.dirname(d["profile"])), d["name"]))') || exit 1
+if [ "$Y" = 1 ]; then mkdir -p "$(dirname "$f")" && touch "$f.you"; else rm -f "$f.you"; fi`, "sh", ...args(w)], { Y: on ? "1" : "0" }, 30_000).catch(() => null);
+  /** another machine's screens a page watches now: key -> how many pages */
+  const watching = new Map<string, number>();
+  const watch = (key: string, d: 1 | -1) => { const n = (watching.get(key) ?? 0) + d; if (n > 0) watching.set(key, n); else watching.delete(key); deps.changed?.(); };
 
-  const isDriving = (name: string) => driving.has(name) || existsSync(file(name, ".you"));
+  const isDriving = (name: string) => driving.has(name) || (!far(name) && existsSync(file(name, ".you")));
   const handsOf = (name: string): { what: string; src?: string; settled?: "done" | "skip"; at?: number } | null => {
     const h = json(read(file(name, ".hands")));
     return h && typeof h.what === "string" ? h : null;
@@ -136,17 +174,28 @@ export function createScreens(deps: Deps) {
   };
   const holder = () => (shared ? read(join(root, "desktop.holder")) : "");
   const titleOf = (who: string) => { const k = deps.keyOf(who), w = k ? deps.who(k) : null; return w?.title ?? who; };
-  const nameOfKey = (key: string) => { if (key.startsWith("machine:")) return key === `machine:${deps.machine}` ? "machine" : null; const w = deps.who(key); return local(w) ? nameOf(w) : null; };
+  const nameOfKey = (key: string) => { if (key.startsWith("machine:")) return key === `machine:${deps.machine}` ? "machine" : null; const w = deps.who(key); return local(w) ? nameOf(w) : w ? farName(key) : null; };
+  /** the person's input keeps their take-over fresh: here its file, there (over the link) every two minutes */
+  const farTouched = new Map<string, number>();
+  function fresh(name: string) {
+    const d = driving.get(name);
+    if (!d) return;
+    if (!far(name)) { if (now() - d.at > 5000) touch(file(name, ".you")); }
+    else if (now() - (farTouched.get(name) ?? 0) > 120_000) { farTouched.set(name, now()); const w = deps.who(d.key); if (w) void youThere(w, true); }
+    d.at = now();
+  }
 
   function take(name: string, key: string) {
     driving.set(name, { at: now(), key });
-    touch(file(name, ".you"));
+    if (!far(name)) return touch(file(name, ".you"));
+    farTouched.set(name, now());                     // (screenAction set its file there first)
   }
   /** Ends a take-over and settles what the agent asked for. Returns what to tell the agent, if anything. */
   function release(name: string, key: string, how: "back" | "done" | "skip" | "idle"): Send | undefined {
-    const was = isDriving(name), h = handsOf(name), open = h && !h.settled ? h : null;
+    const was = isDriving(name), h = far(name) ? null : handsOf(name), open = h && !h.settled ? h : null;
     driving.delete(name);
-    drop(file(name, ".you"));
+    if (far(name)) { farTouched.delete(name); const fw = deps.who(key); if (fw) void youThere(fw, false); }
+    else drop(file(name, ".you"));
     if (open && how !== "back" && how !== "idle") { try { writeFileSync(file(name, ".hands"), JSON.stringify({ ...open, settled: how, at: Math.floor(now() / 1000) }) + "\n"); } catch {} }
     const w = key.startsWith("machine:") ? null : deps.who(key);
     if (!w?.address) return undefined;
@@ -182,6 +231,12 @@ export function createScreens(deps: Deps) {
       if (isDriving(name)) info.driver = "you";
       if ((info.b || info.d) && agentActive(name)) { info.active = true; info.driver ??= "agent"; }
       if (info.b || info.d || info.hands || info.driver) out[key] = info;
+    }
+    // another machine's screen a page watches or the person drives: the agent's until Take over
+    for (const key of new Set([...watching.keys(), ...[...driving.entries()].filter(([n]) => far(n)).map(([, d]) => d.key)])) {
+      if (out[key]) continue;
+      const you = isDriving(farName(key));
+      out[key] = { active: true, driver: you ? "you" : "agent" };
     }
     if (shared && realScreen) {
       const k = `machine:${deps.machine}`;
@@ -243,11 +298,24 @@ export function createScreens(deps: Deps) {
     let ended = false, stream: WebSocket | null = null, looping = false, wake: (() => void) | null = null;
     let state: Record<string, unknown> = { type: "state", driver: "agent", url: "", title: "", connected: false, viewport: { w: 1280, h: 800 } };
     const say = (m: object) => { if (!ended && page.buffered() < 2 << 20) page.send(JSON.stringify(m)); };
-    if (!local(w)) {
-      say({ ...state, closed: true, error: w ? `This runs on ${(w as Who).machine}. Its browser can be watched only on the machine Shepherdr is served from, for now.` : "There is no such screen." });
+    if (!w) {
+      say({ ...state, closed: true, error: "There is no such screen." });
       return { message(_raw: string) {}, end() { ended = true; } };
     }
-    const name = nameOf(w);
+    const name = local(w) ? nameOf(w) : farName(key);
+    // another machine's: its stream through a forward to its 127.0.0.1, while this page watches
+    let fwd: Forward | null = null, fwdTo = 0;
+    if (far(name)) watch(key, 1);
+    const streamPort = async (port: number) => {
+      if (!w.machine) return port;
+      if (fwd && fwdTo === port) return fwd.port;
+      fwd?.close();
+      const at = await reach(w.machine);
+      if (!at.ok) return 0;
+      fwd = there.forward(at.link, port);
+      fwdTo = port;
+      return fwd.port;
+    };
     const show = () => say({ ...state, driver: isDriving(name) ? "you" : "agent" });
     const set = (p: Record<string, unknown>) => { state = { ...state, ...p }; show(); };
 
@@ -255,10 +323,11 @@ export function createScreens(deps: Deps) {
       if (looping) return;
       looping = true;
       while (!ended) {
-        const st = json((await hb(w!, ["--state"])).out);
+        const ran = await hb(w!, ["--state"]);
+        const st = json(ran.out);
         if (st?.open) {
           const got = json((await hb(w!, ["stream", "status", "--json"])).out)?.data;
-          const port = Number(got?.port);
+          const port = await streamPort(Number(got?.port) || 0);
           if (port && !ended) {
             await new Promise<void>((done) => {
               const ws = new WebSocket(`ws://127.0.0.1:${port}/`);
@@ -281,7 +350,7 @@ export function createScreens(deps: Deps) {
             });
             continue;
           }
-        } else set({ connected: false, closed: true, ...(st ? { error: st.desk ? "The person is signing in on the desktop: see the Desktop tab." : undefined } : { error: "herdr-browser didn't answer." }) });
+        } else set({ connected: false, closed: true, ...(st ? { error: st.desk ? "The person is signing in on the desktop: see the Desktop tab." : undefined } : { error: ran.offline ?? (ran.code === 127 ? `Shepherdr's browser tool isn't on ${w!.machine ?? "this machine"} yet.` : "herdr-browser didn't answer.") }) });
         if (ended) break;
         await new Promise<void>((r) => { wake = r; setTimeout(r, 3000); });
         wake = null;
@@ -291,26 +360,24 @@ export function createScreens(deps: Deps) {
     /** the person's own command on the page (the address bar, Back, Reload, a paste): opens the browser when it is closed */
     const own = async (rest: string[]) => {
       const r = await hb(w, rest);
-      touch(join(root, "spaces", safe(w.space) + ".used"));
+      if (!w.machine) touch(join(root, "spaces", safe(w.space) + ".used"));
       if (r.code) set({ error: r.err || "The browser didn't answer." });
       wake?.();
     };
-    /** may the person act: they took over, or the agent isn't using it (then it is simply theirs) */
-    const may = () => isDriving(name) || !agentActive(name);
+    /** may the person act: they took over, or the agent isn't using it (then it is simply theirs); another
+     *  machine's: only once they took over */
+    const may = () => isDriving(name) || (!far(name) && !agentActive(name));
     const spaceUsed = join(root, "spaces", safe(w.space) + ".used");
     const bump = () => {
-      if (age(spaceUsed) > 30_000) touch(spaceUsed);   // the person's use keeps the space's browser from its idle close
-      const d = driving.get(name);
-      if (!d) return;
-      if (now() - d.at > 5000) touch(file(name, ".you"));
-      d.at = now();
+      if (!far(name) && age(spaceUsed) > 30_000) touch(spaceUsed);   // the person's use keeps the space's browser from its idle close
+      fresh(name);
     };
     return {
       message(raw: string) {
         if (ended || raw.length > 65_536) return;
         let m: any;
         try { m = JSON.parse(raw); } catch { return; }
-        if (m.type === "take") { take(name, key); show(); deps.changed?.(); return; }
+        if (m.type === "take") { if (!far(name)) take(name, key); show(); deps.changed?.(); return; }   // another machine's: screen › take sets it there
         if (m.type === "handback") { const s = release(name, key, "back"); if (s) deps.send?.(s); show(); deps.changed?.(); return; }
         if (m.type === "start") return void connect();
         if (!may()) return;                       // the agent drives: watching only
@@ -328,27 +395,79 @@ export function createScreens(deps: Deps) {
         ended = true;
         wake?.();
         stream?.close();
+        fwd?.close();
+        if (far(name)) watch(key, -1);
       },
     };
   }
 
-  /** Where a key's desktop can be watched: starts an agent's own display when it has none (Linux). */
-  async function desktopOf(key: string): Promise<DesktopTarget> {
+  /** Where a key's desktop can be watched (start: its own display is started when it has none), or why it can't. */
+  async function desktopOf(key: string, start = true): Promise<DesktopTarget> {
     const machine = key.startsWith("machine:"), w = machine ? null : deps.who(key);
-    if (machine ? key !== `machine:${deps.machine}` : !local(w)) return { ok: false, why: "This desktop is on another machine. It can be watched only on the machine Shepherdr is served from, for now." };
-    if (machine && !shared) return { ok: false, why: "This machine has no screen of its own: each agent has its own desktop." };
-    const r = await hd(key, w, ["--up"]);
+    const fail = (code: DesktopCode, why: string): DesktopTarget => ({ ok: false, code, why });
+    if (machine && key !== `machine:${deps.machine}`) return fail("elsewhere", "This desktop is on another machine: open it from a chat or a task there.");
+    if (machine && !shared) return fail("no-screen", "This machine has no screen of its own: each agent has its own desktop.");
+    if (!machine && !w) return fail("elsewhere", "There is no such screen.");
+    const on = w?.machine ?? "this machine";
+    const r = await hd(key, w, [start ? "--up" : "--state"]);
+    if (r.unreached) return fail(r.unreached.code, r.unreached.why);
     const st = json(r.out);
-    if (!st?.ok || !st.port) return { ok: false, why: st?.why || r.err || "herdr-desktop didn't answer." };
-    return { ok: true, port: Number(st.port), own: !!st.own, ...(st.own ? {} : { password: deps.password?.() }) };
+    if (!st) {
+      if (r.code === 127) return fail("no-tool", `Shepherdr's desktop tool isn't on ${on} yet.`);
+      if (r.code === 255 && w?.machine) return fail("offline", `${w.machine} can't be reached now.`);
+      return fail("start", r.err || "The desktop tool didn't answer.");
+    }
+    if (!st.ok || !st.port) {
+      const why = String(st.why ?? "");
+      if (st.driver === "shared") return fail("sharing-off", "Screen Sharing is off on this Mac.");
+      if (!why) return fail("starting", "Starting the desktop…");                       // --state: nothing started yet
+      if (/has no /.test(why)) return fail("missing", `${on === "this machine" ? "This machine" : on} has no virtual display to show: it needs Xvnc (TigerVNC), or Xvfb with x11vnc.`);
+      return fail("start", `The desktop didn't start: ${why}`);
+    }
+    const password = st.own ? undefined : await deps.password?.();
+    const target = { ok: true as const, port: Number(st.port), own: !!st.own, ...(password ? { password } : {}) };
+    if (!w?.machine) return target;
+    const at = await reach(w.machine);
+    if (!at.ok) return fail(at.code, at.why);
+    const f = there.forward(at.link, target.port);
+    return { ...target, port: f.port, close: f.close };
+  }
+
+  /** a display starting for a page that asked (key -> its result once there): the page hears "Starting" meanwhile */
+  const starting = new Map<string, { done?: DesktopTarget }>();
+  /** Can a key's desktop be shown now (POST api/action screen › check)? Starts its own display when it has none, and
+   *  tries the screen's sign-in, so the page can say why not in plain words before it connects. */
+  async function desktopCheck(key: string): Promise<DesktopCheck> {
+    let t: DesktopTarget;
+    const job = starting.get(key);
+    if (job && !job.done) return { ok: false, code: "starting", why: "Starting the desktop…" };
+    if (job?.done) { starting.delete(key); t = job.done.ok ? await desktopOf(key, false) : job.done; }   // (its forward is closed)
+    else {
+      t = await desktopOf(key, false);
+      if (!t.ok && t.code === "starting") {
+        const j: { done?: DesktopTarget } = {};
+        starting.set(key, j);
+        void desktopOf(key, true).catch((): DesktopTarget => ({ ok: false, code: "start", why: "The desktop didn't start." })).then((d) => { if (d.ok) d.close?.(); j.done = d; });
+        return { ok: false, code: "starting", why: "Starting the desktop…" };
+      }
+    }
+    if (!t.ok) return { ok: false, code: t.code, why: t.why };
+    try {
+      const no = await driver.check?.(t);
+      return no ? { ok: false, ...no } : { ok: true };
+    } finally { t.close?.(); }
   }
   /** One page's view of a key's desktop (ws api/desktop): the screen server's own bytes; view-only until Take over. */
   function desktopRelay(key: string, page: DesktopPage) {
     const name = nameOfKey(key) ?? "";
-    return relayDesktop(desktopOf(key), page, {
-      driving: () => !!name && (isDriving(name) || (name !== "machine" && !agentActive(name))),
-      input: () => { const d = driving.get(name); if (d) { if (now() - d.at > 5000) touch(file(name, ".you")); d.at = now(); } },
+    const remote = far(name);
+    if (remote) watch(key, 1);
+    const r = relayDesktop(desktopOf(key), page, {
+      driving: () => !!name && (isDriving(name) || (name !== "machine" && !remote && !agentActive(name))),
+      input: () => fresh(name),
     }, driver);
+    let left = false;
+    return { message: r.message, end() { r.end(); if (remote && !left) { left = true; watch(key, -1); } } };
   }
 
   /** The latest picture of a key's browser (JPEG) or desktop (PNG), for cards and thumbnails; null: nothing to show. */
@@ -356,16 +475,17 @@ export function createScreens(deps: Deps) {
     const name = nameOfKey(key);
     if (!name) return null;
     if (src === "d") {
+      if (far(name)) return null;                                   // another machine's: no thumbnail over its link
       const w = key.startsWith("machine:") ? null : deps.who(key);
       const st = json((await hd(key, w, ["--state"])).out);       // a thumbnail never starts a display
       if (!st?.ok || !st.port) return null;
-      const body = await driver.shot({ ok: true, port: Number(st.port), own: !!st.own, ...(st.own ? {} : { password: deps.password?.() }) });
+      const body = await driver.shot({ ok: true, port: Number(st.port), own: !!st.own, ...(st.own ? {} : { password: await deps.password?.() }) });
       return body ? { type: "image/png", body } : null;
     }
     const f = frames.get(name);
     if (f && now() - f.at < 4000) return { type: "image/jpeg", body: f.jpeg };
     const w = deps.who(key);
-    if (!local(w) || !tabOf(name)) return null;
+    if (!local(w) || far(name) || !tabOf(name)) return null;
     const tmp = join(root, `.shot-${name}-${now()}.jpg`);
     try {
       const r = await hb(w, ["screenshot", tmp, "--screenshot-format", "jpeg", "--screenshot-quality", "60"]);
@@ -379,19 +499,29 @@ export function createScreens(deps: Deps) {
   /** POST api/action {type:"screen", key, op, …}. `send`: a message the service delivers to the agent (hc send). */
   async function screenAction(body: any): Promise<{ ok: boolean; error?: string; path?: string; send?: Send }> {
     const key = String(body?.key ?? ""), op = String(body?.op ?? "");
+    if (op === "check") return { ...(await desktopCheck(key)) } as any;
     const name = nameOfKey(key);
-    if (!name) return { ok: false, error: deps.who(key) ? "This screen is on another machine. It can be used only on the machine Shepherdr is served from, for now." : "There is no such screen." };
+    if (!name) return { ok: false, error: "There is no such screen." };
     const w = key.startsWith("machine:") ? null : deps.who(key);
-    if (op === "take") { take(name, key); return { ok: true }; }
+    if (op === "take") {
+      // another machine's: its agent there is refused only once <name>.you is set there
+      if (far(name) && w) {
+        const r = await youThere(w, true);
+        if (!r || r.code) return { ok: false, error: r?.offline ?? `Couldn't take over on ${w.machine}${r?.err ? `: ${r.err}` : "."}` };
+      }
+      take(name, key);
+      return { ok: true };
+    }
     if (op === "handback" || op === "skip") {
       const send = release(name, key, op === "skip" ? "skip" : body.done ? "done" : "back");
       // the person was signing in on the desktop: the space's own browser starts again, signed in, with its next command
-      if (w && existsSync(join(root, "spaces", safe(w.space) + ".desk"))) await hb(w, ["--desk-end"]);
+      if (w && !w.machine && existsSync(join(root, "spaces", safe(w.space) + ".desk"))) await hb(w, ["--desk-end"]);
       return { ok: true, ...(send ? { send } : {}) };
     }
     if (op === "shot") {
       const m = /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/=]+)$/.exec(String(body.data ?? ""));
       if (!m || m[2]!.length > 24_000_000) return { ok: false, error: "There is no picture to save." };
+      if (far(name)) return { ok: false, error: `A screenshot can be saved for ${w?.machine}'s agent only on ${w?.machine}, for now.` };
       const dir = join(deps.shots ?? join(DATA, "screens"), name);
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       const path = join(dir, `${body.src === "d" ? "desktop" : "browser"}-${new Date(now()).toISOString().replace(/[:.]/g, "-")}.${m[1] === "png" ? "png" : "jpg"}`);
@@ -405,6 +535,7 @@ export function createScreens(deps: Deps) {
       if (!/^https?:\/\//i.test(url)) return { ok: false, error: "There is no address to open yet." };
       const t = await desktopOf(key);
       if (!t.ok) return { ok: false, error: t.why };
+      t.close?.();
       const st = json((await hd(key, w, ["--state"])).out);
       const r = await hb(w, ["--desk", url], st?.display ? { DISPLAY: String(st.display) } : {});
       return r.code ? { ok: false, error: r.err || "Couldn't open it on the desktop." } : { ok: true };
@@ -412,5 +543,5 @@ export function createScreens(deps: Deps) {
     return { ok: false, error: "Unknown screen action." };
   }
 
-  return { screensOf, waiting, desktops, sweep, start, stop, screenRelay, desktopRelay, desktopOf, shotOf, screenAction };
+  return { screensOf, waiting, desktops, sweep, start, stop, screenRelay, desktopRelay, desktopOf, desktopCheck, shotOf, screenAction };
 }
