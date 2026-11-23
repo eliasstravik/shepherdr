@@ -43,7 +43,7 @@ class Repo(unittest.TestCase):
     def test_the_one_herdr_mod(self):
         """herdr/open-shepherdr is all Shepherdr puts in the Herdr app: a popup opened by a key (place none, an
         overlay), one button that opens the web app's link, nothing imported from outside its folder, and it parses."""
-        self.assertEqual(os.listdir(J("herdr")), ["open-shepherdr"])
+        self.assertEqual(sorted(os.listdir(J("herdr"))), ["open-shepherdr", "window-notice"])
         self.assertEqual(sorted(os.listdir(J("herdr", "open-shepherdr"))), ["main.js", "mod.json"])
         mod = json.load(open(J("herdr", "open-shepherdr", "mod.json")))
         self.assertEqual(mod["place"], "none")
@@ -67,6 +67,47 @@ class Repo(unittest.TestCase):
             with open(J("herdr", "open-shepherdr", "main.js"), "rb") as f:
                 p = subprocess.run(["node", "--input-type=module", "--check"], stdin=f, capture_output=True, text=True)
             self.assertEqual(p.returncode, 0, p.stderr)
+
+    def test_the_window_notice(self):
+        """herdr/window-notice (SHEP-355) goes in the place of each of 3.1's window views: self-contained, place none, one
+        button that opens the web app's link (at the space an Assistant tab names), never a tooltip, and it parses."""
+        top = J("herdr", "window-notice")
+        self.assertEqual(sorted(os.listdir(top)), ["blank.js", "full.js", "mod.json", "notice.js"])
+        self.assertEqual(json.load(open(os.path.join(top, "mod.json"))), {"place": "none", "title": "Shepherdr"})
+        for f in ("blank.js", "full.js", "notice.js"):
+            src = open(os.path.join(top, f), encoding="utf-8").read()
+            for spec in re.findall(r"""from\s+["']([^"']+)["']""", src):
+                self.assertIn(spec, ("herdr", "gpui-kit", "gpui-base", "./notice.js"), f"{f} imports {spec}")
+            self.assertNotIn(".tooltip(", src)
+            if shutil.which("node"):
+                p = subprocess.run(["node", "--input-type=module", "--check"], input=src, capture_output=True, text=True)
+                self.assertEqual(p.returncode, 0, f + p.stderr)
+        src = open(os.path.join(top, "notice.js"), encoding="utf-8").read()
+        self.assertIn("Shepherdr 3.1's window views, retired", src[:200], "bin/shepherdr's is_notice() knows a notice by it")
+        self.assertIn("Shepherdr 3.1's window views, retired", open(J("bin", "shepherdr")).read())
+        self.assertEqual(src.count(".on_click("), 1, "one button")
+        self.assertIn("web.json", src)
+        if not shutil.which("node"):
+            return
+        # its link logic, with Herdr's modules stood in for
+        body = re.sub(r"^import .*$", "", src, flags=re.M)
+        stub = ("const div = () => 0, v_flex = () => 0, h_flex = () => 0, exec = async () => ({}), theme = () => ({}), "
+                "props = () => ({}), shared = () => null; class View {}\n")
+        test = """
+const out = {
+  link: linkOf('{"link":"https://box.example.ts.net/shepherdr/"}'), none: linkOf("not json"), plain: linkOf('{"link":"file:///x"}'),
+  at: linkAt("https://box.example.ts.net/shepherdr/", { space: "spa1b2" }),
+  remote: linkAt("https://box.example.ts.net/shepherdr/?x=1", { space: "vm/sp1" }),
+  bad: linkAt("https://box.example.ts.net/shepherdr/", { space: "a b<script>" }),
+  nolink: linkAt(null, { space: "sp1" }), words: WORDS.title };
+console.log(JSON.stringify(out));"""
+        p = subprocess.run(["node", "--input-type=module", "-e", stub + body + test], capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(json.loads(p.stdout), {
+            "link": "https://box.example.ts.net/shepherdr/", "none": None, "plain": None,
+            "at": "https://box.example.ts.net/shepherdr/?place=spa1b2",
+            "remote": "https://box.example.ts.net/shepherdr/?x=1&place=vm%2Fsp1",
+            "bad": "https://box.example.ts.net/shepherdr/", "nolink": None, "words": "Shepherdr now lives in the web app"})
 
     def test_every_plugin_has_its_page(self):
         """web/plugins.json lists the web app's plugins; each is a folder with its client.tsx."""

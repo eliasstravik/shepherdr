@@ -19,6 +19,8 @@
   shepherdr secrets where               which machine keeps them
   shepherdr uninstall  [--root DIR] [--dry-run]
   shepherdr doctor     [--root DIR]: checks the install; once it's whole, lets the sync to other machines go
+  shepherdr window     [--remove] [--root DIR]: the Herdr window's notices where 3.1's Shepherdr views were (each says
+                       Shepherdr lives in the web app); --remove takes them out, and updates don't put them back
   shepherdr version
 
 What goes where (each under --root, default your home):
@@ -44,6 +46,8 @@ herdr-task from sending them to other machines until `shepherdr doctor` finds th
 From 3.1 (the Herdr-window layout and its mods): one switch. The update waits while tasks are working (it says which;
 --force switches anyway), then takes out what 3.1 put in the Herdr app (its mods, layout, lib/, core/, bin/, keys and
 hooks; a file you changed is backed up first), leaves your data alone and converts old artifacts to pages once.
+A window that ran 3.1's views gets a notice in each one's place (herdr/window-notice: Shepherdr lives in the web app),
+also on a later update of a machine 3.2.0-3.2.2 switched; `shepherdr window --remove` takes them out.
 
 Shepherdr's own data (tasks, artifacts, settings, secrets, browsers, the service's files) lives in its
 own folders: ~/.config/shepherdr, ~/.local/share/shepherdr, ~/.local/state/shepherdr, ~/.cache/shepherdr
@@ -428,6 +432,19 @@ LIVE_BLOCKS = ("tasks-thread-term", "artifacts-view-body")
 # (herdr/open-shepherdr in the source), and one key that opens it, only when that key is free.
 BUTTON = "open-shepherdr"
 KEY = ("global", "ctrl-shift-o", f"mod.open:{BUTTON}")
+# SHEP-355: 3.1's window views, retired. A Herdr window that showed them keeps them on screen after the switch (and a
+# space's Assistant tab is a "chat" mod tab herdr-core keeps), so each old mod's place gets a stand-in
+# (herdr/window-notice in the source): the main chat says Shepherdr lives in the web app, with a button to open it; the
+# rest draw nothing. Every mod name a 3.0 or 3.1 release shipped.
+NOTICE = "window-notice"
+RETIRED = ("accept-card", "artifacts", "chat", "chat-call", "chat-image", "chat-models", "chat-react", "confirm-chat",
+           "coordinator", "jump", "keybinds", "machine-add-chat", "menu-tasks", "new-menu-tasks", "newspace", "pane-chat",
+           "prompt-chat", "shepherdr-settings", "spaces-chat", "tabs-tasks", "task-artifacts", "task-browser",
+           "task-changes", "task-files", "task-pr", "tasks", "tasks-menu", "toasts", "workspace-chrome-shepherdr",
+           "workspace-status-chat")
+NOTICE_SHOWS = ("chat",)   # the main chat; the Tasks panel's (props.panel) draws nothing too
+# Herdr keeps a mod's storage in data/<mod>: one of these means 3.1's window ran here
+WINDOW_RAN = ("spaces-chat", "tabs-tasks", "workspace-chrome-shepherdr", "chat", "coordinator")
 HOOKS = [  # (file under home, event, entry): the agents' question and permission cards
     (".claude/settings.json", "SessionStart",
      {"matcher": "^(startup|resume|clear|compact)$", "hooks": [{"type": "command", "command": "sh '{share}/hooks/session-note.sh'", "timeout": 10}]}),
@@ -1540,7 +1557,7 @@ def carry_old(rec, old):
             rec["created"].append(f)
 
 
-def leave_window(r, old):
+def leave_window(r, old, notices=None):
     """Takes out what a 3.1 install put in the Herdr app: its mods (and the art-<id> mods the old herdr-artifact
     wrote), its layout, lib/, core/, bin/, the keys it merged into keys.json (the person's from before put back) and
     the --guard link. A file the person changed, or put into one of those mods, is backed up first. The Herdr app
@@ -1559,7 +1576,8 @@ def leave_window(r, old):
     say(f"  switching from Shepherdr {old.get('version') or '3.1'} (the Herdr-window install): "
         f"{'would take' if r.dry else 'taking'} out its {len(mods)} mods"
         + (f", {len(arts)} artifact mod{'s' if len(arts) != 1 else ''}" if arts else "") + f", its layout and {len(rest)} other files in {APP}, "
-        "its keys and its hooks; your data stays")
+        "its keys and its hooks; your data stays"
+        + ("; a Herdr window showing them gets a notice in their place that Shepherdr lives in the web app" if notices else ""))
     if r.dry:
         return
     kept = 0
@@ -1574,7 +1592,10 @@ def leave_window(r, old):
             r.backup(rel)
             kept += 1
         try:
-            shutil.rmtree(r.p(top))
+            if notices and m in RETIRED:
+                swap_notice(r, m, notices)   # one swap, so a window showing it reloads once, into the stand-in
+            else:
+                shutil.rmtree(r.p(top))
         except OSError as e:
             raise Stop(f"can't remove {top} (Shepherdr 3.2 has no window mods): {e.strerror}. Fix that and run this again.")
     for d in arts:   # generated from the artifacts, which stay where they are (herdr-artifact convert makes them pages)
@@ -1611,6 +1632,83 @@ def leave_window(r, old):
                    + (f", {len(arts)} artifact mod{'s' if len(arts) != 1 else ''} (kept in the backup)" if arts else "")
                    + ", the Shepherdr layout, lib/, core/, bin/, its keys and its hooks"
                    + (f"; {kept} file{'s' if kept != 1 else ''} you changed {'are' if kept != 1 else 'is'} in the backup" if kept else ""))
+
+
+def notice_files(src, name):
+    """The stand-in for one of 3.1's window views: {file in its folder: bytes}."""
+    top = os.path.join(src, "herdr", NOTICE)
+    return {"main.js": read(os.path.join(top, "full.js" if name in NOTICE_SHOWS else "blank.js")),
+            "notice.js": read(os.path.join(top, "notice.js")), "mod.json": read(os.path.join(top, "mod.json"))}
+
+
+def is_notice(r, name):
+    """Whether the folder by that name in the Herdr app's mods is a stand-in (any version's)."""
+    head = read(r.p(f"{APP}/mods/{name}/notice.js")) or b""
+    return b"Shepherdr 3.1's window views, retired" in head[:400]
+
+
+def swap_notice(r, name, src):
+    """Puts the stand-in in the mod's place in one rename (what was there goes, after leave_window backed up yours)."""
+    top = r.p(f"{APP}/mods/{name}")
+    stage = r.p(f"{APP}/.shepherdr-stage/{name}")
+    shutil.rmtree(stage, ignore_errors=True)
+    os.makedirs(stage)
+    for f, data in notice_files(src, name).items():
+        with open(os.path.join(stage, f), "wb") as fh:
+            fh.write(data)
+    aside = None
+    if os.path.lexists(top):
+        aside = r.p(f"{APP}/.shepherdr-stage/{name}.old")
+        shutil.rmtree(aside, ignore_errors=True)
+        os.rename(top, aside)
+    os.rename(stage, top)
+    if aside:
+        shutil.rmtree(aside, ignore_errors=True)
+
+
+def window_ran(root, old=None):
+    """3.1's window ran on this machine: a 3.1 record with mods, or Herdr's storage of its views."""
+    if old and (old.get("mods") or any(rel.startswith(f"{APP}/mods/") for rel in (old.get("files") or {}))):
+        return True
+    return any(os.path.isdir(os.path.join(root, APP, "data", m)) for m in WINDOW_RAN)
+
+
+def put_notices(r, rec, src):
+    """SHEP-355: every one of 3.1's window views that isn't in its place gets its stand-in, and one there is brought up
+    to date; a folder by that name that isn't one (someone's own mod) is left alone. Not after `shepherdr window
+    --remove`. Said once, the first time."""
+    if rec.get("notices_removed") or not os.path.isdir(os.path.join(src, "herdr", NOTICE)):
+        return
+    first = not rec.get("notices")
+    done = []
+    for name in RETIRED:
+        top = r.p(f"{APP}/mods/{name}")
+        if os.path.lexists(top) and not is_notice(r, name):
+            continue
+        if not r.dry and (not os.path.lexists(top) or any(read(os.path.join(top, f)) != d for f, d in notice_files(src, name).items())):
+            os.makedirs(r.p(f"{APP}/mods"), exist_ok=True)
+            swap_notice(r, name, src)
+        done.append(name)
+    if not r.dry:
+        shutil.rmtree(r.p(f"{APP}/.shepherdr-stage"), ignore_errors=True)
+    if not r.dry:
+        rec["notices"] = done
+    if done and first:
+        r.notes.append(f"the Herdr window: Shepherdr's old views there {'would ' if r.dry else ''}now say Shepherdr lives in the web app, "
+                       "with a button that opens it; nothing of yours stops. Herdr's own layout: Ctrl+Shift+L there. "
+                       "`shepherdr window --remove` takes them out (offered, never needed)")
+
+
+def take_notices_out(r, rec):
+    """The stand-ins Shepherdr put in (rec "notices"), each only while it still is one. -> the names taken out."""
+    out = []
+    for name in rec.get("notices") or []:
+        top = r.p(f"{APP}/mods/{name}")
+        if name in RETIRED and os.path.isdir(top) and is_notice(r, name):
+            if not r.dry:
+                shutil.rmtree(top)
+            out.append(name)
+    return out
 
 
 def forget_old_record(r):
@@ -1893,8 +1991,11 @@ def cmd_install(a, update=False):
 
 def finish_install(a, r, rec, old, src, home, root, actions, old_files, gone, button, notes, switching):
     """cmd_install from the first file it changes on: the service is stopped meanwhile (stop_service)."""
+    wants_notices = herdr_app_here(root) and window_ran(root, old)
     if old:
-        leave_window(r, old)
+        leave_window(r, old, src if wants_notices and not rec.get("notices_removed") else None)
+    if wants_notices or rec.get("notices"):
+        put_notices(r, rec, src)
     files = dict(old_files)
     for g, rel, how, data, mode in actions if not a.dry_run else []:
         if how == "keep":
@@ -2184,6 +2285,9 @@ def cmd_doctor(a):
         bad += agents_bad
         bad += records_naming_nobody(root)
     t_notes = d_notes + t_notes
+    n_line = notices_line(root, rec)
+    if n_line:
+        t_notes.append(n_line)
     if home:
         s_bad, s_notes = serve_check(root)
         bad += s_bad
@@ -2213,6 +2317,40 @@ def cmd_doctor(a):
         say("  ✓ whole: the sync to other machines may go again")
     else:
         say("  ✓ whole")
+    return 0
+
+
+# ---- window -------------------------------------------------------------------------------------
+
+def notices_line(root, rec):
+    """doctor's line on the Herdr window's notices (SHEP-355), or None."""
+    r = Run(root, True)
+    here = [n for n in rec.get("notices") or [] if is_notice(r, n)]
+    if here:
+        return (f"the Herdr window: {len(here)} of Shepherdr 3.1's old views show a notice that Shepherdr lives in the web app "
+                "(nothing breaks there; Herdr's own layout: Ctrl+Shift+L). `shepherdr window --remove` takes them out, once "
+                "you closed the old Assistant tabs")
+    if not rec.get("notices_removed") and herdr_app_here(root) and window_ran(root):
+        return ("the Herdr window ran Shepherdr 3.1's views here and has no notices in their place: a window still showing "
+                "them shows red errors. Run `shepherdr update` to put them in, or pick Herdr's own layout there (Ctrl+Shift+L)")
+    return None
+
+
+def cmd_window(a):
+    root = os.path.realpath(a.root or real_home())
+    rec = load_record(root)
+    if not rec:
+        raise Stop(f"Shepherdr isn't installed under {root}")
+    if not a.remove:
+        say(notices_line(root, rec) or "the Herdr window has no Shepherdr notices in it")
+        return 0
+    r = Run(root, False)
+    gone = take_notices_out(r, rec)
+    rec["notices"] = []
+    rec["notices_removed"] = True
+    save_record(root, rec)
+    say(f"took out {len(gone)} notice{'s' if len(gone) != 1 else ''} from the Herdr window; updates won't put them back."
+        + (" An old Assistant tab still open in Herdr now says it can't load: close it." if "chat" in gone else ""))
     return 0
 
 
@@ -2257,6 +2395,7 @@ def cmd_uninstall(a):
     top = r.p(f"{APP}/mods/{BUTTON}")
     if rec.get("button") and os.path.isdir(top) and not walk_files(top) and not a.dry_run:
         shutil.rmtree(top)
+    take_notices_out(r, rec)
     take_keys_out(r, rec)
     # Links: ours removed, anything they replaced put back.
     for name, dest in links.items():
@@ -2595,6 +2734,9 @@ def main(argv):
     mg.add_argument("--cleanup-legacy", action="store_true", help="remove the links at the old paths (once every machine is updated)")
     mg.add_argument("--force", action="store_true", help="move even on a network disk (no other machine uses this home)")
     mg.add_argument("--yes", action="store_true")
+    wn = sub.add_parser("window", help="the Herdr window's notices where 3.1's Shepherdr views were")
+    wn.add_argument("--remove", action="store_true", help="take them out (an old Assistant tab still open in Herdr then says it can't load)")
+    wn.add_argument("--root", help=argparse.SUPPRESS)
     sub.add_parser("version")
     a = ap.parse_args(argv)
     try:
@@ -2613,6 +2755,8 @@ def main(argv):
             return cmd_where(a)
         if a.cmd == "migrate":
             return cmd_migrate(a)
+        if a.cmd == "window":
+            return cmd_window(a)
         if a.cmd == "version":
             say(f"shepherdr {VERSION}")
             return 0

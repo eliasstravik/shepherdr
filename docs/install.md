@@ -36,6 +36,7 @@ than its sources. A build that fails stops the install before anything is writte
 | The service | Linux: `~/.config/systemd/user/shepherdr.service`. macOS: `~/Library/LaunchAgents/dev.shepherdr.service.plist` |
 | Question and permission cards | hooks in `~/.claude/settings.json` and `~/.codex/hooks.json`; `--no-hooks` leaves them out. Codex asks once to trust a new hook |
 | The "Open Shepherdr" button | `~/.config/herdr-app/mods/open-shepherdr`, and the key Ctrl+Shift+O in `keys.json` when that key is free. Only when the Herdr app is on this machine |
+| Notices where 3.1's views were | `~/.config/herdr-app/mods/<each 3.1 mod>`, only when the Herdr app here ran 3.1's views: the main chat says Shepherdr lives in the web app, the rest are blank ([Upgrading](upgrading.md#the-herdr-window-after-32)). `shepherdr window --remove` takes them out |
 | agent-browser, for Screens | one on the PATH when it is 0.41.x from 0.41.1, else Shepherdr's own copy in `~/.local/share/shepherdr/agent-browser/<version>/`, and Chrome for Testing in `~/.agent-browser` |
 | agent-desktop, for the agents' desktop | one on the PATH when it is 1.3.x from 1.3.1, else Shepherdr's own copy in `~/.local/share/shepherdr/agent-desktop/<version>/` |
 
