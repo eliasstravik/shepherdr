@@ -550,7 +550,7 @@ textarea.cin{overflow-y:auto}
 .msgs>:not(.fold,.ref,.donerow,.time,.mend)+:is(.card,.wsign,.wrow),.msgs>.card+:not(.fold,.ref,.donerow,.time,.mend){margin-top:8px}
 .msgs>:not(.fold,.ref,.donerow,.time)+:is(.fold,.ref,.donerow),.msgs>:is(.fold,.ref,.donerow)+:not(.fold,.ref,.donerow,.time,.quietb,.files,.mend){margin-top:4px}
 .msgs>:is(.fold,.ref,.donerow):nth-last-child(2){margin-bottom:-4px}
-.msgs>.ref>.tring{width:16px}.msgs>.ref>.tring>.i{width:16px;height:16px}
+.msgs>.ref{max-width:100%}.msgs>.ref>.tring:not(.tside){width:16px}.msgs>.ref>.tring.tside>.i{flex:none}.msgs>.ref>.rt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.msgs>.ref>.tring>.i{width:16px;height:16px}
 .msgs>.quietb,.msgs>.files{margin-inline-start:24px}
 /* on touch a row is itself 44 px tall (12 px of air above and below its words), not a 28 px row with an invisible pad:
    packed 12 px apart, neighbouring pads split the space between them and each row kept only ~32 px for a finger. Touch
