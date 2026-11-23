@@ -151,6 +151,26 @@ test('the bubbles are one line of pills that scroll sideways, a long one truncat
   expect(css).not.toContain('.kbd')
 })
 
+test('a short reply ("1") gets a bubble at least the send button and a fingertip big, its text centred', () => {
+  const css = read('../../src/ds.css')
+  const sug = css.match(/\.sug\{([^}]*)\}/)![1].split(';')
+  // one size, never under the send button, used for both sides so a one-character bubble is a circle
+  const size = sug.find(x => x.startsWith('--sugh:'))!
+  expect(size).toContain('var(--send)')
+  for (const x of ['min-width:var(--sugh)', 'height:var(--sugh)', 'text-align:center']) expect(sug).toContain(x)
+  // by touch, never under the app's touch target
+  const tap = css.match(/\.app\.tap \.sug\{([^}]*)\}/)![1]
+  expect(tap).toMatch(/--sugh:max\([^;]*var\(--hit\)/)
+  expect(tap).toContain('var(--send)')
+})
+
+test("a tap never leaves an outlined bubble grey: its hover is only for a mouse", () => {
+  const css = read('../../src/ds.css')
+  const bare = css.replace(/@media[^{]*\(hover:hover\)[^{]*\{[^{}]*(\{[^}]*\}[^{}]*)*\}/g, '')
+  expect(bare).not.toMatch(/\.sug:hover/)
+  expect(css).toMatch(/\(hover:hover\)[^{]*\{\.sug:hover\{/)
+})
+
 // 3.2.3's broken dictation: the row ran out of the box, the wave read nothing, Done and Cancel were loud filled discs
 // that sat lower than the idle buttons. web/demo/dict-check.ts checks all of it in a real Chrome; these keep the causes.
 const allCss = read('../../src/dictate.css') + read('../../src/ds.css')
