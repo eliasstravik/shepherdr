@@ -8647,7 +8647,7 @@ class Next32(unittest.TestCase):
         self.agent("idle", turn=4)
         self.change(stopped_by="you", stopped_why="Stopped by you.", stopped_at=1, stopped_turns={"t9": 4})
         sent = []
-        with self.mock.patch.object(news, "send_or_hold", lambda addr, text, how="send": (sent.append((addr, text)), "sent")[1]):
+        with self.mock.patch.object(news, "person_send", lambda addr, text: (sent.append((addr, text)), "sent")[1]):
             v = self.run_cmd(self.commands.cmd_reply, id="1", text="Carry on, but skip the footer.")
         self.assertEqual(sent, [("t9", "Carry on, but skip the footer.")])
         self.assertEqual(v["new_agent"], False)
