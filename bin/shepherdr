@@ -116,6 +116,44 @@ def env_for(root):
     return {k: v for k, v in os.environ.items() if k in ("SHEPHERDR_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME", "XDG_CACHE_HOME") and v.startswith("/")}
 
 
+# Shepherdr's own herdr-core session (service/session.ts, herdr-task's base.SESSION): the service's unit names it, so
+# every hc and agent the service starts lands there, never in herdr-core's default session (the Herdr app's).
+SESSION = "shepherdr"
+
+
+def service_session(root):
+    """The herdr-core session the service runs in: SHEPHERDR_SESSION as the installer saw it on the real home (empty:
+    herdr-core's default one), else Shepherdr's own."""
+    s = os.environ.get("SHEPHERDR_SESSION") if os.path.realpath(root) == os.path.realpath(real_home()) else None
+    return SESSION if s is None else s
+
+
+def session_env(root):
+    """The unit's lines for that session: HC_SESSION for every hc the service and its children run (a user service
+    has none of the shell's), and SHEPHERDR_SESSION when it isn't Shepherdr's own."""
+    s = service_session(root)
+    if not s:
+        return {"SHEPHERDR_SESSION": ""}
+    return {"HC_SESSION": s, **({} if s == SESSION else {"SHEPHERDR_SESSION": s})}
+
+
+def unit_session_problem(root):
+    """doctor's words when the service's unit doesn't put the service in Shepherdr's session, else None."""
+    path = os.path.join(root, PLIST if sys.platform == "darwin" else UNIT)
+    text = (read(path) or b"").decode(errors="replace")
+    if not text:
+        return None
+    want = session_env(root).get("HC_SESSION")
+    if not want:
+        return None
+    has = (f"<key>HC_SESSION</key><string>{want}</string>" in text) if sys.platform == "darwin" else \
+        any(line.strip() in (f"Environment=HC_SESSION={want}", f'Environment="HC_SESSION={want}"') for line in text.splitlines())
+    if has:
+        return None
+    return (f"the Shepherdr service's unit doesn't set HC_SESSION={want}: the agents it starts land in herdr-core's default "
+            "session, outside Shepherdr. Run `shepherdr update` (or the install again) to write it")
+
+
 def service_file(root, name):
     """A file of the service's own (service.json, web.json, ...): Shepherdr's state folder once moved, else ~/.herdr/shepherdr."""
     return os.path.join(where_for(root).path("service"), name)
@@ -415,7 +453,7 @@ def unit_text(root, bun, port=None):
     """The user service that keeps Shepherdr's service running (Linux), or its launchd agent (macOS). port: install's
     --port (SHEPHERDR_PORT; none: the service's own 7788). The CLI reads the port the service really took
     from its service.json, so this is the only place it is set. SHEPHERDR_HOME and XDG_* as the installer saw them go
-    along, so the service finds the same folders."""
+    along, so the service finds the same folders, and HC_SESSION, so its agents land in Shepherdr's own session."""
     main = os.path.join(root, SHARE, "service", "main.ts")
     # hc, herdr-task and the helpers live in ~/.local/bin, which a user service's PATH lacks; and the tools herdr-task
     # and the agents run (gh, git, node, agent-browser, the CLIs…) where this install finds them (mise, nvm, brew…)
@@ -432,7 +470,7 @@ def unit_text(root, bun, port=None):
 <dict>
   <key>Label</key><string>{AGENT}</string>
   <key>ProgramArguments</key><array><string>{bun}</string><string>{main}</string></array>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{path}</string>{f"<key>SHEPHERDR_PORT</key><string>{port}</string>" if port else ""}{"".join(f"<key>{k}</key><string>{v}</string>" for k, v in sorted(env_for(root).items()))}</dict>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{path}</string>{f"<key>SHEPHERDR_PORT</key><string>{port}</string>" if port else ""}{"".join(f"<key>{k}</key><string>{v}</string>" for k, v in sorted({**env_for(root), **session_env(root)}.items()))}</dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>{service_file(root, "service.log")}</string>
@@ -447,7 +485,7 @@ After=network-online.target
 [Service]
 ExecStart={bun} {main}
 Environment=PATH={path}
-{f"Environment=SHEPHERDR_PORT={port}{chr(10)}" if port else ""}{"".join(f"Environment={k}={v}{chr(10)}" for k, v in sorted(env_for(root).items()))}Restart=always
+{f"Environment=SHEPHERDR_PORT={port}{chr(10)}" if port else ""}{"".join(f"Environment={k}={v}{chr(10)}" for k, v in sorted({**env_for(root), **session_env(root)}.items()))}Restart=always
 RestartSec=2
 
 [Install]
@@ -597,6 +635,51 @@ def fence_worktrees(r):
         pass
 
 
+def service_running(root):
+    """The service's unit is loaded and running here (launchd's agent, or the systemd user unit)."""
+    if sys.platform == "darwin":
+        return subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{AGENT}"], capture_output=True).returncode == 0
+    return subprocess.run(["systemctl", "--user", "is-active", "--quiet", "shepherdr.service"], capture_output=True).returncode == 0
+
+
+def stop_service(r, home):
+    """Before an install or update swaps files: the running service (and the old helpers it runs) would read files
+    while they move, and crashed on ones gone a moment (ENOENT on herdr-task's or herdr-secret's files). It stops,
+    and cmd_install starts it again after, also when the install fails halfway. True when it stopped one."""
+    if not home or r.dry or not has_unit(r.root) or not service_running(r.root):
+        return False
+    if calls_on(r.root):
+        # a voice call on now: it isn't cut here; the service starts again on the new code once the call ends
+        return False
+    if sys.platform == "darwin":
+        target = f"gui/{os.getuid()}"
+        subprocess.run(["launchctl", "bootout", f"{target}/{AGENT}"], capture_output=True)
+        for _ in range(20):
+            if subprocess.run(["launchctl", "print", f"{target}/{AGENT}"], capture_output=True).returncode != 0:
+                break
+            time.sleep(0.5)
+    else:
+        subprocess.run(["systemctl", "--user", "stop", "shepherdr.service"], capture_output=True)
+    say("  service: stopped while the files change")
+    return True
+
+
+def start_service(r):
+    """The service back on whatever unit is there now, after an install that stopped it and didn't get as far as
+    starting it again (it failed halfway, or had no bun)."""
+    if sys.platform == "darwin":
+        ok = False
+        for _ in range(4):
+            ok = subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", r.p(PLIST)], capture_output=True).returncode == 0
+            if ok:
+                break
+            time.sleep(1)
+    else:
+        ok = subprocess.run(["systemctl", "--user", "start", "shepherdr.service"], capture_output=True).returncode == 0
+    say("  service: started again" if ok else "  service: didn't start again: `shepherdr doctor` says more")
+    return ok
+
+
 def install_service(r, rec, home):
     """Writes the unit; on the real home, (re)starts the service with it. A scratch root only gets the file."""
     fence_worktrees(r)
@@ -631,6 +714,7 @@ def install_service(r, rec, home):
         atomic_write(service_file(r.root, "restart-when-free"), b"1\n")
         r.notes.append("a voice call is on: the Shepherdr service starts again on this update once it ends")
         return
+    r.service_started = True
     if sys.platform == "darwin":
         target = f"gui/{os.getuid()}"
         subprocess.run(["launchctl", "bootout", f"{target}/{AGENT}"], capture_output=True)
@@ -696,6 +780,7 @@ class Run:
             self.backup_dir = os.path.join(root, SHARE, ".shepherdr-backup", f"{self.stamp}-{n}")
         self.backed = False
         self.notes = []
+        self.service_started = False   # install_service started the service (again) in this run
 
     def p(self, rel):
         return os.path.join(self.root, rel)
@@ -1223,6 +1308,34 @@ def forget_old_record(r):
         pass
 
 
+def carry_env():
+    """herdr-task carry-over's environment: no session of the caller's (it picks each one itself), but the caller's own
+    terminal when that is in the default session (an agent there running the update), which it never ends."""
+    env = {k: v for k, v in os.environ.items() if k not in ("HC_SESSION", "HC_SOCKET", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "HC_CORE_ID")}
+    if os.environ.get("HC_TERMINAL_ID") and os.environ.get("HC_SESSION") in (None, "", "default"):
+        env["SHEPHERDR_CARRY_CALLER"] = os.environ["HC_TERMINAL_ID"]
+    return env
+
+
+def agents_left_behind(root, run=subprocess.run):
+    """doctor's lines for Shepherdr's agents (an Assistant, a task's agent) still in herdr-core's default session, where
+    Shepherdr doesn't see them: the installed herdr-task's `carry-over --agents --dry-run`, read-only. [] when there
+    are none, or it can't be asked (no hc, an older herdr-task)."""
+    helper = os.path.join(root, SHARE, "mods", "tasks", "bin", "herdr-task")
+    if not os.path.isfile(helper) or not shutil.which("hc"):
+        return []
+    try:
+        p = run([sys.executable, helper, "carry-over", "--agents", "--dry-run", "--json"], capture_output=True, text=True,
+                env=carry_env(), stdin=subprocess.DEVNULL, timeout=120)
+        out = json.loads(p.stdout.strip().splitlines()[-1])
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return []
+    rows = out.get("agents") if isinstance(out, dict) else None
+    return [f"{x.get('name', 'an agent')} ({x.get('address')}) still runs in herdr-core's default session, outside Shepherdr: "
+            + ("`herdr-task carry-over` moves it into Shepherdr's session" if x.get("state") == "would-move" else x.get("why") or "it stays there")
+            for x in rows or [] if isinstance(x, dict)]
+
+
 def carry_over_session(r, rec, home, run=subprocess.run):
     """At the switch, once the files are in place and before the service starts: what 3.1 kept in herdr-core's
     default session (the shared document with the spaces, who keeps the secrets, Serve from, the window's spaces,
@@ -1236,7 +1349,7 @@ def carry_over_session(r, rec, home, run=subprocess.run):
         say("  session: would carry Shepherdr's documents and machines over from herdr-core's default session (herdr-task carry-over)")
         return
     helper = r.p(f"{SHARE}/mods/tasks/bin/herdr-task")
-    env = {k: v for k, v in os.environ.items() if k not in ("HC_SESSION", "HC_SOCKET", "HC_TERMINAL_ID", "HC_TERMINAL_SOCKET", "HC_CORE_ID")}
+    env = carry_env()
     out, err = None, ""
     try:
         p = run([sys.executable, helper, "carry-over", "--json"], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=300)
@@ -1250,8 +1363,18 @@ def carry_over_session(r, rec, home, run=subprocess.run):
                        "`herdr-task carry-over` tries again")
         return
     rows = (out.get("machines") or []) + (out.get("documents") or [])
+    agents = out.get("agents") or []
     label = lambda x: x.get("name", "?") + (f" on {x['machine']}" if x.get("machine") else "")
     copied = [label(x) for x in rows if x.get("state") in ("copied", "added")]
+    moved = [x.get("name", "?") for x in agents if x.get("state") == "moved"]
+    if moved:
+        say("  session: moved into Shepherdr's own session: " + ", ".join(moved))
+    # SHEP-295: an agent of Shepherdr's that stays in the default session is said in plain words, with what to do
+    for x in agents:
+        if x.get("state") != "moved":
+            r.notes.append(f"{x.get('name', 'an agent')} ({x.get('address')}) still runs in herdr-core's default session, outside Shepherdr"
+                           + (f": {x['why']}" if x.get("why") else ""))
+    rec["carry_over_agents"] = "done" if all(x.get("state") == "moved" for x in agents) else "waiting"
     left = [label(x) + (f" ({x.get('why') or x.get('error')})" if x.get("why") or x.get("error") else "")
             for x in rows if x.get("state") in ("waiting", "failed", "wrong-session")]
     say("  session: " + (f"carried over {', '.join(copied)}" if copied else "nothing to carry over")
@@ -1357,6 +1480,18 @@ def cmd_install(a, update=False):
         for p in hold_paths(root):
             atomic_write(p, f"held by shepherdr {VERSION} install at {r.stamp}: run `shepherdr doctor`\n".encode())
         r.notes.append("the sync to other machines is held until `shepherdr doctor` finds the install whole")
+    # SHEP-295: the running service stops while files move (this is the new installer's side: an older installed
+    # copy hands an update over to the source's own bin/shepherdr first, hand_over), and starts again after
+    stopped = stop_service(r, home)
+    try:
+        return finish_install(a, r, rec, old, src, home, root, actions, old_files, gone, button, notes, switching)
+    finally:
+        if stopped and not r.service_started:
+            start_service(r)
+
+
+def finish_install(a, r, rec, old, src, home, root, actions, old_files, gone, button, notes, switching):
+    """cmd_install from the first file it changes on: the service is stopped meanwhile (stop_service)."""
     if old:
         leave_window(r, old)
     files = dict(old_files)
@@ -1399,7 +1534,7 @@ def cmd_install(a, update=False):
     rec["button"] = bool(button)
     rec["hooks"] = set_hooks(r, rec, None if a.no_hooks else True)
     move_data(r, a, home)   # before the service starts again: it then finds the data where it now is
-    if switching or rec.get("carry_over") == "waiting":
+    if switching or rec.get("carry_over") == "waiting" or rec.get("carry_over_agents") != "done":
         carry_over_session(r, rec, home)   # and its documents and machines in Shepherdr's own herdr-core session
     set_port(a, rec)
     set_https_port(a, root)
@@ -1633,6 +1768,13 @@ def cmd_doctor(a):
         warn += github_checks_check(root)
     d_bad, d_notes = data_check(root)
     bad += d_bad
+    # SHEP-295: a unit an older install wrote lacks HC_SESSION, and the service's agents then start outside Shepherdr's session
+    unit_bad = unit_session_problem(root) if has_unit(root) else None
+    if unit_bad:
+        (warn if managed_unit(root) else bad).append(unit_bad)
+    if home:
+        agents_bad = agents_left_behind(root)
+        bad += agents_bad
     t_notes = d_notes + t_notes
     if home:
         s_bad, s_notes = serve_check(root)

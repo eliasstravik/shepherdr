@@ -124,7 +124,8 @@ lists the hosts it could try, and tries each once only with `--go`.
 
 `SHEPHERDR_HOME=<folder>` puts all four under `<folder>/{config,data,state,cache}`. Otherwise `XDG_CONFIG_HOME`,
 `XDG_DATA_HOME`, `XDG_STATE_HOME` and `XDG_CACHE_HOME` are honoured. Set them before installing: the installer writes
-them into the service's unit. Task worktrees go to `~/.local/share/shepherdr/worktrees` unless `tasks.worktree_root`
+them into the service's unit. The unit also sets `HC_SESSION=shepherdr`, so the service's agents run in Shepherdr's
+own herdr-core session; `shepherdr doctor` says when a unit lacks it, and `shepherdr update` writes it. Task worktrees go to `~/.local/share/shepherdr/worktrees` unless `tasks.worktree_root`
 in the settings file names another folder.
 
 ## Uninstall

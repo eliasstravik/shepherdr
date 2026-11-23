@@ -459,9 +459,10 @@ def main():
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=cmd_machines)
     c = sub.add_parser("carry-over", help="3.2's switch, safe to run again: what Shepherdr kept in the default herdr-core session (its documents, "
-                                          "its machines) into its own session, and 3.1's scheduler there removed")
+                                          "its machines, its idle agents) into its own session, and 3.1's scheduler there removed")
     c.add_argument("--dry-run", action="store_true", help="only say what it would do")
     c.add_argument("--wait", type=int, default=20, help="seconds to wait for the machines just added to connect (default 20)")
+    c.add_argument("--agents", action="store_true", help="only Shepherdr's agents still in the default session (with --dry-run: which are left, as doctor asks)")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=lambda a: __import__("herdr_task.carry_over", fromlist=["cmd_carry_over"]).cmd_carry_over(a))
     c = ma.add_parser("reach", help="the reach map: the machines this one links to over herdr-core, and through each, what that one links to (contacts nothing else)")
