@@ -271,7 +271,13 @@ export function enrich(snap: Snapshot, f: Facts): Snapshot {
     return { ...p, ...(homes.has(p.id) ? { home: true, name: "home" } : {}), ...(f.archived.includes(p.id) ? { archived: true } : {}), ...(blocked ? { needs: true } : {}) };
   });
   const rowOf = new Map(f.rows.map((r) => [r.machine ? `${r.machine}:${r.ref}` : r.ref, r]));
-  const titleOf = (r: any, id: unknown) => f.rows.find((x) => x.folder === r.folder && (x.machine ?? null) === (r.machine ?? null) && String(x.id) === String(id))?.title;
+  const rowIn = (r: any, id: unknown) => f.rows.find((x) => x.folder === r.folder && (x.machine ?? null) === (r.machine ?? null) && String(x.id) === String(id));
+  // the tasks it still waits for (a done one holds nothing up): the first by title, the rest counted ("+5")
+  const waitsFor = (r: any, ids: unknown) => {
+    const all = (Array.isArray(ids) ? ids : []).map((id) => rowIn(r, id)).filter(Boolean);
+    const open = all.filter((x: any) => x.section !== "done");
+    return open.length ? open : all.slice(0, 1);
+  };
   const tasks: Task[] = snap.tasks.map((t0) => {
     let t = t0;
     const r = rowOf.get(t.id);
@@ -286,7 +292,8 @@ export function enrich(snap: Snapshot, f: Facts): Snapshot {
     if (hands) t = { ...t, status: "need" };
     const blocked = t.status !== "need" ? undefined : hands ? "auth" : card ?? (rep?.kind === "auth" ? "auth" : rep?.kind === "permission" || rep?.kind === "question" ? rep.kind : rep?.state === "blocked" ? "prompt" : undefined);
     const stopped = x.stopped_by && t.status !== "done" && t.status !== "work" ? { by: x.stopped_by as "you" | "error" | "limit", ...(x.stopped_why ? { why: String(x.stopped_why).slice(0, 200) } : {}) } : undefined;
-    const after = Array.isArray(x.after) && x.after.length ? titleOf(r, x.after[0]) : undefined;
+    const waits = waitsFor(r, x.after);
+    const after = waits[0]?.title as string | undefined;
     return {
       ...t,
       // on its own branch or worktree (also one set to, not started yet), changed in the folder itself, or not a repo
@@ -300,7 +307,7 @@ export function enrich(snap: Snapshot, f: Facts): Snapshot {
       ...(t.status === "need" || t.status === "ready" || stopped ? { needsAt: x.attention_at ?? r.ready_at ?? r.started ?? undefined } : {}),
       ...(t.status === "done" && r.ready_at ? { needsAtWas: r.ready_at } : {}),
       ...(x.merge_failed ? { mergeFailed: String(x.merge_failed).slice(0, 200) } : {}),
-      ...(after ? { afterTitle: after } : {}),
+      ...(after ? { afterTitle: after, ...(waits.length > 1 ? { afterMore: waits.length - 1 } : {}) } : {}),
       ...(f.waiting?.includes(`task:${t.id}`) ? { waitsDesktop: true } : {}),
     };
   });

@@ -92,11 +92,12 @@ button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"])
 .hd{display:flex;align-items:center;gap:4px;height:var(--hd);padding:0 12px;flex:none;min-width:0}
 .hd{border-bottom:1px solid transparent}.hd.sc{border-bottom-color:var(--line)}
 .ttl{flex:1;min-width:0;padding:0 4px}
-/* the open space's folder, a quiet chip beside its name (SHEP-316): it gives way before the name, and from its start */
-.ttl:has(>.fchip){display:flex;align-items:center;gap:6px}.ttl>.tbtn{flex:none;max-width:60%}
+/* the open space's folder, a quiet chip beside its name (SHEP-316): it gives way before the name, and from its start;
+   the name has all the room the header's buttons leave, and is cut only once the chip is down to its icon */
+.ttl:has(>.fchip){display:flex;align-items:center;gap:6px}.ttl>.tbtn{flex:0 1 auto}.ttl>.fchip{flex-shrink:60}
 .fchip{position:relative;display:inline-flex;align-items:center;gap:4px;flex:0 3 auto;min-width:26px;height:24px;padding:0 8px 0 4px;border-radius:6px;color:var(--sub);font-size:var(--sec);line-height:var(--secl);box-shadow:inset 0 0 0 1px var(--line)}
 .fchip .i{flex:none;color:var(--muted)}.fchip:hover,.fchip[aria-expanded="true"]{background:var(--control);color:var(--fg)}
-.fct,.fcm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fct{flex:0 3 auto}.fct.cut{direction:rtl}.fct bdi{direction:ltr}.fcm{flex:none;max-width:45%;color:var(--muted)}.fcm::before{content:"·";padding-right:4px}
+.fct,.fcm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fct{flex:0 3 auto}.fct.cut{direction:rtl}.fct bdi{direction:ltr}.fcm{flex:0 1 auto;max-width:45%;color:var(--muted)}.fcm::before{content:"·";padding-right:4px}
 .app.phone .fchip{height:28px;padding:0 10px 0 6px}
 @media (pointer:coarse){.fchip::after{content:"";position:absolute;inset:-10px 0}}.t1{font-weight:600}.t1,.t2{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .t2{color:var(--muted);font-size:var(--sec);line-height:var(--secl)}
@@ -174,9 +175,9 @@ button.b{cursor:pointer}
 .code{display:flex;align-items:center;gap:4px;max-width:100%;min-height:36px;padding:4px 4px 4px 12px;border-radius:8px;background:var(--well);box-shadow:inset 0 0 0 1px var(--line);font:13px/20px ui-monospace,SFMono-Regular,Menlo,monospace}
 .code code{flex:1;min-width:0;overflow-wrap:anywhere}.card .code{width:100%}
 .donerow{display:inline-flex;align-items:center;gap:8px;color:var(--muted);font-size:14px;line-height:20px;padding:2px 0}
-.banner{display:flex;align-items:center;gap:8px;width:100%;min-width:0;height:max(40px,var(--row));margin-bottom:8px;padding:0 4px 0 12px;border-radius:12px;box-shadow:inset 0 0 0 1px var(--line2);font-size:14px;line-height:20px}
+.banner{display:flex;align-items:center;gap:8px;width:100%;min-width:0;min-height:max(40px,var(--row));margin-bottom:8px;padding:0 4px 0 12px;border-radius:12px;box-shadow:inset 0 0 0 1px var(--line2);font-size:14px;line-height:20px}
 .banner .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.banner>button.n{text-align:left;height:100%}
+.banner>button.n{text-align:left;align-self:stretch;margin-block:-4px}
 .app.tap .banner{padding-right:0}.app.tap .banner>.ib{width:var(--hit);height:100%;border-radius:0 12px 12px 0}
 .cbox{display:grid;border-radius:16px;background:var(--well);box-shadow:inset 0 0 0 1px var(--line2)}
 .cbox:focus-within{box-shadow:inset 0 0 0 1px var(--muted)}
@@ -185,6 +186,8 @@ button.b{cursor:pointer}
 .agent{display:inline-flex;align-items:center;gap:6px;min-width:0;height:var(--btns);padding:0 6px;border-radius:8px;font-size:14px;line-height:20px}
 .agent:hover{background:var(--control)}.agent .m{font-weight:500;white-space:nowrap}
 .agent .e{min-width:0;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* short of room, the line drops its logo, then its chevron, then its permission mode before the effort is cut (picker.tsx) */
+.agent[data-drop~="logo"]>.logo,.agent[data-drop~="chev"]>.i:last-child,.agent[data-drop~="perm"]>.pm{display:none}
 .agent .i{color:var(--muted)}.agent .bolt{color:var(--fg);margin-left:-4px}.agent .bolt+.bolt{margin-left:-10px}
 .send{display:grid;place-items:center;width:var(--send);height:var(--send);border-radius:50%;background:var(--fg);color:var(--canvas);flex:none}
 .chat>.foot,.pane>.foot{padding-bottom:12px}.pane>.foot{padding-inline:var(--gut)}
@@ -504,3 +507,7 @@ textarea.cin{overflow-y:auto}
 @media(pointer:coarse){a.btn{position:relative}a.btn::before{content:"";position:absolute;left:50%;top:50%;width:max(100%,var(--hit));height:max(100%,var(--hit));transform:translate(-50%,-50%)}}
 .app.tap .emo{gap:0}.app.tap .emo button{min-width:var(--hit)}
 .app.tap .fold,.app.tap .ref{min-height:var(--row)}.app.tap .ref{margin-top:0}
+/* Text gets the room there is (SHEP-356): a name or title wraps to a second line before it is cut, and is cut only where
+   that second line ends too. Where it is still cut, a tap opens the thing that shows it whole. */
+.row.tk .l1,.row.tk .l2:not(.rline),.rowx[data-project]>.row>.n,.tile>.l1,.banner .n:not(button),.hd .ttl>.t1:only-child{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;overflow-wrap:anywhere}
+.rowx[data-project]>.row{padding-block:6px}.banner{padding-block:4px}.hd .ttl>.t1:only-child{line-height:20px}

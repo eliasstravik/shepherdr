@@ -69,3 +69,22 @@ test("two home spaces on this computer: Everything is always the same one, and n
     expect(out.places.filter((p: any) => p.home).map((p: any) => p.id).sort()).toEqual(["home", "spH"]);
   }
 });
+
+test("Up next: it waits for the tasks not done yet, the first by title and the rest counted (SHEP-356)", async () => {
+  const { enrich } = await import("./next.ts");
+  const spaces = [{ id: "sp1", folder: "/srv/app", machine: null }];
+  const row = (id: number, title: string, section: string, x: any = {}) => ({ ref: `APP-${id}`, id, title, folder: "/srv/app", machine: null, section, x });
+  const snapTask = (id: number) => ({ id: `APP-${id}`, name: "", place: "sp1", status: "queued", state: "queued", on: "mini", created: "", age: "" });
+  const rows = [row(1, "Old one", "done"), row(2, "Desktop tab: starts by itself", "working"), row(3, "Tasks filter menu", "working"), row(4, "Swap control", "queued"),
+    row(9, "Release", "queued", { after: [1, 2, 3, 4] }), row(10, "Docs", "queued", { after: [2] }), row(11, "After a done one", "queued", { after: [1] })];
+  const snap: any = { places: [{ id: "sp1", chat: "p:sp1", name: "app", machine: "mini" }], tasks: [9, 10, 11].map(snapTask), machines: [] };
+  const f: any = { spaces, rows, archived: [], asked: () => null, reportOf: () => null, config: { plans: [] } };
+  const out: any = enrich(snap, f);
+  const by = (id: string) => out.tasks.find((t: any) => t.id === id);
+  expect(by("APP-9")).toMatchObject({ afterTitle: "Desktop tab: starts by itself", afterMore: 2 });
+  expect(by("APP-10").afterTitle).toBe("Desktop tab: starts by itself");
+  expect(by("APP-10").afterMore).toBeUndefined();
+  // everything it waited for is done: its title still says which, nothing counted
+  expect(by("APP-11")).toMatchObject({ afterTitle: "Old one" });
+  expect(by("APP-11").afterMore).toBeUndefined();
+});

@@ -120,7 +120,21 @@ export const catalog = (machine: string): Catalog => ({
   ],
 })
 
-export function snapshot(mode: 'normal' | 'empty' | 'down' | 'more' = 'normal'): Snapshot {
+// ?case=long: long names everywhere, for checking text gets its room and is cut only where the space ends
+const LONG_NAMES: Record<string, string> = {
+  'SHOP-15': 'Bigger checkout button on phones, and the same for the cart page and the one-page checkout',
+  'SHOP-12': 'Faster product search: results as you type, with typo tolerance and the top sellers first',
+  'BLOG-9': 'Dark mode for code blocks, matching the theme the reader picked in their system settings',
+}
+const longDay = (s: Snapshot): Snapshot => ({
+  ...s,
+  places: s.places.map((p) => (p.id === P.shop ? { ...p, name: 'shop-storefront-and-checkout' } : p)),
+  tasks: s.tasks.map((t) => ({ ...t, ...(LONG_NAMES[t.id] ? { name: LONG_NAMES[t.id] } : {}), ...(t.id === 'BLOG-9' ? { afterTitle: LONG_NAMES['SHOP-12'], afterMore: 5 } : {}) })),
+  artifacts: s.artifacts.map((a: any, i: number) => (i === 0 ? { ...a, title: `${a.title}: the whole story, with every screenshot and the numbers behind it` } : a)),
+})
+
+export function snapshot(mode: 'normal' | 'empty' | 'down' | 'more' | 'long' = 'normal'): Snapshot {
+  if (mode === 'long') return longDay(snapshot('normal'))
   const empty = mode === 'empty'
   const down = mode === 'down'
   return {

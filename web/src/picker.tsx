@@ -3,7 +3,7 @@
 // you change one thing at a time: Agent, Model, Effort, Speed and Permissions, each the same row (its label, what is
 // picked, a chevron) that opens its own list, and Done.
 // A sheet on a phone, a 560 px dialog on a desktop; an open list takes the form's place, with a back arrow.
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { AgentPick, Catalog, CatalogAgent, CatalogModel, Snapshot } from '@shared/types.ts'
 import { everything, isEverything, machineLabel, machineOf, spacesOf, unreachable } from '@shared/view.ts'
 import { act, getState } from './kernel.ts'
@@ -104,16 +104,43 @@ function Bolts({ speed, c = 's16 bolt' }: { speed: string; c?: string }) {
 export function AgentLine({ pick, machine, onClick }: { pick: Pick; machine: string; onClick: () => void }) {
   const cat = useCatalog(machine)
   const w = pickWords(pick, cat)
+  const ref = useRef<HTMLButtonElement>(null)
+  const words = `${w.model}|${w.agent}|${w.effort}|${w.perm}|${w.speed}`
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const fit = () => fitAgentLine(el)
+    fit()
+    if (typeof ResizeObserver === 'undefined' || !el.parentElement) return
+    const ro = new ResizeObserver(fit)
+    ro.observe(el.parentElement)
+    return () => ro.disconnect()
+  }, [words])
   return (
-    <button type="button" className="agent" aria-label={`${sayPick(pick, cat).replace(/ · /g, ', ')}. Change`} onClick={onClick}>
+    <button ref={ref} type="button" className="agent" aria-label={`${sayPick(pick, cat).replace(/ · /g, ', ')}. Change`} onClick={onClick}>
       <Logo agent={pick.agent} name={w.agent} />
       <span className="m">{w.model || w.agent}</span>
       {w.effort && <span className="e">{w.effort.toLowerCase()}</span>}
       <Bolts speed={w.speed} />
-      {w.perm && <span className="e">· {w.perm.toLowerCase()}</span>}
+      {w.perm && <span className="e pm">· {w.perm.toLowerCase()}</span>}
       <I n="down" c="s16" />
     </button>
   )
+}
+
+/** what goes from the message box's agent line when it is short of room (SHEP-356), in this order, so the model and
+ *  its effort stay whole: the logo (the model's name says whose it is), the chevron (the whole line is the button), the
+ *  permission mode. Only past all three does the effort get cut. */
+export const AGENT_DROPS = ['logo', 'chev', 'perm'] as const
+
+/** sets the agent line's data-drop to the fewest drops that let its words fit */
+export function fitAgentLine(el: HTMLElement) {
+  const cut = () => el.scrollWidth > el.clientWidth + 0.5 || [...el.querySelectorAll<HTMLElement>('.m,.e')].some((s) => s.scrollWidth > s.clientWidth + 0.5)
+  for (let n = 0; n <= AGENT_DROPS.length; n++) {
+    el.dataset.drop = AGENT_DROPS.slice(0, n).join(' ')
+    if (!cut()) return n
+  }
+  return AGENT_DROPS.length
 }
 
 /** a dialog's Agent row: what is picked, a chevron; it opens the picker */

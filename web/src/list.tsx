@@ -290,7 +290,21 @@ export function spaceMenu(anchor: Element, placeId: string, head = false) {
     { icon: 'archive', label: p.archived ? 'Unarchive' : 'Archive', run: () => archive(snap, p) },
     { icon: 'bin', label: 'Remove', danger: true, line: true, run: () => remove(snap, p) },
   ]
-  openMenu(anchor, rows, { label: `#${p.name}` })
+  openMenu(anchor, rows, { label: `#${p.name}`, ...(nameCut(anchor) ? { top: () => <WholeName name={p.name} /> } : {}) })
+}
+
+/** a cut-off name (one line, or two that wrap) shows whole where it opens: its menu's first line (SHEP-356) */
+export const isCut = (el: Element | null | undefined) => !!el && (el.scrollWidth > el.clientWidth + 0.5 || el.scrollHeight > el.clientHeight + 0.5)
+/** the space's name as its header button or its row in the list shows it, cut or not */
+const nameCut = (anchor: Element) => isCut(anchor.classList.contains('tbtn') ? anchor.querySelector('span') : anchor.closest('.rowx')?.querySelector('.row>.n'))
+
+function WholeName({ name }: { name: string }) {
+  return (
+    <div className="fwhere">
+      <I n="hash" />
+      <span className="n"><span className="l1">{name}</span></span>
+    </div>
+  )
 }
 
 function groupMenu(anchor: Element, id: string, name: string) {

@@ -306,6 +306,8 @@ export interface Task {
   repo?: 'branch' | 'folder'
   /** the task it waits for, by title */
   afterTitle?: string
+  /** how many more tasks it waits for besides afterTitle's */
+  afterMore?: number
   /** short name, as people say it: GTM-15 */
   id: string
   name: string
