@@ -1,4 +1,4 @@
-// SHEP-360: the chat header's folder is quiet text beside the name, on every chat, and gives way from its start
+// SHEP-360: the chat header's folder is quiet text beside the name, on every chat, ~ and / as they are, and gives way from its start
 import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -18,14 +18,16 @@ test('a named space: its path, cut from its start, no machine here', () => {
   expect(h).toContain('aria-label="Folder: /Users/sam/dev/clients/northwind/docs"')
 })
 
-test('the root: in words, and its machine', () => {
+test('the root: / as it is, and its machine', () => {
   const h = html({ id: 'r', machine: 'vm', where: '/', folder: '/' })
-  expect(h).toContain('<span class="hp"><bdi>Root</bdi></span><span class="hm">vm</span>')
+  expect(h).toContain('<span class="hp"><bdi>/</bdi></span><span class="hm">vm</span>')
+  expect(h).not.toContain('Root folder')
 })
 
-test('Everything shows it too: its home folder on its machine', () => {
+test('Everything shows it too: ~ on its machine', () => {
   const h = html({ id: 'ev', machine: 'mini', where: '~', folder: '/Users/sam', home: true })
-  expect(h).toContain('<bdi>Home</bdi></span><span class="hm">Mac mini</span>')
+  expect(h).toContain('<bdi>~</bdi></span><span class="hm">Mac mini</span>')
+  expect(h).not.toContain('Home folder')
 })
 
 test('quiet: no pill, border, fill or icon; it gives way before the name, from its start', () => {

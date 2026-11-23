@@ -135,12 +135,12 @@ test("a chat header's where: the folder, the machine only when it adds something
   expect(headerWhere(snap, { id: 'shop', machine: 'mini', where: '~/dev/shop', folder: '/Users/sam/dev/shop' })).toEqual({ path: '~/dev/shop', cut: true, full: '/Users/sam/dev/shop', machine: null })
   // on another machine: that machine
   expect(headerWhere(snap, { id: 'x', machine: 'vm-b', where: '~/clients/acme/shop', folder: '/home/sam/clients/acme/shop' })).toMatchObject({ path: '~/clients/acme/shop', machine: 'Build box' })
-  // the root: in words, never cut
-  expect(headerWhere(snap, { id: 'r', machine: 'vm-b', where: '/', folder: '/' })).toEqual({ path: 'Root', cut: false, full: '/', machine: 'Build box' })
-  // Everything: its home folder, with the machine whose home it is
-  expect(headerWhere(snap, { id: 'ev', machine: 'mini', where: '~', folder: '/Users/sam' })).toEqual({ path: 'Home', cut: false, full: '/Users/sam', machine: 'Mac mini' })
+  // the root: / as it is, never cut
+  expect(headerWhere(snap, { id: 'r', machine: 'vm-b', where: '/', folder: '/' })).toEqual({ path: '/', cut: false, full: '/', machine: 'Build box' })
+  // Everything: ~ as it is, with the machine whose home it is
+  expect(headerWhere(snap, { id: 'ev', machine: 'mini', where: '~', folder: '/Users/sam' })).toEqual({ path: '~', cut: false, full: '/Users/sam', machine: 'Mac mini' })
   // Everything from a service that sends no folder still says it
-  expect(headerWhere(snap, { id: 'ev', machine: 'mini' })).toEqual({ path: 'Home', cut: false, full: '~', machine: 'Mac mini' })
+  expect(headerWhere(snap, { id: 'ev', machine: 'mini' })).toEqual({ path: '~', cut: false, full: '~', machine: 'Mac mini' })
   // another space with no folder: nothing
   expect(headerWhere(snap, { id: 'y', machine: 'mini' })).toBeNull()
 })

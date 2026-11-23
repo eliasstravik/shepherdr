@@ -1,5 +1,5 @@
 // Where a chat is, in its header beside its name (SHEP-360): plain dim text, no pill, border or fill, the size of the
-// header's secondary words. The folder (Home folder / Root folder in words; a long path gives way from its start, so
+// header's secondary words. The folder as it is (~ and / too; a long path gives way from its start, so
 // its end shows) and its machine when that adds something. Everything says it too. A tap shows the whole path with Copy.
 import type { Snapshot } from '@shared/types.ts'
 import { headerWhere, type Space } from '@shared/view.ts'
