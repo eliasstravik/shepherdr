@@ -43,6 +43,6 @@ test('sizes: a pill that hugs its emoji with a 44 px tap area, a pop only with m
   expect(rule('.rxc')).toContain('height:28px')
   expect(rule('.rxc')).toContain('flex:none')
   expect(rule('.rxs')).toContain('width:max-content')
-  expect(rule('.rxc::after')).toContain('inset:-8px')
+  expect(rule('.rxc::after')).toContain('inset:-13px -2px -8px') // 13 + 28 + 8 = 49: a bar just below may take a few
   expect(css).toMatch(/prefers-reduced-motion:reduce\)\{\.rxc\.pop\{animation:none\}/)
 })

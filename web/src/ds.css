@@ -156,7 +156,9 @@ button.b{cursor:pointer}
    ring of the chat's background so the overlap reads clean; being in the flow, it reserves its own space below */
 .rxs{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:4px;width:max-content;max-width:calc(100% - 16px);margin:-10px 8px 2px}.bw.mine .rxs{justify-content:flex-end}
 .rxc{position:relative;flex:none;display:inline-flex;align-items:center;justify-content:center;gap:3px;width:auto;min-width:28px;height:28px;padding:0 6px;border-radius:999px;background:var(--rx);box-shadow:0 0 0 2px var(--canvas);color:var(--sub);font-size:12px;line-height:16px;font-weight:600;font-variant-numeric:tabular-nums}
-.rxc::after{content:"";position:absolute;inset:-8px -2px}
+/* the finger pad reaches further up, over the bubble it already overlaps: below it, a bar such as "waiting at a
+   prompt" may sit close and take the lower pad, and the chip must still give a finger 44px */
+.rxc::after{content:"";position:absolute;inset:-13px -2px -8px}
 .rxc .e{font-size:16px;line-height:1}
 .rxc:hover{background:color-mix(in srgb,var(--fg) 6%,var(--rx))}
 .rxc[aria-pressed="true"]{background:color-mix(in srgb,var(--blue) 18%,var(--rx));color:var(--fg)}
