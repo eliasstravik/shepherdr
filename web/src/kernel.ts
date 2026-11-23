@@ -718,7 +718,17 @@ if (typeof window !== 'undefined') {
   // the line after an update, once; a reload that brought the same page back is kept, so it isn't tried again soon
   const after = afterLoad(readMark(), BUILD, OWN_VERSION, Date.now())
   writeMark(after.keep)
-  if (after.said) setTimeout(() => notice(after.said!, 4000), 600)
+  // said once the page is on screen: an update while it was hidden is told when you come back
+  const say = () => {
+    if (!after.said || document.visibilityState !== 'visible') return
+    document.removeEventListener('visibilitychange', say)
+    setTimeout(() => notice(after.said!, 4000), 600)
+    after.said = null
+  }
+  if (after.said) {
+    document.addEventListener('visibilitychange', say)
+    say()
+  }
 }
 
 /** Hold off reloading while something can't be picked up again (an upload on its way, dictation). Returns the release. */
