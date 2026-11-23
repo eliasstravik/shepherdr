@@ -6,17 +6,18 @@
 export const fontFor = (width: number) => (width < 480 ? 12 : 13)
 export const LINE = 1.25
 
-/** the columns and rows that fit a box (its inner size, px) at its font; cell: a character's width per px of font */
-export function fitGrid(width: number, height: number, cell: number): { cols: number; rows: number } {
+/** the columns and rows that fit a box (its inner size, px) at its font; cell and line: a character's width and a
+ *  row's height per px of font, as the terminal really draws them */
+export function fitGrid(width: number, height: number, cell: number, line = LINE): { cols: number; rows: number } {
   const f = fontFor(width)
-  return { cols: Math.max(20, Math.min(400, Math.floor(width / (f * cell)))), rows: Math.max(5, Math.min(200, Math.floor(height / (f * LINE)))) }
+  return { cols: Math.max(20, Math.min(400, Math.floor(width / (f * cell)))), rows: Math.max(5, Math.min(200, Math.floor(height / (f * line)))) }
 }
 
 /** the font that shows a terminal of cols × rows whole in the box: the normal one when it fits, else smaller, never under 8 */
-export function shrinkTo(width: number, height: number, cols: number, rows: number, cell: number): number {
+export function shrinkTo(width: number, height: number, cols: number, rows: number, cell: number, line = LINE): number {
   const f = fontFor(width)
   const w = Math.floor((width / (cols * cell)) * 4) / 4
-  const h = Math.floor((height / (rows * LINE)) * 4) / 4
+  const h = Math.floor((height / (rows * line)) * 4) / 4
   return Math.max(8, Math.min(f, w, h))
 }
 
@@ -31,4 +32,15 @@ export function linesFor(carry: number, delta: number, linePx: number): [number,
   const total = carry + delta
   const lines = Math.trunc(total / linePx)
   return [lines, total - lines * linePx]
+}
+
+/** the box's scroll position that shows the last row with something on it (0-based) at its foot: rows of rowPx, 8 px
+ *  of padding above and below, never past the end */
+export function footTop(last: number, rowPx: number, boxHeight: number, maxTop: number) {
+  return Math.min(maxTop, Math.max(0, Math.ceil((last + 1) * rowPx + 16 - boxHeight)))
+}
+
+/** after you scroll: does the terminal follow new output again? Only within a row of the foot, or below it */
+export function following(scrollTop: number, foot: number, rowPx: number) {
+  return scrollTop >= foot - rowPx
 }

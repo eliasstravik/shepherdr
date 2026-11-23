@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { fitGrid, fontFor, linesFor, shrinkTo, showKeys } from './fit.ts'
+import { fitGrid, following, fontFor, footTop, linesFor, shrinkTo, showKeys } from './fit.ts'
 
 const CELL = 0.6 // a monospace character is about 0.6 of its font size wide
 
@@ -27,6 +27,21 @@ test('held at another size by someone else, the font shrinks to show it whole, n
   expect(shrinkTo(1100, 900, 200, 40, CELL)).toBe(9)
   // far too wide: 8 px, and only then it pans
   expect(shrinkTo(362, 600, 200, 40, CELL)).toBe(8)
+  // an agent's tall screen scrolls instead: only its width shrinks the font
+  expect(shrinkTo(1100, Infinity, 141, 120, CELL)).toBe(13)
+})
+
+test('it opens at the last line shown, scrolled to the end, and follows only until you scroll up', () => {
+  // 120 rows of 16 px in a 640 px box, the last line on row 119: the very end
+  const max = 120 * 16 + 16 - 640
+  expect(footTop(119, 16, 640, max)).toBe(max)
+  // a short screen (last line on row 9 of 120): that line at the foot, not the blank rows under it
+  expect(footTop(9, 16, 640, max)).toBe(0)
+  expect(footTop(59, 16, 640, max)).toBe(60 * 16 + 16 - 640)
+  // scrolled up by more than a row: it stays where you are; back at the foot (or a row from it): it follows
+  expect(following(max - 400, max, 16)).toBe(false)
+  expect(following(max - 10, max, 16)).toBe(true)
+  expect(following(max, max, 16)).toBe(true)
 })
 
 test('the key row shows on any touch screen, at every width, and on a phone', () => {
