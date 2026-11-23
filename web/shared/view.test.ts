@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Snapshot, Task } from './types.ts'
-import { doneWords, folderOf, leftWords, listOf, minutesLeft, needsCount, nowGroups, statusWord, taskLine, taskWhen, tstate } from './view.ts'
+import { doneWords, folderOf, folderWords, leftWords, listOf, minutesLeft, needsCount, nowGroups, spaceHint, statusWord, taskLine, taskWhen, tstate } from './view.ts'
 
 const task = (x: Partial<Task>): Task => ({ id: 'T-1', name: 'A task', place: 'shop', status: 'work', state: 'work', on: 'mini', created: '', age: '', ...x })
 
@@ -86,18 +86,56 @@ test('needs you: a space\'s tasks under Needs you and Ready for review, and its 
   expect(nowGroups(s.tasks).map((g) => [g.name, g.tasks.length])).toEqual([['Needs you', 3], ['Working', 1], ['Up next', 0], ['Done', 0], ['Archived', 1]])
 })
 
-test("a space's folder: home as ~, the folder's own name kept whole, another machine named (SHEP-302)", () => {
+test("a space's folder: home as ~, the whole path, another machine named (SHEP-302)", () => {
   const snap = { host: 'mini', machines: [{ id: 'm:vm-b', machine: 'vm-b', name: 'Build box', status: 'idle' }] } as unknown as Snapshot
-  expect(folderOf(snap, { machine: 'mini', where: '~/dev/shop', folder: '/Users/sam/dev/shop' })).toEqual({ head: '~/dev', tail: '/shop', full: '/Users/sam/dev/shop', machine: null })
-  // Everything, at home
-  expect(folderOf(snap, { machine: 'mini', where: '~', folder: '/Users/sam' })).toEqual({ head: '', tail: '~', full: '/Users/sam', machine: null })
-  // another machine: its own home as ~, and its name
-  expect(folderOf(snap, { machine: 'vm-b', where: '~/clients/acme/shop', folder: '/home/sam/clients/acme/shop' })).toEqual({ head: '~/clients/acme', tail: '/shop', full: '/home/sam/clients/acme/shop', machine: 'Build box' })
-  // outside home, the root, a trailing slash, and an older service that sends only `where`
-  expect(folderOf(snap, { machine: 'mini', where: '/srv/app' })).toMatchObject({ head: '/srv', tail: '/app', full: '/srv/app' })
-  expect(folderOf(snap, { machine: 'mini', where: '/' })).toMatchObject({ head: '', tail: '/' })
-  expect(folderOf(snap, { machine: 'mini', where: '/srv' })).toMatchObject({ head: '', tail: '/srv' })
-  expect(folderOf(snap, { machine: 'mini', where: '~/dev/shop/' })).toMatchObject({ head: '~/dev', tail: '/shop' })
+  expect(folderOf(snap, { machine: 'mini', where: '~/dev/shop', folder: '/Users/sam/dev/shop' })).toEqual({ short: '~/dev/shop', full: '/Users/sam/dev/shop', machine: null })
+  expect(folderOf(snap, { machine: 'vm-b', where: '~/clients/acme/shop', folder: '/home/sam/clients/acme/shop' })).toEqual({ short: '~/clients/acme/shop', full: '/home/sam/clients/acme/shop', machine: 'Build box' })
+  // a trailing slash, and an older service that sends only `where`
+  expect(folderOf(snap, { machine: 'mini', where: '~/dev/shop/' })).toMatchObject({ short: '~/dev/shop', full: '~/dev/shop' })
+  expect(folderOf(snap, { machine: 'mini', where: '/' })).toMatchObject({ short: '/', full: '/' })
   // a machine Shepherdr doesn't list by name: its key
   expect(folderOf(snap, { machine: 'vm-c', where: '~/x' }).machine).toBe('vm-c')
+})
+
+test('a lone ~ or / is said in words (SHEP-316)', () => {
+  expect(folderWords('~')).toBe('Home')
+  expect(folderWords('/')).toBe('Root folder')
+  expect(folderWords('~/dev')).toBe('~/dev')
+})
+
+test("a space's folder shows beside its name only when a namesake needs telling apart (SHEP-316)", () => {
+  const sp = (id: string, name: string, machine: string, where: string) => ({ id, name, machine, where, level: 0, status: 'idle', mode: 'regular', chat: id })
+  const places = [
+    { ...sp('ev', 'home', 'mini', '~'), home: true },
+    sp('shop', 'shop', 'mini', '~/dev/shop'),
+    sp('vshop', 'Shop', 'vm-b', '~/clients/acme/shop'),
+    sp('blog', 'blog', 'mini', '~/dev/blog'),
+    sp('root', 'root', 'vm-b', '/'),
+    sp('notes', 'notes', 'mini', '~/notes'),
+    sp('notes2', 'notes', 'vm-b', '~/notes'),
+    sp('srv', 'app', 'mini', '/app'),
+    sp('app', 'app', 'mini', '~/app'),
+    sp('home2', 'tools', 'vm-b', '~'),
+    sp('tools', 'tools', 'mini', '~/dev/tools'),
+    sp('w1', 'web', 'mini', '~/dev/web'),
+    sp('w2', 'web', 'mini', '~/dev/web-old'),
+  ]
+  const snap = { host: 'mini', everything: 'ev', places, machines: [{ id: 'm:vm-b', machine: 'vm-b', name: 'Build box', status: 'idle' }] } as unknown as Snapshot
+  const hint = (id: string) => spaceHint(snap, places.find((p) => p.id === id)!)
+  // its own name: nothing, not even at the root or home
+  expect(hint('blog')).toBeNull()
+  expect(hint('root')).toBeNull()
+  // namesakes (any case): the folder each sits in
+  expect(hint('shop')).toBe('~/dev')
+  expect(hint('vshop')).toBe('~/clients/acme')
+  // never a lone symbol: in words
+  expect(hint('srv')).toBe('Root folder')
+  expect(hint('app')).toBe('Home')
+  expect(hint('home2')).toBe('Home')
+  // the same folder on two machines: the machine
+  expect(hint('notes')).toBe('mini')
+  expect(hint('notes2')).toBe('Build box')
+  // side by side in one folder: its own folder
+  expect(hint('w1')).toBe('~/dev/web')
+  expect(hint('w2')).toBe('~/dev/web-old')
 })

@@ -39,14 +39,15 @@ button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"])
 .l1,.l2{display:block}.l2,.row .v{color:var(--muted);font-size:var(--sec);line-height:var(--secl)}
 .row .v{flex:none;font-variant-numeric:tabular-nums}
 .row2{min-height:var(--row2)}
-/* a space's folder (SHEP-302): its start gives way ("…/acme/shop"), the folder's own name stays whole; a space's row in the list is a
-   little shorter than a menu's two-line row */
-.fpath{display:flex;min-width:0;white-space:nowrap}.fh{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;direction:rtl}.fh bdi{direction:ltr}
-.ft,.fm{flex:none;max-width:100%;overflow:hidden;text-overflow:ellipsis}.fm{padding-right:.3em}
-.row.sp{min-height:44px;padding-top:3px;padding-bottom:3px}.app.phone .row.sp{min-height:var(--row2)}
-.tbtn.two{flex-direction:column;align-items:flex-start;gap:0;height:auto;min-height:32px;padding:1px 8px}
-.tbtn .tn{display:flex;align-items:center;gap:4px;max-width:100%;min-width:0}.tbtn .fpath{max-width:100%;font-weight:400;color:var(--muted);font-size:var(--sec);line-height:var(--secl)}
-.pop .fwhere{padding:6px 8px 4px;color:var(--muted);font-size:var(--sec);line-height:var(--secl);overflow-wrap:anywhere;user-select:text}.row.danger{color:var(--red)}.row.off{opacity:.45}.row.dim{opacity:.6}
+/* a space's name on one line (SHEP-316), a namesake's folder dim beside it, giving way first and from its start ("…/acme") */
+.sn{display:flex;align-items:baseline;gap:6px;min-width:0}.snn{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.snh{flex:0 3 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;direction:rtl;color:var(--muted);font-weight:400;font-size:var(--sec)}.snh bdi{direction:ltr}
+.tbtn .sn{flex:0 1 auto}
+/* a space's whole folder at the top of its menu (SHEP-302), set like a row: its icon in the rows' icon column */
+.pop .fwhere{display:flex;align-items:flex-start;gap:8px;padding:6px 8px;color:var(--sub);font-size:var(--sec);line-height:var(--secl);user-select:text}
+.pop .fwhere .i{flex:none;margin-top:calc((var(--secl) - var(--ic)) / 2);color:var(--muted)}.pop .fwhere .n{flex:1;min-width:0}
+.pop .fwhere .l1{white-space:normal;overflow-wrap:anywhere;color:var(--fg)}.pop .fwhere .l2{white-space:normal;overflow-wrap:anywhere}
+.row.danger{color:var(--red)}.row.off{opacity:.45}.row.dim{opacity:.6}
 .row .i:not([class*="c-"]){color:var(--muted)}.row.danger .i{color:inherit}
 .rowx{display:flex;align-items:center;border-radius:8px;min-width:0}.rowx>.row{flex:1}
 .lab{padding:12px 8px 4px;color:var(--muted);font-size:var(--sec);line-height:var(--secl)}

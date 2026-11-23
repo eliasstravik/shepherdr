@@ -3,11 +3,11 @@
 // space's menu and the small dialogs it opens (New space, New group, Rename, Archive, Remove, Feedback).
 import { useState } from 'react'
 import type { Snapshot } from '@shared/types.ts'
-import { everything, folderOf, groupOf, isEverything, listOf, machineLabel, needsCount, placeDown, placeOf, tasksIn, tstate, unreachable, type Space } from '@shared/view.ts'
+import { everything, folderOf, groupOf, isEverything, listOf, machineLabel, needsCount, placeDown, placeOf, spaceHint, tasksIn, tstate, unreachable, type Space } from '@shared/view.ts'
 import { act, getState, go, notice, openSettings, registry, setUI, tryAct, useUI, type Filter, type MenuRow } from './kernel.ts'
 import { confirm, openDialog, openForm, openMenu } from './overlay.tsx'
 import { AgentField, MachineField, pickFor, type Pick } from './picker.tsx'
-import { Btn, Cnt, Folder, I, IB, Row } from './ui.tsx'
+import { Btn, Cnt, I, IB, Row, SpaceName } from './ui.tsx'
 import { copyText } from './copy.ts'
 import { DictateButton } from './dictate.tsx'
 import { press } from './drag.ts'
@@ -225,9 +225,20 @@ export function spaceMenu(anchor: Element, placeId: string) {
   const snap = getState().snap
   const p = snap && placeOf(snap, placeId)
   if (!snap || !p) return
-  // its whole folder at the top, where a phone can read it, and a row that copies it (SHEP-302)
+  // its whole folder at the top, where a phone can read it, with its machine, and a row that copies it (SHEP-302); a
+  // home or root folder says so in words, its path beneath (SHEP-316)
   const f = folderOf(snap, p)
-  const top = () => <div className="fwhere">{f.machine ? `${f.full} on ${f.machine}` : f.full}</div>
+  const named = f.short === '~' || f.full === '/'
+  const under = [named && f.full !== '/' ? f.full : '', f.machine ? `on ${f.machine}` : ''].filter(Boolean).join(' ')
+  const top = () => (
+    <div className="fwhere">
+      <I n="folder" />
+      <span className="n">
+        <span className="l1">{f.short === '~' ? 'Home folder' : f.full === '/' ? 'Root folder' : f.full}</span>
+        {under && <span className="l2">{under}</span>}
+      </span>
+    </div>
+  )
   const first = [{ icon: 'copy', label: 'Copy folder path', run: () => void copyText(f.full).then((ok) => ok && notice('Copied')) } as MenuRow, ...registry.spaceMenu.flatMap((m) => m.rows(p))]
   const line = first.length > 0
   if (isEverything(snap, p.id)) return openMenu(anchor, [...first, { icon: 'gear', label: 'Settings', line, run: () => openSettings('all') }], { label: 'Everything', top })
@@ -292,7 +303,7 @@ function SpaceRow({ snap, p, sub, under, siblings, section }: { snap: Snapshot; 
   const dim = !!placeDown(snap, p.id) || p.archived
   return (
     <div className="rowx" data-project={p.id} data-section={section} data-drop={under} onPointerDown={dragSpace(snap, p, under, siblings)}>
-      <Row icon="hash" label={p.name} sub={<Folder f={folderOf(snap, p)} machine={false} />} className={['sp', sub ? 'sub' : '', dim ? 'dim' : ''].join(' ')} current={at === p.id && !wide} end={<Cnt n={n} />} onClick={() => go(p.id)} />
+      <Row icon="hash" label={<SpaceName name={p.name} hint={spaceHint(snap, p)} />} className={[sub ? 'sub' : '', dim ? 'dim' : ''].join(' ')} current={at === p.id && !wide} end={<Cnt n={n} />} onClick={() => go(p.id)} />
       <IB
         icon="dots"
         label={`More for ${p.name}`}
@@ -325,7 +336,7 @@ export function List({ snap }: { snap: Snapshot }) {
       </div>
       {ev && (
         <div className="rowx">
-          <Row icon="layers" label="Everything" sub={<Folder f={folderOf(snap, ev)} machine={false} />} className="sp" current={ui.at === ev.id && !ui.wide} onClick={() => go(ev.id)} />
+          <Row icon="layers" label="Everything" current={ui.at === ev.id && !ui.wide} onClick={() => go(ev.id)} />
           {!ph && FilterBtn}
           {!ph && (
             <IB
