@@ -625,6 +625,8 @@ export interface Message {
    *  from: who sent it ("Reviewer", "Assistant on m3"), only on a message from another agent, drawn as a message;
    *  to: whom, on a message this chat's own agent sent another (from is then itself: "Assistant" → "SHEP-4") */
   brief?: { label: string; bare?: boolean; from?: string; to?: string }
+  /** a task's brief, the first message of its chat (SHEP-330): what its agent was given, from the moment the task exists */
+  taskBrief?: TaskBrief
   /** 3.0's task news line in an Assistant's chat (core/chat-view.js newsWords): its mark, what happened, the rest;
    *  live: still needs you (red); accept: the newest ready line of a task still Ready */
   news?: { task: string; ref: string; mark: 'started' | 'needs' | 'ready' | 'done' | 'other'; what: string; text: string; live?: boolean; accept?: boolean }
@@ -857,6 +859,19 @@ export const cardMessage = (card: UpdateCard, at?: number): Message => ({
   text: `${card.task ?? card.health?.machine ?? card.red ?? ''} ${card.text}`,
   card,
 })
+
+/** The brief a task's agent was given, drawn as the first message of its chat (core/chat-view.js taskBrief) */
+export interface TaskBrief {
+  title: string
+  /** the prompt as the space's Assistant wrote it */
+  text: string
+  /** its Settings block's lines ("Review: off"), folded away */
+  settings?: string[]
+  /** who wrote it: "Assistant" */
+  from: string
+  /** waiting: no agent yet; sent: its agent started and hasn't taken it in yet; read: its agent took it in */
+  state: 'waiting' | 'sent' | 'read'
+}
 
 export interface Chat {
   key: string

@@ -37,6 +37,7 @@ export const tasks: Task[] = [
   // SHEP-321: a task just started (no % yet: the turning ring) and one stopped by an error part way
   task('SHOP-18', 'Product page copy', P.shop, 'work', { started: NOW - 2 * min, report: { msg: 'Reading the product pages' } }),
   task('BLOG-11', 'Newsletter signup form', P.blog, 'need', { needsAt: NOW - 12 * min, stopped: { by: 'error', why: 'its session ended' }, report: { msg: 'Adding the form', progress: 45, paused: true } }),
+  task('SHOP-19', 'Product page reviews', P.shop, 'work', { started: NOW - min, repo: 'branch' }),
   task('BLOG-9', 'Dark mode for code blocks', P.blog, 'queued', { afterTitle: 'Fix typo on the About page', desc: 'Adds a dark theme to the code blocks on the blog', agent: undefined }),
   task('SHOP-13', 'Gift cards at checkout', P.shop, 'todo', { desc: 'Lets shoppers pay with a gift card at checkout', agent: undefined }),
   task('NOTES-5', "Sort last year's notes", P.notes, 'todo', { desc: "Sorts last year's notes into folders by topic", agent: undefined }),
@@ -135,6 +136,25 @@ const me = (text: string, x: Partial<Message> = {}): Message => ({ id: `m${++n}`
 const did = (at: number, rows: [string, string, string][], summary?: string): Message => ({ id: `m${++n}`, who: 'agent', activity: { id: `a${n}`, at, end: at + 1000, steps: rows.length, ...(summary ? { summary } : {}), rows: rows.map(([kind, text, x], i) => ({ key: `${n}:${i}`, kind: kind as 'run', text, steps: ['s'], ...(x.startsWith('+') ? { added: Number(x.slice(1).split(' ')[0]), removed: Number((x.split('−')[1] ?? '0')) || undefined } : {}) })) } })
 const ask = (id: string, title: string, by: { ref: string; title: string; chat: string } | undefined, choices: string[], x: Record<string, unknown> = {}): Message => ({ id: `ask:${id}`, who: 'agent', question: { id, title, kind: 'Question', choices: choices.map((label) => ({ label })), to: '', ...(by ? { by } : {}), ...x } })
 
+// a task's brief, its chat's first message (SHEP-330): what the shop's Assistant wrote, its Settings folded away
+const SETTINGS = ['Review: off', 'Merge: after checks', 'Proof: before and after screenshots', 'Agent: claude, model opus, effort high']
+const brief = (title: string, text: string, state: 'waiting' | 'sent' | 'read', at?: number): Message => ({ id: `m${++n}`, who: 'you', text, ...(at ? { at } : {}), taskBrief: { title, text, settings: SETTINGS, from: 'Assistant', state } })
+const LONG_BRIEF = [
+  "On phones the checkout button is small and sits right under the total, so people tap the total instead. Make it easy to hit.",
+  '',
+  "Sam's words: \"On my phone I keep missing the pay button. Make it big, the whole width, like other shops do.\"",
+  '',
+  'Do:',
+  '- On screens under 640 px wide, the checkout button spans the full width, 48 px tall, with 16 px around it.',
+  '- Keep it where it is on larger screens.',
+  '- The button keeps its colour and its words ("Pay now").',
+  '- Check the cart page and the one-page checkout; both use the same button.',
+  '- Tests: the button is full width at 390 px and unchanged at 1280 px.',
+  '- Proof: before and after screenshots on a phone and a laptop.',
+  '',
+  'Stay inside this change. Do not touch the payment code.',
+].join('\n')
+
 const byPay = { ref: 'SHOP-14', title: 'Switch payment provider', chat: 'SHOP-14/worker' }
 const byPhoto = { ref: 'GARDEN-4', title: 'Photo upload', chat: 'vm:GARDEN-4/worker' }
 const chat = (key: string, messages: Message[], agent: Chat['agent'], x: Partial<Chat> = {}): Chat => ({ key, messages, cli: agent?.kind ?? 'claude', top: true, agent, ...x })
@@ -170,7 +190,11 @@ export const chats: Record<string, Chat> = Object.fromEntries(
     chat('NOTES-4/worker', [a('I read the three quotes in your notes folder and wrote up a comparison.')], opus),
     chat('vm:GARDEN-4/worker', permQ().map((x, i) => (i ? x : { ...x, suggest: 'Allow it once' })), opus),
     chat('SHOP-17/worker', [a("I'm downloading October's invoices. The billing portal sent a sign-in code to your phone, so I need you for this one step.")], opus),
-    chat('SHOP-15/worker', [a('Started. Making the checkout button full width on phones.'), did(NOW - 8 * min, [['read', 'Read checkout.css', ''], ['edit', 'Edit checkout.css', '+6 −2'], ['run', 'Run bun test', 'passed'], ['edit', 'Edit checkout.test.ts', '+12']], 'Ran 4 commands · edited 2 files'), a('Changing the button now. About 10 minutes left.', { suggest: 'Show me a screenshot when it is done' })], opus, { working: true, doing: 'Changing the checkout button', live: { id: 'live', at: NOW, rows: [], steps: 0 } }),
+    chat('SHOP-15/worker', [brief('Bigger checkout button on phones', LONG_BRIEF, 'read', NOW - 10 * min), a('Started. Making the checkout button full width on phones.'), did(NOW - 8 * min, [['read', 'Read checkout.css', ''], ['edit', 'Edit checkout.css', '+6 −2'], ['run', 'Run bun test', 'passed'], ['edit', 'Edit checkout.test.ts', '+12']], 'Ran 4 commands · edited 2 files'), a('Changing the button now. About 10 minutes left.', { suggest: 'Show me a screenshot when it is done' })], opus, { working: true, doing: 'Changing the checkout button', live: { id: 'live', at: NOW, rows: [], steps: 0 } }),
+    // its agent just started: the brief sent, not taken in yet, and words for it starting
+    chat('SHOP-19/worker', [brief('Product page reviews', 'Show the three newest reviews under each product, with their stars. A product with none says "No reviews yet."', 'sent', NOW - min)], opus),
+    // queued: no agent yet, its brief waits to be sent
+    chat('BLOG-9/worker', [brief('Dark mode for code blocks', 'Adds a dark theme to the code blocks on the blog. It follows the reader\'s system setting; no switch on the page.', 'waiting')], undefined),
     chat('SHOP-16/worker', [a('Updating three packages. None are breaking changes.')], opus, { working: true, live: { id: 'live', at: NOW, rows: [], steps: 0 }, doing: 'Updating 3 packages' }),
     chat('vm:GARDEN-3/worker', [a('Reminders are built. Writing the tests now, about 20 minutes left.')], gpt, { working: true, live: { id: 'live', at: NOW, rows: [], steps: 0 }, doing: 'Writing tests' }),
   ].map((c) => [c.key, c]),

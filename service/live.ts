@@ -136,12 +136,13 @@ export class Live {
   }
 
   /** The open chats with no agent: a space's Assistant that hasn't started gets its fresh chat (compat.freshChat: what
-   *  its first message starts it on), sent again only when it changed. One whose Assistant just went waits a moment. */
+   *  its first message starts it on), a task whose agent hasn't started its brief, sent again only when it changed. One whose Assistant just went waits a moment. */
   private fresh(ws: WS, keys: string[]) {
     const compat = this.compat as any, sent = (ws.data.fresh ??= new Map());
     for (const k of [...sent.keys()]) if (!keys.includes(k)) sent.delete(k);
     for (const k of keys) {
-      if (!k.startsWith("p:")) continue;
+      // a space's Assistant not started, a task whose agent hasn't started (its brief, waiting: SHEP-330)
+      if (!k.startsWith("p:") && !k.endsWith("/worker")) continue;
       const left = ws.data.left?.get(k) ?? 0, wait = left + FRESH_AFTER_MS - Date.now();
       if (wait > 0) {
         ws.data.freshTimer ??= setTimeout(() => { ws.data.freshTimer = null; if (this.pages.has(ws) && ws.data.keys) this.watch(ws, ws.data.keys); }, wait + 50);

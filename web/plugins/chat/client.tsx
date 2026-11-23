@@ -10,10 +10,11 @@ import { AgentLine, openPicker, pickFor, pickWords, type Pick } from '@client/pi
 import { attach, detach, dropOut, retry, reupload, send } from '@client/send.ts'
 import { Btn, cx, Empty, I, IB, useGrow } from '@client/ui.tsx'
 import { isImage, isVideo } from '@shared/files.ts'
-import type { Chat, Message, Snapshot, Task, TurnActivity } from '@shared/types.ts'
+import type { Chat, Message, Snapshot, Task, TaskBrief, TurnActivity } from '@shared/types.ts'
 import { isEverything, placeOf, taskOf } from '@shared/view.ts'
 import { StatusIcon } from '@plugins/tasks/icon.tsx'
 import { DoneRow, QuestionCard, SecretCard } from './cards.tsx'
+import { briefFrom, deliveryWord, looksLong, startWords } from './brief.ts'
 import { dayLabel } from './days.ts'
 import { Markdown } from './markdown.tsx'
 import { dropped, pasted } from './paste.ts'
@@ -126,6 +127,51 @@ function Bubble({ msg, chat, thread, gap, pending, failed, mark }: { msg: Messag
         </div>
       )}
       {registry.messageEdge.map((e, i) => <e.View key={i} msg={msg} chat={chat} />)}
+    </>
+  )
+}
+
+/** A task's brief, the first message of its chat (SHEP-330): from its space's Assistant, the task's title and the prompt
+ *  as written, a few lines with Show all when long, its Settings folded away, and under it whether its agent has it. */
+export function BriefMessage({ msg, b, space }: { msg: Message; b: TaskBrief; space?: string }) {
+  const [all, setAll] = useState(false)
+  const [settings, setSettings] = useState(false)
+  const [long, setLong] = useState(() => looksLong(b.text))
+  const body = useRef<HTMLDivElement>(null)
+  // long: its words run past the clipped height (measured, so a short brief shows no Show all)
+  useLayoutEffect(() => {
+    const el = body.current
+    if (el && !all) setLong(el.scrollHeight > el.clientHeight + 1)
+  }, [b.text, all])
+  return (
+    <>
+      <div className="bfrom">{briefFrom(space)}</div>
+      <div className="b mine brief" data-msg={msg.id}>
+        <p className="bt">{b.title}</p>
+        <div ref={body} className={cx('bbody', !all && 'clip', !all && long && 'fade')}>
+          <Markdown text={b.text} />
+        </div>
+        {(long || all) && (
+          <button type="button" className="fold" aria-expanded={all} onClick={() => setAll(!all)}>
+            {all ? 'Show less' : 'Show all'}
+          </button>
+        )}
+        {!!b.settings?.length && (
+          <>
+            <button type="button" className="fold" aria-expanded={settings} onClick={() => setSettings(!settings)}>
+              <I n={settings ? 'down' : 'right'} c="s16" />
+              Settings
+            </button>
+            {settings && (
+              <ul role="list" className="bset">
+                {b.settings.map((l) => <li key={l}>{l}</li>)}
+              </ul>
+            )}
+          </>
+        )}
+      </div>
+      {/* SHEP-329's Sent / Read under a sent message */}
+      <div className="seen" role="status">{deliveryWord(b.state)}</div>
     </>
   )
 }
@@ -278,7 +324,8 @@ function Messages({ thread }: { thread: Thread }) {
       out.push(<div key={k} className="time" role="separator">New session</div>)
       continue
     }
-    if (m.activity) out.push(<Did key={k} a={m.activity} />)
+    if (m.taskBrief) out.push(<BriefMessage key={k} msg={m} b={m.taskBrief} space={placeOf(snap, thread.place)?.name} />)
+    else if (m.activity) out.push(<Did key={k} a={m.activity} />)
     else if (m.question) {
       // a question from a task, shown in this chat: under a line naming the task (once), and it says where that task runs
       const from = m.question.by && !thread.task ? taskIdOf(snap, m.question.by.chat) : null
@@ -322,6 +369,7 @@ function Messages({ thread }: { thread: Thread }) {
         <Empty title={every ? 'Welcome to Shepherdr' : `Nothing in #${placeOf(snap, thread.place)?.name ?? ''} yet`}>Tell me what you want done{every ? ', here or in a space.' : ' here.'}</Empty>
       )}
       {out}
+      {thread.task && <StartLine chat={chat} thread={thread} />}
       {cards.map((c) => <div key={`c:${c.key}`} style={{ display: 'contents' }}>{c.node}</div>)}
       {registry.chatTail.map((t, i) => <t.View key={i} chat={chat} thread={thread} />)}
       <div ref={end} />
@@ -332,6 +380,20 @@ const loading = new Set<string>()
 
 /** a task's id from its chat's key ("vm:SHOP-12/worker") */
 const taskIdOf = (snap: Snapshot, chatKey: string) => snap.tasks.find((t) => t.agent?.chat === chatKey)?.id ?? chatKey.replace(/\/[^/]+$/, '')
+
+/** Before a task's agent is at work, what it waits for, in words under its brief (SHEP-330): never an empty page */
+function StartLine({ chat, thread }: { chat: Chat | undefined; thread: Thread }) {
+  const snap = useSnap()
+  const t = snap && thread.task ? snap.tasks.find((x) => x.id === thread.task!.id) ?? thread.task : thread.task
+  const words = t ? startWords(t, chat) : ''
+  if (!words) return null
+  return (
+    <div className="ref" role="status">
+      <I n="clock" c="s16" />
+      <span>{words}</span>
+    </div>
+  )
+}
 
 /** The working sign at the chat's end (SHEP-313), as Claude Duet shows its agent at work: three dots that rise in turn,
  *  where its words will land, and gone the moment they do. Shepherdr's own form: no bubble around them (nothing the

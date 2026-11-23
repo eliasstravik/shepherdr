@@ -262,6 +262,39 @@ export function briefLabel(x, i, { start = null, template = null, task = false, 
   return null;
 }
 
+// A task's brief as the first message of its chat (SHEP-330): what its agent was given, so a task's page is never blank.
+// The launch text (herdr-task's brief(): the worker's instructions, "Your task, <ref>:\n<prompt>", where it works, how
+// to finish, the Settings block) is cut to what the space's Assistant wrote, and the Settings block's lines are kept
+// apart, folded away on the page.
+const SETTINGS_RE = /(?:^|\n)Settings:[^\n]*\n((?:- [^\n]*(?:\n|$))+)/;
+// what comes after the prompt in a brief, each its own paragraph (herdr-task's launch.py brief())
+const AFTER_PROMPT = /\n\n(?:You work in \S|Before you say ready:|When the work is (?:finished|done)|Settings: \(|Your space's instructions)/;
+
+// The Settings block's lines ("Review: off", ...), else [].
+export function briefSettings(text) {
+  const m = SETTINGS_RE.exec(String(text ?? ""));
+  return m ? m[1].split("\n").filter((l) => l.startsWith("- ")).map((l) => l.slice(2).trim()).filter(Boolean) : [];
+}
+
+// The prompt a launch text carries ("Your task, <ref>:\n" up to where it works or how it finishes), else "".
+export function briefPrompt(text) {
+  const s = String(text ?? "");
+  const at = /(?:^|\n)Your task, [^\n:]+:\n/.exec(s);
+  if (!at) return "";
+  const rest = s.slice(at.index + at[0].length);
+  const end = AFTER_PROMPT.exec(rest);
+  return (end ? rest.slice(0, end.index) : rest).trim();
+}
+
+// The brief's message: { title, text, settings, from, state }. prompt: the task's own (as the Assistant wrote it),
+// else cut from the launch text; state: waiting (no agent yet), sent (its agent started and hasn't taken it in), read
+// (its agent took it in: its log has it).
+export function taskBrief({ title = "", prompt = "", launch = "", from = "Assistant", state = "waiting" } = {}) {
+  const text = String(prompt ?? "").trim() || briefPrompt(launch) || String(title ?? "");
+  const settings = briefSettings(launch);
+  return { title: String(title ?? ""), text, ...(settings.length ? { settings } : {}), from, state };
+}
+
 // A task's news line: { mark (its dot), what (happened), text (the rest) }. Herdr's line is "HERD-4 needs you: Needs
 // a go (Fix login)", "HERD-4 is ready: Fix login · summary", ...: without the id and the title, split at its first
 // ": ". e: { ref, event, text, made } (made: from the task's own record, not a line Herdr sent); x: the task.
