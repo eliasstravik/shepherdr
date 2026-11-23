@@ -528,17 +528,18 @@ def _unsettled(c):
         ((c.get("status") or c.get("state") or "").upper() in PENDING and not (c.get("conclusion") or ""))
 
 
-def merge_checks(task, v):
+def merge_checks(task, v, now_=False):
     """GitHub #1221: what a merge waits on is its base branch's required checks: v with only those, once one isn't
-    passed (a red or running optional check never stops a merge, nor its queueing). The base requires none, or GitHub
-    couldn't say: every check, as before. A running optional one left out while GitHub still blocks the merge (a
-    required check it doesn't show yet): runs_pending, so it waits."""
+    passed (a red or running optional check never stops a merge, nor its queueing). The base requires none: merge
+    "on its own" (now_) waits on nothing (the person wants it fast; main going red is a fix-forward task's), "after
+    checks" on every check, as its name says. GitHub couldn't say: every check. A running optional one left out while
+    GitHub still blocks the merge (a required check it doesn't show yet): runs_pending, so it waits."""
     rows = v.get("statusCheckRollup") or []
     if not any(_unsettled(c) for c in rows):
         return v
     names = required_checks(task)
     keep = [c for c in rows if (c.get("name") or c.get("context")) in (names or ())]
-    if not keep or len(keep) == len(rows):
+    if names is None or len(keep) == len(rows) or (not keep and not now_):
         return v
     out = {**v, "statusCheckRollup": keep, "optional_checks": [c.get("name") or c.get("context") for c in rows if c not in keep]}
     if v.get("mergeStateStatus") == "BLOCKED" and not needs_approval(v):
@@ -757,8 +758,8 @@ def checks_since(s, task, v):
 def checks_missing(v, since, expect=None):
     """No checks on its pull request yet (#1044): None when it has some or none are coming; "waiting"
     while they may still start; "never" when they should have and didn't (CHECKS_START_MS)."""
-    if v.get("statusCheckRollup"):
-        return None
+    if v.get("statusCheckRollup") or v.get("optional_checks"):
+        return None  # optional ones it has don't count (merge_checks()): none are missing
     gone = now() - (since or 0)
     if v.get("checks_unknown"):
         # Checks that can't be read here (SHEP-179): a moment for GitHub, then pr_wait() decides.

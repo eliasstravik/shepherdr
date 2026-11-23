@@ -328,8 +328,8 @@ SET_BY = {"task": "set by the assistant for this task", "repo": "this repo's set
 FROM_WORDS = {"task": "task", "repo": "repo", "folder": "repo", "space": "space", "machine": "machine", "all": "Everywhere",
               None: "default"}
 MERGE_WORDS = {"ask": "ask the person first: they mark it as done on its card, which merges it",
-               "checks": "after checks: once you say ready, Herdr merges it when its checks pass",
-               "auto": "on its own: once you say ready, Herdr merges it"}
+               "checks": "after checks: once you say ready, Herdr merges it when all its checks pass",
+               "auto": "on its own: once you say ready, Herdr merges it, waiting only on checks its base branch requires"}
 MUST_WORDS = {"blocker": "blocker", "major": "major and up (blocker, major)", "minor": "everything (blocker, major, minor)"}
 # --set's keys (Shepherdr's spellings too) and the task fields they set.
 SET_KEYS = {"review": "review", "brief.review": "review", "merge": "merge", "brief.merge": "merge",
@@ -348,7 +348,7 @@ PROOF_WORDS = {"on": "show verifiable proof in one artifact: each proof with a o
                      "plus a \"Not proven\" list; then say ready with --proof <its id>",
                "off": "not needed for this task: no proof artifact; say in your summary how you checked it"}
 MERGE_VALUES = {"ask": "ask", "ask me first": "ask", "ask first": "ask", "ask the person first": "ask", "wait": "ask",
-                "checks": "checks", "after checks": "checks", "after github checks": "checks", "after checks pass": "checks",
+                "checks": "checks", "after checks": "checks", "after github checks": "checks", "after checks pass": "checks", "after all checks": "checks", "after all checks pass": "checks", "right away": "auto",
                 "auto": "auto", "on its own": "auto", "merge it": "auto", "at once": "auto"}
 MUST_VALUES = {"blocker": "blocker", "blockers": "blocker", "critical": "blocker", "major": "major",
                "minor": "minor", "trivial": "minor", "everything": "minor"}

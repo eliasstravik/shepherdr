@@ -3362,6 +3362,55 @@ class RequiredChecksOnly(PrLooks):
         self.look(t, after=1000)
         self.assertEqual(t["attention"], "Checks failing: lint.")
 
+    LINT_RUNS = {"name": "lint", "status": "IN_PROGRESS", "conclusion": ""}
+
+    def test_on_its_own_never_waits_for_a_check_nobody_requires(self):
+        # Merge "on its own" on a base that requires no checks: a running optional one is no wait, and its row says
+        # Merging, not "Merges once its checks pass".
+        t = self.auto()
+        t["auto_merge"] = "auto"
+        self.requires()
+        self.github_says(checks=[self.BUILD, self.LINT_RUNS])
+        self.look(t)
+        self.assertNotIn("wait", t["pr"])
+        self.assertEqual(self.agents.ready_wait(t, []), "Merging")
+        self.assertEqual(self.merge(t), self.commands.IN_QUEUE)  # merged on GitHub (this fake's pull request stays open)
+        self.assertTrue(self.merged())
+
+    def test_after_checks_still_waits_for_a_running_one_nobody_requires(self):
+        t = self.auto()
+        self.requires()
+        self.github_says(checks=[self.BUILD, self.LINT_RUNS])
+        self.assertEqual(self.agents.ready_wait(t, []), "Merges once its checks pass")
+        self.assertEqual(self.merge(t), self.commands.CHECKS_RUNNING)
+        self.assertFalse(self.merged())
+
+    def test_on_its_own_still_waits_for_a_required_check(self):
+        t = self.auto()
+        t["auto_merge"] = "auto"
+        self.requires("build")
+        self.github_says(checks=[{"name": "build", "status": "IN_PROGRESS", "conclusion": ""}, self.LINT_RUNS])
+        self.assertEqual(self.merge(t), self.commands.CHECKS_RUNNING)
+        self.assertFalse(self.merged())
+
+    def test_a_merge_by_hand_follows_its_merge_setting(self):
+        # herdr-task merge on a task set to merge on its own (auto_merge not set yet): no wait for an optional check.
+        t = self.auto()
+        t.pop("auto_merge")
+        t["set"] = {"merge": "auto"}
+        self.requires()
+        self.github_says(checks=[self.BUILD, self.LINT_RUNS])
+        self.assertEqual(self.merge(t), self.commands.IN_QUEUE)
+        self.assertTrue(self.merged())
+
+    def test_github_unable_to_say_waits_on_every_one_on_its_own_too(self):
+        t = self.auto()
+        t["auto_merge"] = "auto"
+        with open(os.path.join(self.dir, "required.json"), "w") as f:
+            f.write("not json")
+        self.github_says(checks=[self.BUILD, self.LINT_RUNS])
+        self.assertEqual(self.merge(t), self.commands.CHECKS_RUNNING)
+
     def test_github_unable_to_say_waits_on_every_one(self):
         t = self.auto()
         with open(os.path.join(self.dir, "required.json"), "w") as f:
@@ -4695,7 +4744,7 @@ class AssistantSettings(unittest.TestCase):
         note = self.aset.session_note("t5")
         self.assertIn(f"the task lines below are {shop}'s", note)
         self.assertEqual(self.line(note, "Review"), "- Review: on, at most 2 rounds, must fix major and up (blocker, major), reviewer claude, model opus; this repo's setting")
-        self.assertEqual(self.line(note, "Merge"), "- Merge: after checks (Herdr merges a ready task once its checks pass); your setting everywhere")
+        self.assertEqual(self.line(note, "Merge"), "- Merge: after checks (Herdr merges a ready task once all its checks pass); your setting everywhere")
         self.assertEqual(self.line(note, "Proof"), "- Proof: on")
         self.assertEqual(self.line(note, "Task agent"), "- Task agent: codex, model gpt-5, effort high; this repo's setting")
         self.assertIn("- Base branch: dev ", note)
@@ -4714,14 +4763,14 @@ class AssistantSettings(unittest.TestCase):
         # a space on / (root), its file not moved yet: its task values are the / folder's, not the shop repo's
         self.assistant("t6", "sp2")
         other = self.aset.session_note("t6")
-        self.assertIn("- Merge: on its own (Herdr merges a ready task); this repo's setting", other)
+        self.assertIn("- Merge: on its own (Herdr merges a ready task at once, waiting only on checks its base branch requires); this repo's setting", other)
         self.assertIn("the task lines below are /'s", other)
         self.assertIn(f"- Repo settings: {shop}: ", other)
         # moved (repos), root sits on no repo of its own: Everywhere's task lines, and the repos listed with theirs
         self.write({"everywhere": {"tasks": {"merge": "checks"}}, "repos": {shop: {"tasks": {"merge": "auto"}}},
                     "spaces": {"sp2": {"folder": "/"}}})
         other = self.aset.session_note("t6")
-        self.assertIn("- Merge: after checks (Herdr merges a ready task once its checks pass); your setting everywhere", other)
+        self.assertIn("- Merge: after checks (Herdr merges a ready task once all its checks pass); your setting everywhere", other)
         self.assertIn("the task lines below are Everywhere's", other)
         self.assertIn(f"- Repo settings: {shop}: Merge on its own\n", other)
         self.assertIn("- Reactions: on", other)
@@ -9444,7 +9493,7 @@ class ParallelCollisions(unittest.TestCase):
         self.merge_first(a)
         conflict = {"state": "OPEN", "mergeable": "CONFLICTING", "statusCheckRollup": [], "headRefOid": "abc"}
         self.patch(self.commands, "pr_view", lambda t: conflict)
-        self.patch(self.commands, "merge_checks", lambda t, v: v)
+        self.patch(self.commands, "merge_checks", lambda t, v, **k: v)
         self.patch(self.commands, "note_checks", lambda *x: None)
         import argparse
         with self.assertRaises(SystemExit):
@@ -9902,7 +9951,7 @@ class RepoSettings(unittest.TestCase):
         with open(os.path.join(tmp, "store", lists[0])) as f:
             t = json.load(f)["tasks"][0]
         store = types.SimpleNamespace(loc={"folder": repo, "kind": "repo"})
-        self.assertIn("- Merge: on its own: once you say ready, Herdr merges it (this repo's setting)",
+        self.assertIn("- Merge: on its own: once you say ready, Herdr merges it, waiting only on checks its base branch requires (this repo's setting)",
                       self.settings.settings_block(store, t, argv=["claude"], sources=True))
         rows = {x["label"]: x for x in self.settings.task_settings(store, t, argv=["claude"])}
         self.assertEqual((rows["Merge"]["from"], rows["Review"]["from"]), ("repo", "default"))

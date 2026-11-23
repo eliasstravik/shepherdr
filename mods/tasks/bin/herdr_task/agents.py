@@ -289,7 +289,8 @@ def ready_wait(task, live):
         return IN_QUEUE_LINE
     if task.get("auto_merge") and task.get("pr") and not task.get("merged"):
         # #743: waits calmly for a review GitHub requires
-        return APPROVAL_LINE if task["pr"].get("needs_approval") else MERGES_ITSELF
+        # merge "on its own": it waits on no check its base doesn't require: Merging
+        return APPROVAL_LINE if task["pr"].get("needs_approval") else MERGING if task["auto_merge"] == "auto" else MERGES_ITSELF
     return (task.get("pr") or {}).get("wait") or None
 
 

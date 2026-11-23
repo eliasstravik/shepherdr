@@ -14,8 +14,8 @@ test("the Tasks rows say the window's words, and a change keeps the rest of the 
   const s = new Settings();
   s.start();
   const tasks = s.sections("https://box/shepherdr/").find((x) => x.name === "Tasks" && x.level === "all")!;
-  expect(tasks.rows.find((r) => r.key === "tasks.merge")).toMatchObject({ value: "On Accept", options: ["On Accept", "After checks pass", "Right away"] });
-  s.set("tasks.merge", "After checks pass");
+  expect(tasks.rows.find((r) => r.key === "tasks.merge")).toMatchObject({ value: "On Accept", options: ["On Accept", "After all checks pass", "Right away"] });
+  s.set("tasks.merge", "After all checks pass");
   s.set("tasks.proof", "Off");
   const f = JSON.parse(readFileSync(file, "utf8"));
   expect(f.everywhere.tasks).toEqual({ merge: "checks", proof: false });

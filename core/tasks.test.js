@@ -55,6 +55,7 @@ describe("a task's status (as herdr-task's task_status)", () => {
     expect(at({ id: 1, state: "ready", auto_merge: "checks", pr: { number: 3, needs_approval: true } })).toMatchObject({ section: "working", why: "Merges once it's approved" });
     expect(at({ id: 1, state: "ready", merge_requested: true }, [{ address: "t1", status: "working" }])).toMatchObject({ section: "working", why: "Merging" });
     expect(at({ id: 1, state: "ready", auto_merge: true, pr: { number: 3 } })).toMatchObject({ section: "working", why: "Merges once its checks pass" });
+    expect(at({ id: 1, state: "ready", auto_merge: "auto", pr: { number: 3 } })).toMatchObject({ section: "working", why: "Merging" });
   });
   test("a pull request whose checks still run is Working, then Ready (SHEP-175)", () => {
     const idle = [{ address: "t1", status: "idle", since: NOW - 600_000 }];

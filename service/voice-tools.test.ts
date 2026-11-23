@@ -378,10 +378,10 @@ test("act answer: a question's choice, a command allowed once or declined, as th
 test("act setting: Merge, Review, Proof and the plugins, through the settings window's own action", async () => {
   const x = io();
   const set = async (p: any) => { const r = await voiceTool("act", { action: "setting", confirmed: false, ...p }, web, x); return [r.result, x.calls.pop() ?? null]; };
-  expect(await set({ key: "merge", value: "when checks pass" })).toEqual(['Merge is "When checks pass" for every space.', { type: "config", place: "all", key: "merge", value: "checks" }]);
+  expect(await set({ key: "merge", value: "when checks pass" })).toEqual(['Merge is "When all checks pass" for every space.', { type: "config", place: "all", key: "merge", value: "checks" }]);
   expect((await set({ key: "merge", value: "right away", id: "shop" }))[1]).toEqual({ type: "config", place: "sp1", key: "merge", value: "now" });
   expect((await set({ key: "merge", value: "reset", id: "shop" }))[1]).toEqual({ type: "config", place: "sp1", key: "merge", value: null });
-  expect((await set({ key: "merge", value: "maybe" }))[0]).toBe("Merge can be: When I mark it as done, When checks pass, Right away.");
+  expect((await set({ key: "merge", value: "maybe" }))[0]).toBe("Merge can be: When I mark it as done, When all checks pass, Right away.");
   expect((await set({ key: "review", value: "on" }))[1]).toEqual({ type: "config", place: "all", key: "review", value: true });
   expect((await set({ key: "proof", value: "off", id: "here" }))[1]).toEqual({ type: "config", place: "sp1", key: "proof", value: false });
   expect(await set({ key: "Schedules", value: "on" })).toEqual(["Schedules is on.", { type: "config", place: "all", key: "plugin.schedules", value: true }]);

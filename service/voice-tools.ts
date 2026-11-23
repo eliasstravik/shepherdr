@@ -528,7 +528,7 @@ function lookSchedules(snap: Snapshot, where: Where, id: unknown) {
   return done(rows.length ? list(rows, 12, "schedules") : `No schedules${all ? "" : ` in ${label(snap, p!.id)}`}.`);
 }
 
-const MERGE_WORDS: Record<string, string> = { done: "When I mark it as done", checks: "When checks pass", now: "Right away" };
+const MERGE_WORDS: Record<string, string> = { done: "When I mark it as done", checks: "When all checks pass", now: "Right away" };
 const pickSaid = (p: AgentPick | undefined) => (p ? [p.agent, p.model, p.effort, p.fast === "ultrafast" ? "ultrafast" : p.fast ? "fast" : ""].filter(Boolean).join(", ") : "its own default");
 const onOff = (v: unknown) => (v ? "on" : "off");
 
