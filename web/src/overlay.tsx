@@ -52,6 +52,9 @@ export function closeAll() {
 
 export const anyOpen = () => layers.length > 0
 
+/** what is open now, bottom first (for tests) */
+export const layersNow = (): readonly Layer[] => layers
+
 /** Open a menu at its button. Its rows, or anything drawn (`render`); `cap`: a quiet line on top; `top`: above the rows. */
 export function openMenu(anchor: Element | null, rows: MenuRow[] | ((close: () => void) => ReactNode), opts: { cap?: string; top?: (close: () => void) => ReactNode; label?: string } = {}) {
   // the same button again closes it
@@ -72,6 +75,14 @@ export function openDialog(render: (close: () => void) => ReactNode, opts: { wid
   layers = [...layers, { id, kind: 'dialog', render, ...opts }]
   emit()
   return () => close(id)
+}
+
+/** Open a dialog whose body keeps its own state (fields, a choice): `Form` is one component for the dialog's whole life.
+ *  Defined inside a dialog's render, it would be a new component each time the app redraws, and React would put new
+ *  fields in place of the old: the field being typed in loses its focus. On a phone the keyboard coming up redraws the
+ *  app, so the keyboard closed at once and nothing could be typed (SHEP-308). */
+export function openForm(Form: (p: { close: () => void }) => ReactNode, opts: { wide?: boolean; bare?: boolean; label?: string; onClose?: () => void } = {}): () => void {
+  return openDialog((close) => <Form close={close} />, opts)
 }
 
 /** "Are you sure?", asked only before what can't be undone */

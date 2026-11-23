@@ -4,7 +4,7 @@
 // a chat; changed from its row's Edit.
 import { useState } from 'react'
 import { definePlugin, getState, openTask, setUI, tryAct, useSnap } from '@client/kernel.ts'
-import { openDialog, openMenu } from '@client/overlay.tsx'
+import { openDialog, openForm, openMenu } from '@client/overlay.tsx'
 import { AgentField, pickFor, SpaceField, type Pick } from '@client/picker.tsx'
 import { Btn, Empty, I, IB, Row } from '@client/ui.tsx'
 import { dayLabel } from '@plugins/chat/days.ts'
@@ -15,41 +15,38 @@ const act = (x: Schedule, op: string, more: Record<string, unknown> = {}) => try
 /** Edit: when it runs and what it does (two plain text fields), the space (and so the machine) and the agent. Save
  *  sends the new words to that space's agent, which sets the trigger, exactly as when it is asked in a chat. */
 function edit(x: Schedule) {
-  openDialog(
-    (close) => {
-      const Form = () => {
-        const snap = getState().snap!
-        const [when, setWhen] = useState(x.when)
-        const [what, setWhat] = useState(x.what)
-        const [place, setPlace] = useState(x.place)
-        const [pick, setPick] = useState<Pick>(x.agent ?? pickFor(snap, isEverything(snap, x.place) ? 'all' : x.place, 'Tasks'))
-        const machine = snap.places.find((p) => p.id === place)?.machine ?? snap.host
-        const save = () => {
-          close()
-          const changed = { ...(when.trim() && when.trim() !== x.when ? { when: when.trim() } : {}), ...(what.trim() && what.trim() !== x.what ? { what: what.trim() } : {}), ...(place !== x.place ? { to: place } : {}), ...(JSON.stringify(pick) !== JSON.stringify(x.agent ?? pickFor(snap, isEverything(snap, x.place) ? 'all' : x.place, 'Tasks')) ? { agent: pick } : {}) }
-          if (Object.keys(changed).length) void act(x, 'edit', changed)
-        }
-        return (
-          <>
-            <h2>{x.name}</h2>
-            <label className="fld">
-              <span>When</span>
-              <input className="inp" name="schw" value={when} autoComplete="off" onChange={(e) => setWhen(e.target.value)} />
-            </label>
-            <label className="fld">
-              <span>What to do</span>
-              <input className="inp" name="schd" value={what} autoComplete="off" onChange={(e) => setWhat(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && save()} />
-            </label>
-            <SpaceField value={place} onChange={setPlace} />
-            <AgentField title="Its tasks run on" machine={machine} pick={pick} onChange={setPick} />
-            <div className="acts">
-              <Btn onClick={close}>Cancel</Btn>
-              <Btn kind="pri" onClick={save}>Save</Btn>
-            </div>
-          </>
-        )
+  openForm(
+    function Form({ close }) {
+      const snap = getState().snap!
+      const [when, setWhen] = useState(x.when)
+      const [what, setWhat] = useState(x.what)
+      const [place, setPlace] = useState(x.place)
+      const [pick, setPick] = useState<Pick>(x.agent ?? pickFor(snap, isEverything(snap, x.place) ? 'all' : x.place, 'Tasks'))
+      const machine = snap.places.find((p) => p.id === place)?.machine ?? snap.host
+      const save = () => {
+        close()
+        const changed = { ...(when.trim() && when.trim() !== x.when ? { when: when.trim() } : {}), ...(what.trim() && what.trim() !== x.what ? { what: what.trim() } : {}), ...(place !== x.place ? { to: place } : {}), ...(JSON.stringify(pick) !== JSON.stringify(x.agent ?? pickFor(snap, isEverything(snap, x.place) ? 'all' : x.place, 'Tasks')) ? { agent: pick } : {}) }
+        if (Object.keys(changed).length) void act(x, 'edit', changed)
       }
-      return <Form />
+      return (
+        <>
+          <h2>{x.name}</h2>
+          <label className="fld">
+            <span>When</span>
+            <input className="inp" name="schw" value={when} autoComplete="off" onChange={(e) => setWhen(e.target.value)} />
+          </label>
+          <label className="fld">
+            <span>What to do</span>
+            <input className="inp" name="schd" value={what} autoComplete="off" onChange={(e) => setWhat(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && save()} />
+          </label>
+          <SpaceField value={place} onChange={setPlace} />
+          <AgentField title="Its tasks run on" machine={machine} pick={pick} onChange={setPick} />
+          <div className="acts">
+            <Btn onClick={close}>Cancel</Btn>
+            <Btn kind="pri" onClick={save}>Save</Btn>
+          </div>
+        </>
+      )
     },
     { label: x.name },
   )
