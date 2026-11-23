@@ -12,12 +12,60 @@ import { copyText } from '@client/copy.ts'
 import { useDark } from '@client/prefs.ts'
 import type { Artifact, Chat, Message } from '@shared/types.ts'
 import { agoShort, artifactsIn, isEverything, spaceLabel } from '@shared/view.ts'
+import { failed, firstLines, loaded, startShot, type Shot } from './preview.ts'
 
 const on = (a: Artifact) => (a.machine ? `&on=${encodeURIComponent(a.machine)}` : '')
 /** the page itself, at a version */
 export const pageUrl = (a: Artifact, v: number) => `api/artifacts/${encodeURIComponent(a.id)}/page/?v=${v}${on(a)}`
 /** the picture of the page taken when it was published */
-const thumbUrl = (a: Artifact, dark: boolean) => `api/artifacts/${encodeURIComponent(a.id)}/thumb?v=${a.v}${dark ? '&dark=1' : ''}${on(a)}`
+const thumbUrl = (a: Artifact, dark: boolean, tries = 0) =>
+  `api/artifacts/${encodeURIComponent(a.id)}/thumb?v=${a.v}${dark ? '&dark=1' : ''}${on(a)}${tries ? `&try=${tries}` : ''}`
+
+// a page's first lines, read once per version (a tile shows them when its version has no picture)
+const lines = new Map<string, Promise<{ text: string; head: boolean }[]>>()
+function linesOf(a: Artifact) {
+  const k = `${a.machine ?? ''}|${a.id}|${a.v}`
+  let p = lines.get(k)
+  if (!p) {
+    p = fetch(pageUrl(a, a.v)).then((r) => (r.ok ? r.text() : '')).then((h) => firstLines(h)).catch(() => [])
+    lines.set(k, p)
+  }
+  return p
+}
+
+/** A tile's picture, never a broken one (SHEP-344): a calm empty frame until it has loaded, a few tries again, else
+ *  the page's first lines (preview.ts). */
+export function Preview({ a, dark }: { a: Artifact; dark: boolean }) {
+  const key = `${a.machine ?? ''}|${a.id}|${a.v}|${a.thumb ? 1 : 0}`
+  const [shot, setShot] = useState<{ key: string; s: Shot }>({ key, s: startShot(!!a.thumb) })
+  const s = shot.key === key ? shot.s : startShot(!!a.thumb)
+  const [words, setWords] = useState<{ key: string; l: { text: string; head: boolean }[] } | null>(null)
+  const retry = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (retry.current) clearTimeout(retry.current) }, [key])
+  useEffect(() => {
+    if (s.shown !== 'lines') return
+    let live = true
+    void linesOf(a).then((l) => live && setWords({ key, l }))
+    return () => { live = false }
+  }, [key, s.shown])
+  const onError = () => {
+    const { shot: next, retryIn } = failed(s)
+    if (retryIn === null) return setShot({ key, s: next })
+    retry.current = setTimeout(() => setShot({ key, s: next }), retryIn)
+  }
+  const l = words?.key === key ? words.l : null
+  return (
+    <span className={cx('prev', s.shown === 'wait' && 'wait')}>
+      {s.shown !== 'lines' && (
+        <img key={s.tries} src={thumbUrl(a, dark, s.tries)} alt="" loading="lazy" className={s.shown === 'pic' ? 'in' : undefined}
+          onLoad={() => setShot({ key, s: loaded(s) })} onError={onError} />
+      )}
+      {s.shown === 'lines' && !!l?.length && (
+        <span className="plines" aria-hidden="true">{l.map((x, i) => <span key={i} className={x.head ? 'h' : undefined}>{x.text}</span>)}</span>
+      )}
+    </span>
+  )
+}
 
 /** a page as a picture tile: a small picture of the page, its title, when it was updated; tap to open */
 function Tile({ id }: { id: string }) {
@@ -27,7 +75,7 @@ function Tile({ id }: { id: string }) {
   if (!snap || !a) return null
   return (
     <button type="button" className="tile" onClick={() => openArtifact(a.id)}>
-      <span className="prev"><img src={thumbUrl(a, dark)} alt="" loading="lazy" /></span>
+      <Preview a={a} dark={dark} />
       <span className="l1" style={{ fontWeight: 500 }}>{a.title}</span>
       <span className="l2">{spaceLabel(snap, a.place)} · {agoShort(a.at)}</span>
     </button>

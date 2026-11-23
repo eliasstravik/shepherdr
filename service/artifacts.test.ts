@@ -187,6 +187,21 @@ test("another machine's page is read there, inside its version's folder", async 
   arts.hub = null;
 });
 
+test("another machine's version 2 picture is read there, its bytes whole; none taken there: 404 (SHEP-344)", async () => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0x00, 0xc3, 0x28]);
+  const calls: any[] = [];
+  // v2 of far-9f9f has its picture there; v3 was published where no browser was
+  arts.hub = { call: async (_m: string, p: any) => { calls.push(p); const [, id, v, name] = p.argv.slice(-4);
+    return id === "far-9f9f" && v === "2" && name === ".thumb.png" ? { code: 0, stdout: png.toString("base64"), stderr: "" } : { code: 1, stdout: "", stderr: "" }; } } as any;
+  const r = (await get("/api/artifacts/far-9f9f/thumb?v=2&on=vm-2"))!;
+  expect([r.status, r.headers.get("content-type")]).toEqual([200, "image/png"]);
+  expect(Buffer.from(await r.arrayBuffer()).equals(png)).toBe(true);
+  expect(calls[0].on).toBe("vm-2");
+  expect(calls[0].argv.slice(-4)).toEqual(["file", "far-9f9f", "2", ".thumb.png"]);
+  expect((await get("/api/artifacts/far-9f9f/thumb?v=3&on=vm-2"))!.status).toBe(404);
+  arts.hub = null;
+});
+
 test("what the person does with an artifact runs herdr-artifact", async () => {
   expect(await artifactAction({ type: "artifact-rename", place: "p1", artifact: "plan-1a2b", name: " -The plan " })).toEqual({ ok: true });
   expect(lastAsked()).toEqual(["rename", "--json", "--", "plan-1a2b", "-The plan"]);

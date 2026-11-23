@@ -66,7 +66,7 @@ export const automations: Record<string, Automation[]> = {
   [P.blog]: [sched('BLOG-S1', 'Broken link check', P.blog, 'Every night 2:00', 'in 9h', 'last night 2:00 · 1 link fixed', 'Check every link on the site and fix the broken ones.', { runs: [{ at: today(2), task: 'BLOG-6' }] })],
 }
 
-const art = (id: string, title: string, pl: string, at: number, x: Record<string, unknown> = {}) => ({ id, title, place: pl, v: 3, at, when: '', by: '', keeper: '', versions: [{ n: 3, at, when: '', by: '', html: 1 }, { n: 2, at: at - 4 * day, when: '', by: '', html: 1 }, { n: 1, at: at - 7 * day, when: '', by: '', html: 1 }], ...x })
+const art = (id: string, title: string, pl: string, at: number, x: Record<string, unknown> = {}) => ({ id, title, place: pl, v: 3, at, when: '', by: '', keeper: '', versions: [{ n: 3, at, when: '', by: '', html: 1 }, { n: 2, at: at - 4 * day, when: '', by: '', html: 1 }, { n: 1, at: at - 7 * day, when: '', by: '', html: 1 }], thumb: true, ...x })
 export const artifacts = [
   art('a-quotes', 'Supplier quotes compared', P.notes, NOW - 3 * hour, { task: 'NOTES-4', proof: true }),
   art('a-plan', 'Holiday sale plan', P.shop, NOW - 2 * day),
