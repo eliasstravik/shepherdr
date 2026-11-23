@@ -107,3 +107,25 @@ test("New space in a home folder never makes a second space there (SHEP-296)", a
   const { place } = await SP.newSpace(hub, { machine: "vmb", path: "~/crescendo/", store: s });
   expect(s.d.spaces.map((x: any) => SP.ownId(x))).toEqual(["sp1", "home", "vmb/spv", place]);
 });
+
+// SHEP-298: the agent picked in the New space dialog, its Assistant not started, stays the space's choice, so its chat
+// says it and its first message starts on it; one that started (or none picked there) keeps nothing.
+test("an agent picked for a new space whose Assistant didn't start is kept as the space's choice", async () => {
+  const { CHOICE_KEY, choiceOf } = await import("../core/agents.js") as any;
+  const fable = { agent: "claude", model: "claude-fable-5-2", effort: "low", fast: false, perm: null };
+  writeFileSync(FAIL, "");
+  try {
+    const s = store();
+    const made = await SP.newSpace(hub, { machine: "vmb", path: "~/crescendo", store: s, pick: () => fable, keepPick: true });
+    expect(made.error).toBeTruthy();
+    expect(choiceOf(s.d[CHOICE_KEY], made.place)).toEqual(fable);
+    // Settings' choice (no pick in the dialog) is never written down as the space's own
+    const s2 = store();
+    const m2 = await SP.newSpace(hub, { machine: "vmb", path: "~/crescendo", store: s2, pick: () => fable });
+    expect(choiceOf(s2.d[CHOICE_KEY], m2.place)).toBeNull();
+  } finally { rmSync(FAIL); }
+  const s3 = store();
+  const ok = await SP.newSpace(hub, { machine: "vmb", path: "~/crescendo", store: s3, pick: () => fable, keepPick: true });
+  expect(ok.error).toBeUndefined();
+  expect(s3.d[CHOICE_KEY]).toBeUndefined();
+});

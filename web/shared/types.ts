@@ -72,6 +72,9 @@ export interface Place {
   status: Status
   /** chat key of this space's coordinator */
   chat: string
+  /** what its chat's agent runs on (its Assistant's own, else what its first message starts it on), known before its
+   *  chat arrives (SHEP-298) */
+  agent?: ChatAgent
   /** its machine can't be reached: when it went quiet, as shown ("14:02") */
   unreachableSince?: string
   /** its machine hasn't been reached yet since Shepherdr started (an update): what it showed last, while it connects */
@@ -880,11 +883,15 @@ export interface Chat {
   /** what this CLI lets the + menu change; only what it supports is listed */
   controls?: ChatControls
   /** Recorded launch values, never inferred from Settings. Missing values are CLI defaults, not observed telemetry. */
-  agent?: { kind: string; model?: string; modelLabel?: string; effort?: string; speed?: string; runtime?: AgentRuntime; planned?: PlannedAgent; /** the window's model button: "Opus 5.5 · High" */ words?: string
-    /** #1222: the extra flags it was started with, one word each ("--advisor=opus") */ flags?: string[] }
+  agent?: ChatAgent
   /** Settings for its role now say something else than what its agent runs on: a calm hint offers a restart */
   restart?: RestartHint
 }
+
+/** What a chat's agent runs on (SHEP-298: its terminal's arguments and log, never Settings), or, with planned, what its
+ *  first message starts it on */
+export interface ChatAgent { kind: string; model?: string; modelLabel?: string; effort?: string; speed?: string; perm?: string; runtime?: AgentRuntime; planned?: PlannedAgent; /** the window's model button: "Opus 5.5 · High" */ words?: string
+    /** #1222: the extra flags it was started with, one word each ("--advisor=opus") */ flags?: string[] }
 
 /** no agent yet: what Settings will start it on, said as that and never as what runs (docs/runtime-state.md) */
 export interface PlannedAgent {

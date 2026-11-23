@@ -215,3 +215,31 @@ test("#1219: a switch carries the old agent's permission in the new CLI's words"
   expect(claude).toContain("--dangerously-skip-permissions");
   expect(argvFor({ agent: "claude", perm: "acceptEdits" }, { agent: "claude", argv: [] }).argv.join(" ")).toContain("--permission-mode acceptEdits");
 });
+
+// SHEP-298: what an Assistant really runs, never Settings: its CLI's arguments, its log, its resume label once it ended
+test("liveAgent names the model the terminal runs, from its CLI's arguments, else its resume label, and a /model from its log", () => {
+  const { liveAgent, argvOf } = AGall;
+  const sh = ["sh", "-c", "…; exec claude --model claude-fable-5-2 --effort low --settings '{\"fastMode\":false}'"];
+  const own = ["claude", "--model", "claude-fable-5-2", "--effort", "low", "--settings", "{\"fastMode\":false}"];
+  const dflt = { model: "opus[1m]", effort: "high" };
+  // running: its CLI's own arguments (the template's sh -c is only the terminal's)
+  const live = { argv: sh, foreground: { argv: own, name: "claude" }, created_ms: 1000 };
+  expect(liveAgent("claude", live, {}, dflt)).toMatchObject({ kind: "claude", model: "claude-fable-5-2", modelLabel: "Fable 5.2", effort: "low", speed: "normal", words: "Fable 5.2 · Low" });
+  // ended: no foreground, the sh -c names nothing; its resume label kept the arguments
+  const ended = { argv: sh, labels: { "herdr.resume": JSON.stringify({ kind: "claude", argv: own }) }, created_ms: 1000 };
+  expect(argvOf(ended)).toEqual(own);
+  expect(liveAgent("claude", ended, {}, dflt)).toMatchObject({ model: "claude-fable-5-2", modelLabel: "Fable 5.2" });
+  // neither: its CLI's own default, not a guess
+  expect(liveAgent("claude", { argv: sh }, {}, dflt)).toMatchObject({ model: "opus[1m]", modelLabel: "Opus 5.5 · 1M", effort: "high" });
+  // a /model in place, as its log says it, wins over the arguments it started with
+  expect(liveAgent("claude", live, { model: "claude-sonnet-5-5", alias: "sonnet", at: 2000 }, dflt)).toMatchObject({ model: "claude-sonnet-5-5", modelLabel: "Sonnet 5.5" });
+  // a resumed log's older turn doesn't count until this process writes
+  expect(liveAgent("claude", live, { model: "claude-sonnet-5-5", at: 500 }, dflt)).toMatchObject({ model: "claude-fable-5-2" });
+  // Fast and the permission mode come with it
+  const fast = { foreground: { argv: ["claude", "--model", "opus", "--settings", "{\"fastMode\":true}", "--dangerously-skip-permissions"] } };
+  expect(liveAgent("claude", fast, {}, {})).toMatchObject({ modelLabel: "Opus 5.5", speed: "fast", perm: "bypassPermissions" });
+  // Codex: its model's own name from its CLI's list, its tier
+  const codexDflt = { models: [{ id: "gpt-6.2-sol", label: "GPT-6.2 Sol" }] };
+  const cx = { foreground: { argv: ["codex", "--no-daemon", "-m", "gpt-6.2-sol", "-c", "service_tier=\"ultrafast\""] } };
+  expect(liveAgent("codex", cx, {}, codexDflt)).toMatchObject({ kind: "codex", model: "gpt-6.2-sol", modelLabel: "GPT-6.2 Sol", speed: "ultrafast" });
+});
