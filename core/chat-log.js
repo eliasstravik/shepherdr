@@ -125,6 +125,8 @@ BEGIN { pos = base; first = base; msgs = 0 }
   if (length(line) > big) {
     nm = ""
     if (match(line, /"name":"[^"]*"/)) nm = substr(line, RSTART + 8, RLENGTH - 9)
+    # its call id, so its result ends it (SHEP-430: else its step stayed open, the working line on it for good)
+    if (match(line, /"type":"tool_use","id":"[^"]*"/)) nm = nm "\037=" substr(line, RSTART + 24, RLENGTH - 25)
     # A call too big to send: its name and its small fields (what the working line says).
     n = split("file_path notebook_path description command pattern url query path activeForm", ks, " ")
     for (k = 1; k <= n; k++) if (match(line, "\"" ks[k] "\":\"[^\"]*")) nm = nm "\037" ks[k] "=" substr(line, RSTART + length(ks[k]) + 4, (RLENGTH - length(ks[k]) - 4 > 200) ? 200 : RLENGTH - length(ks[k]) - 4)
@@ -775,6 +777,9 @@ export class Conversation {
       replyTo = u.quoted;
       text = u.rest;
     }
+    // a new message from the person: no step of an earlier turn is still running (SHEP-430)
+    this.open.clear();
+    this.waits.clear();
     this.push({ kind: "user", id, text, replyTo, ...(u.replyTask && replyTo === u.replyTo ? { replyTask: u.replyTask } : {}), from: u.from, ...(u.assistant ? { assistant: u.assistant } : {}), at: u.at, images: u.images || 0 });
     this.doing = null;
   }
@@ -950,9 +955,11 @@ export class Conversation {
       }
       if (r.kind === "T") {
         // A call too big to send whole: its name and small fields ("file_path=…").
-        const [name, ...fields] = r.data.split("\x1f");
+        const [name, ...all] = r.data.split("\x1f");
+        const callId = all.find((f) => f.startsWith("="))?.slice(1);
+        const fields = all.filter((f) => !f.startsWith("="));
         const input = Object.fromEntries(fields.map((f) => { const i = f.indexOf("="); let v = f.slice(i + 1); try { v = JSON.parse(`"${v.replace(/\\$/, "")}"`); } catch {} return [f.slice(0, i), v]; }));
-        if (name) this.step(`big${r.off}`, r.off, claudeStep(name, input) ?? { kind: "tool", line: `Used ${name}`, doing: "Working" });
+        if (name) this.step(callId || `big${r.off}`, r.off, claudeStep(name, input) ?? { kind: "tool", line: `Used ${name}`, doing: "Working" });
         continue;
       }
       const l = parse(r.data);

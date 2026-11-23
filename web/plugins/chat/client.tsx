@@ -686,7 +686,7 @@ export function WorkingSign({ chat, thread }: { chat: Chat | undefined; thread?:
   const report = thread?.task?.report
   const sign = signOf(chat, report && !report.paused ? report.msg : undefined)
   // SHEP-421: the line stays while the sign shows, the last step held until the next fades in over it
-  const step = chat ? heldStep(chat.key, sign) : ''
+  const step = chat ? heldStep(chat.key, sign, chat) : ''
   if (!sign) return null
   const n = chat?.messages.length ?? 0
   const el = (
