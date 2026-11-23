@@ -272,6 +272,19 @@ export function prune(out: Outgoing[], now: number, exists?: (chat: string) => b
   return next.length === out.length ? out : next
 }
 
+/** how one you sent shows until the chat has it (SHEP-329): dimmed only while it is on its way or held on purpose for
+ *  the agent's turn (or a menu, a start); once in the agent (its terminal, or its CLI's own queue, which takes it
+ *  within seconds) it is sent, never a grey bubble that stays */
+export function showsAs(o: Outgoing): { pending?: true; failed?: string; mark?: 'sent' } {
+  if (o.state === 'failed') return { failed: o.error ?? '' }
+  if (o.state === 'sending' || (o.waiting && !o.queued)) return { pending: true }
+  return { mark: 'sent' }
+}
+
+/** a message of yours the chat has from the agent's log, taken in (not one in its queue, nor one still on its way):
+ *  read, as long as it is the chat's last */
+export const readNow = (m: Message) => m.who === 'you' && !m.waiting && !m.id.startsWith('out:') && !!(m.text || m.file)
+
 /** how it shows: a bubble for the text, one for each file, like what comes back; nothing while the chat shows it */
 export function partsOf(o: Outgoing, chat?: Chat): Message[] {
   if (chat?.messages.some((m) => m.cid === o.cid)) return []

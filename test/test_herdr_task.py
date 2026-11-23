@@ -7636,6 +7636,44 @@ class CodexBatch278(unittest.TestCase):
         self.assertTrue(self.news.news_send("t9", "Change of plan: stop the build"))
         self.assertFalse([a for a in sent if a[0] == "keys"])
 
+    # ---- SHEP-329: the person's reply is in within seconds, always -----------------------------------------------
+    AFTER_ESC = ("  ⎿  Interrupted · What should Claude do instead?\n❯ Change of plan: stop\n✽ Cultivating… (1s)\n"
+                 "──────\n❯ \n──────\n  ⏵⏵ bypass permissions on · esc to interrupt")
+
+    def test_the_persons_reply_steers_and_falls_back_to_esc(self):
+        # still queued after Ctrl+Enter's grace (5 s, 20 looks): Esc, once
+        sent = self.fake_hc(self.CLAUDE, [self.QUEUED_2_1_330] * 21 + [self.AFTER_ESC])
+        self.assertEqual(self.news.person_send("t9", "Change of plan: stop"), "sent")
+        self.assertEqual([a for a in sent if a[0] == "keys"], [["keys", "t9", "ctrl+enter"], ["keys", "t9", "esc"]])
+        # in by Ctrl+Enter: no Esc
+        sent = self.fake_hc(self.CLAUDE, [self.QUEUED_2_1_330, self.WORKING])
+        self.assertEqual(self.news.person_send("t9", "Change of plan: stop"), "sent")
+        self.assertEqual([a for a in sent if a[0] == "keys"], [["keys", "t9", "ctrl+enter"]])
+
+    def test_news_never_presses_esc(self):
+        sent = self.fake_hc(self.CLAUDE, [self.QUEUED_2_1_330])
+        self.assertTrue(self.news.news_send("t9", "SHEP-1 is ready"))
+        self.assertEqual([a for a in sent if a[0] == "keys"], [["keys", "t9", "ctrl+enter"]])
+
+    def test_the_persons_reply_goes_to_a_working_codex_now(self):
+        held = []
+        self.patch(self.news, "hold", lambda *a: held.append(a))
+        sent = self.fake_hc(self.CODEX, ["› hange of plan: stop\n  tab to queue message"])
+        self.assertEqual(self.news.person_send("t9", "Change of plan: stop"), "sent")
+        self.assertEqual(held, [])
+        self.assertIn(["send", "t9", "Change of plan: stop"], sent)
+        # its "tab to queue" draft goes in now (Enter), never to the queue
+        self.assertIn(["keys", "t9", "enter"], sent)
+        self.assertNotIn(["keys", "t9", "tab"], sent)
+
+    def test_the_persons_reply_waits_only_while_they_write_in_its_box(self):
+        held = []
+        self.fake_hc(self.CLAUDE, [self.WORKING])
+        self.patch(self.news, "typing", lambda *a, **kw: "its box")
+        self.patch(self.news, "hold", lambda *a: held.append(a))
+        self.assertEqual(self.news.person_send("t9", "Change of plan: stop"), "held")
+        self.assertEqual(held, [("t9", "Change of plan: stop")])
+
     # ---- #1093 #1143 -----------------------------------------------------------------------------
     def log(self, items):
         path = os.path.join(self.dir, "rollout.jsonl")
@@ -8609,7 +8647,7 @@ class Next32(unittest.TestCase):
         self.agent("idle", turn=4)
         self.change(stopped_by="you", stopped_why="Stopped by you.", stopped_at=1, stopped_turns={"t9": 4})
         sent = []
-        with self.mock.patch.object(news, "send_or_hold", lambda addr, text, how="send": (sent.append((addr, text)), "sent")[1]):
+        with self.mock.patch.object(news, "person_send", lambda addr, text: (sent.append((addr, text)), "sent")[1]):
             v = self.run_cmd(self.commands.cmd_reply, id="1", text="Carry on, but skip the footer.")
         self.assertEqual(sent, [("t9", "Carry on, but skip the footer.")])
         self.assertEqual(v["new_agent"], False)

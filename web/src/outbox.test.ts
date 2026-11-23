@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from 'bun:test'
-import { expire, forgetDone, KEEP_PAST, loadOutbox, partsOf, settle, type Outgoing } from './outbox.ts'
+import { expire, forgetDone, KEEP_PAST, loadOutbox, partsOf, readNow, settle, showsAs, type Outgoing } from './outbox.ts'
 import type { Chat } from '@shared/types.ts'
 
 // What you sent comes back from the agent's log without its id: it takes the pending one's place by its words, files
@@ -251,4 +251,20 @@ test('a reload never brings a cleared one back, even when another tab writes its
   } finally {
     g.localStorage = was
   }
+})
+
+// SHEP-329: a message in the agent never looks dead: dimmed only on its way or held on purpose, then sent, then read
+test('sent once it is in the agent, its queue included; dimmed only on its way or held', () => {
+  expect(showsAs(sent({ state: 'sending' }))).toEqual({ pending: true })
+  expect(showsAs(sent())).toEqual({ mark: 'sent' })
+  expect(showsAs(sent({ waiting: true, queued: true, waitsFor: 'queue' }))).toEqual({ mark: 'sent' })
+  expect(showsAs(sent({ waiting: true, waitsFor: 'turn' }))).toEqual({ pending: true })
+  expect(showsAs(sent({ state: 'failed', error: 'no' }))).toEqual({ failed: 'no' })
+})
+
+test('read: yours from the log, not one in its queue nor one on its way', () => {
+  expect(readNow({ id: 'u1', who: 'you', text: 'hi', at: 1 })).toBe(true)
+  expect(readNow({ id: 'q1', who: 'you', text: 'hi', at: 1, waiting: true, waitsFor: 'queue' })).toBe(false)
+  expect(readNow({ id: 'out:c1', who: 'you', text: 'hi', at: 1 })).toBe(false)
+  expect(readNow({ id: 'a1', who: 'agent', text: 'hi', at: 1 })).toBe(false)
 })

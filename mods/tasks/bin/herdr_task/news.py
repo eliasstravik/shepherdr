@@ -348,9 +348,10 @@ def codex_busy(k):
     return bool(k) and is_codex(k) and status_word(k) == "working"
 
 
-def codex_settle(address, text, tries=3):
-    """After a send to Codex: a draft it left for the queue is queued (Tab); one still in its input box (the last
-    › line on, past the conversation) is sent. Never presses anything when the box is empty."""
+def codex_settle(address, text, tries=3, steer=False):
+    """After a send to Codex: a draft it left for the queue is queued (Tab), or with steer (the person's own message,
+    SHEP-329) sent now (Enter: Codex takes it mid-turn); one still in its input box (the last › line on, past the
+    conversation) is sent. Never presses anything when the box is empty."""
     words = re.sub(r"\s+", " ", text).strip()
     probe = words[1:25].strip()  # past the first letter, which may be the one dropped
     for i in range(tries):
@@ -359,12 +360,60 @@ def codex_settle(address, text, tries=3):
         at = max((n for n, ln in enumerate(lines) if ln.lstrip().startswith("›")), default=None)
         box = " ".join(ln.strip() for ln in lines[at:]) if at is not None else ""
         if re.search(r"tab to queue", box, re.I):
-            run(["hc", "keys", address, "tab"])
-            return "queued"
+            run(["hc", "keys", address, "enter" if steer else "tab"])
+            return "sent" if steer else "queued"
         if probe and probe in box:
             run(["hc", "keys", address, "enter"])
             return "sent"
     return None
+
+
+# ---- the person's message to a working agent (SHEP-329) ---------------------------------------
+# It must be in within seconds, always: the person's message wins over what the agent is doing. Claude Code holds a
+# message typed mid-turn in its own queue ("Queued · ctrl+enter to send now"): its Ctrl+Enter takes it in mid-turn
+# (a running shell or tool call moves to the background); still queued after STEER_GRACE, Esc stops the turn (the
+# running call is cut off) and Claude Code sends the queue at once, so the agent reads it first. Codex (0.163) takes
+# a message typed mid-turn by itself. The same as core/send.js steerNow, for herdr-task reply.
+
+STEER_GRACE = 5.0
+
+
+def steer(address, grace=STEER_GRACE):
+    """Claude Code's queued message in now (see above). Only while it works (on a dialog of its own a key would answer
+    it) and its screen shows the message queued. True: a key was pressed."""
+    screen = lambda: run(["hc", "read", address, "--lines", "40"]).stdout
+    working = lambda: status_word(hc_json("get", address) or {}) == "working"
+    for i in range(20):
+        time.sleep(0.25 if i else 0.15)
+        if not working():
+            return False
+        if QUEUED.search(screen()):
+            break
+    else:
+        return False
+    run(["hc", "keys", address, "ctrl+enter"])
+    for _ in range(int(grace / 0.25)):
+        time.sleep(0.25)
+        if not QUEUED.search(screen()) or not working():
+            return True
+    run(["hc", "keys", address, "esc"])
+    return True
+
+
+def person_send(address, text):
+    """The person's message to an agent (herdr-task reply): sent now, a working one steered (see above). Held only
+    while the person writes in that agent's own box (typing()). Returns "sent", "held" or None (hc refused it)."""
+    if typing(address):
+        hold(address, text)
+        return "held"
+    if run(["hc", "send", address, text]).returncode != 0:
+        return None
+    k = hc_json("get", address) or {}
+    if is_codex(k):
+        codex_settle(address, text, steer=True)
+    elif (k.get("labels") or {}).get("herdr.agent", "claude") == "claude":
+        steer(address)
+    return "sent"
 
 
 def plain_send(address, text):
