@@ -18,7 +18,7 @@ export const MIN = 44
 
 /** Allowed under MIN, each for a reason. Matched with Element.matches. */
 export const ALLOW: { sel: string; why: string }[] = [
-  { sel: '.md a, .md code, .b .lk, .card .lk, .status .lk, .donerow .lk', why: 'a link inside running text: its line is the target, like any web page' },
+  { sel: '.md a, .md code, .b .lk, .card .lk, .status .lk, .status .wtag, .card .s .wtag, .donerow .lk', why: 'a link inside running text: its line is the target, like any web page' },
   { sel: '.xterm *, .termbox *', why: 'the terminal itself (xterm), typed into, not tapped' },
   { sel: '.page, .scr *, .veil', why: 'a live page or screen: its own content decides' },
   { sel: '.b', why: 'a message: as big as its words, tapped anywhere for its menu' },
@@ -129,7 +129,7 @@ export const SCENES: Scene[] = [
   { name: 'new', steps: ['label:New'], wide: true },
   { name: 'space menu', steps: ['phone-list', 'label:More for blog'] },
   { name: 'new space', steps: ['phone-list', 'text:New space'] },
-  { name: 'a space', steps: ['phone-list', '.row.sp >> text=blog'] },
+  { name: 'a space', steps: ['phone-list', '[data-project] .row:has-text("blog")'] },
   { name: 'search', steps: ['phone-list', 'label:Search'] },
   { name: 'header title', steps: ['.tbtn'] },
   { name: 'tasks', steps: ['[aria-label="Tasks"], .pt:has-text("Tasks")'] },
