@@ -10,12 +10,6 @@
          sets both to the theme picked -->
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121212" />
-    <!-- relative: under any path (/shepherdr/); with the login cookie: a browser fetches a manifest without one unless
-         told, and a login gate in front (Cloudflare Access, Authelia…) then answers with its sign-in page, so the app
-         can't be added to the home screen (GitHub #494). Its colours are dark, the app's own: an installed Android app keeps
-         the manifest it was installed with (no script swap reaches it) and paints the window under the gesture bar in
-         its background_color. Light: manifest-light.webmanifest (the script below) -->
-    <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials" />
     <style>
       /* the canvas from the first paint, in the theme picked (ds.css's --canvas): what the phone shows where the page
          hasn't drawn yet, as the keyboard slides up and under its gesture bar, is never white in dark (or dark in light) */
@@ -23,6 +17,21 @@
       @media (prefers-color-scheme: dark){html:not([data-theme="light"]){color-scheme:dark;background:#121212}}
       html[data-theme="dark"]{color-scheme:dark;background:#121212}
     </style>
+    <script>
+      /* GitHub #1261: opened as /shepherdr (no slash), the page's relative files (./assets/…) resolve against / and
+         miss, so the page stays blank. Add the slash to the address before anything below is read: they then resolve
+         under /shepherdr/. A file's own address (…/index.html) is left alone. */
+      (function () {
+        var p = location.pathname
+        if (!/\/$/.test(p) && !/\.[^/]*$/.test(p)) history.replaceState(history.state, '', p + '/' + location.search + location.hash)
+      })()
+    </script>
+    <!-- relative: under any path (/shepherdr/); with the login cookie: a browser fetches a manifest without one unless
+         told, and a login gate in front (Cloudflare Access, Authelia…) then answers with its sign-in page, so the app
+         can't be added to the home screen (GitHub #494). Its colours are dark, the app's own: an installed Android app keeps
+         the manifest it was installed with (no script swap reaches it) and paints the window under the gesture bar in
+         its background_color. Light: manifest-light.webmanifest (the script below) -->
+    <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials" />
     <script>
       /* the theme picked on this device (src/prefs.ts), on the page before the first paint: no flash of the other */
       (function () {
