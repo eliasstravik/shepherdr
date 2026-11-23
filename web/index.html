@@ -5,7 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>Shepherdr</title>
     <meta name="description" content="Your agents, tasks and chats from a phone, tablet or desktop." />
+    <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#ffffff" />
+    <!-- relative: under any path (/shepherdr/); with the login cookie: a browser fetches a manifest without one unless
+         told, and a login gate in front (Cloudflare Access, Authelia…) then answers with its sign-in page, so the app
+         can't be added to the home screen (GitHub #494). Dark: manifest-dark.webmanifest (the script below) -->
+    <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials" />
+    <style>
+      /* the canvas from the first paint, in the theme picked (ds.css's --canvas): what the phone shows where the page
+         hasn't drawn yet, as the keyboard slides up and under its gesture bar, is never white in dark (or dark in light) */
+      html{color-scheme:light;background:#ffffff}
+      @media (prefers-color-scheme: dark){html:not([data-theme="light"]){color-scheme:dark;background:#121212}}
+      html[data-theme="dark"]{color-scheme:dark;background:#121212}
+    </style>
     <script>
       /* the theme picked on this device (src/prefs.ts), on the page before the first paint: no flash of the other */
       (function () {
@@ -14,6 +26,8 @@
         if (t !== 'System') document.documentElement.dataset.theme = t.toLowerCase()
         var dark = t === 'Dark' || (t === 'System' && matchMedia('(prefers-color-scheme: dark)').matches)
         document.querySelector('meta[name=theme-color]').content = dark ? '#121212' : '#ffffff'
+        /* the installed app's window and the phone's navigation bar take the manifest's colours */
+        if (dark) document.querySelector('link[rel=manifest]').setAttribute('href', 'manifest-dark.webmanifest')
       })()
       /* a link's #part (#accept=SHEP-7), kept before the app's own address takes the bar */
       window.shepherdrLink = location.hash
@@ -22,10 +36,6 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Shepherdr" />
-    <!-- relative: under any path (/shepherdr/); with the login cookie: a browser fetches a manifest without one unless
-         told, and a login gate in front (Cloudflare Access, Authelia…) then answers with its sign-in page, so the app
-         can't be added to the home screen (GitHub #494) -->
-    <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials" />
     <link rel="icon" href="icon.svg?v=2" type="image/svg+xml" />
     <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png?v=2" />
     <!-- the launch screen on a home-screen iPhone, in its light or dark -->

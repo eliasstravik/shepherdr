@@ -162,6 +162,45 @@ class Repo(unittest.TestCase):
                             found.append(f"{os.path.relpath(os.path.join(root, f), J('.'))}: {m.group(0)}")
         self.assertFalse(found, "a tap highlight turned back on:\n" + "\n".join(found))
 
+    def test_the_canvas_from_the_first_paint(self):
+        """SHEP-311: the page's root, the browser's bar and the installed app's window are the canvas in each theme from
+        the first paint: a phone shows them where the page hasn't drawn yet (the keyboard sliding up, under the gesture
+        bar), so white in dark was a flash and a white strip."""
+        css = open(J("web/src/ds.css")).read()
+        light = re.search(r":root\{color-scheme:light;--canvas:(#[0-9a-f]+);", css)
+        dark = re.search(r':root\[data-theme="dark"\]\{color-scheme:dark;--canvas:(#[0-9a-f]+);', css)
+        self.assertTrue(light and dark, "ds.css sets color-scheme with --canvas for light and dark")
+        self.assertIn('@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--canvas:' + dark[1] + ";", css)
+        self.assertIn("html{background:var(--canvas);", css)
+        full = lambda c: "#" + "".join(ch * 2 for ch in c[1:]) if len(c) == 4 else c
+        L, D = full(light[1]), full(dark[1])
+        html = open(J("web/index.html")).read()
+        head = html[: html.index("</head>")]
+        style = head[head.index("<style>") : head.index("</style>")]
+        self.assertLess(head.index("<style>"), head.index("<script"), "the canvas comes before any script")
+        self.assertIn("html{color-scheme:light;background:%s}" % L, style)
+        self.assertIn('html:not([data-theme="light"]){color-scheme:dark;background:%s}' % D, style)
+        self.assertIn('html[data-theme="dark"]{color-scheme:dark;background:%s}' % D, style)
+        self.assertIn('<meta name="color-scheme" content="light dark" />', head)
+        self.assertIn('<meta name="theme-color" content="%s" />' % L, head)
+        self.assertIn("dark ? '%s' : '%s'" % (D, L), head)
+        self.assertIn("interactive-widget=resizes-content", head)
+        self.assertIn("viewport-fit=cover", head)
+        prefs = open(J("web/src/prefs.ts")).read()
+        self.assertIn("const BAR = { light: '%s', dark: '%s' }" % (L, D), prefs)
+        self.assertIn("const MANIFEST = { light: 'manifest.webmanifest', dark: 'manifest-dark.webmanifest' }", prefs)
+        self.assertIn("'manifest-dark.webmanifest'", head)
+        ml = json.load(open(J("web/public/manifest.webmanifest")))
+        md = json.load(open(J("web/public/manifest-dark.webmanifest")))
+        self.assertEqual((ml["background_color"], ml["theme_color"]), (L, L))
+        self.assertEqual((md["background_color"], md["theme_color"]), (D, D))
+        # the same app in either: only the colours differ
+        for k in ("background_color", "theme_color"):
+            ml.pop(k), md.pop(k)
+        self.assertEqual(ml, md)
+        # the phone's bottom bar runs under the gesture bar
+        self.assertIn(".bar{padding-bottom:calc(12px + env(safe-area-inset-bottom))}", css)
+
     def test_no_component_made_inside_a_dialog(self):
         """A dialog with fields is opened with openForm (SHEP-308): a component made inside openDialog's render is a
         new one at each redraw of the app, so its fields are swapped for new ones and the one being typed in loses

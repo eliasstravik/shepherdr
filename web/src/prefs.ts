@@ -18,6 +18,8 @@ const KEY = 'shepherdr.prefs'
 const START: Prefs = { theme: 'System', width: 'Narrow', motion: 'System' }
 /** the bars over the app (the browser's, the phone's status bar): the canvas */
 const BAR = { light: '#ffffff', dark: '#121212' }
+/** the app's manifest in each, its background_color and theme_color the canvas (index.html picks it before the paint) */
+const MANIFEST = { light: 'manifest.webmanifest', dark: 'manifest-dark.webmanifest' }
 
 function load(): Prefs {
   try {
@@ -48,6 +50,9 @@ function apply() {
   else delete root.dataset.motion
   const bar = document.querySelector<HTMLMetaElement>('meta[name=theme-color]')
   if (bar) bar.content = isDark() ? BAR.dark : BAR.light
+  // the installed app's window and the phone's navigation bar: the manifest's colours, read when the app updates
+  const manifest = document.querySelector<HTMLLinkElement>('link[rel=manifest]')
+  if (manifest) manifest.setAttribute('href', isDark() ? MANIFEST.dark : MANIFEST.light)
   for (const l of listeners) l()
 }
 
