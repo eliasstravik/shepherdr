@@ -82,8 +82,10 @@ function QuietRow({ icon, label, meta = [], body, startOpen = false, kind }: { i
   const words = (
     <>
       <I n={icon} c="s16" />
-      <span className="ql">{label}</span>
-      {meta.filter((x) => x.word).map((x, i) => <span key={i} className={cx('qm', x.tone === 'red' && 'c-red', x.tone === 'amber' && 'c-ask')}>{x.word}</span>)}
+      <span className="ql">
+        {label}
+        {meta.filter((x) => x.word).map((x, i) => <span key={i} className={cx('qm', x.tone === 'red' && 'c-red', x.tone === 'amber' && 'c-ask')}>{x.word}</span>)}
+      </span>
     </>
   )
   if (!body) return <div className={cx('fold quiet', kind)}><span className="qc" />{words}</div>
