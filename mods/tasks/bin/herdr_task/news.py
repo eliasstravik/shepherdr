@@ -17,7 +17,7 @@ from .agents import (
     STATUSES, trust_asked,
 )
 from .sessions import session_of
-from .launch import coordinator_in
+from .launch import coordinator_in, core_spaces, everything_of, tilde_of
 from .store import locate, read_list, Store, store_files
 from .output import line, minutes, view
 
@@ -131,6 +131,11 @@ def news_pass(report, folder=None):
     except (OSError, ValueError):
         state = {}
     seen, outbox, quiet = state.setdefault("seen", {}), state.setdefault("outbox", []), state.setdefault("quiet", {})
+    # 3.2.8: news of a task in this computer's own ~ space goes to Everything beside it, which keeps every task's news
+    # (once: the overview skips what Everything had itself); the ~ space's Assistant is never told it too.
+    here = core_spaces()
+    tilde, every = tilde_of(here), everything_of(here)
+    told_in = lambda sp: every if tilde and every and sp == tilde else sp
     current = {}  # key -> (status, stall mark), to check queued lines against
     for path in store_files(folder):
         d = read_list(path)
@@ -224,7 +229,7 @@ def news_pass(report, folder=None):
                     # A failed command's line stands apart: it neither replaces nor is replaced.
                     outbox[:] = [x for x in outbox if not (x["key"] == key and not APART & {ev, x["event"]}
                                                            and (x["event"] == ev or ev != "stalled"))]
-                    outbox.append({"key": key, "space": bare(t["space"]), "folder": os.path.basename(s.loc["folder"]), "event": ev, "status": v["status"],
+                    outbox.append({"key": key, "space": told_in(bare(t["space"])), "folder": os.path.basename(s.loc["folder"]), "event": ev, "status": v["status"],
                                    "stall": stall[0] if ev == "stalled" else None, "text": text, "at": now()})
             ids = {str(t["id"]) for t in s.data["tasks"]}
             for k in [k for k in mine if k not in ids and k != "_init"]:

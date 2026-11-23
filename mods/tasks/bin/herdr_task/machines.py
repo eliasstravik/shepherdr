@@ -847,6 +847,12 @@ if hc:
         spaces = []
     me["spaces"] = [{"id": s.get("id"), "name": s.get("name"), "folder": s.get("folder"), "machine": s.get("machine"), "icon": s.get("icon")} for s in spaces]
     names = {s["id"]: s for s in me["spaces"]}
+    # Everything (it answers for every machine) and, beside it in the home folder, the main machine's own ~ space (3.2.8),
+    # as core/spaces.js everythingOf and tildeOf
+    at_home = sorted(str(s["id"]) for s in me["spaces"] if s.get("folder") and os.path.realpath(s["folder"]) == os.path.realpath(H))
+    every = "home" if "home" in at_home else (at_home[0] if at_home else None)
+    rest = [x for x in at_home if x != every]
+    tilde = "tilde" if "tilde" in rest else (rest[0] if rest else None)
     me["assistants"] = []
     for a in seen:
         k = js(sh([hc, "get", a, "--json"])[1]) or {}
@@ -855,8 +861,10 @@ if hc:
         if k.get("state") != "live" or not (lb.get("herdr.role") == "coordinator" or k.get("template") in ("assistant", "coordinator")):
             continue
         s = names.get(sp) or {}
-        me["assistants"].append({"address": a, "space": sp, "space_name": s.get("name") or (os.path.basename(k.get("cwd") or "") or None),
-                                 "folder": s.get("folder") or k.get("cwd"), "template": k.get("template"), "name": k.get("name")})
+        # marked only where both work (the main machine): another machine's lone home space is no Everything
+        role = {} if not tilde else {"role": "everything"} if sp == every else {"role": "home"} if sp == tilde else {}
+        me["assistants"].append({"address": a, "space": sp, "space_name": s.get("name") or ("~" if role else os.path.basename(k.get("cwd") or "") or None),
+                                 "folder": s.get("folder") or k.get("cwd"), "template": k.get("template"), "name": k.get("name"), **role})
 # Next hops: through each herdr-core link that works, to a machine nobody on the way looks at.
 if o["depth"] > 0 and core:
     look = [l for l in me["links"] if l.get("ok") and l.get("id") and l["how"] == "herdr-core" and l["id"] not in o["seen"]]
@@ -1178,7 +1186,8 @@ def cmd_assistants(args):
     if not rows:
         print("No live Assistants on any machine reachable from here.")
     for a in rows:
-        print(f"{a['target']:<28} {a.get('space_name') or '?':<20} {a.get('folder') or ''}")
+        role = {"everything": "  (Everything: answers for every machine)", "home": "  (its own ~ space, beside Everything)"}.get(a.get("role"), "")
+        print(f"{a['target']:<28} {a.get('space_name') or '?':<20} {a.get('folder') or ''}{role}")
 
 
 def _find(rows, target):

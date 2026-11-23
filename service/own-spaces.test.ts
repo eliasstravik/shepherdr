@@ -162,9 +162,12 @@ test("the model carries the window's spaces over once per machine, then never re
   expect(doc[IMPORTED]).toEqual(["", "vm"]);
   // this computer's are carried over and none is the home folder: Everything, the root space, is made (once)
   expect(doc.spaces.filter((s: any) => s.id === "home")).toMatchObject([{ id: "home", name: "Home", folder: HOME, machine: null }]);
-  expect(put.spaces.spaces.map((s: any) => s.id).sort()).toEqual(["home", "sp1", "vm/sp1"]);
-  // removed since: it stays removed
-  doc.spaces = doc.spaces.filter((s: any) => s.machine !== "vm");
+  // with another machine, this computer gets its own ~ space beside Everything, unnamed, once (3.2.8)
+  expect(doc.spaces.filter((s: any) => s.folder === HOME)).toMatchObject([{ id: "home" }, { id: "tilde", name: "", folder: HOME, machine: null }]);
+  expect(doc.spaces.findIndex((s: any) => s.id === "tilde")).toBe(doc.spaces.findIndex((s: any) => s.id === "home") + 1);
+  expect(put.spaces.spaces.map((s: any) => s.id).sort()).toEqual(["home", "sp1", "tilde", "vm/sp1"]);
+  // removed since: it stays removed (the ~ space too)
+  doc.spaces = doc.spaces.filter((s: any) => s.machine !== "vm" && s.id !== "tilde");
   await refresh();
   expect(put.spaces.spaces.map((s: any) => s.id).sort()).toEqual(["home", "sp1"]);
   expect(doc.spaces.filter((s: any) => s.id === "home").length).toBe(1);

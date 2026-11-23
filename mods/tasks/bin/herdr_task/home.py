@@ -240,12 +240,12 @@ def local_report(candidates=None, since=None, news_only=False):
     ms = connected_machines()
     # SHEP-310: a link another herdr-core answers on, which stays down though its machine is up
     out = {"home": HOME, "at": now(), **link_facts(ms), "stale_links": [{"name": x["name"], "answers": x["answers"]} for x in stale_links(ms)]}
-    real = os.path.realpath(HOME)
-    space = next((sid for sid, folder in candidates or [] if folder and os.path.realpath(folder) == real), None)
+    # the home space: Everything where it works beside this computer's own ~ space (3.2.8: never that one)
+    from .launch import core_spaces, everything_of
+    space = everything_of([{"id": sid, "folder": folder} for sid, folder in candidates or []])
     if not space and candidates is not None:
         # This machine knows its own home space even when the asker doesn't list it (#1029).
-        from .launch import core_spaces
-        space = next((s["id"] for s in core_spaces() if os.path.realpath(s["folder"]) == real), None)
+        space = everything_of(core_spaces())
     if space:
         out["space"], out["assistant"] = space, assistant_in(space)
     if since is not None:
@@ -593,6 +593,12 @@ def cmd_home(args):
     me = hc_json("get", os.environ.get("HC_TERMINAL_ID") or "") if os.environ.get("HC_TERMINAL_ID") else None
     cwd = (me or {}).get("cwd") or os.getcwd()
     home = home_on(cfg, here) and os.path.realpath(cwd) == os.path.realpath(HOME)
+    # 3.2.8: this computer's own ~ space works in the home folder too, beside Everything, which looks after the machine
+    from .launch import core_spaces, tilde_of
+    labels = (me or {}).get("labels") or {}
+    mine = labels.get("herdr.coordinator.space") or labels.get("herdr.space")
+    tilde = bool(mine) and mine == tilde_of(core_spaces())
+    home = home and not tilde
     rep = local_report()
     try:
         with open(HOME_STATE) as f:
@@ -608,6 +614,8 @@ def cmd_home(args):
     role = ("the lead machine's home Assistant: this machine, plus every machine's overview" if out["main"]
             else f"this machine's home Assistant ({lead} keeps the overview)" if home and lead else
             "this machine's home Assistant" if home else
+            "this computer's own ~ space's Assistant, not its home Assistant (Everything looks after the machine and "
+            "is told every task's news)" if tilde else
             "not a home Assistant" + ("" if out["on"] else " (Home Assistant is off for this machine in Settings)"))
     print(f"You are {role}.")
     print(f"Now: {meters_words(rep['health'])}")

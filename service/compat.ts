@@ -385,8 +385,11 @@ export class Compat {
     });
     // a task's space: the one that started it (herdr-task keeps it), else the one in its folder, as the window places it
     // what its row says it is in, as the window's Tasks: the space working in its list's folder, else the list's name
-    const placeName = (r: Row) => places.find((p) => spaces.find((s) => s.id === p.id && (s.machine ?? null) === (r.machine ?? null) && s.folder === r.folder))?.name ?? r.list ?? "";
-    const placeOf = (r: Row) => (r.space && spaces.some((s) => s.id === r.space) ? r.space : spaces.find((s) => (s.machine ?? null) === (r.machine ?? null) && s.folder === r.folder)?.id ?? "");
+    // in the home folder here: Everything's, never this computer's own ~ space beside it (3.2.8) unless that one started it
+    const tildeId = SPc.tildeOf(spaces, HOME)?.id;
+    const inFolder = (r: Row) => spaces.find((s) => s.id !== tildeId && (s.machine ?? null) === (r.machine ?? null) && s.folder === r.folder);
+    const placeName = (r: Row) => places.find((p) => p.id === inFolder(r)?.id)?.name ?? r.list ?? "";
+    const placeOf = (r: Row) => (r.space && spaces.some((s) => s.id === r.space) ? r.space : inFolder(r)?.id ?? "");
     // SHEP-325: the spaces working in its folder on its machine: their Tasks list it too (the window's rule, core inSpace)
     const folderSpaces = (r: Row) => (r.folder ? spaces.filter((s) => (s.machine ?? null) === (r.machine ?? null) && s.folder === r.folder).map((s) => s.id) : []);
 

@@ -33,6 +33,8 @@ export const sh = (hub: Hub, script: string, args: string[], on: string | null) 
 
 type List = any;
 const missingDoc = (e: unknown) => ["not_found", "document_not_found", "doc_not_found"].includes(String((e as any)?.kind ?? ""));
+/** set once the main machine's own ~ space was made (3.2.8): a removed one stays removed */
+const TILDE_MADE = "spaces.tilde.made";
 
 export class Model {
   private lists = new Map<string | null, List[]>();   // machine (null: here) -> its task lists
@@ -98,6 +100,9 @@ export class Model {
   gitOf(s: any) { return this.git.get(`${s.machine ?? ""}|${s.folder}`)?.info ?? null; }
   /** A space as last built (its id, name, machine, folder), or undefined. */
   spaceById(id: string) { return this.spaces.find((s) => s.id === id); }
+
+  /** Whether the person has other machines (connected or not): the main machine then has its own ~ space too. */
+  hasOthers() { return this.known.length > 0; }
 
   /** The connected other machines. */
   machineNames() { return this.machines; }
@@ -198,6 +203,21 @@ export class Model {
         await this.own.update((v) => {
           const list: any[] = Array.isArray(v.spaces) ? (v.spaces as any[]) : [];
           return S.everythingOf(list, HOME) ? v : { ...v, spaces: [{ id: "home", name: "Home", folder: HOME, machine: null, at: Date.now() }, ...list] };
+        });
+      } catch {} finally { this.carrying = false; }
+    }
+    // The main machine's own home space (~, 3.2.8): beside Everything in its folder, made once there are other machines
+    // (one machine keeps Everything alone), with no agent until its first message. Made once: Remove keeps it gone.
+    if (S.everythingOf(own, HOME) && this.known.length && !this.doc()[TILDE_MADE]) {
+      this.carrying = true;
+      try {
+        await this.own.update((v) => {
+          const list: any[] = Array.isArray(v.spaces) ? (v.spaces as any[]) : [];
+          if (v[TILDE_MADE] || !S.everythingOf(list, HOME)) return v;
+          // right after Everything: the first row under this computer
+          const at = list.indexOf(S.everythingOf(list, HOME)) + 1;
+          const spaces = S.tildeOf(list, HOME) ? list : [...list.slice(0, at), { id: S.TILDE, name: "", folder: HOME, machine: null, at: Date.now() }, ...list.slice(at)];
+          return { ...v, spaces, [TILDE_MADE]: true };
         });
       } catch {} finally { this.carrying = false; }
     }

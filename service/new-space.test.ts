@@ -137,3 +137,24 @@ test("an agent picked for a new space whose Assistant didn't start is kept as th
   expect(ok.error).toBeUndefined();
   expect(s3.d[CHOICE_KEY]).toBeUndefined();
 });
+
+test("with other machines, New space at ~ here opens this computer's own ~ space, never Everything, never a second (3.2.8)", async () => {
+  writeFileSync(CALLS, "");
+  const s = store();
+  const every = { id: "home", name: "Home", folder: process.env.HOME!, machine: null };
+  s.d.spaces = [every, { id: "tilde", name: "", folder: `${process.env.HOME}/`, machine: null }];
+  const made = await SP.newSpace(hub, { machine: null, path: "~", others: true, store: s });
+  expect(made).toEqual({ place: "tilde", existed: true, home: true, tilde: true, name: "" });
+  expect(SP.existedWords(made, null)).toBe("This computer's home space (~) already works in your home folder, so it's open now.");
+  expect(readFileSync(CALLS, "utf8")).toBe("");
+  // one machine: Everything, as before
+  expect(await SP.newSpace(hub, { machine: null, path: "~", store: s })).toMatchObject({ place: "home", existed: true });
+  // removed: made again, unnamed (it shows as ~), beside Everything, which stays as it was
+  s.d.spaces = [every];
+  const again = await SP.newSpace(hub, { machine: null, path: "~/", others: true, store: s });
+  expect(again.place).not.toBe("home");
+  expect(s.d.spaces).toMatchObject([every, { id: again.place, name: "", folder: process.env.HOME, machine: null }]);
+  // and found the next time, not a third
+  expect(await SP.newSpace(hub, { machine: null, path: "~", others: true, store: s })).toMatchObject({ place: again.place, existed: true, tilde: true });
+  expect(s.d.spaces.length).toBe(2);
+});

@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-from .base import ASK_HOME, ENTRY, Fail, git, hc_json, now, run, SHARE, WORKTREES
+from .base import ASK_HOME, ENTRY, Fail, git, hc_json, HOME, now, run, SHARE, WORKTREES
 from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, CLAUDE_PROFILE, REVIEW_TOOLS, codex_too_old, codex_update_words, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, ROW_MAX, SUMMARY_MAX
@@ -556,6 +556,24 @@ def core_spaces():
     except (OSError, ValueError, AttributeError):
         return []
     return [x for x in spaces if isinstance(x, dict) and x.get("id") and "/" not in str(x["id"]) and not x.get("machine") and x.get("folder")]
+
+
+def _at_home(folder):
+    return bool(folder) and os.path.realpath(os.path.expanduser(folder)) == os.path.realpath(HOME)
+
+
+def everything_of(spaces):
+    """Everything's id among this machine's spaces ([{id, folder}], as core/spaces.js everythingOf): of those in the home
+    folder, id "home", else the smallest. None: none there."""
+    there = sorted(str(x["id"]) for x in spaces if _at_home(x.get("folder")))
+    return "home" if "home" in there else (there[0] if there else None)
+
+
+def tilde_of(spaces):
+    """This machine's own ~ space beside Everything in the home folder (3.2.8; core/spaces.js tildeOf), or None."""
+    every = everything_of(spaces)
+    there = sorted(str(x["id"]) for x in spaces if _at_home(x.get("folder")) and str(x["id"]) != every)
+    return "tilde" if "tilde" in there else (there[0] if there else None)
 
 
 def _inside(path, top):

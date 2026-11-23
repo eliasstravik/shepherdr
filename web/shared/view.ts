@@ -14,9 +14,9 @@ export function everything(snap: Snapshot): Place | undefined {
 
 export const isEverything = (snap: Snapshot, id: string) => everything(snap)?.id === id
 
-/** another machine's home space: its home folder's (this computer's is Everything). A space like any other: renamed,
- *  grouped, archived or removed; New space at ~ there brings it back. */
-export const isHomeSpace = (snap: Snapshot, p: Pick<Place, 'id' | 'home' | 'machine'>) => !!p.home && p.machine !== snap.host && !isEverything(snap, p.id)
+/** a machine's home space: its home folder's. The main machine's sits beside Everything in the same folder (3.2.8), a
+ *  space of its own. A space like any other: renamed, grouped, archived or removed; New space at ~ there brings it back. */
+export const isHomeSpace = (snap: Snapshot, p: Pick<Place, 'id' | 'home' | 'machine'>) => !!p.home && !isEverything(snap, p.id)
 
 /** a home space nobody named: it shows as ~ with a folder icon (a name given shows as any space's, with #) */
 export const isTilde = (snap: Snapshot, p: Pick<Place, 'id' | 'home' | 'machine' | 'unnamed'>) => isHomeSpace(snap, p) && !!p.unnamed
@@ -27,7 +27,7 @@ export function placeOf(snap: Snapshot, id: string | null | undefined): Place | 
   return snap.places.find((x) => x.id === id)
 }
 
-/** the spaces of the list: every space but Everything (other machines' home spaces among them) */
+/** the spaces of the list: every space but Everything (every machine's home space among them) */
 export const spacesOf = (snap: Snapshot) => snap.places.filter((p) => !isEverything(snap, p.id))
 
 /** a space's name as its row shows it: ~ for a machine's home space nobody named */
@@ -124,8 +124,8 @@ export function listOf(snap: Snapshot, filter: ListFilter | ((machine: string) =
   const sections: Section[] = (snap.sections ?? []).filter((s) => s.id !== 'pinned')
   return snap.machines.map((machine) => {
     const f = typeof filter === 'function' ? filter(machine.machine) : filter
-    // its home space (another machine's: this computer's is Everything) is one of its spaces, first in the service's
-    // order until moved: grouped, archived or removed like any
+    // its home space (the main machine's beside Everything) is one of its spaces, first in the service's order until
+    // moved: grouped, archived or removed like any
     const all = snap.places.filter((p) => p.machine === machine.machine && (!p.home || isHomeSpace(snap, p)))
     const mine = all.filter((p) => f === 'All' || (f === 'Archived') === !!p.archived)
     const groups = sections
@@ -395,5 +395,8 @@ export function scheduleLine(a: Automation): string {
 export function artifactsIn(snap: Snapshot, placeId: string): Artifact[] {
   const all = isEverything(snap, placeId)
   const proofs = new Set(snap.tasks.map((t) => t.proof).filter(Boolean))
-  return snap.artifacts.filter((a) => !proofs.has(a.id) && !a.proof && (all || a.place === placeId)).sort((a, b) => b.at - a.at)
+  // the main machine's ~ space: its home folder's too, which Everything keeps (as it keeps its tasks)
+  const p = placeOf(snap, placeId)
+  const home = !!p && p.machine === snap.host && isHomeSpace(snap, p) ? snap.everything : null
+  return snap.artifacts.filter((a) => !proofs.has(a.id) && !a.proof && (all || a.place === placeId || (!!home && a.place === home))).sort((a, b) => b.at - a.at)
 }

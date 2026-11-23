@@ -7869,6 +7869,47 @@ class AcceptCommandNews(unittest.TestCase):
         self.assertEqual(len(self.sent), 1)
 
 
+class TildeNewsGoesToEverything(AcceptCommandNews):
+    """3.2.8: this computer's own ~ space sits beside Everything in the home folder. A task in it is told to Everything,
+    which keeps every task's news, once; never to the ~ space's own Assistant too. Throwaway files; hc is never run."""
+
+    def setUp(self):
+        from unittest import mock
+        super().setUp()
+        import herdr_task.launch as launch
+        self.launch = launch
+        here = [{"id": "home", "folder": launch.HOME}, {"id": "tilde", "folder": launch.HOME + "/"}, {"id": "sp1", "folder": "/srv/shop"}]
+        for name, value in (("core_spaces", lambda: here), ("coordinator_in", lambda space: f"asst-{space}")):
+            p = mock.patch.object(self.news, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_told_once(self):
+        pass  # the parent's case, run there
+
+    def test_which_is_which(self):
+        H = self.launch.HOME
+        self.assertEqual((self.launch.everything_of([{"id": "tilde", "folder": H}, {"id": "home", "folder": H}]),
+                          self.launch.tilde_of([{"id": "tilde", "folder": H}, {"id": "home", "folder": H}])), ("home", "tilde"))
+        self.assertEqual(self.launch.tilde_of([{"id": "home", "folder": H}, {"id": "sp9", "folder": "/srv"}]), None)
+        self.assertEqual(self.launch.everything_of([{"id": "spz", "folder": H}, {"id": "spa", "folder": H}]), "spa")
+
+    def test_a_task_in_tilde_is_told_to_everything(self):
+        self.task["space"] = "tilde"
+        self.news.news_pass({})
+        self.task["after_accept"] = {"state": "failed", "code": 3, "tail": "x", "log": "/logs/f-4.log"}
+        self.news.news_pass({})
+        self.assertEqual([to for to, _ in self.sent], ["asst-home"])
+        self.news.news_pass({})
+        self.assertEqual(len(self.sent), 1, "told once")
+
+    def test_another_space_keeps_its_own(self):
+        self.news.news_pass({})
+        self.task["after_accept"] = {"state": "failed", "code": 3, "tail": "x", "log": "/logs/f-4.log"}
+        self.news.news_pass({})
+        self.assertEqual([to for to, _ in self.sent], ["asst-sp1"])
+
+
 class DiskHoldSaysWhatFillsIt(unittest.TestCase):
     """SHEP-275: a hold for a full disk names its biggest folders, found by du in the background and
     kept a while (queues.disk_top); never du in the hold itself. Throwaway files."""

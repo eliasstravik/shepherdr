@@ -124,6 +124,20 @@ test("a machine's home space is a space like any other: named, it shows its name
   expect(part(renderToStaticMarkup(<List snap={named} />), 'pi')).toContain('data-project="pih"')
 })
 
+test("the main machine has its own ~ row too, first, with the full menu; Everything stays the top row (3.2.8)", () => {
+  setUI({ shown: {} })
+  // the service lists it right after Everything
+  const withTilde = { ...snap, places: [snap.places[0]!, place('tilde', 'mini', { home: true, name: 'home', unnamed: true }), ...snap.places.slice(1)] }
+  const html = renderToStaticMarkup(<List snap={withTilde} />)
+  const mini = part(html, 'mini')
+  expect(mini).toContain('data-project="tilde"')
+  expect(mini).toContain('aria-label="~ on mini"')
+  expect(mini).toContain('aria-label="More for ~ on mini"')
+  expect(mini.indexOf('data-project="tilde"')).toBeLessThan(mini.indexOf('data-project="shop"'))
+  expect(mini).not.toContain('data-project="home"')
+  expect(html.slice(0, html.indexOf('data-machine='))).toContain('Everything')
+})
+
 test("a machine's plus opens New space with that machine picked", () => {
   // the heading's plus, found in the drawn tree and pressed
   const find = (n: ReactNode, label: string): ReactElement<{ onClick: () => void }> | undefined => {
