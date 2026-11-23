@@ -317,7 +317,7 @@ export const webState = (loaded, w) => (!loaded ? "Reading…"
   : w.serve?.host ? SERVE.elsewhere(w.serve.host) : "On, private to your tailnet.");
 
 // ---- the rows' choices -----------------------------------------------------------------------------------------
-export const MERGE = [["ask", "On Accept"], ["checks", "After checks pass"], ["auto", "Right away"]];
+export const MERGE = [["ask", "On Accept"], ["checks", "After all checks pass"], ["auto", "Right away"]];
 export const MUST_FIX = [["blocker", "Blockers"], ["major", "Major and up"], ["minor", "Everything"]];
 export const ROUNDS = [[0, "Off"], [1, "1 round"], [2, "2 rounds"], [3, "3 rounds"]];
 export const ARCHIVE = [[0, "Off"], [1, "1 day"], [3, "3 days"], [7, "1 week"], [30, "1 month"]];

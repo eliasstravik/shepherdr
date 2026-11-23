@@ -1679,8 +1679,9 @@ def merge_now(s, t, accept=False):
         finish(s, t, even_if_busy=True)
         return None
     if v.get("state") != "MERGED":
-        # only the base branch's required checks hold a merge (#1221)
-        v = merge_checks(t, v)
+        # only the base branch's required checks hold a merge (#1221); merge "on its own" (also a merge by hand) none
+        # beyond them
+        v = merge_checks(t, v, now_=(t.get("auto_merge") or merge_policy(s, t)) == "auto")
         problem = pr_problem(v) or queue_refusal(t, v)
         if problem:
             # #1174: never into GitHub's merge queue while it conflicts, nor again at the commit whose

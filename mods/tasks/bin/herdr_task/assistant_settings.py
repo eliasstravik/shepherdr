@@ -26,8 +26,8 @@ HEAD = ("Your settings: (Shepherdr settings, the truth for every task you add. A
         "it works in, whichever space adds it; the task lines below are {where}'s, and Repo settings lists the repos that set "
         "their own. A task's own --set wins, and `herdr-task show <id>` says what one task has and where each value comes from)")
 MERGE_SHORT = {"ask": "ask the person first (they mark it as done on its card, which merges it)",
-               "checks": "after checks (Herdr merges a ready task once its checks pass)",
-               "auto": "on its own (Herdr merges a ready task)"}
+               "checks": "after checks (Herdr merges a ready task once all its checks pass)",
+               "auto": "on its own (Herdr merges a ready task at once, waiting only on checks its base branch requires)"}
 BY = {"space": "set for this space", "repo": "this repo's setting", "machine": "this machine's setting",
       "everywhere": "your setting everywhere"}
 NOTICE_END = "Nothing to answer: reply only <hc no-reply/>."

@@ -173,7 +173,7 @@ def facts(s, t, report):
         # merging by itself: only the base branch's required checks count (#1221), for its news too (a red optional
         # check sent to its agent would take it out of Ready, and the merge with it)
         if t.get("auto_merge"):
-            v = merge_checks(t, v)
+            v = merge_checks(t, v, now_=t["auto_merge"] == "auto")
         problem = pr_problem(v)
         if t.get("merge_queued"):
             queue_pass(s, t, v, report)

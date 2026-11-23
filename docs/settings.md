@@ -8,7 +8,7 @@ Settings is one window. Open it from the foot of the list. On a phone it is a li
 |---|---|
 | General | Theme, Chat width, Motion, and "Alerts on this device": Needs me, Everything or Off. Kept in that browser |
 | Agents | What Chats, Tasks and Reviews run on. Each row opens the picker: Agent, Model, Permissions, Effort, Speed |
-| Tasks | Review by a second agent, Merge ("When I mark it as done", "When checks pass", "Right away"), Proof |
+| Tasks | Review by a second agent, Merge ("When I mark it as done", "When all checks pass", "Right away"), Proof |
 | Secrets | Add or replace a secret. Agents use it by name and never see it |
 | Machines | Each machine's agents, processor, memory and disk. Add a machine. Open desktop, where a machine has one |
 | Usage | How much of each plan your agents have used, with reset times |

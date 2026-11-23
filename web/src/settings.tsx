@@ -212,7 +212,7 @@ function Agents({ snap, place, only }: { snap: Snapshot; place: string; only?: R
   return <>{rows.filter(([r]) => !only || only.includes(r)).map(([r, t]) => row(r, t))}</>
 }
 
-const MERGE: [LevelConfig['merge'], string][] = [['done', 'When I mark it as done'], ['checks', 'When checks pass'], ['now', 'Right away']]
+const MERGE: [LevelConfig['merge'], string][] = [['done', 'When I mark it as done'], ['checks', 'When all checks pass'], ['now', 'Right away']]
 
 function Tasks({ snap, place }: { snap: Snapshot; place: string }) {
   // a space's page: the repos its tasks work in (SHEP-335); Everywhere's: Everywhere or one repo
