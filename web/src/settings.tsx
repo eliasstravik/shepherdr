@@ -8,14 +8,15 @@ import type { Config, LevelConfig, RepoConfig, Snapshot } from '@shared/types.ts
 import { isEverything, machineLabel, machineWarn, placeOf, spaceLabel, unreachable } from '@shared/view.ts'
 import { copyText } from './copy.ts'
 import type { IconName } from './icons.ts'
-import { notice, openSettings, registry, setUI, tryAct, useUI } from './kernel.ts'
+import { newerServed, notice, openSettings, registry, setUI, tryAct, updateNow, useStore, useUI } from './kernel.ts'
 import { openDialog, openForm } from './overlay.tsx'
 import { openPicker, PickerHead, pickFor, sayPick, useCatalog, type Role } from './picker.tsx'
 import { MOTIONS, setPref, THEMES, usePrefs, WIDTHS } from './prefs.ts'
 import { setChatSide, useSides, type Layout, type Side } from './sides.ts'
+import { OWN_VERSION } from './update.ts'
 import { Btn, cx, I, IB, Meter, Row, Seg, Tgl } from './ui.tsx'
 
-const ALL: [string, IconName][] = [['General', 'gear'], ['Agents', 'agent'], ['Tasks', 'tasks'], ['Secrets', 'key'], ['Machines', 'server'], ['Usage', 'gauge'], ['Plugins', 'plug']]
+const ALL: [string, IconName][] = [['General', 'gear'], ['Agents', 'agent'], ['Tasks', 'tasks'], ['Secrets', 'key'], ['Machines', 'server'], ['Usage', 'gauge'], ['Plugins', 'plug'], ['About', 'info']]
 const SPACE: [string, IconName][] = [['Agents', 'agent'], ['Tasks', 'tasks'], ['Secrets', 'key']]
 
 /** a settings row: a label and a control */
@@ -402,9 +403,27 @@ function Plugins({ snap }: { snap: Snapshot }) {
   )
 }
 
+/** the version this device runs and the one the service serves (SHEP-337) */
+function About() {
+  const served = useStore((s) => s.served)
+  const newer = useStore(newerServed)
+  return (
+    <>
+      <SRow label="This device"><span className="val">{OWN_VERSION || 'Unknown'}</span></SRow>
+      <SRow label="Shepherdr serves"><span className="val">{served?.version || 'Unknown'}{newer && ' · newer'}</span></SRow>
+      {newer && (
+        <div className="acts" style={{ justifyContent: 'flex-start', marginTop: 12 }}>
+          <Btn small onClick={updateNow}>Update this device</Btn>
+        </div>
+      )}
+    </>
+  )
+}
+
 function Section({ snap, place, sec }: { snap: Snapshot; place: string; sec: string }) {
   const extra = registry.settings.find((s) => s.name === sec)
   if (extra) return <extra.View place={place} />
+  if (sec === 'About') return <About />
   if (!snap.config) return null
   if (sec === 'General') return <General />
   // a space's Agents: its own Assistant only (its tasks' agents are its repos', SHEP-335)

@@ -3,6 +3,7 @@
 // them out.
 import { useSyncExternalStore, type FC, type ReactNode } from 'react'
 import { buildId } from '@shared/build.ts'
+import { afterLoad, mayRetry, OWN_VERSION, readMark, safeNow, writeMark, type Now } from './update.ts'
 import type { Action, Chat, Message, ReplyQuote, ServerEvent, Snapshot, Task, UpdateStatus } from '@shared/types.ts'
 import { everything, placeOf, taskChat, taskOf, type ListFilter, type Space } from '@shared/view.ts'
 import { clean, NO_FILTER, type TaskFilter } from '@shared/task-filter.ts'
@@ -242,6 +243,8 @@ interface State {
   chats: Record<string, Chat>
   outbox: Outgoing[]
   update: UpdateStatus | null
+  /** the web app the service serves (SHEP-337): its build and version; a page on another build updates itself */
+  served: { build: string; version: string } | null
   ui: UI
 }
 
@@ -276,6 +279,7 @@ let state: State = {
   chats: {},
   outbox: loadOutbox(),
   update: null,
+  served: null,
   ui: {
     phone: !!MQ?.matches,
     narrow: !!MQ2?.matches,
@@ -588,8 +592,10 @@ export function connect() {
       state = { ...state, chats: { ...state.chats, [msg.chat.key]: chat } }
       if (!msg.chat.fresh) putOutbox(settle(state.outbox, msg.chat))
     } else if (msg.type === 'update') state = { ...state, update: msg.update }
-    else if (msg.type === 'build' && BUILD && msg.id && msg.id !== BUILD) reloadSoon()
-    else return
+    else if (msg.type === 'build') {
+      state = { ...state, served: { build: msg.id, version: msg.version ?? '' } }
+      if (BUILD && msg.id && msg.id !== BUILD) reloadSoon()
+    } else return
     emit()
   }
   sock.onclose = () => drop(sock)
@@ -701,15 +707,32 @@ function stayOnShown() {
   writeUrl(true)
 }
 
-/* ---------- a new build: the page reloads once nothing would be lost ---------- */
+/* ---------- a new build: the page reloads once nothing would be lost (SHEP-337, update.ts) ---------- */
 
-const BUILD = typeof document === 'undefined' ? '' : buildId(document.head.innerHTML)
+export const BUILD = typeof document === 'undefined' ? '' : buildId(document.head.innerHTML)
 let reloading: ReturnType<typeof setInterval> | null = null
 let holds = 0
-let typed = 0
-if (typeof window !== 'undefined') addEventListener('input', () => (typed = Date.now()), true)
+let touched = Date.now()
+if (typeof window !== 'undefined') {
+  for (const ev of ['input', 'keydown', 'pointerdown', 'wheel', 'touchstart']) addEventListener(ev, () => (touched = Date.now()), { capture: true, passive: true })
+  // the line after an update, once; a reload that brought the same page back is kept, so it isn't tried again soon
+  const after = afterLoad(readMark(), BUILD, OWN_VERSION, Date.now())
+  writeMark(after.keep)
+  // said once the page is on screen: an update while it was hidden is told when you come back
+  const say = () => {
+    const said = after.said
+    if (!said || document.visibilityState !== 'visible') return
+    document.removeEventListener('visibilitychange', say)
+    after.said = null
+    setTimeout(() => notice(said, 4000), 600)
+  }
+  if (after.said) {
+    document.addEventListener('visibilitychange', say)
+    say()
+  }
+}
 
-/** Hold off reloading while something can't be picked up again (an upload on its way). Returns the release. */
+/** Hold off reloading while something can't be picked up again (an upload on its way, dictation). Returns the release. */
 export function holdReload() {
   holds++
   let done = false
@@ -719,14 +742,37 @@ export function holdReload() {
   }
 }
 
+/** the service serves a newer web app than this page runs */
+export const newerServed = (s: State) => !!(BUILD && s.served?.build && s.served.build !== BUILD)
+
+/** what reloading now would lose */
+function nowFacts(): Now {
+  const words = [...document.querySelectorAll('textarea')].some((t) => t.value.trim() !== '')
+  return {
+    holds,
+    call: state.ui.call,
+    modal: !!document.querySelector('[aria-modal="true"]') || !!state.ui.settings,
+    composer: words,
+    hidden: document.visibilityState === 'hidden',
+    idleMs: Date.now() - touched,
+  }
+}
+
+/** Reload onto the new web app now (the chip's Update, Settings › About): what was typed and where you were stay. */
+export function updateNow() {
+  writeMark({ from: BUILD, to: state.served?.build ?? '', at: Date.now() })
+  location.reload()
+}
+
 function reloadSoon() {
   if (reloading) return
   const tryNow = () => {
-    // not in a call, not mid-upload, not while typing or with a dialog open
-    if (holds || state.ui.call || Date.now() - typed < 5000 || document.querySelector('[aria-modal="true"]')) return
-    location.reload()
+    if (!newerServed(state)) return
+    if (!mayRetry(readMark(), BUILD, Date.now()) || !safeNow(nowFacts())) return
+    updateNow()
   }
-  reloading = setInterval(tryNow, 1000)
+  reloading = setInterval(tryNow, 2000)
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', tryNow)
   tryNow()
 }
 

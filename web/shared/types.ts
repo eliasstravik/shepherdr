@@ -1388,8 +1388,8 @@ export type ServerEvent =
   | { type: 'chat'; chat: Chat }
   | ({ type: 'terminal'; chat: string } & TermScreen)
   | { type: 'offline'; since: number }
-  /** the build of the screen the server serves: a screen on another build reloads */
-  | { type: 'build'; id: string }
+  /** the build of the web app the server serves, and its version: a screen on another build updates (SHEP-337) */
+  | { type: 'build'; id: string; version?: string }
   | { type: 'update'; update: UpdateStatus | null }
   /** the answer to a screen's ping: its link still works */
   | { type: 'pong' }

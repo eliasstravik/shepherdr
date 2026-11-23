@@ -135,3 +135,6 @@ button:disabled{opacity:.5;cursor:default}
 .bbody.fade{mask-image:linear-gradient(to bottom,#000 50%,transparent)}
 .b.brief .fold{min-height:32px}
 .bset{margin:0;padding:0;list-style:none;color:var(--sub);font-size:var(--sec);line-height:var(--secl)}
+/* a newer web app (SHEP-337): a small pill under the header, one tap reloads onto it */
+.upchip{position:fixed;z-index:19;top:calc(var(--hd) + 8px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px 0 10px;border-radius:999px;background:var(--fg);color:var(--canvas);box-shadow:var(--shadow);font-size:13px;line-height:18px;white-space:nowrap}
+.upchip b{font-weight:600}

@@ -41,6 +41,9 @@ export class Live {
   private wake: { from: string; at: number; msg: string } | null = null;
   /** device -> when its last page on screen went away without saying it was hidden */
   private lookedAt = new Map<string, number>();
+  /** the web app's build this service serves (webbuild.ts): each page hears it, and again when it changes */
+  private build = "";
+  web: (() => { id: string; version: string }) | null = null;
 
   constructor(private hub: Hub, private store: Store, private me: () => Me | null, private version: string, private link: () => string | null = () => null) {
     hub.on((e) => {
@@ -50,6 +53,22 @@ export class Live {
     // the shared document changed: a choice for an Assistant that hasn't started may be one of them
     store.on((d) => { this.put("state", d); this.refresh(); });
     setInterval(() => void this.machines(), 15_000);
+    setInterval(() => this.newBuild(), 20_000);
+  }
+
+  private buildText() {
+    const b = this.web?.();
+    this.build = b?.id ?? "";
+    // a web app from before it said its version: the service's own
+    return this.build ? JSON.stringify({ type: "build", id: this.build, version: b?.version || this.version }) : "";
+  }
+
+  /** a new web app put in place while the service runs: every page hears of it */
+  private newBuild() {
+    const was = this.build;
+    const text = this.buildText();
+    if (!text || this.build === was) return;
+    for (const ws of this.pages) if (ws.readyState === 1) ws.send(text);
   }
 
   join(ws: WS) {
@@ -57,6 +76,8 @@ export class Live {
     this.pages.add(ws);
     const me = this.me();
     ws.send(JSON.stringify({ type: "hello", version: this.version, login: ws.data.who, machine: me?.host ?? null, link: this.link() }));
+    const build = this.buildText();
+    if (build) ws.send(build);
     for (const [name, text] of this.views) ws.send(`{"type":"view","name":${JSON.stringify(name)},"value":${text}}`);
     if (this.snap) ws.send(this.snap);
     if (!this.views.has("state")) void this.store.load().then((d) => this.put("state", d));

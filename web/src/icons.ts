@@ -1,5 +1,6 @@
 // The one icon set (20-unit grid, 1.5 stroke): drawn by <I> in ui.tsx. No text glyphs as icons.
 export const IC = {
+  "info": "<circle cx=\"10\" cy=\"10\" r=\"7\"/><path d=\"M10 9v4.5M10 6.6v.1\"/>",
   "plus": "<path d=\"M10 4v12M4 10h12\"/>",
   "minus": "<path d=\"M4 10h12\"/>",
   "mic": "<rect x=\"7.5\" y=\"2.5\" width=\"5\" height=\"9\" rx=\"2.5\"/><path d=\"M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v2.5\"/>",
