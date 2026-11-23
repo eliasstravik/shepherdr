@@ -9,6 +9,7 @@ import { everything, isEverything, machineLabel, machineOf, spaceName, spacesOf,
 import { act, getState } from './kernel.ts'
 import { openDialog } from './overlay.tsx'
 import { Btn, I, IB, Logo, Row } from './ui.tsx'
+import { SpaceIcon } from './space-icon.tsx'
 
 /** what runs: the agent, its model, effort, speed and permission mode; `label`: the model's name as a running agent reports it */
 export type Pick = AgentPick & { label?: string | null }
@@ -437,7 +438,7 @@ function SpacePicker({ value, onPick, close }: { value: string; onPick: (place: 
   const row = (id: string, name: string, root: boolean, machine: string) => (
     <Row
       key={id}
-      icon={root ? 'layers' : 'hash'}
+      lead={<SpaceIcon snap={snap} id={id} />}
       label={name}
       value={root ? machineLabel(snap, machine) : undefined}
       current={value === id}
@@ -481,7 +482,7 @@ export function SpaceField({ value, onChange }: { value: string; onChange: (plac
     <div className="fld">
       <span>Space</span>
       <button type="button" className="fake" aria-label={`Space: ${name} on ${mach}. Change`} onClick={() => openDialog((close) => <SpacePicker value={value} onPick={onChange} close={close} />, { wide: true, bare: true, label: 'Space' })}>
-        <I n={root ? 'layers' : 'hash'} />
+        <SpaceIcon snap={snap} id={value} />
         <span className="n"><b>{name}</b> <span>{mach}</span></span>
         <I n="right" c="s16" />
       </button>

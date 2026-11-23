@@ -11,7 +11,8 @@ import { cx, I } from '@client/ui.tsx'
 import type { Chat, Message } from '@shared/types.ts'
 import { chipLabel, chipsOf, minesOf, togglesFor } from './chips.ts'
 import { fit } from './place.ts'
-import { loadEmoji, quickRow, remember, search, tone, withTone, type Group } from './emoji.ts'
+import { quickRow, remember, tone } from './emoji.ts'
+import { All } from './all.tsx'
 
 /** react to a message: the same emoji again takes it back, another one changes yours */
 export function react(chat: string, msg: Message, emoji: string) {
@@ -58,27 +59,6 @@ export function Chips({ msg, chat }: { msg: Message; chat: Chat }) {
           {c.count > 1 && <span className="n">{c.count}</span>}
         </button>
       ))}
-    </div>
-  )
-}
-
-/** every emoji, with search */
-function All({ onPick }: { onPick: (e: string) => void }) {
-  const [groups, setGroups] = useState<Group[] | null>(null)
-  const [q, setQ] = useState('')
-  useEffect(() => void loadEmoji().then(setGroups), [])
-  const skin = tone()
-  const found = groups && q.trim() ? search(groups, q) : null
-  return (
-    <div className="pk">
-      <input className="inp" name="eq" aria-label="Search emoji" placeholder="Search emoji" value={q} autoComplete="off" data-autofocus onChange={(e) => setQ(e.target.value)} />
-      <div className="emolist" role="listbox" aria-label="Emoji">
-        {(found ?? groups?.flatMap((g) => g.list) ?? []).slice(0, found ? 120 : 400).map((e) => {
-          const ch = e.tone ? withTone(e.e, skin) : e.e
-          return <button type="button" key={e.e} role="option" aria-selected={false} aria-label={e.name} onClick={() => onPick(ch)}>{ch}</button>
-        })}
-      </div>
-      {found && !found.length && <p className="hint" style={{ padding: 8 }}>No emoji matches.</p>}
     </div>
   )
 }

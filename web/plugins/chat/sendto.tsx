@@ -5,6 +5,7 @@ import { getState } from '@client/kernel.ts'
 import { openDialog } from '@client/overlay.tsx'
 import { PickerHead } from '@client/picker.tsx'
 import { I, Row } from '@client/ui.tsx'
+import { SpaceIcon } from '@client/space-icon.tsx'
 import { StatusIcon } from '@plugins/tasks/icon.tsx'
 import type { Snapshot } from '@shared/types.ts'
 import { everything, machineLabel, spaceName, spacesOf, taskChat, workWords } from '@shared/view.ts'
@@ -35,7 +36,7 @@ function SendTo({ from, close }: { from: string; close: () => void }) {
       <div className="list">
         {spaces.length > 0 && <div className="lab">Spaces</div>}
         {spaces.map((p) => (
-          <Row key={p.id} icon={p.root ? 'layers' : 'hash'} label={p.name} value={machineLabel(snap, p.machine)} current={p.chat === from} end={p.chat === from ? <I n="check" /> : undefined} onClick={to({ key: p.chat, place: p.id })} />
+          <Row key={p.id} lead={<SpaceIcon snap={snap} id={p.id} />} label={p.name} value={machineLabel(snap, p.machine)} current={p.chat === from} end={p.chat === from ? <I n="check" /> : undefined} onClick={to({ key: p.chat, place: p.id })} />
         ))}
         {tasks.length > 0 && <div className="lab">Tasks</div>}
         {tasks.map((t) => (

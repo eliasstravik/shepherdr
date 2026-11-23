@@ -13,6 +13,7 @@ import { copyText } from './copy.ts'
 import { DictateButton } from './dictate.tsx'
 import { press } from './drag.ts'
 import { swapRow } from './sides.ts'
+import { NameWithIcon, SpaceIcon } from './space-icon.tsx'
 
 const FILTERS: Filter[] = ['Active', 'Archived', 'All']
 
@@ -111,6 +112,40 @@ export function renameDialog(name: string, save: (name: string) => void | Promis
   )
 }
 
+/** the last part of a folder typed in New space: what the space is called when no name is given */
+const folderName = (f: string) => f.trim().replace(/\/+$/, '').split('/').pop()?.replace(/^~$/, '') ?? ''
+
+/** Rename a space: its icon's own button, then its name (blank: what an empty name shows, a machine's home space: ~,
+ *  saved as no name). Everything's icon is set in Settings. */
+export function renameSpace(id: string, name: string, icon: string | null, blank?: string) {
+  openForm(
+    function Form({ close }) {
+      const [v, setV] = useState(name)
+      const [ic, setIc] = useState(icon)
+      const ok = () => {
+        const t = v.trim()
+        if (!t && blank === undefined) return
+        close()
+        if (t === name && ic === icon) return
+        void tryAct({ type: 'rename', id, name: t, ...(ic !== icon ? { emoji: ic ?? '' } : {}), ...(blank !== undefined && !t ? { unname: true } : {}) })
+      }
+      return (
+        <>
+          <h2>Rename</h2>
+          <NameWithIcon icon={ic} onIcon={setIc}>
+            <input className="inp" name="name" aria-label="Name" value={v} placeholder={blank} autoComplete="off" onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && ok()} />
+          </NameWithIcon>
+          <div className="acts">
+            <Btn onClick={close}>Cancel</Btn>
+            <Btn kind="pri" onClick={ok}>Save</Btn>
+          </div>
+        </>
+      )
+    },
+    { label: 'Rename' },
+  )
+}
+
 export function newGroupDialog(machine?: string, then?: (id: string) => void) {
   openForm(
     function Form({ close }) {
@@ -150,6 +185,7 @@ export function newSpaceDialog(machine?: string, pre?: { name: string; folder: s
     function Form({ close }) {
       const snap = getState().snap!
       const [name, setName] = useState(pre?.name ?? '')
+      const [icon, setIcon] = useState<string | null>(null)
       const [m, setM] = useState(machine ?? snap.host)
       const [folder, setFolder] = useState(pre?.folder ?? '')
       // it starts on Everything's choice for chats
@@ -160,7 +196,7 @@ export function newSpaceDialog(machine?: string, pre?: { name: string; folder: s
         if (!path || busy) return
         setBusy(true)
         try {
-          const r = await fetch('api/spaces', { method: 'POST', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify({ machine: m === snap.host ? undefined : m, path, name: name.trim().replace(/^#\s*/, '') || undefined, agent: pick ?? undefined, create: true }) })
+          const r = await fetch('api/spaces', { method: 'POST', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify({ machine: m === snap.host ? undefined : m, path, name: name.trim().replace(/^#\s*/, '') || undefined, ...(icon ? { icon } : {}), agent: pick ?? undefined, create: true }) })
           const j = (await r.json().catch(() => ({}))) as { place?: string; error?: string; warning?: string; existed?: boolean }
           if (!r.ok || !j.place) throw new Error(j.error || 'The space could not be made.')
           close()
@@ -179,10 +215,9 @@ export function newSpaceDialog(machine?: string, pre?: { name: string; folder: s
         <>
           <h2>New space</h2>
           <p>A folder on one of your machines, with its own chat.</p>
-          <label className="fld">
-            <span>Name</span>
-            <input className="inp" name="space" value={name} placeholder="# docs" autoComplete="off" autoCapitalize="off" onChange={(e) => setName(e.target.value)} />
-          </label>
+          <NameWithIcon icon={icon} onIcon={setIcon}>
+            <input className="inp" name="space" aria-label="Name" value={name} placeholder={folderName(folder) || 'docs'} autoComplete="off" autoCapitalize="off" onChange={(e) => setName(e.target.value)} />
+          </NameWithIcon>
           <MachineField value={m} onChange={setM} />
           <label className="fld">
             <span>Folder</span>
@@ -287,7 +322,7 @@ export function spaceMenu(anchor: Element, placeId: string, head = false) {
     {
       icon: 'pen',
       label: 'Rename',
-      run: () => (home ? renameDialog(tilde ? '' : p.name, (name) => tryAct({ type: 'rename', id: p.id, name, ...(name ? {} : { unname: true }) }), '~') : renameDialog(p.name, (name) => tryAct({ type: 'rename', id: p.id, name }))),
+      run: () => renameSpace(p.id, home ? (tilde ? '' : p.name) : p.name, p.emoji ?? null, home ? '~' : undefined),
     },
     {
       icon: 'folder',
@@ -301,7 +336,7 @@ export function spaceMenu(anchor: Element, placeId: string, head = false) {
     { icon: 'archive', label: p.archived ? 'Unarchive' : 'Archive', run: () => archive(snap, p) },
     { icon: 'bin', label: 'Remove', danger: true, line: true, run: () => remove(snap, p) },
   ]
-  openMenu(anchor, rows, { label: spaceLabel(snap, p.id), ...(nameCut(anchor) && !tilde ? { top: () => <WholeName name={p.name} /> } : {}) })
+  openMenu(anchor, rows, { label: spaceLabel(snap, p.id), ...(nameCut(anchor) && !tilde ? { top: () => <WholeName name={p.name} id={p.id} /> } : {}) })
 }
 
 /** a cut-off name (one line, or two that wrap) shows whole where it opens: its menu's first line (SHEP-356) */
@@ -309,10 +344,10 @@ export const isCut = (el: Element | null | undefined) => !!el && (el.scrollWidth
 /** the space's name as its header button or its row in the list shows it, cut or not */
 const nameCut = (anchor: Element) => isCut(anchor.classList.contains('tbtn') ? anchor.querySelector('span') : anchor.closest('.rowx')?.querySelector('.row>.n'))
 
-function WholeName({ name }: { name: string }) {
+function WholeName({ name, id }: { name: string; id: string }) {
   return (
     <div className="fwhere">
-      <I n="hash" />
+      <SpaceIcon snap={getState().snap!} id={id} />
       <span className="n"><span className="l1">{name}</span></span>
     </div>
   )
@@ -357,7 +392,7 @@ function SpaceRow({ snap, p, sub, under, siblings, section }: { snap: Snapshot; 
   const tilde = isTilde(snap, p)
   return (
     <div className="rowx" data-project={p.id} data-section={section} data-drop={under} onPointerDown={dragSpace(snap, p, under, siblings)}>
-      <Row icon="hash" label={tilde ? '~' : p.name} {...(tilde ? { 'aria-label': spaceLabel(snap, p.id) } : {})} className={[sub ? 'sub' : '', dim ? 'dim' : ''].join(' ')} current={at === p.id && !wide} end={<Cnt n={n} />} onClick={() => go(p.id)} />
+      <Row lead={<SpaceIcon snap={snap} id={p.id} />} label={tilde ? '~' : p.name} {...(tilde ? { 'aria-label': spaceLabel(snap, p.id) } : {})} className={[sub ? 'sub' : '', dim ? 'dim' : ''].join(' ')} current={at === p.id && !wide} end={<Cnt n={n} />} onClick={() => go(p.id)} />
       <IB
         icon="dots"
         label={`More for ${tilde ? spaceLabel(snap, p.id) : p.name}`}
@@ -506,7 +541,7 @@ export function List({ snap }: { snap: Snapshot }) {
       </div>
       {ev && (
         <div className="rowx">
-          <Row icon="layers" label="Everything" current={ui.at === ev.id && !ui.wide} onClick={() => go(ev.id)} />
+          <Row lead={<SpaceIcon snap={snap} id={ev.id} />} label="Everything" current={ui.at === ev.id && !ui.wide} onClick={() => go(ev.id)} />
         </div>
       )}
       {machines.map((m) => {

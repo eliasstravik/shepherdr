@@ -68,6 +68,7 @@ const SC = SCORE as any;
 const { SCAN, scanned, commandList, MENU } = SL as any;
 import * as HCORE from "../core/host.js";
 const { serveChoice } = HCORE as any;
+import { iconValue, isPicture } from "../core/space-icon.js";
 import * as MN from "../core/mentions.js";
 const { REACH_FILE, reachable } = MN as any;
 
@@ -78,7 +79,7 @@ const reaches = new Map<string, { at: number; got: Promise<{ from: string | null
 function knownSpaces() {
   return compat.allSpaces().map((s) => {
     const p = compat.last?.places.find((x) => x.id === s.id);
-    return { id: s.id.split("/").pop()!, name: p?.name ?? "", folder: s.folder, machine: s.machine ?? null, ...(p?.emoji ? { emoji: p.emoji } : {}), assistant: !!(p && compat.addrOf(p.chat)) };
+    return { id: s.id.split("/").pop()!, name: p?.name ?? "", folder: s.folder, machine: s.machine ?? null, ...(p?.emoji && !isPicture(p.emoji) ? { emoji: p.emoji } : {}), assistant: !!(p && compat.addrOf(p.chat)) };
   });
 }
 function reachOf(machine: string | null) {
@@ -92,7 +93,7 @@ function reachOf(machine: string | null) {
     from: machine, checked: null,
     spaces: compat.allSpaces().filter((s) => (s.machine ?? null) === machine).map((s) => {
       const id = s.id.split("/").pop()!, p = compat.last?.places.find((x) => x.id === s.id);
-      return { id, name: p?.name ?? id, route: "", machine: machine ?? me?.host ?? "", target: id, ...(p?.emoji ? { emoji: p.emoji } : {}), assistant: !!(p && compat.addrOf(p.chat)) };
+      return { id, name: p?.name ?? id, route: "", machine: machine ?? me?.host ?? "", target: id, ...(p?.emoji && !isPicture(p.emoji) ? { emoji: p.emoji } : {}), assistant: !!(p && compat.addrOf(p.chat)) };
     }),
   });
   reaches.set(k, { at: Date.now(), got });
@@ -992,7 +993,8 @@ const server = Bun.serve<{ who: string }>({
       const b = await req.json().catch(() => null);
       try {
         const machine = !b?.machine || b.machine === me?.host ? null : String(b.machine);
-        const icon = typeof b?.icon === "string" && b.icon ? b.icon.slice(0, 16) : null;
+        // an emoji or a picture, checked (core/space-icon.js)
+        const icon = iconValue(b?.icon);
         // the name typed and the agent picked in the New space dialog (none: named after its folder, on Settings' choice)
         const name = typeof b?.name === "string" && b.name.trim() ? b.name.trim().slice(0, 80) : undefined;
         const picked = pickFrom(b?.agent);

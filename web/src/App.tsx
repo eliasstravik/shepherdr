@@ -13,6 +13,7 @@ import { edge } from './resize.ts'
 import { columnsOf, swapSides, useSides } from './sides.ts'
 import { SettingsWindow } from './settings.tsx'
 import { cx, Empty, I, IB, useScrolled } from './ui.tsx'
+import { SpaceIcon } from './space-icon.tsx'
 
 /** the thread the middle column shows: the open task when it has the middle, else the space's chat */
 export function middleThread(snap: Snapshot, ui: { at: string; task: string | null; wide: boolean }): Thread | null {
@@ -39,7 +40,7 @@ function ChatHeader({ snap, thread, place, scrolled }: { snap: Snapshot; thread:
       {phone ? <IB icon="burger" label="Spaces" onClick={() => setUI({ drawer: true })} /> : hidden ? <IB icon="panel" label="Show the list" onClick={showList} /> : null}
       <div className="ttl">
         <button type="button" className="tbtn" aria-haspopup="menu" onClick={(e) => spaceMenu(e.currentTarget, place.id, true)}>
-          {!every && <I n="hash" c="s16" />}
+          {(!every || place.emoji) && <SpaceIcon snap={snap} id={place.id} c="s16" />}
           <span>{every ? 'Everything' : spaceName(snap, place)}</span>
           <I n="down" c="s16 c-mute" />
         </button>

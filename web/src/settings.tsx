@@ -5,7 +5,7 @@
 import { useState, type ReactNode } from 'react'
 import { choose, TELL, turnOn, useDeviceAlerts, WHY, type Tell } from '@plugins/alerts/device.ts'
 import type { Config, LevelConfig, RepoConfig, Snapshot } from '@shared/types.ts'
-import { isEverything, machineLabel, machineWarn, placeOf, spaceLabel, unreachable } from '@shared/view.ts'
+import { everything, isEverything, machineLabel, machineWarn, placeOf, spaceLabel, unreachable } from '@shared/view.ts'
 import { copyText } from './copy.ts'
 import type { IconName } from './icons.ts'
 import { newerServed, notice, openSettings, registry, setUI, tryAct, updateNow, useStore, useUI } from './kernel.ts'
@@ -14,10 +14,11 @@ import { openPicker, PickerHead, pickFor, sayPick, useCatalog, type Role } from 
 import { MOTIONS, setPref, THEMES, usePrefs, WIDTHS } from './prefs.ts'
 import { setChatSide, useSides, type Layout, type Side } from './sides.ts'
 import { OWN_VERSION } from './update.ts'
+import { IconButton } from './space-icon.tsx'
 import { Btn, cx, I, IB, Meter, Row, Seg, Tgl } from './ui.tsx'
 
 const ALL: [string, IconName][] = [['General', 'gear'], ['Agents', 'agent'], ['Tasks', 'tasks'], ['Secrets', 'key'], ['Machines', 'server'], ['Usage', 'gauge'], ['Plugins', 'plug'], ['About', 'info']]
-const SPACE: [string, IconName][] = [['Agents', 'agent'], ['Tasks', 'tasks'], ['Secrets', 'key']]
+const SPACE: [string, IconName][] = [['Space', 'hash'], ['Agents', 'agent'], ['Tasks', 'tasks'], ['Secrets', 'key']]
 
 /** a settings row: a label and a control */
 export function SRow({ label, wrap, children }: { label: ReactNode; wrap?: boolean; children?: ReactNode }) {
@@ -420,12 +421,24 @@ function About() {
   )
 }
 
+/** a space's icon (Everything's too): its own button, as in Rename (web/src/space-icon.tsx) */
+function IconRow({ snap, id }: { snap: Snapshot; id: string }) {
+  const p = placeOf(snap, id)
+  if (!p) return null
+  return (
+    <SRow label="Icon">
+      <IconButton icon={p.emoji ?? null} root={isEverything(snap, id)} onChange={(v) => void tryAct({ type: 'rename', id, name: '', emoji: v ?? '' })} />
+    </SRow>
+  )
+}
+
 function Section({ snap, place, sec }: { snap: Snapshot; place: string; sec: string }) {
   const extra = registry.settings.find((s) => s.name === sec)
   if (extra) return <extra.View place={place} />
   if (sec === 'About') return <About />
   if (!snap.config) return null
-  if (sec === 'General') return <General />
+  if (sec === 'General') return <><General /><h3>Everything</h3><IconRow snap={snap} id={everything(snap)?.id ?? ''} /></>
+  if (sec === 'Space') return <IconRow snap={snap} id={place} />
   // a space's Agents: its own Assistant only (its tasks' agents are its repos', SHEP-335)
   if (sec === 'Agents') return <Agents snap={snap} place={place} only={place === 'all' ? undefined : ['Chats']} />
   if (sec === 'Tasks') return <Tasks snap={snap} place={place} />

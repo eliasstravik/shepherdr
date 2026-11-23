@@ -10,6 +10,7 @@ import { confirm, openDialog, openForm, openMenu } from '@client/overlay.tsx'
 import { AgentField, pickFor, type Pick } from '@client/picker.tsx'
 import { edge } from '@client/resize.ts'
 import { Btn, Cnt, cx, Empty, Hd, I, IB, MenuGroup, Row } from '@client/ui.tsx'
+import { SpaceIcon } from '@client/space-icon.tsx'
 import type { MergeEvidence, Snapshot, Task } from '@shared/types.ts'
 import { askedWords, isEverything, machineLabel, nowGroups, onBranch, placeDown, reposOf, spaceLabel, spaceOnFolder, spacesOf, etaOf, leftWords, statusWord, taskChat, taskLine, taskWhen, tasksIn, tstate, workKey, workName, workWords, type Repo } from '@shared/view.ts'
 import { DoneRow } from '@plugins/chat/cards.tsx'
@@ -216,7 +217,7 @@ function startDialog(t: Task) {
           <div className="fld">
             <span>Space</span>
             <span className="fake">
-              <I n={every ? 'layers' : 'hash'} />
+              <SpaceIcon snap={snap} id={t.place} />
               <span style={{ marginLeft: 8 }}>
                 <b style={{ fontWeight: 500 }}>{spaceLabel(snap, t.place).replace(/^#/, '')}</b> <span style={{ color: 'var(--muted)' }}>{machineLabel(snap, machine)}</span>
               </span>
