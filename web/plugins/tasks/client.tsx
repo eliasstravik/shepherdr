@@ -260,7 +260,6 @@ function TaskHead({ task: t, where, scrolled }: { task: Task; where: 'chat' | 'p
 /** the status line: its status, time left, its id as small print, its machine, its pull request */
 function TaskTop({ task: t }: { task: Task }) {
   const snap = useSnap()
-  const voiced = useUI((u) => u.voiced === t.id)
   if (!snap) return null
   const w = statusWord(t)
   const left = tstate(t) === 'working' ? taskWhen(t) : ''
@@ -272,7 +271,6 @@ function TaskTop({ task: t }: { task: Task }) {
       <span>· {taskRef(t)}</span>
       <span>· {machineLabel(snap, t.on)}</span>
       {t.pr && <span>· <a className="lk" href={t.pr.url} target="_blank" rel="noreferrer">PR #{t.pr.number}</a></span>}
-      {voiced && <span>· opened by voice</span>}
     </div>
   )
 }

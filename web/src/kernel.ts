@@ -85,7 +85,7 @@ export interface Registry {
   bar: { order: number; pane: string; label: string; icon: IconName; count?: (snap: Snapshot, place: string) => number }[]
   /** at the right of the phone's bottom bar (the voice button; Mute and End in a call) */
   barEnd: FC[]
-  /** one line just above the phone's bottom bar (a call's caption) */
+  /** one line just above the phone's bottom bar (a call's wave) */
   barAbove: FC[]
   /** rows of a space's menu, between Switch to terminal and Settings (none today) and its other parts */
   spaceMenu: { order: number; rows: (place: Space) => MenuRow[] }[]
@@ -209,8 +209,6 @@ export interface UI {
   call: boolean
   callMuted: boolean
   /** what the call heard or says, one line */
-  callCap: string
-  callError: string | null
   /** files in each message box, not sent yet */
   files: Record<string, { name: string; path?: string; id?: string; failed?: string }[]>
   /** the message each box replies to */
@@ -221,8 +219,6 @@ export interface UI {
   offline: number | null
   /** a message or card to bring into view once its chat shows it (an alert's link) */
   jump: string | null
-  /** the task the voice opened: marked "opened by voice" in its status line */
-  voiced: string | null
   /** the artifacts grid's search box: null is closed */
   artq: string | null
   /** the warnings line was closed: the ids of the warnings it held ("a|b"), until one that isn't among them shows */
@@ -294,15 +290,12 @@ let state: State = {
     doneShown: 20,
     call: false,
     callMuted: false,
-    callCap: '',
-    callError: null,
     files: {},
     reply: {},
     keyboard: false,
     offline: null,
     jump: params.get('focus'),
     artq: null,
-    voiced: null,
     banner: null,
     ...stored<Partial<UI>>('shepherdr.ui', {}),
   },

@@ -8,9 +8,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { canDictate, clock, dictate, dictSample, SAY, type Dictation, type Heard } from './dictation.ts'
 import { IDLE, NOTHING, shownWords, step, type DictEvent, type DictState } from './dictstate.ts'
 import { has } from './kernel.ts'
-import { still } from './motion.ts'
 import { escapeFirst } from './overlay.tsx'
 import { I, IB } from './ui.tsx'
+import { Wave } from './wave.tsx'
 import './dictate.css'
 
 /** the state and the words it writes: each event steps once (no reducer, which StrictMode runs twice), so a write
@@ -166,7 +166,7 @@ export function DictateButton({ write, scope }: { write: (text: string) => void;
         ) : (
           <>
             <IB icon="x" label="Cancel dictation" onClick={cancel} />
-            <Wave on={s.k === 'on'} />
+            <Wave on={s.k === 'on'} sample={dictSample} />
             <span className="dtime" aria-hidden>
               <i className={`ddot${s.k === 'on' ? ' rec' : ''}`} />
               {s.k === 'on' ? clock(Date.now() - s.since) : s.k === 'writing' ? clock(s.took) : '0:00'}
@@ -190,79 +190,4 @@ export function DictateButton({ write, scope }: { write: (text: string) => void;
       </span>
     </div>
   )
-}
-
-/** bars kept for the wave: one per BAR+GAP pixels, the newest on the right */
-const BAR = 3
-const GAP = 2
-/** a new bar about every 60 ms: speech's syllables show as peaks */
-const EVERY = 60
-
-/** The wave: drawn from the microphone's real level (dictSample), scrolling left as you speak; still dots before a
- *  sound and frozen once Done is pressed. With reduced motion: a calm level meter that fills and empties, no scroll. */
-function Wave({ on }: { on: boolean }) {
-  const ref = useRef<HTMLCanvasElement>(null)
-  const bars = useRef<number[]>([])
-  const calm = useRef(still())
-  useEffect(() => {
-    const c = ref.current
-    if (!c) return
-    let raf = 0
-    let last = 0
-    let smooth = 0
-    const draw = (now: number) => {
-      raf = requestAnimationFrame(draw)
-      const dpr = devicePixelRatio || 1
-      const w = c.clientWidth
-      const h = c.clientHeight
-      if (!w || !h) return
-      if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
-        c.width = Math.round(w * dpr)
-        c.height = Math.round(h * dpr)
-      }
-      const g = c.getContext('2d')
-      if (!g) return
-      g.setTransform(dpr, 0, 0, dpr, 0, 0)
-      g.clearRect(0, 0, w, h)
-      g.fillStyle = getComputedStyle(c).color
-      const level = on ? dictSample().level : 0
-      if (calm.current) {
-        // reduced motion: one bar that fills with how loud you are, eased so it doesn't flicker
-        smooth += (level - smooth) * 0.2
-        g.globalAlpha = 0.18
-        round(g, 0, h / 2 - 2, w, 4)
-        g.globalAlpha = 1
-        if (smooth > 0.01) round(g, 0, h / 2 - 2, Math.max(4, w * Math.min(1, smooth * 1.4)), 4)
-        return
-      }
-      const n = Math.max(1, Math.floor((w + GAP) / (BAR + GAP)))
-      if (on && now - last >= EVERY) {
-        last = now
-        bars.current.push(level)
-        if (bars.current.length > n) bars.current.splice(0, bars.current.length - n)
-      }
-      const b = bars.current
-      for (let i = 0; i < n; i++) {
-        const v = b[b.length - n + i]
-        const x = w - (n - i) * (BAR + GAP) + GAP
-        // before any sound: a row of still dots; a sound: a bar as tall as it was loud
-        const bh = v === undefined ? 2 : Math.max(2, Math.min(h, h * Math.min(1, v * 1.5)))
-        // the oldest bars fade at the left edge
-        g.globalAlpha = (v === undefined ? 0.25 : 1) * Math.min(1, (i + 1) / (n * 0.25))
-        round(g, x, (h - bh) / 2, BAR, bh)
-      }
-      g.globalAlpha = 1
-    }
-    raf = requestAnimationFrame(draw)
-    return () => cancelAnimationFrame(raf)
-  }, [on])
-  return <canvas ref={ref} className={`dwave${on ? '' : ' off'}`} aria-hidden />
-}
-
-function round(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
-  const r = Math.min(w, h) / 2
-  g.beginPath()
-  if (g.roundRect) g.roundRect(x, y, w, h, r)
-  else g.rect(x, y, w, h)
-  g.fill()
 }

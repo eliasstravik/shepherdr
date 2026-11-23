@@ -88,7 +88,13 @@ button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"])
 .t2{color:var(--muted);font-size:var(--sec);line-height:var(--secl)}
 .tbtn{display:inline-flex;align-items:center;gap:4px;max-width:100%;height:32px;padding:0 8px;margin-left:-4px;border-radius:8px;font-weight:600;min-width:0}
 .tbtn:hover,.tbtn[aria-expanded="true"]{background:var(--control)}.tbtn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.vline{flex:0 1 auto;min-width:0;color:var(--muted);font-size:var(--sec);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 8px}
+/* SHEP-326: the call's mark, no words: a live wave of whoever talks, still dots that breathe while it connects */
+.vmark{display:inline-flex;align-items:center;flex:none;width:56px;height:20px;margin:0 6px;color:var(--fg)}
+.vmark.ph{width:120px;margin:0}
+.vmark.wait{animation:calm 1.6s ease-in-out infinite}
+.vwave{width:100%;height:100%}
+.vwave.off{color:var(--muted)}
+@media(prefers-reduced-motion:reduce){.vmark.wait{animation:none}}
 
 /* list (sidebar and drawer) */
 .brand{display:flex;align-items:center;gap:4px;height:var(--hd);margin-top:-8px;padding-left:4px;flex:none}
@@ -208,7 +214,7 @@ h3+.srow,.hint+.srow,.banner+.srow{border-top:0}
 .vbtn{display:grid;place-items:center;width:60px;height:60px;border-radius:50%;background:var(--raised);flex:none}
 .vbtn[aria-pressed="true"]{background:var(--fg);color:var(--canvas)}
 .vbtn.end,.ib.end,.ib.end:hover{background:#dc2626;color:#fff}
-.vcap{height:20px;padding:0 16px;color:var(--muted);font-size:14px;line-height:20px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vcap{display:flex;justify-content:center;align-items:center;height:20px;padding:0 16px}
 
 /* resizable edges */
 .rz{display:none;position:absolute;top:0;bottom:0;width:12px;cursor:col-resize;touch-action:none;z-index:15}
