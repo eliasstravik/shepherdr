@@ -142,7 +142,14 @@ button.b{cursor:pointer}
 .bw{position:relative;display:grid;grid-template-columns:minmax(0,1fr);justify-self:start;max-width:min(82%,560px)}.bw.mine{justify-self:end}
 .pane .bw{max-width:92%}.bw>.bmv>.b{max-width:100%}
 .bmv{position:relative;display:grid;grid-template-columns:minmax(0,1fr);justify-items:start}.bw.mine>.bmv{justify-items:end}
-.bmv.settle{transition:transform 320ms cubic-bezier(.25,1.12,.4,1)}
+.bmv.settle,.tslide .settle,.rowx.tsl>.settle{transition:transform 320ms cubic-bezier(.25,1.12,.4,1)}
+/* a task's row slides to reply to it like a message (SHEP-332's slide): its Reply behind it, in one line */
+.tslide,.rowx.tsl{position:relative;isolation:isolate}.tslide{touch-action:pan-y pinch-zoom}.rowx.tsl>.row.tk{touch-action:pan-y pinch-zoom}
+.tslide>.tmv{display:inline-flex;align-items:center;gap:inherit;min-width:0;max-width:100%}
+:is(.tslide,.rowx.tsl)>.rpl{flex-direction:row;gap:6px;border-radius:8px;z-index:-1}
+.quote.qtask{display:flex;align-items:center;gap:6px;max-width:100%;border:0;border-left:2px solid var(--line2);background:none;font:inherit;font-size:14px;line-height:20px;text-align:start;cursor:pointer}
+.quote.qtask>.qt1{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--sub)}.quote.qtask>.qt2{flex:0 4 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quote.qtask>.qt2::before{content:"· "}
+.quote.qtask>.tring{flex:none}.quote.qtask>.tring>.i{width:16px;height:16px}
 .rpl{position:absolute;inset-block:0;left:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;overflow:hidden;border-radius:18px;background:var(--control2);color:var(--fg);font-size:var(--sec);line-height:var(--secl);font-weight:600;white-space:nowrap;pointer-events:none}
 .rpl.on{background:var(--fg);color:var(--canvas)}
 .qb{position:absolute;z-index:3;display:flex;align-items:center;gap:8px;transform:translateY(-50%)}
@@ -175,7 +182,7 @@ button.b{cursor:pointer}
 .rxc.rx-pending{opacity:.6}
 .rxs>.rxc.rx-new{animation:rxpop 280ms cubic-bezier(.25,1.12,.4,1)}
 @keyframes rxpop{0%{transform:scale(.3);opacity:0}60%{transform:scale(1.12);opacity:1}100%{transform:scale(1)}}
-@media(prefers-reduced-motion:reduce){.rxs>.rxc.rx-new{animation:none}.bmv.settle{transition:none}}
+@media(prefers-reduced-motion:reduce){.rxs>.rxc.rx-new{animation:none}.settle{transition:none!important}}
 /* a finger's long press opens the menu, not the system's word selection (Select text turns it back on) */
 @media(pointer:coarse){.b[data-menu]:not(.sel){-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}}
 .b[data-menu]{touch-action:pan-y pinch-zoom}
@@ -557,7 +564,7 @@ textarea.cin{overflow-y:auto}
 .msgs>:not(.fold,.ref,.donerow,.time,.mend)+:is(.card,.wsign,.wrow),.msgs>.card+:not(.fold,.ref,.donerow,.time,.mend){margin-top:8px}
 .msgs>:not(.fold,.ref,.donerow,.time)+:is(.fold,.ref,.donerow),.msgs>:is(.fold,.ref,.donerow)+:not(.fold,.ref,.donerow,.time,.quietb,.files,.mend){margin-top:4px}
 .msgs>:is(.fold,.ref,.donerow):nth-last-child(2){margin-bottom:-4px}
-.msgs>.ref{max-width:100%}.msgs>.ref>.tring:not(.tside){width:16px}.msgs>.ref>.tring.tside>.i{flex:none}.msgs>.ref>.rt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.msgs>.ref>.tring>.i{width:16px;height:16px}
+.msgs>.ref{max-width:100%}.msgs>.ref>.tring:not(.tside){width:16px}.msgs>.ref>.tmv>.tring:not(.tside){width:16px}.msgs>.ref>.tring.tside>.i,.msgs>.ref>.tmv>.tring.tside>.i{flex:none}.msgs>.ref>.tmv>.rt,.msgs>.ref>.rt{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.msgs>.ref>.tring>.i,.msgs>.ref>.tmv>.tring>.i{width:16px;height:16px}
 .msgs>.quietb,.msgs>.files{margin-inline-start:24px}
 /* on touch a row is itself 44 px tall (12 px of air above and below its words), not a 28 px row with an invisible pad:
    packed 12 px apart, neighbouring pads split the space between them and each row kept only ~32 px for a finger. Touch

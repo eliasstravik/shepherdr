@@ -53,7 +53,7 @@ async function sendNow(hub: Hub, b: any, compat: Compat, again = false) {
     if (put.code !== 0 || !landed) throw new Error("A file didn't reach that machine.");
     return landed;
   }));
-  const body = [messageBody({ text, quote: typeof b.quote === "string" ? b.quote.slice(0, 2000) : null, tags: typeof b.tags === "string" ? b.tags : "" }), ...files].filter(Boolean).join("\n\n");
+  const body = [messageBody({ text, quote: typeof b.quote === "string" ? b.quote.slice(0, 2000) : null, tags: typeof b.tags === "string" ? b.tags : "", task: typeof b.quoteTask === "string" ? b.quoteTask : null }), ...files].filter(Boolean).join("\n\n");
   // held on purpose (Ctrl+Enter, a long press): it goes once the agent stops working
   const st = (hub.terminals.get(a) as any)?.status?.state;
   if (b.hold && (st === "working" || st === "blocked")) {
@@ -257,6 +257,18 @@ async function startFresh(hub: Hub, b: any, compat: Compat): Promise<any> {
 
 // A space's Assistant that ended, started again for its next message (SHEP-297): one start per space at a time, so
 // two messages sent meanwhile (two devices, a send and a voice call) reach the same new Assistant.
+/** What a send quotes and the task tag lines it carries: the message it replies to (by its id), or the task it replies
+ *  to (replyTask, a task row's Reply in chat: its tag line first, so "status?" is about that task, from any space or
+ *  machine), then the tasks its words mention (the chat's folder's, that one not twice). */
+export function quoteOf(b: any, compat: Compat, r: any): { quote: string | null; tags: string; quoteTask: string | null } {
+  const id = typeof b.replyTask === "string" ? b.replyTask.slice(0, 200) : null;
+  const t = id ? compat.replyTaskOf(id) : null;
+  const quote = t ? String(t.title ?? t.ref) : typeof b.reply === "string" ? r?.conv?.items?.find((x: any) => x.id === b.reply)?.text ?? null : null;
+  const said = mentionedIn(String(b.text ?? ""), compat.tasksFor(b.chat)).filter((x: any) => !t || x.ref !== t.ref || x.folder !== t.folder);
+  const tags = [...(t ? [t] : []), ...said].map((x: any) => taskTag(x, x.ref ?? `#${x.id}`)).join("");
+  return { quote, tags, quoteTask: t ? id : null };
+}
+
 const reviving = new Map<string, Promise<{ addr: string; mine?: symbol; result?: unknown }>>();
 /** how long a restarted Assistant may take to come up before its message is given up on (the page's Retry) */
 export const REVIVE_WAIT = { ms: 120_000, every: 500 };
@@ -271,8 +283,7 @@ async function sendToEnded(hub: Hub, b: any, compat: Compat, old: string): Promi
   if (!text && !(Array.isArray(b.attachments) && b.attachments.length)) throw new Error("nothing to send");
   // what it replies to and the tasks it mentions, from the chat as it shows (the old one's)
   const r = compat.reader?.(old);
-  const quote = typeof b.reply === "string" ? r?.conv?.items?.find((x: any) => x.id === b.reply)?.text ?? null : null;
-  const tags = mentionedIn(String(b.text ?? ""), compat.tasksFor(b.chat)).map((x: any) => taskTag(x, x.ref ?? `#${x.id}`)).join("");
+  const { quote, tags, quoteTask } = quoteOf(b, compat, r);
   const me = Symbol("send");
   let p = reviving.get(place);
   if (!p) {
@@ -300,7 +311,7 @@ async function sendToEnded(hub: Hub, b: any, compat: Compat, old: string): Promi
     if (Date.now() > until) throw new Error("The Assistant started again but isn't ready yet. Send it again in a moment.");
     await Bun.sleep(REVIVE_WAIT.every);
   }
-  return sendNow(hub, { ...b, addr: got.addr, quote, tags, hold: true }, compat);
+  return sendNow(hub, { ...b, addr: got.addr, quote, tags, quoteTask, hold: true }, compat);
 }
 
 export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
@@ -601,9 +612,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   if (b?.type === "send" && typeof b.chat === "string") {
     // what it replies to (the message by its id) and the tasks it mentions
     const a = chat(b.chat), r = compat.reader?.(a);
-    const quoted = typeof b.reply === "string" ? r?.conv?.items?.find((x: any) => x.id === b.reply)?.text ?? null : null;
-    const tags = mentionedIn(String(b.text ?? ""), compat.tasksFor(b.chat)).map((x: any) => taskTag(x, x.ref ?? `#${x.id}`)).join("");
-    b = { ...b, addr: a, quote: quoted, tags };
+    b = { ...b, addr: a, ...quoteOf(b, compat, r) };
   }
   else if (b?.type === "stop" && typeof b.chat === "string" && compat.taskOf(b.chat.split("/")[0])) {
     // Stop on a task pauses its agent, like pressing Esc: it drops what it was doing and waits. herdr-task records

@@ -13,6 +13,7 @@ import { Btn, Cnt, cx, Empty, Hd, I, IB, MenuGroup, Row } from '@client/ui.tsx'
 import type { MergeEvidence, Snapshot, Task } from '@shared/types.ts'
 import { askedWords, isEverything, machineLabel, nowGroups, onBranch, placeDown, reposOf, spaceLabel, spaceOnFolder, spacesOf, etaOf, leftWords, statusWord, taskChat, taskLine, taskWhen, tasksIn, tstate, workKey, workName, workWords, type Repo } from '@shared/view.ts'
 import { DoneRow } from '@plugins/chat/cards.tsx'
+import { replyToTask, SlideHint, useSlide } from '@plugins/chat/slide.tsx'
 import { StatusIcon } from './icon.tsx'
 import { chipsOf, choices, clean, filterCount, filterOn, filterTasks, hereOn, NO_FILTER, toggle, type GroupKey, type TaskFilter } from '@shared/task-filter.ts'
 
@@ -148,7 +149,7 @@ function del(t: Task) {
 }
 
 /** A task's menu, on its row and in its thread: in its thread first Terminal and Screen (its header has no buttons for
- *  them); Reply, Open task, Show in #space, Show screen, Move to (only before it has started), Mark as done, Rename,
+ *  them); Reply in chat (in the space's chat, SHEP-415), Open task, Show in #space, Show screen, Move to (only before it has started), Mark as done, Rename,
  *  Stop, then Archive and Delete. In its thread, View as terminal / View as chat follows Terminal and Screen below a line:
  *  it changes this chat's view rather than opening one beside it. */
 export function taskMenu(anchor: Element, t: Task, where: 'row' | 'thread') {
@@ -165,8 +166,9 @@ export function taskMenu(anchor: Element, t: Task, where: 'row' | 'thread') {
     ...views,
     ...viewSwitch,
     ...(th ? [] : [
-      // Reply opens it with the reply box ready to type in
-      { icon: 'reply' as const, label: 'Reply', run: () => { open(t); setTimeout(() => document.querySelector<HTMLTextAreaElement>(`textarea[data-box="${CSS.escape(chat)}"]`)?.focus(), 60) } },
+      // Reply in chat quotes it in the space's chat, as a reply to a message: "status?" is then about this task. Writing
+      // to its own agent is Open task.
+      { icon: 'reply' as const, label: 'Reply in chat', run: () => replyToTask(t) },
       { icon: 'chat' as const, label: 'Open task', run: () => open(t) },
     ]),
     { icon: every ? 'layers' : 'hash', label: `Show in ${spaceLabel(snap, t.place)}`, line: views.length + viewSwitch.length > 0, run: () => go(t.place) },
@@ -442,9 +444,12 @@ function TaskRow({ snap, t, tag }: { snap: Snapshot; t: Task; tag: boolean }) {
   const s = tstate(t)
   const sub = down ? `Can't reach ${down.name} · last seen ${{ ask: 'asking', working: 'working', ready: 'ready', next: 'waiting', done: 'done', archived: 'done' }[s]}` : taskLine(t)
   const when = down ? '' : taskWhen(t)
+  // a slide to the right replies to it in the space's chat, as to a message (Reply in chat)
+  const { on, slide, armed, skip, moving } = useSlide(() => replyToTask(t))
   return (
-    <div className="rowx">
-      <button type="button" className={cx('row row2 tk', down && 'dim')} aria-current={cur} onClick={() => open(t)}>
+    <div className="rowx tsl" {...on}>
+      <SlideHint slide={slide} armed={armed} />
+      <button type="button" className={cx('row row2 tk', down && 'dim', moving.className)} style={moving.style} onTransitionEnd={moving.onTransitionEnd} aria-current={cur} onClick={() => (skip.current ? void (skip.current = false) : open(t))}>
         <StatusIcon t={t} dim={!!down} />
         <span className="n">
           <span className="l1">{t.name}</span>
@@ -453,7 +458,7 @@ function TaskRow({ snap, t, tag }: { snap: Snapshot; t: Task; tag: boolean }) {
         </span>
         {when && <span className="v">{when}</span>}
       </button>
-      <IB icon="dots" label={`More for ${t.name}`} aria-haspopup="menu" onClick={(e) => taskMenu(e.currentTarget, t, 'row')} />
+      <IB icon="dots" label={`More for ${t.name}`} aria-haspopup="menu" className={moving.className} style={moving.style} onClick={(e) => taskMenu(e.currentTarget, t, 'row')} />
     </div>
   )
 }

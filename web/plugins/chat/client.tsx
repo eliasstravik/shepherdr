@@ -13,12 +13,13 @@ import { Btn, cx, Empty, I, IB, useGrow } from '@client/ui.tsx'
 import type { IconName } from '@client/icons.ts'
 import { isImage, isVideo } from '@shared/files.ts'
 import type { Chat, Message, Relay, Snapshot, Task, TaskBrief, TurnActivity } from '@shared/types.ts'
-import { isEverything, placeOf, taskOf } from '@shared/view.ts'
+import { isEverything, placeOf, statusWord, taskOf } from '@shared/view.ts'
 import { StatusIcon } from '@plugins/tasks/icon.tsx'
 import { DoneRow, QuestionCard, SecretCard } from './cards.tsx'
 import { briefFrom, deliveryWord, looksLong, startWords } from './brief.ts'
 import { relayLabel, relayState, relayWhy } from './relay.ts'
-import { Finger, HOLD_MS, quickFit, REPLY_AT, type QuickFit } from './press.ts'
+import { quickFit, type QuickFit } from './press.ts'
+import { replyToTask, SlideHint, useSlide } from './slide.tsx'
 import { dayLabel } from './days.ts'
 import { Markdown, withLinks } from './markdown.tsx'
 import { dropped, pasted } from './paste.ts'
@@ -137,10 +138,37 @@ export function endedLine(text: string, above: string): string | null {
 }
 
 function TaskRef({ id, title, t }: { id: string; title: string; t?: Task }) {
+  // a slide to the right replies to the task here, as to a message
+  const { on, slide, armed, skip, moving } = useSlide(() => replyToTask({ id, name: title }))
   return (
-    <button type="button" className="ref" onClick={() => setUI({ task: id, pane: 'tasks', wide: false })}>
-      {t ? <StatusIcon t={t} time="side" /> : <I n="chat" c="s16" />}
-      <span className="rt">{title}</span>
+    <button type="button" className="ref tslide" {...on} onClick={() => (skip.current ? void (skip.current = false) : setUI({ task: id, pane: 'tasks', wide: false }))}>
+      <SlideHint slide={slide} armed={armed} />
+      <span className={cx('tmv', moving.className)} style={moving.style} onTransitionEnd={moving.onTransitionEnd}>
+        {t ? <StatusIcon t={t} time="side" /> : <I n="chat" c="s16" />}
+        <span className="rt">{title}</span>
+      </span>
+    </button>
+  )
+}
+
+/** the task a message replies to, above its words: its state and title; a tap opens it */
+function TaskQuote({ id, title }: { id: string; title: string }) {
+  const snap = useSnap()
+  const t = snap ? taskOf(snap, id) : undefined
+  const word = t ? statusWord(t).word : ''
+  return (
+    <button
+      type="button"
+      className="quote qtask"
+      aria-label={`Replying to the task ${t?.name ?? title}${word ? `, ${word}` : ''}`}
+      onClick={(e) => {
+        e.stopPropagation()
+        setUI({ task: id, pane: 'tasks', wide: false })
+      }}
+    >
+      {t ? <StatusIcon t={t} time="none" /> : <I n="tasks" c="s16" />}
+      <span className="qt1">{t?.name ?? title}</span>
+      {word && <span className="qt2">{word}</span>}
     </button>
   )
 }
@@ -152,12 +180,12 @@ export function replyTo(msg: Message, key: string) {
   document.querySelector<HTMLTextAreaElement>(`textarea[data-box="${CSS.escape(key)}"]`)?.focus()
 }
 
-function msgMenu(anchor: Element, msg: Message, chat: Chat, thread: Thread, select: () => void) {
+function msgMenu(anchor: Element, msg: Message, chat: Chat, thread: Thread, select: () => void, reply?: () => void) {
   const key = thread.chat
   const text = msg.text ?? msg.file?.name ?? ''
   const rows: MenuRow[] = [
     // Reply puts a quote of the message in the box
-    { icon: 'reply', label: 'Reply', run: () => replyTo(msg, key) },
+    { icon: 'reply', label: 'Reply', run: () => (reply ? reply() : replyTo(msg, key)) },
     { icon: 'copy', label: 'Copy', run: () => void copyText(text).then((ok) => ok && notice('Copied')) },
     // Select text makes that message's text selectable
     { icon: 'select', label: 'Select text', run: select },
@@ -184,35 +212,9 @@ const quickSub = (f: () => void) => {
 }
 const useQuick = (id: string) => useSyncExternalStore(quickSub, () => (quickNow?.id === id ? quickNow : null))
 
-/** The click a finger's lift makes after a hold would land on the menu's backdrop the hold just opened, and close it:
- *  the next click (within a moment of the lift) is swallowed. */
-function swallowClick() {
-  const eat = (e: Event) => {
-    e.preventDefault()
-    e.stopPropagation()
-    off()
-  }
-  const lifted = () => setTimeout(off, 400)
-  const off = () => {
-    removeEventListener('click', eat, true)
-    removeEventListener('pointerup', lifted, true)
-  }
-  addEventListener('click', eat, true)
-  addEventListener('pointerup', lifted, true)
-}
-
-/** a light tick, where the device has one (Android; iPhones have no web haptics) */
-const tick = (ms = 8) => {
-  try {
-    navigator.vibrate?.(ms)
-  } catch {
-    /* not allowed here */
-  }
-}
-
 /** The quick bar beside a message, on its open side: add a reaction, reply, more (the whole menu); on a narrow screen
  *  only the first. `y`: where to centre it, for a message taller than the screen. */
-function QuickBar({ msg, chat, thread, mine, wrap, y, done, more }: { msg: Message; chat: Chat; thread: Thread; mine: boolean; wrap: HTMLElement; y: number | null; done: () => void; more: (el: Element) => void }) {
+function QuickBar({ msg, chat, mine, wrap, y, done, more, reply: onReply }: { msg: Message; chat: Chat; thread: Thread; mine: boolean; wrap: HTMLElement; y: number | null; done: () => void; more: (el: Element) => void; reply: () => void }) {
   const phone = useUI((u) => u.phone)
   const [fit, setFit] = useState<QuickFit | null>(null)
   useLayoutEffect(() => {
@@ -222,7 +224,7 @@ function QuickBar({ msg, chat, thread, mine, wrap, y, done, more }: { msg: Messa
   }, [wrap, mine, phone])
   const quick = registry.messageQuick
   const reply = (
-    <button key="reply" type="button" className="qbtn" aria-label="Reply" onClick={() => { done(); replyTo(msg, thread.chat) }}>
+    <button key="reply" type="button" className="qbtn" aria-label="Reply" onClick={() => { done(); onReply() }}>
       <I n="reply" />
     </button>
   )
@@ -251,7 +253,7 @@ function QuickBar({ msg, chat, thread, mine, wrap, y, done, more }: { msg: Messa
   )
 }
 
-function Bubble({ msg, chat, thread, gap, pending, failed, mark }: { msg: Message; chat: Chat; thread: Thread; gap: boolean; pending?: boolean; failed?: string; mark?: Shown['mark'] }) {
+function Bubble({ msg, chat, thread, gap, pending, failed, mark, onReply }: { msg: Message; chat: Chat; thread: Thread; gap: boolean; pending?: boolean; failed?: string; mark?: Shown['mark']; onReply?: () => void }) {
   const [sel, setSel] = useState(false)
   const jump = useUI((u) => u.jump === msg.id)
   const mine = msg.who === 'you'
@@ -259,18 +261,18 @@ function Bubble({ msg, chat, thread, gap, pending, failed, mark }: { msg: Messag
   const quick = useQuick(qid)
   const [hover, setHover] = useState<number | null | false>(false)
   const wrap = useRef<HTMLDivElement>(null)
-  const finger = useRef<Finger | null>(null)
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  /** the click that follows a hold or a slide is not a tap */
-  const skip = useRef(false)
-  const [slide, setSlide] = useState(0)
-  const [armed, setArmed] = useState(false)
-  const [settling, setSettling] = useState(false)
   const full = (el: Element) => {
     if (sel) return
     setQuick(null)
-    msgMenu(el, msg, chat, thread, () => setSel(true))
+    msgMenu(el, msg, chat, thread, () => setSel(true), onReply)
   }
+  const reply = () => {
+    setQuick(null)
+    if (onReply) onReply()
+    else replyTo(msg, thread.chat)
+  }
+  // a slide to the right replies, a press held still opens the whole menu (the click after either is not a tap)
+  const { on, slide, armed, skip, pressing, moving } = useSlide(reply, { hold: full, off: sel })
   // a tap anywhere else (or Escape) puts the quick bar away
   useEffect(() => {
     if (!quick) return
@@ -287,17 +289,6 @@ function Bubble({ msg, chat, thread, gap, pending, failed, mark }: { msg: Messag
       removeEventListener('keydown', esc)
     }
   }, [quick])
-  useEffect(() => () => clearTimeout(timer.current), [])
-  const letGo = (replying: boolean) => {
-    skip.current = true
-    setSettling(true)
-    setSlide(0)
-    setArmed(false)
-    if (replying) {
-      setQuick(null)
-      replyTo(msg, thread.chat)
-    }
-  }
   const yIn = (clientY: number) => clientY - (wrap.current?.getBoundingClientRect().top ?? 0)
   const bar = quick ?? (hover !== false && !quickNow ? { y: hover } : null)
   return (
@@ -308,17 +299,8 @@ function Bubble({ msg, chat, thread, gap, pending, failed, mark }: { msg: Messag
         onPointerEnter={(e) => e.pointerType === 'mouse' && setHover(yIn(e.clientY))}
         onPointerLeave={(e) => e.pointerType === 'mouse' && setHover(false)}
       >
-        {slide > 0 && (
-          <div className={cx('rpl', armed && 'on')} aria-hidden="true" style={{ width: Math.max(0, slide - 8), opacity: Math.min(1, slide / REPLY_AT) }}>
-            <I n="reply" />
-            <span>Reply</span>
-          </div>
-        )}
-        <div
-          className={cx('bmv', settling && 'settle')}
-          style={slide ? { transform: `translateX(${slide}px)` } : undefined}
-          onTransitionEnd={() => setSettling(false)}
-        >
+        <SlideHint slide={slide} armed={armed} />
+        <div className={cx('bmv', moving.className)} style={moving.style} onTransitionEnd={moving.onTransitionEnd}>
           <div
             className={cx('b', mine && 'mine', sel && 'sel', pending && 'pending', jump && 'jump')}
             role="button"
@@ -327,54 +309,11 @@ function Bubble({ msg, chat, thread, gap, pending, failed, mark }: { msg: Messag
             data-msg={msg.id}
             data-chat={chat.key}
             data-menu
-            onPointerDown={(e) => {
-              if (e.button !== 0 || sel || e.pointerType === 'mouse') return
-              const f = new Finger(e.clientX, e.clientY, performance.now())
-              finger.current = f
-              const el = e.currentTarget
-              clearTimeout(timer.current)
-              timer.current = setTimeout(() => {
-                if (finger.current !== f || !f.hold(performance.now())) return
-                tick(10)
-                skip.current = true
-                swallowClick()
-                full(el)
-              }, HOLD_MS)
-            }}
-            onPointerMove={(e) => {
-              const f = finger.current
-              if (!f || f.held) return
-              const r = f.move(e.clientX, e.clientY)
-              if (f.way === 'scroll') {
-                finger.current = null
-                clearTimeout(timer.current)
-                return
-              }
-              if (f.way !== 'slide') return
-              clearTimeout(timer.current)
-              if (!e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.setPointerCapture(e.pointerId)
-              setSettling(false)
-              setSlide(r.slide)
-              setArmed(f.armed)
-              if (r.crossed) tick()
-            }}
-            onPointerUp={() => {
-              const f = finger.current
-              finger.current = null
-              clearTimeout(timer.current)
-              const o = f?.up()
-              if (o === 'reply' || o === 'back') letGo(o === 'reply')
-            }}
-            onPointerCancel={() => {
-              const f = finger.current
-              finger.current = null
-              clearTimeout(timer.current)
-              if (f?.way === 'slide') letGo(false)
-            }}
+            {...on}
             onContextMenu={(e) => {
               // a finger's hold is ours (above); a right click opens the whole menu
               e.preventDefault()
-              if (finger.current || skip.current) return
+              if (pressing() || skip.current) return
               full(e.currentTarget)
             }}
             onClick={(e) => {
@@ -386,13 +325,13 @@ function Bubble({ msg, chat, thread, gap, pending, failed, mark }: { msg: Messag
             }}
             onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget && (e.preventDefault(), full(e.currentTarget))}
           >
-            {msg.reply && <span className="quote">{msg.reply.text}</span>}
+            {msg.reply?.task ? <TaskQuote id={msg.reply.task} title={msg.reply.text} /> : msg.reply && <span className="quote">{msg.reply.text}</span>}
             {mine ? <div className="md" style={{ whiteSpace: 'pre-wrap' }}>{withLinks(msg.text ?? '')}</div> : <Markdown text={msg.text ?? ''} mentions={msg.mentions} />}
           </div>
           {registry.messageEdge.map((x, i) => <x.View key={i} msg={msg} chat={chat} />)}
         </div>
         {bar && wrap.current && !slide && (
-          <QuickBar msg={msg} chat={chat} thread={thread} mine={mine} wrap={wrap.current} y={bar.y} done={() => { setQuick(null); setHover(false) }} more={full} />
+          <QuickBar msg={msg} chat={chat} thread={thread} mine={mine} wrap={wrap.current} y={bar.y} done={() => { setQuick(null); setHover(false) }} more={full} reply={reply} />
         )}
       </div>
       {mark && <div className="seen" role="status">{mark === 'read' ? 'Read' : 'Sent'}</div>}
@@ -629,7 +568,7 @@ function Messages({ thread }: { thread: Thread }) {
       if (t && !thread.task && t.id !== lastRef) out.push(<TaskRef key={`r:${k}`} id={t.id} title={t.name} t={t} />)
       if (t) lastRef = t.id
       const text = m.card.text ?? m.text ?? ''
-      if (text) out.push(<Bubble key={k} msg={{ ...m, text }} chat={stub} thread={thread} gap={false} />)
+      if (text) out.push(<Bubble key={k} msg={{ ...m, text }} chat={stub} thread={thread} gap={false} onReply={t && !thread.task ? () => replyToTask(t) : undefined} />)
     }
     // a message between agents, in the sender's chat and the receiver's: its own quiet row (SHEP-368)
     else if (m.relay) out.push(<RelayRow key={k} r={m.relay} text={m.text ?? ''} at={m.at} />)
@@ -870,8 +809,9 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
       )}
       {reply && (
         <div className="fchips">
-          <span className="fchip">
+          <span className="fchip" aria-label={reply.task ? `Replying to the task ${reply.text}` : undefined}>
             <I n="reply" c="s16" />
+            {reply.task && <I n="tasks" c="s16 c-mute" />}
             <span style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{reply.text}</span>
             <button type="button" aria-label="Don't reply to it" onClick={() => setUI((ui) => { const { [key]: _, ...rest } = ui.reply; return { reply: rest } })}><I n="x" c="s16" /></button>
           </span>

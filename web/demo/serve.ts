@@ -52,7 +52,9 @@ function action(a: Record<string, any>): unknown {
   if (a.type === 'send') {
     // as the service gives your message back from the log: its words, then each file under them, a moment later
     const paths: string[] = Array.isArray(a.attachments) ? a.attachments.filter(Boolean) : []
-    if (!paths.length) say(a.chat, { who: 'you', text: a.text, cid: a.cid })
+    // a reply to a task quotes it (its title; the page shows its state)
+    const quoted = typeof a.replyTask === 'string' ? taskOf(a.replyTask) : undefined
+    if (!paths.length) say(a.chat, { who: 'you', text: a.text, cid: a.cid, ...(quoted ? { reply: { text: quoted.name, task: quoted.id } } : {}) })
     else setTimeout(() => {
       const id = `n${++n}`
       const at = Date.now()

@@ -251,7 +251,7 @@ function reactionLines(t) {
 function replyOf(t) {
   const lines = String(t).split("\n");
   const a = tagOf(lines[0] ?? "");
-  if (a && "reply-to" in a) return { replyTo: a["reply-to"], text: lines.slice(1).join("\n").trim() };
+  if (a && "reply-to" in a) return { replyTo: a["reply-to"], ...(a.task ? { replyTask: a.task } : {}), text: lines.slice(1).join("\n").trim() };
   const m = /^((?:>[^\n]*\n)+)\n*([\s\S]+)$/.exec(String(t));
   if (m) return { quoted: m[1].split("\n").map((l) => l.replace(/^>\s?/, "")).join(" ").trim(), text: m[2].trim() };
   return null;
@@ -337,7 +337,7 @@ function cleanWords(t) {
   // A quote (a reply from the chat) ends where the typed text starts: the CLI may have joined them.
   t = t.replace(/^(>.*)\n(?!>|\n)/gm, "$1\n\n");
   const reply = replyOf(t);
-  if (reply?.replyTo !== undefined) return { text: reply.text, replyTo: reply.replyTo };
+  if (reply?.replyTo !== undefined) return { text: reply.text, replyTo: reply.replyTo, ...(reply.replyTask ? { replyTask: reply.replyTask } : {}) };
   if (reply?.quoted) return { text: t, quoted: reply.quoted, rest: reply.text };
   return t ? { text: t } : null;
 }
@@ -354,7 +354,7 @@ function claudeUser(c) {
   const reactions = parts.flatMap((p) => p.reactions ?? []), news = parts.flatMap((p) => p.news ?? []);
   const pilot = parts.find((p) => p.pilot)?.pilot;
   return { text: parts.map((p) => p.text).filter(Boolean).join("\n\n"), from: parts[0].from, ...(parts[0].assistant ? { assistant: parts[0].assistant } : {}), images, reactions, news, ...(pilot ? { pilot } : {}),
-    replyTo: parts[0].replyTo, quoted: parts[0].quoted, rest: parts[0].rest };
+    replyTo: parts[0].replyTo, ...(parts[0].replyTask ? { replyTask: parts[0].replyTask } : {}), quoted: parts[0].quoted, rest: parts[0].rest };
 }
 
 // Claude Code may show the person a message it wrote mid-turn (before a call) as a short update in other words
@@ -597,7 +597,7 @@ function codexStep(name, args) {
 // Items (ids come from byte offsets, so they stay the same when earlier pages are added):
 //   { kind: "user", id, text, from?, at, images, paths? }   { kind: "agent", id, text, at, suggests? }
 //   (images: how many were sent; paths: where the ones Claude Code read from files came from;
-//   replyTo: the start of the message it answers)
+//   replyTo: the start of the message it answers; replyTask: the task it answers, when it replies to a task)
 //   { kind: "mark", id }  (a message of only reactions: ends the turn, shows nothing)
 //   { kind: "news", id, at, ref, event, text }  (one line of task news Herdr told an Assistant)
 //   { kind: "sent", id, at, to, text, how, call?, state?, why? }  (a message the agent sent another agent: sendsOf();
@@ -775,7 +775,7 @@ export class Conversation {
       replyTo = u.quoted;
       text = u.rest;
     }
-    this.push({ kind: "user", id, text, replyTo, from: u.from, ...(u.assistant ? { assistant: u.assistant } : {}), at: u.at, images: u.images || 0 });
+    this.push({ kind: "user", id, text, replyTo, ...(u.replyTask && replyTo === u.replyTo ? { replyTask: u.replyTask } : {}), from: u.from, ...(u.assistant ? { assistant: u.assistant } : {}), at: u.at, images: u.images || 0 });
     this.doing = null;
   }
 

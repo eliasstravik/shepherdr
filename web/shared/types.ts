@@ -806,6 +806,8 @@ export interface ReplyQuote {
   text: string
   file?: boolean
   artifact?: boolean
+  /** a reply to a task (its row's Reply in chat, or a slide on it): the task's id; text is its title */
+  task?: string
 }
 
 /** One small update card Shepherdr posts in a project's coordinator chat. */
@@ -1318,7 +1320,7 @@ export type Action =
   /** cid: the screen's own id for what it sent, which comes back on the message (Message.cid); reply: the id of the
       message it answers; human: said in the app itself, the only kind of message that can take back a merge yes. Scripts
       leave it off */
-  | { type: 'send'; chat: string; text: string; attachments?: string[]; cid?: string; reply?: string; human?: boolean }
+  | { type: 'send'; chat: string; text: string; attachments?: string[]; cid?: string; reply?: string; replyTask?: string; human?: boolean }
   | { type: 'react'; chat: string; message: string; emoji: string }
   /** a secret kept at a level (all, m:<machine>, p:<machine>:<space>), or removed (null); kept on the main machine, so
       it names no chat or place to be passed on by. card: the agent's ask it answers, told once it is kept */
