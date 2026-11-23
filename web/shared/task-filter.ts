@@ -115,14 +115,17 @@ export function toggle(f: TaskFilter, key: GroupKey, id: string): TaskFilter {
 export interface Chip {
   key: string
   label: string
-  icon: 'hash' | 'folder' | 'layers' | 'server' | 'check' | 'filter'
+  icon: 'hash' | 'folder' | 'layers' | 'server' | 'check' | 'ask' | 'working' | 'ready' | 'next' | 'clock' | 'archive'
   off: (f: TaskFilter) => TaskFilter
 }
+/** a state's chip carries its status mark */
+const STATE_ICON: Record<FState, Chip['icon']> = { needs: 'ask', working: 'working', ready: 'ready', next: 'next', scheduled: 'clock', stopped: 'ask', done: 'check', archived: 'archive' }
+
 export function chipsOf(snap: Snapshot, f: TaskFilter, at: string): Chip[] {
   const out: Chip[] = []
   if (hereOn(snap, f, at)) out.push({ key: 'here', label: `${spaceLabel(snap, at)} only`, icon: 'hash', off: (x) => ({ ...x, here: false }) })
   if (f.hideDone) out.push({ key: 'hideDone', label: 'Done hidden', icon: 'check', off: (x) => ({ ...x, hideDone: false }) })
-  for (const id of f.state) out.push({ key: `state:${id}`, label: STATE_WORDS[id as FState] ?? id, icon: 'filter', off: (x) => toggle(x, 'state', id) })
+  for (const id of f.state) out.push({ key: `state:${id}`, label: STATE_WORDS[id as FState] ?? id, icon: STATE_ICON[id as FState] ?? 'check', off: (x) => toggle(x, 'state', id) })
   for (const id of f.machine) out.push({ key: `machine:${id}`, label: machineLabel(snap, id), icon: 'server', off: (x) => toggle(x, 'machine', id) })
   for (const id of f.space) out.push({ key: `space:${id}`, label: (spaceLabel(snap, id) || id).replace(/^#/, ''), icon: isEverything(snap, id) ? 'layers' : 'hash', off: (x) => toggle(x, 'space', id) })
   for (const id of f.repo) out.push({ key: `repo:${id}`, label: reposOf(snap).find((r) => r.key === id)?.name ?? (id.replace(/^.*\//, '') || id), icon: 'folder', off: (x) => toggle(x, 'repo', id) })
