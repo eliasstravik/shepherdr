@@ -13,6 +13,8 @@ interface Layer {
   wide?: boolean
   /** a dialog without the form's own padding and gaps (search, the picker) */
   bare?: boolean
+  /** a picture or file shown on its own, over the whole screen (chat/preview.tsx) */
+  view?: boolean
   label?: string
   render: (close: () => void) => ReactNode
   onClose?: () => void
@@ -64,7 +66,7 @@ export function openMenu(anchor: Element | null, rows: MenuRow[] | ((close: () =
 }
 
 /** Open a dialog: 400 px on a desktop (560 px `wide`), a sheet on a phone. Returns its close. */
-export function openDialog(render: (close: () => void) => ReactNode, opts: { wide?: boolean; bare?: boolean; label?: string; onClose?: () => void } = {}): () => void {
+export function openDialog(render: (close: () => void) => ReactNode, opts: { wide?: boolean; bare?: boolean; view?: boolean; label?: string; onClose?: () => void } = {}): () => void {
   for (const l of layers.filter((x) => x.kind === 'menu')) close(l.id)
   const id = seq++
   layers = [...layers, { id, kind: 'dialog', render, ...opts }]
@@ -226,7 +228,7 @@ function Dialog({ layer, phone, children }: { layer: Layer; phone: boolean; chil
     ;(first ?? el).focus({ preventScroll: true })
   }, [])
   return (
-    <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={layer.label} className={cx(phone ? 'pop sheet' : 'dlg', !phone && layer.wide && 'wide', phone && !layer.bare && 'form', 'in')}>
+    <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={layer.label} className={layer.view ? 'lbox in' : cx(phone ? 'pop sheet' : 'dlg', !phone && layer.wide && 'wide', phone && !layer.bare && 'form', 'in')}>
       {children}
     </div>
   )

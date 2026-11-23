@@ -138,6 +138,7 @@ export const chats: Record<string, Chat> = Object.fromEntries(
   [
     chat(EV, [
       a('Morning, Sam. GARDEN-3 is still in progress. Three things are ready for you:', { at: today(7, 30), suggest: 'Show me what needs me' }),
+      me('', { at: today(9, 11), file: { name: 'supplier-quotes-november.pdf', path: '/demo/supplier-quotes-november.pdf' } }),
       me('Nice. Add a task to make the checkout button bigger on phones.', { at: today(9, 12), reactions: [{ emoji: '👀', by: 'them' }] }),
       a('Added SHOP-15 to #shop and started it.', { at: today(9, 12) }),
       did(today(9, 12), [['run', 'herdr-task add', 'SHOP-15'], ['run', 'herdr-task start', 'SHOP-15']]),

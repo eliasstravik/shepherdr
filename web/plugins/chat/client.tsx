@@ -7,7 +7,7 @@ import { act, definePlugin, getState, notice, registry, setUI, tryAct, useChat, 
 import { partsOf, placesOf, keyOf } from '@client/outbox.ts'
 import { confirm, openMenu } from '@client/overlay.tsx'
 import { AgentLine, openPicker, pickFor, pickWords, type Pick } from '@client/picker.tsx'
-import { attach, detach, dropOut, retry, send } from '@client/send.ts'
+import { attach, detach, dropOut, retry, reupload, send } from '@client/send.ts'
 import { Btn, cx, Empty, I, IB, useGrow } from '@client/ui.tsx'
 import { isImage, isVideo } from '@shared/files.ts'
 import type { Chat, Message, Snapshot, TurnActivity } from '@shared/types.ts'
@@ -17,10 +17,10 @@ import { dayLabel } from './days.ts'
 import { Markdown } from './markdown.tsx'
 import { dropped, pasted } from './paste.ts'
 import { suggestionOf, suggestionsOn } from './suggest.ts'
+import { BoxThumb, openPreview, SentThumb, sourcesOf } from './thumbs.tsx'
 import { typing, working } from './typing.ts'
 
-/** a file a chat names, served by Shepherdr */
-export const fileUrl = (chat: string, path: string, small = false) => `api/file?chat=${encodeURIComponent(chat)}&path=${encodeURIComponent(path)}${small ? '&thumb=1' : ''}`
+export { fileUrl } from './thumbs.tsx'
 
 const clock = (at: number) => {
   const d = new Date(at)
@@ -129,20 +129,31 @@ function Bubble({ msg, chat, thread, gap, pending, failed }: { msg: Message; cha
 }
 
 function FileRow({ msg, chat, gap }: { msg: Message; chat: Chat; gap: boolean }) {
-  const f = msg.file!
+  const f = msg.file! as NonNullable<Message['file']> & { id?: string }
   const mine = msg.who === 'you'
-  if (f.path && (isImage(f.name) || isVideo(f.name)))
+  const { small, full } = sourcesOf(chat.key, f)
+  // a picture or video shows itself (this screen's own copy while it still goes up); a tap opens the preview
+  if (full && (isImage(f.name) || isVideo(f.name)))
     return (
-      <a className={cx('pic', mine && 'mine', gap && 'gap')} href={fileUrl(chat.key, f.path)} target="_blank" rel="noreferrer" aria-label={f.alt || f.name} data-msg={msg.id}>
-        {isVideo(f.name) ? <video src={fileUrl(chat.key, f.path)} controls playsInline preload="metadata" /> : <img src={fileUrl(chat.key, f.path, true)} alt={f.alt || f.name} loading="lazy" />}
+      <a
+        className={cx('pic', mine && 'mine', gap && 'gap')}
+        href={full}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={f.alt || f.name}
+        data-msg={msg.id}
+        onClick={(e) => {
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0 || isVideo(f.name)) return
+          e.preventDefault()
+          openPreview(chat.key, f)
+        }}
+      >
+        {isVideo(f.name) ? <video src={full} controls playsInline preload="metadata" /> : <img src={small} alt={f.alt || f.name} loading="lazy" />}
       </a>
     )
   return (
-    <div className={cx('fchips', mine && 'mine')} data-msg={msg.id}>
-      <a className="fchip" href={f.path ? fileUrl(chat.key, f.path) : undefined} target="_blank" rel="noreferrer">
-        {isImage(f.name) ? <i className="pic" /> : <I n="doc" c="s16" />}
-        {f.name}
-      </a>
+    <div className={cx('athr', mine && 'mine')} data-msg={msg.id}>
+      <SentThumb chat={chat.key} f={f} />
     </div>
   )
 }
@@ -418,13 +429,11 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
         </div>
       )}
       {!!files?.length && (
-        <div className="fchips">
+        <div className="athr box" role="list" aria-label="Files to send">
           {files.map((f, i) => (
-            <span className="fchip" key={f.id ?? i} style={f.path ? undefined : { opacity: 0.6 }}>
-              {isImage(f.name) ? <i className="pic" /> : <I n="doc" c="s16" />}
-              {f.name}
-              <button type="button" aria-label={`Remove ${f.name}`} onClick={() => detach(key, i)}><I n="x" c="s16" /></button>
-            </span>
+            <div role="listitem" key={f.id ?? i}>
+              <BoxThumb chat={key} f={f} onRetry={() => f.id && reupload(key, key, f.id)} onRemove={() => detach(key, i)} />
+            </div>
           ))}
         </div>
       )}

@@ -15,7 +15,27 @@ export const MAX_FILE = 25 * 1024 * 1024
 const uploads = new Map<string, Promise<string>>()
 const gates = new Map<string, Promise<void>>()
 
-/** put files in a message box: each shows as a chip at once and goes up meanwhile */
+/** what this screen still has of a file it put in a box: the file itself and a link to it for its picture */
+const local = new Map<string, { file: File; url: string }>()
+export const localOf = (id: string | undefined) => (id ? local.get(id) : undefined)
+
+const setBox = (key: string, fn: (fs: UIFile[]) => UIFile[]) => setUI((ui) => ({ files: { ...ui.files, [key]: fn(ui.files[key] ?? []) } }))
+type UIFile = ReturnType<typeof getState>['ui']['files'][string][number]
+
+function upload(key: string, chat: string, id: string, f: File) {
+  const up = retrying(() => postFile(chat, f), Date.now())
+  uploads.set(id, up)
+  up.then(
+    (path) => setBox(key, (fs) => fs.map((x) => (x.id === id ? { ...x, path, failed: undefined } : x))),
+    (e) => {
+      // it stays in the box and says so on its tile: a tap tries again, its x takes it out
+      uploads.delete(id)
+      setBox(key, (fs) => fs.map((x) => (x.id === id ? { ...x, failed: reasonOf(e) || 'It did not go up' } : x)))
+    },
+  )
+}
+
+/** put files in a message box: each shows as a thumbnail at once and goes up meanwhile */
 export function attach(key: string, chat: string, files: File[]) {
   for (const f of files) {
     if (f.size > MAX_FILE) {
@@ -23,23 +43,35 @@ export function attach(key: string, chat: string, files: File[]) {
       continue
     }
     const id = newCid()
-    const since = Date.now()
-    const up = retrying(() => postFile(chat, f), since)
-    uploads.set(id, up)
-    setUI((ui) => ({ files: { ...ui.files, [key]: [...(ui.files[key] ?? []), { name: f.name, id }] } }))
-    up.then(
-      (path) => setUI((ui) => ({ files: { ...ui.files, [key]: (ui.files[key] ?? []).map((x) => (x.id === id ? { ...x, path } : x)) } })),
-      (e) => {
-        notice(`${f.name} could not be added: ${reasonOf(e)}`)
-        uploads.delete(id)
-        setUI((ui) => ({ files: { ...ui.files, [key]: (ui.files[key] ?? []).filter((x) => x.id !== id) } }))
-      },
-    )
+    let url = ''
+    try {
+      url = URL.createObjectURL(f)
+    } catch {
+      /* no object links here: its tile waits for the upload */
+    }
+    local.set(id, { file: f, url })
+    setBox(key, (fs) => [...fs, { name: f.name, id }])
+    upload(key, chat, id, f)
   }
 }
 
+/** try a failed upload again */
+export function reupload(key: string, chat: string, id: string) {
+  const l = local.get(id)
+  if (!l) return
+  setBox(key, (fs) => fs.map((x) => (x.id === id ? { ...x, failed: undefined } : x)))
+  upload(key, chat, id, l.file)
+}
+
 export function detach(key: string, index: number) {
-  setUI((ui) => ({ files: { ...ui.files, [key]: (ui.files[key] ?? []).filter((_, i) => i !== index) } }))
+  const gone = getState().ui.files[key]?.[index]
+  if (gone?.id) {
+    const l = local.get(gone.id)
+    if (l?.url) URL.revokeObjectURL(l.url)
+    local.delete(gone.id)
+    uploads.delete(gone.id)
+  }
+  setBox(key, (fs) => fs.filter((_, i) => i !== index))
 }
 
 async function deliver(cid: string, pending: Promise<string>[]) {
@@ -86,7 +118,8 @@ async function deliver(cid: string, pending: Promise<string>[]) {
  *  waits its turn and is delivered when the agent is free. */
 export function send(key: string, chat: string, text: string, hold = false) {
   const s = getState()
-  const boxed = s.ui.files[key] ?? []
+  // one that failed to go up stays out of it (its tile said so)
+  const boxed = (s.ui.files[key] ?? []).filter((f) => !f.failed)
   const reply = s.ui.reply[key] as (ReplyQuote & { id: string }) | undefined
   if (!text.trim() && !boxed.length) return
   const cid = newCid()
@@ -95,7 +128,7 @@ export function send(key: string, chat: string, text: string, hold = false) {
     cid,
     chat,
     text: text.trim(),
-    files: boxed.map((f) => ({ name: f.name, path: f.path ?? '' })),
+    files: boxed.map((f) => ({ name: f.name, path: f.path ?? '', ...(f.id ? { id: f.id } : {}) })),
     reply,
     at: Date.now(),
     prior: priorOf(s.chats[chat]),

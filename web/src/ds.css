@@ -12,7 +12,7 @@ input:focus-visible,textarea:focus-visible{outline:0}
 /* a press on a touch screen: no browser box and no text picked up by a long press; the app's own states show it */
 button,[role="tab"],summary,.lk{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 @media(pointer:coarse){
-  .tab:active,.seg button:active,.pt:active,.vbtn:active,.send:active,.grp:active,.fold:active,.keys button:active,.fchip button:active,.tg:active,.banner>button.n:active,.thumb:active,button.ref:active,.lk:active,a.pic:active,a.fchip:active{opacity:.6}
+  .tab:active,.seg button:active,.pt:active,.vbtn:active,.send:active,.grp:active,.fold:active,.keys button:active,.fchip button:active,.tg:active,.banner>button.n:active,.thumb:active,button.ref:active,.lk:active,a.pic:active,a.fchip:active,.atb:active,.arm:active{opacity:.6}
 }
 p,h2,h3{margin:0}small{font-size:inherit}
 
@@ -296,7 +296,7 @@ html,body{height:100%}body{padding:0;overflow:hidden}
 .dlg{position:fixed;top:14dvh;max-height:80dvh;overflow-y:auto}
 .sheet{position:fixed;top:auto!important;bottom:0;max-height:85dvh;overflow-y:auto;padding-bottom:calc(16px + env(safe-area-inset-bottom))}
 .sheet.in{animation:up .2s ease-out}
-.pop.in:not(.sheet),.dlg.in,.win.in{animation:fade .12s ease-out}
+.pop.in:not(.sheet),.dlg.in,.win.in,.lbox.in{animation:fade .12s ease-out}
 .drawer{position:fixed;border-radius:0;overflow-y:auto}.drawer.in{animation:in .2s ease-out}
 .pk .list{max-height:46dvh;overflow-y:auto}
 .bar{padding-bottom:calc(12px + env(safe-area-inset-bottom))}
@@ -309,8 +309,46 @@ html,body{height:100%}body{padding:0;overflow:hidden}
 .i.turn{animation:turn 1s linear infinite}
 @keyframes turn{to{transform:rotate(1turn)}}
 @keyframes calm{50%{opacity:.45}}
-@media(prefers-reduced-motion:reduce){.i.turn{animation:calm 2.4s ease-in-out infinite}.sheet.in,.drawer.in,.pop.in,.dlg.in,.win.in{animation:none}.tg i{transition:none}}
+@media(prefers-reduced-motion:reduce){.i.turn{animation:calm 2.4s ease-in-out infinite}.sheet.in,.drawer.in,.pop.in,.dlg.in,.win.in,.lbox.in{animation:none}.tg i{transition:none}}
 
 textarea.cin{overflow-y:auto}
 .pane .scroll>.tdr .tw{flex:1;display:flex;flex-direction:column}
 .srch .list{max-height:56dvh;overflow-y:auto}
+
+/* attachments: square thumbnails in one row that scrolls sideways (the message box, what you sent), and the preview */
+.app{--ath:72px}
+.athr{display:flex;gap:8px;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:none}
+.athr::-webkit-scrollbar{display:none}
+.athr.box{padding:8px 8px 4px}
+.athr.mine{justify-self:end;margin-top:4px}
+.athr>[role="listitem"]{flex:none}
+.ath{position:relative;flex:none;width:var(--ath);height:var(--ath);border-radius:10px}
+.atb{display:block;width:100%;height:100%;border-radius:10px;overflow:hidden;background:var(--control);color:var(--fg)}
+.atb::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 1px var(--line2);pointer-events:none}
+.ath.bad .atb::after{box-shadow:inset 0 0 0 2px var(--red)}
+.atb img,.atb video{display:block;width:100%;height:100%;object-fit:cover;pointer-events:none}
+.ftl{display:grid;place-content:center;justify-items:center;gap:2px;width:100%;height:100%;padding:6px;text-align:center}
+.ftl b{font-size:13px;line-height:18px;font-weight:600}
+.ftl span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:11px;line-height:14px}
+.ast{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:2px;border-radius:inherit;background:rgb(0 0 0/.45);color:#fff;font-size:12px;line-height:16px;font-weight:500}
+.ast.bad{background:color-mix(in srgb,var(--canvas) 85%,transparent);color:var(--red)}
+.arm{position:absolute;top:0;right:0;display:grid;place-items:start end;width:28px;height:28px;padding:4px;border-radius:0 10px 0 8px}
+.arm>span{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:rgb(0 0 0/.6);color:#fff;box-shadow:0 0 0 1px rgb(255 255 255/.35)}
+.arm .i{width:12px;height:12px;stroke-width:2}
+.arm:focus-visible{outline-offset:-2px}
+.lbox{position:fixed;inset:0;display:flex;flex-direction:column;background:rgb(0 0 0/.88);color:#fafafa;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+.lbox:focus{outline:0}
+.lbar{display:flex;align-items:center;gap:4px;min-height:52px;padding:0 8px 0 16px;pointer-events:auto}
+.lbar .ib{color:#d4d4d4}.lbar .ib:hover{background:rgb(255 255 255/.1);color:#fafafa}
+.lbar .ib:focus-visible{outline-color:#fafafa}
+.lname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;line-height:20px;font-weight:500}
+.lbody{flex:1;min-height:0;display:grid;place-items:center;padding:0 16px 16px}
+.lbody>*{pointer-events:auto}
+.lbody img,.lbody video{max-width:100%;max-height:calc(100dvh - 68px - env(safe-area-inset-top) - env(safe-area-inset-bottom));object-fit:contain;border-radius:4px}
+.lfile{display:grid;justify-items:center;gap:8px;width:min(320px,100%);padding:24px;border-radius:16px;background:var(--overlay);color:var(--fg);text-align:center;box-shadow:inset 0 0 0 1px var(--line2)}
+.ftl.big{width:96px;height:96px;border-radius:12px;background:var(--control);color:var(--muted)}
+.ftl.big b{color:var(--fg)}
+.lfn{max-width:100%;overflow-wrap:anywhere;font-size:16px;line-height:24px;font-weight:600}
+.lsub{color:var(--muted);font-size:14px;line-height:20px}
+.lfile .btn{margin-top:8px}
+.lfile a.btn{color:inherit;text-decoration:none}
