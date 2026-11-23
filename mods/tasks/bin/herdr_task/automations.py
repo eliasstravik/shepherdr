@@ -307,7 +307,7 @@ def auto_view(s, a):
              active=bool(enabled and not a.get("paused") and not a.get("space_paused")), runs=runs, last=runs[-1] if runs else None)
     # machine: None here; herdr-task --on <machine> names it (cli.remote), so a list across machines says whose it is
     v.update(ref=auto_ref(s, a), **{"from": from_text(a["from"]) if a.get("from") else None}, folder=s.loc["folder"], machine=None, prefix=s.prefix, every=(a.get("every") or {}).get("text"),
-             trigger=trigger_words(a), enabled=enabled)
+             trigger=trigger_words(a), enabled=enabled, may_update=bool(a.get("may_update")), last_update=a.get("last_update"))
     return v
 
 
@@ -316,7 +316,7 @@ def auto_line(v):
                                           (f"next {datetime.datetime.fromtimestamp(v['next_run'] / 1000):%a %H:%M}" if v.get("next_run") else "on events"))
     err = (f"  ! {v['last_error']['message']}" if v.get("last_error") else
            f"  ~ {v['from_error']['message']} ({v['from_error']['misses']} round(s) so far)" if v.get("from_error") else "")
-    return f"{v['title']}  ({v['trigger']}; {state}){err}  [key {v['ref']}]"
+    return f"{v['title']}  ({v['trigger']}; {state}{'; may update Shepherdr' if v.get('may_update') else ''}){err}  [key {v['ref']}]"
 
 
 def set_auto_fields(s, a, args, adding=False):
@@ -359,6 +359,9 @@ def set_auto_fields(s, a, args, adding=False):
         a["space"] = bare(args.space)
     if args.parent:
         a["parent"] = args.parent
+    if getattr(args, "may_update", None) is not None:
+        from .self_update import set_allowed
+        set_allowed(a, args.may_update)
     if getattr(args, "set", None):
         # Each task it adds gets these (#744: review=off for a run that only reads); checked now.
         sets = dict(a.get("set") or {})
@@ -522,6 +525,9 @@ def fire(s, a, why, brief=None):
     # 3.2 (step 42): every run is an ordinary task named after its schedule, which it carries (started by its schedule)
     t["automation"], t["automation_title"], t["automation_ref"] = a["id"], a["title"], auto_ref(s, a)
     t["prompt"] = (t["prompt"].rstrip() + "\n\n" if t["prompt"].strip() else "") + run_rules(s, t)
+    if a.get("may_update"):
+        from .self_update import brief_words
+        t["prompt"] += "\n\n" + brief_words(s, a, t, own_path())
     if a.get("space"):
         t["space"] = bare(a["space"])
     if a.get("agent"):
