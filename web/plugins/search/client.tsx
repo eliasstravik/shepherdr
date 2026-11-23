@@ -2,9 +2,9 @@
 // results grouped Spaces, Tasks, Artifacts, each drawn as its usual row; picking one opens it. By name only.
 import { useState } from 'react'
 import { definePlugin, getState, go, openArtifact, setUI, useSnap } from '@client/kernel.ts'
-import { I, Row } from '@client/ui.tsx'
+import { Folder, I, Row } from '@client/ui.tsx'
 import { StatusIcon, open as openTask } from '@plugins/tasks/client.tsx'
-import { agoShort, artifactsIn, everything, machineLabel, spaceLabel, spacesOf, whereWords } from '@shared/view.ts'
+import { agoShort, artifactsIn, everything, folderOf, machineLabel, spaceLabel, spacesOf, whereWords } from '@shared/view.ts'
 
 function Search({ close }: { close: () => void }) {
   const snap = useSnap()
@@ -27,7 +27,7 @@ function Search({ close }: { close: () => void }) {
       <div className="list" style={{ minHeight: 0 }}>
         {none && <p className="hint" style={{ padding: 8 }}>{s ? 'Nothing with that name.' : 'Type a name.'}</p>}
         {spaces.length > 0 && <div className="lab">Spaces</div>}
-        {spaces.map((p) => <Row key={p.id} icon={p.id === ev?.id ? 'layers' : 'hash'} label={p.id === ev?.id ? 'Everything' : p.name} value={machineLabel(snap, p.machine)} onClick={pick(() => go(p.id))} />)}
+        {spaces.map((p) => <Row key={p.id} icon={p.id === ev?.id ? 'layers' : 'hash'} label={p.id === ev?.id ? 'Everything' : p.name} sub={<Folder f={folderOf(snap, p)} machine={false} />} value={machineLabel(snap, p.machine)} onClick={pick(() => go(p.id))} />)}
         {tasks.length > 0 && <div className="lab">Tasks</div>}
         {tasks.map((t) => <Row key={t.id} lead={<StatusIcon t={t} />} label={t.name} sub={whereWords(snap, t.place)} onClick={pick(() => openTask(t))} />)}
         {arts.length > 0 && <div className="lab">Artifacts</div>}

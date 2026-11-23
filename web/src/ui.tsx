@@ -33,6 +33,18 @@ export function Btn({ kind, small, className, children, ...rest }: ButtonHTMLAtt
   )
 }
 
+/** A space's folder on one line (SHEP-302): its machine when it is another, then the path, whose start gives way first
+ *  so the folder's own name stays readable ("…/acme/shop"). From view.ts folderOf. */
+export function Folder({ f, machine = true }: { f: { head: string; tail: string; machine: string | null }; machine?: boolean }) {
+  return (
+    <span className="fpath">
+      {machine && f.machine && <span className="fm">{f.machine} ·</span>}
+      {f.head && <span className="fh"><bdi>{f.head}</bdi></span>}
+      <span className="ft">{f.tail}</span>
+    </span>
+  )
+}
+
 /** a row: of the list, of a menu, of a picker */
 export function Row({
   icon,

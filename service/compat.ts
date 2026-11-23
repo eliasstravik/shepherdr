@@ -347,12 +347,13 @@ export class Compat {
       // folder it works in, home shortened to ~
       const kind = s.assistant ? kindOfTerm((this as any).terminalsOf?.(s.assistant)) : null;
       const header = `Assistant${kind ? ` · ${CLI_NAMES[kind] ?? kind}` : ""}`;
-      const where = s.machine ? s.folder : s.folder === HOME ? "~" : s.folder.startsWith(HOME + "/") ? `~${s.folder.slice(HOME.length)}` : s.folder;
+      // its folder with its own machine's home as ~ (another machine's home by its usual place, never this one's)
+      const where = s.machine ? SPc.tilde(s.folder) : s.folder === HOME ? "~" : s.folder.startsWith(HOME + "/") ? `~${s.folder.slice(HOME.length)}` : s.folder;
       // the folder the header shows, as the window's (mods/pane-chat): where its Assistant works now, home as ~ (another
       // machine's too, as its own window shows it); the space's folder until it has one
       const live = ak?.foreground?.cwd ?? ak?.cwd;
       const cwd = live ? (s.machine ? SPc.tilde(live) : shortHome(live)) : null;
-      return { id: s.id, name, ...(!s.name || s.name === "~" ? { unnamed: true } : {}), ...(s.icon ? { emoji: s.icon } : {}),...(s.git ? { git: s.git.linked ? "linked" : "main", repo: s.git.repo, gitName: s.git.name, branch: s.git.branch ?? null } : {}), ...(s.git?.linked ? { worktree: true } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", chat: key, header, where, ...(cwd ? { cwd } : {}), store: artifactStore(s as any), ...((s as any).changedAt ? { changedAt: (s as any).changedAt } : {}), ...((a) => (a ? { agent: a } : {}))(this.placeAgent(s, key)) };
+      return { id: s.id, name, ...(!s.name || s.name === "~" ? { unnamed: true } : {}), ...(s.icon ? { emoji: s.icon } : {}),...(s.git ? { git: s.git.linked ? "linked" : "main", repo: s.git.repo, gitName: s.git.name, branch: s.git.branch ?? null } : {}), ...(s.git?.linked ? { worktree: true } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", chat: key, header, where, folder: s.folder, ...(cwd ? { cwd } : {}), store: artifactStore(s as any), ...((s as any).changedAt ? { changedAt: (s as any).changedAt } : {}), ...((a) => (a ? { agent: a } : {}))(this.placeAgent(s, key)) };
     });
 
     // every agent's own helper agents (SHEP-54): their chats open by t:<address>
