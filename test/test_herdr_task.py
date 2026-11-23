@@ -4552,7 +4552,7 @@ class AssistantSettings(unittest.TestCase):
         labels = self.terminals["t5"]["labels"]
         self.assertEqual(labels["herdr.reactions"], "off")
         self.assertEqual(sorted(self.aset.parse(labels["herdr.settings"])),
-                         sorted(["review", "merge", "proof", "agent", "base", "worktrees", "notes", "setup", "reactions", "suggestions", "feedback", "instructions"]))
+                         sorted(["review", "merge", "proof", "agent", "base", "worktrees", "notes", "setup", "reactions", "suggestions", "feedback"]))
         # another space inherits Everywhere's, with its own merge
         self.assistant("t6", "sp2")
         other = self.aset.session_note("t6")
@@ -4599,26 +4599,32 @@ class AssistantSettings(unittest.TestCase):
         self.assertEqual(report["settings"], [{"to": "t5", "changed": ["review", "reactions"]}])
         self.assertEqual(self.terminals["t5"]["labels"]["herdr.reactions"], "off")
 
-    def test_instructions_are_told_as_written(self):
-        """3.2: Settings › Instructions (everything's, then the space's own) end the "Your settings" block as written; a
-        change is told to a running session, and a stored Autopilot or Tasks-at-once setting is simply ignored."""
+    def test_old_instructions_are_ignored_and_a_told_assistant_hears_once_they_are_gone(self):
+        """SHEP-319: Settings › Instructions is gone. A file still holding them (or a stored Autopilot or Tasks-at-once)
+        breaks nothing and none of it reaches the block; an Assistant told some before is told once they no longer
+        apply, one never told any hears nothing."""
         self.write({"everywhere": {"instructions": "Write British English.", "autopilot": {"every": "every 30 minutes"}, "tasks": {"max_running": 2}},
                     "spaces": {"sp1": {"instructions": "This shop sells tea."}, "sp2": {"autopilot": {"direction": "x"}}}})
         self.assistant()
         note = self.aset.session_note("t5")
-        self.assertIn("\n" + self.settings.INSTRUCTIONS_HEAD + "\n\nWrite British English.\n\nFor this space:\nThis shop sells tea.\n", note)
-        self.assertNotIn("- Instructions:", note)
-        for gone in ("Autopilot", "Tasks at once"):
+        for gone in ("Autopilot", "Tasks at once", "nstructions", "British", "sells tea"):
             self.assertNotIn(gone, note)
+        self.assertNotIn("instructions", self.aset.parse(self.terminals["t5"]["labels"]["herdr.settings"]))
+        # two running Assistants labelled by an older herdr-task: t5 was told some, t6 none
+        import hashlib
+        told = self.aset.parse(self.terminals["t5"]["labels"]["herdr.settings"])
+        self.terminals["t5"]["labels"]["herdr.settings"] = ",".join(f"{k}:{v}" for k, v in {**told, "instructions": hashlib.sha1(b"x").hexdigest()[:6]}.items())
         self.assistant("t6", "sp2")
-        other = self.aset.session_note("t6")
-        self.assertIn("Write British English.", other)
-        self.assertNotIn("sells tea", other)
-        self.write({"everywhere": {"instructions": "Write British English."}, "spaces": {"sp1": {"instructions": "This shop sells coffee now."}}})
+        self.aset.session_note("t6")
+        self.terminals["t6"]["labels"]["herdr.settings"] += f",instructions:{self.aset.NO_INSTRUCTIONS}"
         self.aset.settings_pass({}, {})
-        self.assertEqual([a for a, _ in self.sent], ["t5"])  # only the space it changed for
-        self.assertIn('<herdr-setting name="instructions" value="on" scope="space">The person changed their instructions. From now on:', self.sent[0][1])
-        self.assertIn("This shop sells coffee now.", self.sent[0][1])
+        self.assertEqual([a for a, _ in self.sent], ["t5"])
+        self.assertIn('<herdr-setting name="instructions" value="off"', self.sent[0][1])
+        self.assertIn(self.aset.INSTRUCTIONS_GONE, self.sent[0][1])
+        self.assertIn(self.aset.NOTICE_END, self.sent[0][1])
+        self.write({"everywhere": {"instructions": "Write American English."}})
+        self.aset.settings_pass({}, {})
+        self.assertEqual(len(self.sent), 1)  # once; a changed old key says nothing
 
     def test_a_save_that_changes_nothing_for_it_says_nothing(self):
         self.write({"everywhere": {"tasks": {"merge": "checks"}}})
@@ -8734,29 +8740,25 @@ class Next32(unittest.TestCase):
         with self.assertRaises(self.Fail):
             self.run_cmd(self.commands.cmd_edit, id="2", permission="root", **base)
 
-    # ---- Instructions (thin layer: words, not code) ----
+    # ---- Instructions: gone (SHEP-319), agents read AGENTS.md / CLAUDE.md natively ----
 
-    def test_instructions_go_into_every_brief(self):
+    def test_old_instructions_reach_no_brief(self):
         import herdr_task.settings as settings
         import herdr_task.launch as launch
         with open(settings.SETTINGS, "w") as f:
-            json.dump({"everywhere": {"instructions": "Write British English.\nNever push to main."},
-                       "spaces": {"sp1": {"folder": self.folder, "instructions": "This shop sells tea: keep the tone warm."},
-                                  "sp2": {"folder": "/elsewhere", "instructions": "Not this one."}}}, f)
+            json.dump({"everywhere": {"instructions": "Write British English."},
+                       "spaces": {"sp1": {"folder": self.folder, "instructions": "This shop sells tea."}}}, f)
         self.add("Fix login")
         with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
-            part = settings.instructions_part(s, "sp1")
             with self.mock.patch.object(launch, "instructions", lambda role: "You work on one task."), \
-                    self.mock.patch.object(launch, "settings_block", lambda *a, **k: "Settings: …"), \
-                    self.mock.patch.object(launch, "keep_review", lambda *a: None), \
-                    self.mock.patch.object(launch, "closing_line", lambda *a: "Say ready when done."):
+                    self.mock.patch.object(launch, "keep_review", lambda *a: None):
                 brief = launch.brief(s, s.find(1), None, "sp1", ["claude"])
-        self.assertEqual(part, settings.INSTRUCTIONS_HEAD + "\n\nWrite British English.\nNever push to main.\n\n"
-                         "For this space:\nThis shop sells tea: keep the tone warm.")
-        self.assertTrue(brief.endswith(part), brief)  # appended, as written: everything's first, then the space's
-        self.assertNotIn("Not this one", brief)
-        self.assertEqual(settings.instructions_text({"instructions": "  "}, {}), "")
-        self.assertEqual(settings.instructions_text({}, {"instructions": "Only here."}), settings.INSTRUCTIONS_HEAD + "\nOnly here.")
+                handoff = launch.handoff(s, s.find(1), None, argv=["claude"])
+        self.assertIn("Settings:", brief)
+        for text in (brief, handoff):
+            for gone in ("British", "sells tea", "Instructions from the person"):
+                self.assertNotIn(gone, text)
+        self.assertFalse(hasattr(settings, "instructions_part"))
 
 
 class Schedules32(unittest.TestCase):

@@ -83,7 +83,7 @@ export async function voiceNav(nav: Nav): Promise<NavAck> {
     return check(getState().ui.art === id, "the artifact didn't open")
   }
   if (nav.kind === 'settings') {
-    const names = ['General', 'Agents', 'Tasks', 'Instructions', 'Secrets', 'Machines', 'Usage', 'Plugins']
+    const names = ['General', 'Agents', 'Tasks', 'Secrets', 'Machines', 'Usage', 'Plugins']
     const want = str(nav.section).toLowerCase()
     const sec = want ? names.find((n) => n.toLowerCase().includes(want) || want.includes(n.toLowerCase())) : null
     if (want && !sec) return no(`Settings has no page like "${str(nav.section)}": its pages are ${names.join(', ')}`)

@@ -262,7 +262,6 @@ export function spaceMenu(anchor: Element, placeId: string) {
   const rows: MenuRow[] = [
     ...first,
     { icon: 'gear', label: 'Settings', line, run: () => openSettings(p.id) },
-    { icon: 'note', label: 'Instructions', run: () => openSettings(p.id, 'Instructions') },
     { icon: 'pen', label: 'Rename', run: () => renameDialog(p.name, (name) => tryAct({ type: 'rename', id: p.id, name })) },
     {
       icon: 'folder',

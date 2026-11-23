@@ -16,7 +16,7 @@ import sys
 import time
 
 from .base import ASK_HOME, ENTRY, Fail, git, hc_json, now, run, SHARE, WORKTREES
-from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, CLAUDE_PROFILE, REVIEW_TOOLS, codex_too_old, codex_update_words, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, instructions_part, keep_review, notes, notes_part, review_limits, settings_block, settings_for
+from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, CLAUDE_PROFILE, REVIEW_TOOLS, codex_too_old, codex_update_words, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
 from .github import finish, remote_of
@@ -684,8 +684,7 @@ def brief(s, task, parent=None, space=None, argv=None):
     body = "Your task, " + s.ref(task) + ":\n" + ((task.get("prompt") or "").strip() or task["title"])
     finish = notes_part("Before you say ready", notes(s, task, "finish", space))
     return "\n\n".join(x for x in [instructions("worker"), start, body, where_line(task), finish, closing_line(s, task, parent, argv),
-                                    settings_block(s, task, space, argv, live=True),
-                                    instructions_part(s, space or task.get("space"))] if x)
+                                    settings_block(s, task, space, argv, live=True)] if x)
 
 
 def handoff(s, task, prev, parent=None, argv=None):
@@ -700,7 +699,6 @@ def handoff(s, task, prev, parent=None, argv=None):
     lines.append(notes_part("Before you say ready", notes(s, task, "finish")))
     lines.append(closing_line(s, task, parent, argv))
     lines.append(settings_block(s, task, None, argv, live=True))
-    lines.append(instructions_part(s, task.get("space")))
     return "\n\n".join(x for x in lines if x)
 
 

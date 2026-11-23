@@ -1,6 +1,6 @@
 // The settings window: sections on the left, rows with switches and choices on the right; on a phone a list of
 // sections that each push in. 880×640 with a 200 px nav on a desktop. Opened for one space from its menu, it shows
-// only Agents, Tasks, Instructions and Secrets, and every row there carries small print under its value: "Same as
+// only Agents, Tasks and Secrets, and every row there carries small print under its value: "Same as
 // Everything", or "Set here" with a Reset button beside it. A row is a label and a control: no hint lines under one.
 import { useState, type ReactNode } from 'react'
 import { choose, TELL, turnOn, useDeviceAlerts, WHY, type Tell } from '@plugins/alerts/device.ts'
@@ -14,8 +14,8 @@ import { openPicker, pickFor, sayPick, useCatalog, type Role } from './picker.ts
 import { MOTIONS, setPref, THEMES, usePrefs, WIDTHS } from './prefs.ts'
 import { Btn, cx, I, IB, Meter, Row, Seg, Tgl } from './ui.tsx'
 
-const ALL: [string, IconName][] = [['General', 'gear'], ['Agents', 'agent'], ['Tasks', 'tasks'], ['Instructions', 'note'], ['Secrets', 'key'], ['Machines', 'server'], ['Usage', 'gauge'], ['Plugins', 'plug']]
-const SPACE: [string, IconName][] = [['Agents', 'agent'], ['Tasks', 'tasks'], ['Instructions', 'note'], ['Secrets', 'key']]
+const ALL: [string, IconName][] = [['General', 'gear'], ['Agents', 'agent'], ['Tasks', 'tasks'], ['Secrets', 'key'], ['Machines', 'server'], ['Usage', 'gauge'], ['Plugins', 'plug']]
+const SPACE: [string, IconName][] = [['Agents', 'agent'], ['Tasks', 'tasks'], ['Secrets', 'key']]
 
 /** a settings row: a label and a control */
 export function SRow({ label, wrap, children }: { label: ReactNode; wrap?: boolean; children?: ReactNode }) {
@@ -115,44 +115,6 @@ function Tasks({ snap, place }: { snap: Snapshot; place: string }) {
         <Seg label="Merge" values={MERGE.map((m) => m[1])} value={MERGE.find((m) => m[0] === lv.merge)?.[1] ?? MERGE[0]![1]} onChange={(v) => void set(place, 'merge', MERGE.find((m) => m[1] === v)![0])} />
       </SRow>
       <SRow label={<>Proof<Own place={place} own={own('proof')} k="proof" /></>}><Tgl label="Proof" on={lv.proof} onChange={(v) => void set(place, 'proof', v)} /></SRow>
-    </>
-  )
-}
-
-/** a small dialog in the style of New space: one box to write in, and Save */
-function editText(o: { title: string; label: string; value: string; rows?: number; save: (v: string) => void }) {
-  openForm(
-    function Form({ close }) {
-      const [v, setV] = useState(o.value)
-      return (
-        <>
-          <h2>{o.title}</h2>
-          <label className="fld">
-            <span>{o.label}</span>
-            <textarea className="inp" name="text" rows={o.rows ?? 6} value={v} onChange={(e) => setV(e.target.value)} />
-          </label>
-          <div className="acts">
-            <Btn onClick={close}>Cancel</Btn>
-            <Btn kind="pri" onClick={() => { close(); if (v !== o.value) o.save(v) }}>Save</Btn>
-          </div>
-        </>
-      )
-    },
-    { label: o.title },
-  )
-}
-
-function Instructions({ snap, place }: { snap: Snapshot; place: string }) {
-  const all = place === 'all'
-  const { lv, own } = levelOf(snap.config!, place)
-  const text = all || own('instructions') ? lv.instructions : ''
-  return (
-    <>
-      <p className="hint" style={{ marginBottom: 8 }}>{all ? 'How every agent should work, in every space.' : 'How agents should work in this space. Added to the instructions for every space.'}</p>
-      {text.trim() && <p className="note" style={{ whiteSpace: 'pre-wrap' }}>{text}</p>}
-      <div className="acts" style={{ justifyContent: 'flex-start', marginTop: 8 }}>
-        <Btn small onClick={() => editText({ title: 'Instructions', label: all ? 'For every space' : `For ${spaceLabel(snap, place)}`, value: text, save: (v) => void set(place, 'instructions', v) })}>Edit</Btn>
-      </div>
     </>
   )
 }
@@ -326,7 +288,6 @@ function Section({ snap, place, sec }: { snap: Snapshot; place: string; sec: str
   if (sec === 'General') return <General />
   if (sec === 'Agents') return <Agents snap={snap} place={place} />
   if (sec === 'Tasks') return <Tasks snap={snap} place={place} />
-  if (sec === 'Instructions') return <Instructions snap={snap} place={place} />
   if (sec === 'Secrets') return <Secrets snap={snap} place={place} />
   if (sec === 'Machines') return <Machines snap={snap} />
   if (sec === 'Usage') return <Usage snap={snap} />

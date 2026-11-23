@@ -87,31 +87,10 @@ def settings_layers(s, space=None):
     return d.get("everywhere") or {}, machine or {}, pick or {}
 
 
-# ---- Instructions (3.2) ------------------------------------------------------------------------
-# Settings › Instructions: the person's own words for every agent, for everything
-# (settings.json "everywhere" -> "instructions") and per space ("spaces" -> <id> -> "instructions"). Thin layer:
-# they are prompts as written, added to every agent's brief or session (everything's first, then the space's).
-INSTRUCTIONS_HEAD = "Instructions from the person (Shepherdr settings › Instructions), as they wrote them:"
-
-
-def instructions_text(everywhere, own=None):
-    """The Instructions block from two settings layers (everything's, the space's own); "" when neither says any."""
-    words = [str(x.get("instructions") or "").strip() if isinstance(x, dict) and isinstance(x.get("instructions"), str) else ""
-             for x in (everywhere, own)]
-    if not any(words):
-        return ""
-    parts = [INSTRUCTIONS_HEAD]
-    if words[0]:
-        parts.append(words[0])
-    if words[1]:
-        parts.append(("For this space:\n" if words[0] else "") + words[1])
-    return "\n\n".join(parts) if words[0] and words[1] else "\n".join(parts)
-
-
-def instructions_part(s, space=None):
-    """A task's Instructions block: everything's, then those of the space it works for."""
-    everywhere, _, own = settings_layers(s, space)
-    return instructions_text(everywhere, own)
+# ---- Instructions (gone, SHEP-319) --------------------------------------------------------------
+# Settings › Instructions (settings.json "everywhere"/"spaces" -> <id> -> "instructions") was the person's own words for
+# every agent. Agents are instructed natively now: the repo's or folder's AGENTS.md / CLAUDE.md and their own global
+# file. A file that still holds the key is fine: nothing here reads it (the update keeps the words in a plain file).
 
 
 def settings_for(s, space=None):

@@ -2,6 +2,7 @@
 3.1 Herdr-window install, uninstall. Never touches the real home."""
 import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import contextlib
+import io
 import re
 import json
 import os
@@ -420,6 +421,79 @@ class Install(unittest.TestCase):
             self.assertNotIn("✗", run("doctor", "--root", self.root).stdout)
         finally:
             shutil.rmtree(src, ignore_errors=True)
+
+    def test_written_instructions_are_kept_in_a_plain_file_once(self):
+        """SHEP-319: Settings › Instructions is gone. The update moves what was written (everywhere and each space's)
+        into a plain file beside the settings and says so once; a second run loses nothing and says nothing; settings
+        without any get no file; a dry run writes nothing."""
+        sh = installer()
+        path = sh.where_for(self.root).path("settings")
+        out = os.path.join(os.path.dirname(path), sh.OLD_INSTRUCTIONS)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        old = {"everywhere": {"instructions": "Write British English.", "tasks": {"merge": "checks"}},
+               "spaces": {"sp1": {"name": "shop", "folder": "/work/shop", "instructions": "This shop sells tea."},
+                          "sp2": {"name": "blog", "instructions": "  "}, "sp3": {"name": "docs", "tasks": {"proof": False}}}}
+        with open(path, "w") as f:
+            json.dump(old, f)
+        dry, live = mock.Mock(dry_run=True), mock.Mock(dry_run=False)
+        r = sh.Run(self.root, True)
+        with contextlib.redirect_stdout(io.StringIO()) as said:
+            sh.keep_instructions(r, dry, self.root)
+        self.assertIn("would keep", said.getvalue())
+        self.assertFalse(os.path.exists(out))
+        with open(path) as f:
+            self.assertEqual(json.load(f), old)
+        r = sh.Run(self.root, False)
+        sh.keep_instructions(r, live, self.root)
+        with open(out) as f:
+            kept = f.read()
+        self.assertIn("## Every space\n\nWrite British English.\n", kept)
+        self.assertIn("## shop (/work/shop)\n\nThis shop sells tea.\n", kept)
+        self.assertNotIn("blog", kept)
+        self.assertIn("AGENTS.md", kept)
+        self.assertEqual(len([n for n in r.notes if sh.OLD_INSTRUCTIONS in n]), 1)
+        with open(path) as f:
+            now = json.load(f)
+        self.assertNotIn("instructions", json.dumps(now))
+        self.assertEqual(now["everywhere"], {"tasks": {"merge": "checks"}})
+        self.assertEqual(now["spaces"]["sp3"], old["spaces"]["sp3"])
+        # a second run: nothing lost, nothing said
+        r = sh.Run(self.root, False)
+        sh.keep_instructions(r, live, self.root)
+        self.assertEqual(r.notes, [])
+        with open(out) as f:
+            self.assertEqual(f.read(), kept)
+        # another copy of the settings still holding them later (a linked machine's): the same words aren't written
+        # twice; different ones are added after what was kept
+        with open(path, "w") as f:
+            json.dump({"everywhere": {"instructions": "Write British English."}}, f)
+        sh.keep_instructions(sh.Run(self.root, False), live, self.root)
+        with open(out) as f:
+            self.assertEqual(f.read(), kept)
+        with open(path, "w") as f:
+            json.dump({"everywhere": {"instructions": "Write American English."}}, f)
+        sh.keep_instructions(sh.Run(self.root, False), live, self.root)
+        with open(out) as f:
+            again = f.read()
+        self.assertTrue(again.startswith(kept.rstrip("\n")))
+        self.assertIn("Write British English.", again)
+        self.assertIn("Write American English.", again)
+        sh.keep_instructions(sh.Run(self.root, False), live, self.root)
+        with open(out) as f:
+            self.assertEqual(f.read(), again)
+
+    def test_no_instructions_no_file(self):
+        sh = installer()
+        path = sh.where_for(self.root).path("settings")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            json.dump({"everywhere": {"tasks": {"merge": "checks"}}}, f)
+        before = os.stat(path).st_mtime_ns
+        r = sh.Run(self.root, False)
+        sh.keep_instructions(r, mock.Mock(dry_run=False), self.root)
+        self.assertEqual((r.notes, os.stat(path).st_mtime_ns), ([], before))
+        self.assertFalse(os.path.exists(os.path.join(os.path.dirname(path), sh.OLD_INSTRUCTIONS)))
+        sh.keep_instructions(sh.Run(self.root, False), mock.Mock(dry_run=False), os.path.join(self.root, "nowhere"))  # no file: fine
 
     def test_doctor_says_why_not_shared(self):
         """doctor (GitHub #754): when tailscale serve refused the share, it's broken (not a note), in tailscale's own
