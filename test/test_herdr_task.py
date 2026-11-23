@@ -2966,7 +2966,7 @@ class ReviewerLine(unittest.TestCase):
     def test_signed_out_codex_never_reviews(self):
         r = self.line("signed-out")
         self.assertEqual(r["value"]["agent"], "claude")
-        self.assertIn("claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash", r["value"]["command"])
+        self.assertIn("claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --strict-mcp-config", r["value"]["command"])
         self.assertIn("Codex isn't signed in here", r["text"])
         self.assertIn("`codex login`", r["text"])
 
@@ -5373,7 +5373,7 @@ class CodexAsksOnTheCard(unittest.TestCase):
             own = lambda c, sb=True: launch.own_command("/x/herdr-task", c, sb)  # noqa: E731
             yes = [f"hc run --bg --name demo-1-review --label \"herdr.task=$HERDR_BROWSER_TASK\" --label herdr.role=reviewer "
                    f"--label herdr.agent=codex -- {rv} 'Review it: \"ok\" & $x'",
-                   "hc run --bg --name demo-1-review -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --model opus 'review'",
+                   "hc run --bg --name demo-1-review -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --strict-mcp-config --model opus 'review'",
                    f"hc run --bg --name demo-1-review -- {reviewer_command('claude', 'opus', 'high')} 'review'",
                    "hc wait demo-1-review --timeout 600", "hc read demo-1-review --lines 400", "hc kill demo-1-review",
                    "hc keys demo-1-review enter", "hc keys demo-1-review down enter"]
@@ -7730,7 +7730,7 @@ class CodexBatch278(unittest.TestCase):
     def test_claude_in_the_system_folders_needs_nothing(self):
         self.patch(self.settings.shutil, "which", lambda name: f"/usr/bin/{name}")
         self.assertEqual(self.settings.reviewer_command("claude"),
-                         'env ${CLAUDE_CONFIG_DIR:+"CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR"} claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash')
+                         'env ${CLAUDE_CONFIG_DIR:+"CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR"} claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --strict-mcp-config')
 
     # ---- #1131 #1181 -----------------------------------------------------------------------------
     def test_a_claude_reviewer_gets_the_workers_profile_never_plan_mode(self):
