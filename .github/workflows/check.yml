@@ -59,6 +59,9 @@ jobs:
           bunx tsc --noEmit -p .
           bun test service core web
           bun run build
+      - name: every tappable thing is big enough for a finger (the built demo, phone and tablet widths)
+        # SHEP-317: web/demo/tap-check.ts in the runner's own Chrome; it names what's under the minimum
+        run: bun web/demo/tap-check.ts
       - name: shell scripts parse
         # every script under plain bash (macOS's bash 3.2 is what people run; #908), and one whose first line says sh
         # also under sh (dash here). test_repo's test_each_parses checks every shipped script the same way.

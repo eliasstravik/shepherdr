@@ -100,7 +100,7 @@ div.b[data-menu]{cursor:pointer}
 
 /* the emoji list behind + in a message's menu */
 .emolist{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:2px;max-height:46dvh;overflow-y:auto}
-.emolist button{height:40px;border-radius:8px;font-size:20px;line-height:1;text-align:center}
+.emolist button{height:max(40px,var(--ib));border-radius:8px;font-size:20px;line-height:1;text-align:center}
 .emolist button:hover{background:var(--control)}
 
 /* text fields that hold more than a line (a schedule's What to do) */

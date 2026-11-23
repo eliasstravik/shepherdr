@@ -13,7 +13,7 @@
 /* the controls: Cancel, the wave, the time, Done */
 .dctl{display:flex;align-items:center;gap:8px;min-height:var(--btn)}
 .dwave{flex:1;min-width:0;height:24px;color:var(--fg)}
-.app.phone .dwave{height:28px}
+.app.tap .dwave{height:28px}
 .dwave.off{color:var(--muted)}
 .dtime{display:inline-flex;align-items:center;gap:6px;min-width:5ch;color:var(--sub);font-size:var(--sec);line-height:var(--secl);font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
 .ddot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
