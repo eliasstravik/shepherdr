@@ -37,6 +37,7 @@ than its sources. A build that fails stops the install before anything is writte
 | Question and permission cards | hooks in `~/.claude/settings.json` and `~/.codex/hooks.json`; `--no-hooks` leaves them out. Codex asks once to trust a new hook |
 | The "Open Shepherdr" button | `~/.config/herdr-app/mods/open-shepherdr`, and the key Ctrl+Shift+O in `keys.json` when that key is free. Only when the Herdr app is on this machine |
 | agent-browser, for Screens | one on the PATH when it is 0.41.x from 0.41.1, else Shepherdr's own copy in `~/.local/share/shepherdr/agent-browser/<version>/`, and Chrome for Testing in `~/.agent-browser` |
+| agent-desktop, for the agents' desktop | one on the PATH when it is 1.3.x from 1.3.1, else Shepherdr's own copy in `~/.local/share/shepherdr/agent-desktop/<version>/` |
 
 Shepherdr's own folder is replaced whole on every update. Never overwritten: an instructions file you changed (the
 new one goes beside it as `<file>.new`), a key you set, a Herdr mod named `open-shepherdr` that isn't Shepherdr's
@@ -97,6 +98,24 @@ herdr-browser --status     # what is here, as JSON (doctor's line comes from it)
 ```
 
 A failed try waits 10 minutes before the next automatic one. A scratch `--root` install downloads nothing.
+
+## agent-desktop
+
+The agents' desktop (`herdr-desktop`) uses [agent-desktop](https://github.com/vercel-labs/agent-desktop). Shepherdr
+pins 1.3.1 and works with any newer 1.3.x. As with agent-browser, install, update, `herdr-task machines sync` (on the
+machines it reaches) and an agent's first `herdr-desktop` command install Shepherdr's own copy: the release archive
+for this machine, checked against the pinned checksum. No npm, no sudo. `shepherdr uninstall` removes it.
+
+```bash
+herdr-desktop --install    # install or repair agent-desktop now
+herdr-desktop --status     # what is here and what is missing, as JSON (doctor's lines come from it)
+```
+
+On a Mac, only you can switch on what it needs there, and `shepherdr doctor` says which is still off: Accessibility
+and Screen Recording for agent-desktop (System Settings › Privacy & Security; `herdr-desktop permissions --guide`
+opens the page), Screen Sharing with "VNC viewers may control screen with password" (System Settings › General ›
+Sharing, the i button beside Screen Sharing), and that password given to Shepherdr as the secret
+`SCREEN_SHARING_PASSWORD`.
 
 ## What Shepherdr contacts
 

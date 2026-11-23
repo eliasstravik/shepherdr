@@ -1299,6 +1299,88 @@ def ensure_agent_browser(r, home):
         r.notes.append(f"the task browser: {line}")
 
 
+# ---- agent-desktop (the agents' desktop, SHEP-346) ----------------------------------------------
+# herdr-desktop owns it, as herdr-browser owns agent-browser: the pin, Shepherdr's own copy, how it's fetched. Install,
+# update and doctor only ask it (--install, --status), as the installed copy, with the root's home.
+SCREEN_SHARING_SECRET = "SCREEN_SHARING_PASSWORD"   # a Mac's Screen Sharing password, kept as a secret by that name
+
+
+def desktop_helper(root):
+    p = os.path.join(root, SHARE, "bin", "herdr-desktop")
+    return p if os.path.isfile(p) else None
+
+
+def ensure_agent_desktop(r, home):
+    """A working agent-desktop for the agents' desktop: the one already here when it fits, else Shepherdr's own copy
+    (installed, or updated when the pin changed). Never stops the install: a failure is a note with the fix. Only for
+    the real home (a scratch --root downloads nothing), unless SHEPHERDR_AGENT_DESKTOP=1."""
+    if not home and os.environ.get("SHEPHERDR_AGENT_DESKTOP") != "1":
+        return
+    hd = desktop_helper(r.root)
+    if not hd or browser_off(r.root):
+        return
+    if r.dry:
+        say("  agent-desktop: would make sure it's here (herdr-desktop --install)")
+        return
+    try:
+        p = subprocess.run(["sh", hd, "--install"], capture_output=True, text=True, env=browser_env(r.root),
+                           stdin=subprocess.DEVNULL, timeout=900)
+        ok = p.returncode == 0
+        out = [x.replace("herdr-desktop: ", "", 1) for x in (p.stdout + "\n" + p.stderr).splitlines()
+               if x.strip() and not x.startswith(("herdr-desktop: installing", "herdr-desktop: downloading"))]
+    except (OSError, subprocess.SubprocessError) as e:
+        out, ok = [f"herdr-desktop --install didn't finish ({e})"], False
+    if ok:
+        say(f"  {out[0]}" if out else "  agent-desktop is ready")
+        # still missing here (a display server, a Mac's permissions): only the person can do those, doctor says them too
+        r.notes.extend(f"the agents' desktop: {x}" for x in out[1:])
+    else:
+        r.notes.append(f"the agents' desktop: {out[-1] if out else 'herdr-desktop --install failed'}")
+
+
+def secret_names(root):
+    """The secrets' names this machine can use (herdr-secret names), or None when it can't say."""
+    hs = os.path.join(root, ".local", "bin", "herdr-secret")
+    if not os.path.isfile(hs):
+        return None
+    try:
+        p = subprocess.run([sys.executable, hs, "names", "--json"], capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL, timeout=30)
+        return {x.get("name") for x in json.loads(p.stdout)} if p.returncode == 0 else None
+    except (OSError, ValueError, AttributeError, subprocess.SubprocessError):
+        return None
+
+
+def agent_desktop_state(root, root_is_home):
+    """doctor's lines on the agents' desktop: agent-desktop, and on a Mac what only the person can switch on there
+    (Accessibility, Screen Recording, Screen Sharing with its VNC password, that password kept as a secret). [] when
+    there's no herdr-desktop here or the browser add-on is off."""
+    hd = desktop_helper(root)
+    if not hd or browser_off(root):
+        return []
+    try:
+        p = subprocess.run(["sh", hd, "--status"], capture_output=True, text=True, env=browser_env(root),
+                           stdin=subprocess.DEVNULL, timeout=60)
+        st = json.loads(p.stdout)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return ["the agents' desktop: herdr-desktop --status didn't answer"]
+    lines = []
+    if st.get("ok"):
+        where = "Shepherdr's own copy" if st.get("from") == "shepherdr" else st.get("bin")
+        lines.append(f"agent-desktop {st.get('version') or ''} for the agents' desktop ({where})".replace("  ", " "))
+    else:
+        lines.append("the agents' desktop: " + (st.get("problem") or "agent-desktop isn't usable").replace("herdr-desktop: ", "", 1))
+    problem = st.get("problem") or ""
+    lines += [f"the agents' desktop: {x}" for x in st.get("needs") or [] if x not in problem]
+    if st.get("driver") == "shared" and root_is_home:
+        names = secret_names(root)
+        if names is not None and SCREEN_SHARING_SECRET not in names:
+            lines.append(f"the agents' desktop: Shepherdr has no Screen Sharing password for this Mac: give it as the secret "
+                         f"{SCREEN_SHARING_SECRET} (herdr-secret set {SCREEN_SHARING_SECRET}), the one set under \"VNC viewers "
+                         "may control screen with password\"")
+    return lines
+
+
 def codex_sandbox_state(root_is_home):
     """doctor's line when Codex's sandbox (bwrap) can't start on this machine (SHEP-227, #998), else None.
     herdr-task's own check, asked once and kept: `herdr-task sandbox` gives the fix."""
@@ -1866,6 +1948,7 @@ def finish_install(a, r, rec, old, src, home, root, actions, old_files, gone, bu
     install_service(r, rec, home)
     say_web(root, home, a, started)
     ensure_agent_browser(r, home)
+    ensure_agent_desktop(r, home)
     if switching:
         convert_artifacts(r)
     rec.update({"version": VERSION, "source": src, "at": r.stamp, "root": root})
@@ -2115,8 +2198,9 @@ def cmd_doctor(a):
     for x in bad:
         say(f"  ✗ {x}")
     ab = agent_browser_state(root)
+    ad = agent_desktop_state(root, home)
     cs = codex_sandbox_state(home)
-    for x in warn + t_notes + ([ab] if ab else []) + ([cs] if cs else []) + [update_hint(rec)]:
+    for x in warn + t_notes + ([ab] if ab else []) + ad + ([cs] if cs else []) + [update_hint(rec)]:
         say(f"  - {x}")
     holds = [p for p in hold_paths(root) if os.path.exists(p)]
     if bad:
@@ -2196,6 +2280,7 @@ def cmd_uninstall(a):
                 pass
         # the agent-browser Shepherdr installed for the task browser (not data: nothing of the person's is in it)
         shutil.rmtree(os.path.join(where_for(root).roots["data"], "agent-browser"), ignore_errors=True)
+        shutil.rmtree(os.path.join(where_for(root).roots["data"], "agent-desktop"), ignore_errors=True)
         # Folders that only held ours.
         for rel in (f"{APP}/data/shepherdr", SHARE):
             for d, _, _ in sorted(os.walk(r.p(rel)), reverse=True):
