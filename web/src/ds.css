@@ -38,6 +38,9 @@ p,h2,h3{margin:0}small{font-size:inherit}
 .ib:hover,.ib[aria-pressed="true"],.ib[aria-expanded="true"]{background:var(--control);color:var(--fg)}
 .cnt{display:inline-block;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--control2);color:var(--fg);font-size:12px;line-height:18px;font-weight:600;text-align:center;font-variant-numeric:tabular-nums;flex:none}
 .ib .cnt,.pt .cnt{position:absolute;top:-5px;right:-7px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;font-size:11px;line-height:16px;background:var(--fg);color:var(--canvas);box-shadow:0 0 0 2px var(--canvas)}
+/* a header button's count sits on its icon's corner, not the button's: on touch the button is nearly the header's height,
+   so a badge on its edge crossed the header's top line (SHEP-387) */
+.ib .cnt{top:calc(50% - var(--ic)/2 - 8px);right:calc(50% - var(--ic)/2 - 10px)}
 .row{display:flex;align-items:center;gap:8px;width:100%;min-height:var(--row);padding:0 8px;border-radius:8px;color:var(--sub);min-width:0}
 button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"]){background:var(--control);color:var(--fg)}
 .rowx:has(>.row[aria-current="true"])>.row{background:none}
