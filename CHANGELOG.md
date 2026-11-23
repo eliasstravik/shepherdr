@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.2.11
+
+The phone and watch app can show what an agent asks in full, with its suggested replies to send in one tap.
+
+### The phone and watch app
+
+- Items that need you, and tasks that are Ready, now carry the agent's whole question or status, not only one short
+  line.
+- Where an item takes a written answer, it also carries the same suggested replies the web app shows as bubbles, so
+  the phone or watch can send one with a tap.
+
 ## 3.2.10
 
 Web addresses in a terminal open with a tap, links are easier to see, and you can put your machines in your own order.
