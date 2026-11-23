@@ -38,13 +38,15 @@ test("Reply in chat puts the task in the reply chip of the chat the person is in
   expect(getState().ui.task).toBeNull()
 })
 
-test("on a phone the Tasks panel steps aside so the chat's box shows; a task open in the middle gives the chat back", () => {
+test("on a phone the Tasks panel steps aside so the chat's box shows; a task open in the middle gives the chat back", async () => {
   setUI({ at: 'shop', phone: true, pane: 'tasks', task: 'vm:SHOP-2' })
   replyToTask(task)
   expect(getState().ui).toMatchObject({ pane: null, task: null, reply: { 'p:shop': { task: 'vm:SHOP-2' } } })
   setUI({ phone: false, pane: 'tasks', task: 'vm:SHOP-2', wide: true })
   replyToTask(task)
   expect(getState().ui).toMatchObject({ wide: false, pane: 'tasks' })
+  // let the box's late focus run here, not in another test file that has a document but no CSS (voice/call.test.ts)
+  await new Promise((r) => setTimeout(r, 100))
 })
 
 test("a task row's slide is a message's: the same mark, and only a slide past it replies", () => {
