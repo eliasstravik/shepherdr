@@ -32,7 +32,7 @@ export function Chips({ msg, chat }: { msg: Message; chat: Chat }) {
         <button
           type="button"
           key={c.emoji}
-          className={cx('rxc', c.pending && 'pending', !first.current!.has(c.emoji) && 'pop')}
+          className={cx('rxc', c.pending && 'rx-pending', !first.current!.has(c.emoji) && 'rx-new')}
           aria-pressed={c.mine}
           aria-label={chipLabel(c)}
           onClick={(e) => {

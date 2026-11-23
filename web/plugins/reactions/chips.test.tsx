@@ -24,7 +24,7 @@ test('the chips draw as buttons: the emoji, the count only above one, yours pres
   expect((html.match(/<button/g) ?? []).length).toBe(2)
   expect(html).toContain('<span class="n">2</span>')
   expect(html).toMatch(/class="rxc"[^>]*aria-pressed="true"/)
-  expect(html).toMatch(/class="rxc pending"[^>]*aria-pressed="false"/)
+  expect(html).toMatch(/class="rxc rx-pending"[^>]*aria-pressed="false"/)
   // none when there are none
   expect(renderToStaticMarkup(<Chips msg={msg([])} chat={chat} />)).toBe('')
 })
@@ -44,5 +44,16 @@ test('sizes: a pill that hugs its emoji with a 44 px tap area, a pop only with m
   expect(rule('.rxc')).toContain('flex:none')
   expect(rule('.rxs')).toContain('width:max-content')
   expect(rule('.rxc::after')).toContain('inset:-13px -2px -8px') // 13 + 28 + 8 = 49: a bar just below may take a few
-  expect(css).toMatch(/prefers-reduced-motion:reduce\)\{\.rxc\.pop\{animation:none\}/)
+  expect(css).toMatch(/prefers-reduced-motion:reduce\)\{\.rxs>\.rxc\.rx-new\{animation:none\}/)
+})
+
+test('the chip\'s state classes are its own: none is a class the rest of the app styles (3.2.4: "pop", the menu\'s)', () => {
+  const css = readFileSync(new URL('../../src/ds.css', import.meta.url), 'utf8')
+  const src = readFileSync(new URL('./client.tsx', import.meta.url), 'utf8')
+  const states = [...(src.match(/cx\('rxc',(.*?)\)\}/)?.[1] ?? '').matchAll(/'([\w-]+)'/g)].map((m) => m[1])
+  expect(states.sort()).toEqual(['rx-new', 'rx-pending'])
+  for (const c of states) {
+    // every selector naming it names the chip too
+    for (const m of css.matchAll(new RegExp(`[^{}]*\\.${c}(?![\\w-])[^{}]*\\{`, 'g'))) expect(m[0]).toContain('.rxc.' + c)
+  }
 })
