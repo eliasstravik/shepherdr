@@ -1,7 +1,7 @@
 /* Shepherdr's design system (3.2): tokens, sizes and classes. Desktop by default, phone under .app.phone. */
-:root{color-scheme:light;--canvas:#fff;--well:#fafafa;--raised:#f5f5f5;--overlay:#fff;--control:rgb(0 0 0/.05);--control2:rgb(0 0 0/.1);--fg:#0a0a0a;--sub:#404040;--muted:#737373;--line:rgb(0 0 0/.08);--line2:rgb(0 0 0/.12);--mine:#e5e5e5;--scrim:rgb(0 0 0/.3);--green:#15803d;--blue:#0369a1;--amber:#b45309;--red:#dc2626;--term:#0a0a0a;--shadow:0 8px 28px rgb(0 0 0/.14)}
-@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--canvas:#121212;--well:#0a0a0a;--raised:#1e1e1e;--overlay:#1f1f1f;--control:rgb(255 255 255/.1);--control2:rgb(255 255 255/.16);--fg:#fafafa;--sub:#d4d4d4;--muted:#a3a3a3;--line:rgb(255 255 255/.08);--line2:rgb(255 255 255/.12);--mine:rgb(255 255 255/.14);--scrim:rgb(0 0 0/.6);--green:#4ade80;--blue:#7dd3fc;--amber:#fbbf24;--red:#f87171;--shadow:0 0 0 0 transparent}}
-:root[data-theme="dark"]{color-scheme:dark;--canvas:#121212;--well:#0a0a0a;--raised:#1e1e1e;--overlay:#1f1f1f;--control:rgb(255 255 255/.1);--control2:rgb(255 255 255/.16);--fg:#fafafa;--sub:#d4d4d4;--muted:#a3a3a3;--line:rgb(255 255 255/.08);--line2:rgb(255 255 255/.12);--mine:rgb(255 255 255/.14);--scrim:rgb(0 0 0/.6);--green:#4ade80;--blue:#7dd3fc;--amber:#fbbf24;--red:#f87171;--shadow:0 0 0 0 transparent}
+:root{color-scheme:light;--canvas:#fff;--well:#fafafa;--raised:#f5f5f5;--overlay:#fff;--control:rgb(0 0 0/.05);--control2:rgb(0 0 0/.1);--fg:#0a0a0a;--sub:#404040;--muted:#737373;--line:rgb(0 0 0/.08);--line2:rgb(0 0 0/.12);--mine:#e5e5e5;--rx:#fff;--scrim:rgb(0 0 0/.3);--green:#15803d;--blue:#0369a1;--amber:#b45309;--red:#dc2626;--term:#0a0a0a;--shadow:0 8px 28px rgb(0 0 0/.14)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--canvas:#121212;--well:#0a0a0a;--raised:#1e1e1e;--overlay:#1f1f1f;--control:rgb(255 255 255/.1);--control2:rgb(255 255 255/.16);--fg:#fafafa;--sub:#d4d4d4;--muted:#a3a3a3;--line:rgb(255 255 255/.08);--line2:rgb(255 255 255/.12);--mine:rgb(255 255 255/.14);--rx:#3a3a3a;--scrim:rgb(0 0 0/.6);--green:#4ade80;--blue:#7dd3fc;--amber:#fbbf24;--red:#f87171;--shadow:0 0 0 0 transparent}}
+:root[data-theme="dark"]{color-scheme:dark;--canvas:#121212;--well:#0a0a0a;--raised:#1e1e1e;--overlay:#1f1f1f;--control:rgb(255 255 255/.1);--control2:rgb(255 255 255/.16);--fg:#fafafa;--sub:#d4d4d4;--muted:#a3a3a3;--line:rgb(255 255 255/.08);--line2:rgb(255 255 255/.12);--mine:rgb(255 255 255/.14);--rx:#3a3a3a;--scrim:rgb(0 0 0/.6);--green:#4ade80;--blue:#7dd3fc;--amber:#fbbf24;--red:#f87171;--shadow:0 0 0 0 transparent}
 *{box-sizing:border-box}[hidden]{display:none!important}html{background:var(--canvas);-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
 body{margin:0;background:var(--canvas);color:var(--fg);font:16px/24px InterVariable,ui-sans-serif,system-ui,sans-serif;font-feature-settings:"cv02","cv03","cv04","cv11";-webkit-font-smoothing:antialiased}
 button,input{font:inherit;color:inherit;letter-spacing:inherit}
@@ -131,7 +131,7 @@ button.b{cursor:pointer}
 /* its one column never grows past the wrapper's cap (minmax(0,1fr), not auto), and the bubble and its chips stay inside
    it: a quote's one line (white-space:nowrap) would otherwise widen both to its full length, past the chat column */
 .bw{position:relative;display:grid;grid-template-columns:minmax(0,1fr);justify-self:start;max-width:min(82%,560px)}.bw.mine{justify-self:end}
-.pane .bw{max-width:92%}.bw>.bmv>.b,.bw>.bmv>.rxs{max-width:100%}
+.pane .bw{max-width:92%}.bw>.bmv>.b{max-width:100%}
 .bmv{display:grid;grid-template-columns:minmax(0,1fr);justify-items:start}.bw.mine>.bmv{justify-items:end}
 .bmv.settle{transition:transform 320ms cubic-bezier(.25,1.12,.4,1)}
 .rpl{position:absolute;inset-block:0;left:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;overflow:hidden;border-radius:18px;background:var(--control2);color:var(--fg);font-size:var(--sec);line-height:var(--secl);font-weight:600;white-space:nowrap;pointer-events:none}
@@ -144,19 +144,21 @@ button.b{cursor:pointer}
 .qbtn{display:grid;place-items:center;width:max(var(--btn),var(--ib));height:max(var(--btn),var(--ib));border-radius:8px;color:var(--sub)}
 .qbtn:hover,.qbtn[aria-expanded="true"]{background:var(--control);color:var(--fg)}
 .qt{color:var(--muted);font-size:12px;line-height:16px;white-space:nowrap;font-variant-numeric:tabular-nums}
-/* reactions: small chips just under the bubble, never over it, lined up with its inner edge (the right for yours, the
-   left for the agent's, from .bmv's justify-items); a quiet fill, no ring; the gap to the next message stays the list's */
-.rxs{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}.bw.mine .rxs{justify-content:flex-end}
-.rxc{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:calc(var(--chip) + 8px);height:calc(var(--chip) - 4px);padding:0 8px;border-radius:999px;background:var(--control);color:var(--sub);font-size:13px;line-height:18px;font-weight:600;font-variant-numeric:tabular-nums}
+/* reactions, as WhatsApp and iMessage: a pill that hugs its emoji (never a stretched track: width:max-content and
+   flex:none), tucked over the bubble's bottom edge by a third of its height, inset 8px from the bubble's own corner
+   (right for yours, left for the agent's, from .bmv's justify-items), a raised fill one step above the bubble with a
+   ring of the chat's background so the overlap reads clean; being in the flow, it reserves its own space below */
+.rxs{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:4px;width:max-content;max-width:calc(100% - 16px);margin:-10px 8px 2px}.bw.mine .rxs{justify-content:flex-end}
+.rxc{position:relative;flex:none;display:inline-flex;align-items:center;justify-content:center;gap:3px;width:auto;min-width:28px;height:28px;padding:0 6px;border-radius:999px;background:var(--rx);box-shadow:0 0 0 2px var(--canvas);color:var(--sub);font-size:12px;line-height:16px;font-weight:600;font-variant-numeric:tabular-nums}
 .rxc::after{content:"";position:absolute;inset:-8px -2px}
-.rxc .e{font-size:18px;line-height:1}
-.rxc:hover{background:var(--control2)}
-.rxc[aria-pressed="true"]{background:color-mix(in srgb,var(--blue) 16%,transparent);color:var(--fg)}
-.rxc[aria-pressed="true"]:hover{background:color-mix(in srgb,var(--blue) 24%,transparent)}
+.rxc .e{font-size:16px;line-height:1}
+.rxc:hover{background:color-mix(in srgb,var(--fg) 6%,var(--rx))}
+.rxc[aria-pressed="true"]{background:color-mix(in srgb,var(--blue) 18%,var(--rx));color:var(--fg)}
+.rxc[aria-pressed="true"]:hover{background:color-mix(in srgb,var(--blue) 26%,var(--rx))}
 .rxc.pending{opacity:.6}
 .rxc.pop{animation:rxpop 280ms cubic-bezier(.25,1.12,.4,1)}
 @keyframes rxpop{0%{transform:scale(.3);opacity:0}60%{transform:scale(1.12);opacity:1}100%{transform:scale(1)}}
-.app.phone .rxc{padding:0 10px}.app.phone .rxc .e{font-size:20px}
+.app.tap .rxc .e{font-size:18px}
 @media(prefers-reduced-motion:reduce){.rxc.pop{animation:none}.bmv.settle{transition:none}}
 /* a finger's long press opens the menu, not the system's word selection (Select text turns it back on) */
 @media(pointer:coarse){.b[data-menu]:not(.sel){-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}}

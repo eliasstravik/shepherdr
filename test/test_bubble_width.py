@@ -61,7 +61,8 @@ class BubbleWidth(unittest.TestCase):
         self.assertIn("grid-template-columns:minmax(0,1fr)", rule(".bw"))
         self.assertIn("grid-template-columns:minmax(0,1fr)", rule(".bmv"))
         # the bubble and the chips stay inside it
-        self.assertRegex(css, r"\.bw>\.bmv>\.b,\.bw>\.bmv>\.rxs\{max-width:100%\}")
+        self.assertIn(".bw>.bmv>.b{max-width:100%}", css)
+        self.assertIn("max-width:calc(100% - 16px)", rule(".rxs"))
 
     def test_long_quoted_reply_in_a_narrow_column_stays_inside(self):
         exe = chrome()
