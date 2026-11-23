@@ -165,3 +165,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Service children: spawn only via `service/spawn.ts` (Bun.spawn without env drops runtime process.env changes); `test/test_repo.py` enforces it. (from SHEP-294)
 
 - The demo's `?case=more` adds a third warning: close the warnings line on `?case=normal`, then open `?case=more` to see it come back. (from SHEP-301)
+
+- Touch `:active` in headless Chrome: CDP touch/tap gestures don't set `:active`; use mouse.down with `--blink-settings=primaryPointerType=4` to see pointer:coarse press styles. (from SHEP-303)
