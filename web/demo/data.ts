@@ -48,6 +48,10 @@ export const tasks: Task[] = [
   task('SHOP-11', 'Fix cart rounding', P.shop, 'done', { doneAt: NOW - 7 * day, merged: true }),
   task('BLOG-8', 'New post template', P.blog, 'done', { doneAt: NOW - 7 * day, merged: true }),
   task('BLOG-7', 'Faster image loading', P.blog, 'done', { doneAt: NOW - 7 * day, merged: true }),
+  // SHEP-331: more machines, spaces and states for the Tasks filter: a stopped one, a scheduled one, two on vm's shop and root
+  task('vm:ACME-3', 'Sync stock from the warehouse', P.vmShop, 'need', { on: 'vm', stopped: { by: 'error', why: 'Its agent is no longer running.' }, needsAt: NOW - 25 * min, repo: 'branch' }),
+  task('vm:ACME-4', 'Nightly price export', P.vmShop, 'scheduled', { on: 'vm', desc: 'Exports prices for the shop feed at 02:00', agent: undefined }),
+  task('vm:ROOT-2', 'Rotate server logs', P.vmRoot, 'work', { on: 'vm', started: NOW - 6 * min, report: { msg: 'Compressing last week', progress: 30 } }),
 ]
 
 const sched = (id: string, name: string, pl: string, when: string, nextWords: string, last: string, what: string, x: Partial<Automation> = {}): Automation => ({ id, name, place: pl, when, what, on: true, next: [], nextWords, last, ...x })
