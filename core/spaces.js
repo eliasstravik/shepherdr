@@ -110,6 +110,15 @@ export function everythingOf(spaces, home) {
   const there = (Array.isArray(spaces) ? spaces : []).filter((s) => s && !s.machine && sameFolder(s.folder, home, home));
   return there.find((s) => s.id === "home") ?? [...there].sort((a, b) => (String(a.id) < String(b.id) ? -1 : 1))[0] ?? null;
 }
+// The main machine's own home space (~): a space of its own in Everything's folder, beside it, never it (3.2.8). The
+// service makes it once there are other machines (id "tilde"); a store that holds more there gets the same one: id
+// "tilde", else the smallest id that isn't Everything's. null: none (one machine, or removed).
+export const TILDE = "tilde";
+export function tildeOf(spaces, home) {
+  const every = everythingOf(spaces, home);
+  const there = (Array.isArray(spaces) ? spaces : []).filter((s) => s && s !== every && !s.machine && sameFolder(s.folder, home, home));
+  return there.find((s) => s.id === TILDE) ?? [...there].sort((a, b) => (String(a.id) < String(b.id) ? -1 : 1))[0] ?? null;
+}
 // What the service answers when Everything would be removed or archived (voice says its own).
 export const EVERYTHING_STAYS = "Everything is the root chat, so it can't be removed or archived.";
 export function spaceName(s, { at = s?.folder, repo = null, home = null, named = true } = {}) {

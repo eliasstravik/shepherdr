@@ -47,7 +47,8 @@ export function nameProblem(name: string, taken: string[] = []): string | undefi
 
 /** A space: a folder on a machine with a name and its own coordinator, as herdr's spaces. A machine's home space (its
  *  home folder, ~) is a space like any other: renamed, grouped, archived or removed (New space at ~ brings it back);
- *  while it is there its coordinator also keeps an eye on the machine. The main machine's is Everything, which stays.
+ *  while it is there its coordinator also keeps an eye on the machine. On the main machine Everything works there and
+ *  stays; with other machines it has a ~ space of its own beside Everything too (3.2.8).
  *  Spaces are the only places with a chat. */
 export interface Place {
   /** 3.2: archived: out of the list (the filter shows it again), its schedules stopped, nothing deleted */

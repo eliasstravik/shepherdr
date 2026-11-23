@@ -63,3 +63,14 @@ test("SHEP-348: its pull request's checks word and closed, and whether it has it
   expect([b.pr, b.worktree]).toEqual([{ number: 12, url: pr.url, closed: true }, undefined]);
   expect([c.pr, c.worktree]).toEqual([undefined, undefined]);
 });
+
+test("3.2.8: a home-folder task is Everything's, never this computer's own ~ space's, unless that one asked; both hold it", () => {
+  // the ~ space listed first, to prove the order doesn't decide
+  const both = [{ id: "tilde", name: "", folder: HOME, machine: null, assistant: null }, ...spaces];
+  const [a, b] = tasksOf(both, [
+    row({ ref: "HOME-1", folder: HOME, list: "~", kind: "folder", space: null }),
+    row({ ref: "HOME-2", folder: HOME, list: "~", kind: "folder", space: "tilde" }),
+  ]);
+  expect([a.place, a.also]).toEqual(["home", ["tilde"]]);
+  expect([b.place, b.asked, b.also]).toEqual(["tilde", "tilde", ["home"]]);
+});

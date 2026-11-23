@@ -151,7 +151,7 @@ export function snapshot(mode: 'normal' | 'empty' | 'down' | 'more' | 'long' = '
       // SHEP-354: a space with a long name, for the Tasks filter's width
       place(P.vmPortal, 'customer-portal-and-billing-redesign', 'vm', at('/home/sam/clients/northwind/portal')),
       // SHEP-429: every other machine's home space, its first row as ~; pi has nothing else
-      place('p:vm:home', 'home', 'vm', at('/home/sam', '~', { home: true, unnamed: true })), place('p:studio:home', 'home', 'studio', at('/Users/sam', '~', { home: true, unnamed: true })), place('p:pi:home', 'home', 'pi', at('/home/sam', '~', { home: true, unnamed: true }))],
+      place('p:mac-mini:tilde', 'home', 'mac-mini', at('/Users/sam', '~', { home: true, unnamed: true })), place('p:vm:home', 'home', 'vm', at('/home/sam', '~', { home: true, unnamed: true })), place('p:studio:home', 'home', 'studio', at('/Users/sam', '~', { home: true, unnamed: true })), place('p:pi:home', 'home', 'pi', at('/home/sam', '~', { home: true, unnamed: true }))],
     sections: [{ id: 's:store', name: 'Store', machine: 'mac-mini', spaces: [P.shop, P.blog] }],
     machines: [
       { id: 'm:mac-mini', machine: 'mac-mini', name: 'mac-mini', status: 'idle', here: true, health: { meters: [{ name: 'CPU', pct: 34, detail: '', level: 'ok' }, { name: 'Memory', pct: 71, detail: '', level: 'ok' }, { name: 'Disk', pct: 58, detail: '', level: 'ok' }], herdr: true, working: 5, held: 0, at: '' } },

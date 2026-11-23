@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Snapshot, Task } from './types.ts'
-import { doneWords, etaOf, folderName, folderOf, headerWhere, leftShort, leftWords, listOf, needsCount, placeOf, ringOf, nowGroups, spaceLabel, spaceName, spacesOf, statusWord, taskLine, taskWhen, tstate } from './view.ts'
+import { artifactsIn, doneWords, isEverything, isHomeSpace, tasksIn, etaOf, folderName, folderOf, headerWhere, leftShort, leftWords, listOf, needsCount, placeOf, ringOf, nowGroups, spaceLabel, spaceName, spacesOf, statusWord, taskLine, taskWhen, tstate } from './view.ts'
 
 const task = (x: Partial<Task>): Task => ({ id: 'T-1', name: 'A task', place: 'shop', status: 'work', state: 'work', on: 'mini', created: '', age: '', ...x })
 
@@ -162,4 +162,26 @@ test("a chat header's where: the folder, the machine only when it adds something
   expect(headerWhere(snap, { id: 'ev', machine: 'mini' })).toEqual({ path: '~', cut: false, full: '~', machine: 'Mac mini' })
   // another space with no folder: nothing
   expect(headerWhere(snap, { id: 'y', machine: 'mini' })).toBeNull()
+})
+
+test("the main machine's own ~ space: a space of its own beside Everything; its Tasks and Artifacts its home folder's (3.2.8)", () => {
+  const s = snap({
+    everything: 'home',
+    places: [place('home', 'mini', { home: true }), place('shop', 'mini'), place('tilde', 'mini', { home: true, unnamed: true }), place('vmhome', 'vm', { home: true, unnamed: true })],
+    machines: [{ id: 'm:mini', machine: 'mini', name: 'mini', status: 'idle' }, { id: 'm:vm', machine: 'vm', name: 'vm', status: 'idle' }],
+    tasks: [{ id: 'A-1', place: 'tilde' }, { id: 'A-2', place: 'home', also: ['tilde'] }, { id: 'A-3', place: 'shop' }] as Task[],
+    artifacts: [{ id: 'a1', place: 'home', at: 2 }, { id: 'a2', place: 'shop', at: 1 }, { id: 'a3', place: 'vmhome', at: 3 }] as Snapshot['artifacts'],
+  })
+  expect(isEverything(s, 'home')).toBe(true)
+  expect(isHomeSpace(s, s.places[2]!)).toBe(true)
+  expect(isHomeSpace(s, s.places[0]!)).toBe(false)
+  expect(listOf(s, 'Active')[0]!.spaces.map((p) => p.id)).toEqual(['shop', 'tilde'])
+  expect(spaceLabel(s, 'tilde')).toBe('~ on mini')
+  expect(spaceLabel(s, 'home')).toBe('Everything')
+  // Everything keeps every machine's; the ~ space its own folder's
+  expect(tasksIn(s, 'home').map((t) => t.id)).toEqual(['A-1', 'A-2', 'A-3'])
+  expect(tasksIn(s, 'tilde').map((t) => t.id)).toEqual(['A-1', 'A-2'])
+  expect(artifactsIn(s, 'tilde').map((a) => a.id)).toEqual(['a1'])
+  expect(artifactsIn(s, 'vmhome').map((a) => a.id)).toEqual(['a3'])
+  expect(artifactsIn(s, 'home').map((a) => a.id)).toEqual(['a3', 'a1', 'a2'])
 })

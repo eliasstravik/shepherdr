@@ -123,3 +123,16 @@ test("folders compare as one path, and Everything is always the same one of two 
   expect(everythingOf([c, a], home)).toBe(c);
   expect(everythingOf([vm], home)).toBe(null);
 });
+
+test("this computer's own ~ space is the other one in Everything's folder, never Everything (3.2.8)", async () => {
+  const { everythingOf, tildeOf } = await import("./spaces.js");
+  const home = ["", "home", "u"].join("/");
+  const every = { id: "home", folder: home, machine: null }, tilde = { id: "tilde", folder: `${home}/`, machine: null };
+  const made = { id: "spa", folder: home, machine: null }, vm = { id: "sp0", folder: home, machine: "vm" }, dev = { id: "spb", folder: `${home}/dev`, machine: null };
+  expect(tildeOf([tilde, every, vm, dev], home)).toBe(tilde);
+  expect(everythingOf([tilde, every], home)).toBe(every);
+  expect(tildeOf([every, made, tilde], home)).toBe(tilde);
+  expect(tildeOf([every, made], home)).toBe(made);
+  expect(tildeOf([every, vm, dev], home)).toBe(null);
+  expect(tildeOf([], home)).toBe(null);
+});

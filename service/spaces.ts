@@ -116,18 +116,20 @@ export const shellWord = (a: string) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `'${St
  *  unnamed: left to follow its folder), and `icon` is kept as the sidebar's Rename keeps it. It joins the list of
  *  spaces (shared "spaces") and its Assistant starts from the assistant template. Returns its id (place), with error
  *  when its Assistant didn't start: the space is kept, and its first message starts one. */
-export async function newSpace(hub: Hub, opts: { machine: string | null; path: string; name?: string; unnamed?: boolean; makeRepo?: boolean; icon?: string | null; pick?: ((space: string) => any) | null; keepPick?: boolean; store: { value(k: string): any; set(k: string, v: unknown): Promise<unknown> } }) {
+export async function newSpace(hub: Hub, opts: { machine: string | null; path: string; name?: string; unnamed?: boolean; others?: boolean; makeRepo?: boolean; icon?: string | null; pick?: ((space: string) => any) | null; keepPick?: boolean; store: { value(k: string): any; set(k: string, v: unknown): Promise<unknown> } }) {
   const { machine } = opts;
   if (!opts.path || opts.path.includes("\0")) throw new Error("Pick a folder.");
   const home = (await homeOf(hub, machine)) ?? "";
   const abs = NS.pathOf(opts.path, home);
   if (!abs) throw new Error("Pick a folder.");
-  // one space per folder: a folder that has its space already opens that one instead of a second (SHEP-296). This
-  // computer's home folder is Everything's; another machine's is its home space, listed first under it as ~.
+  // one space per folder: a folder that has its space already opens that one instead of a second (SHEP-296). Another
+  // machine's home folder is its home space, listed first under it as ~. This computer's is Everything's, and where
+  // there are other machines its own ~ space's too (3.2.8): that one opens, else it is made again (never Everything).
   const had = (Array.isArray(opts.store.value("spaces")) ? opts.store.value("spaces") : []) as any[];
   const atHome = !!home && SP.sameFolder(abs, home, home);
-  const there = atHome && !machine ? SP.everythingOf(had, home) : had.find((x) => x && (x.machine ?? null) === machine && SP.sameFolder(x.folder, abs, home));
-  if (there) return { place: ownId(there), existed: true as const, home: atHome, name: String(there.name ?? "") };
+  const tilde = atHome && !machine && !!opts.others;
+  const there = atHome && !machine ? (tilde ? SP.tildeOf(had, home) : SP.everythingOf(had, home)) : had.find((x) => x && (x.machine ?? null) === machine && SP.sameFolder(x.folder, abs, home));
+  if (there) return { place: ownId(there), existed: true as const, home: atHome, ...(tilde ? { tilde: true } : {}), name: String(there.name ?? "") };
   const git = (args: string[]) => exec(hub, ["git", "-C", abs, ...args], machine);
   if ((await exec(hub, ["test", "-d", abs], machine)).code !== 0) {
     const r = await exec(hub, ["mkdir", "-p", "--", abs], machine);
@@ -145,7 +147,10 @@ export async function newSpace(hub: Hub, opts: { machine: string | null; path: s
   const iconOf = (id: string) => (opts.icon ? opts.store.set("spaces-chat", SP.withIcon(opts.store.value("spaces-chat"), id, opts.icon)) : null);
   const id = `sp${crypto.randomUUID().replace(/-/g, "")}`;
   const list = Array.isArray(opts.store.value("spaces")) ? opts.store.value("spaces") : [];
-  await opts.store.set("spaces", [...list, { id, name: opts.unnamed ? "" : name, folder: abs, machine, at: Date.now() }]);
+  // this computer's ~ space made again: unnamed (it shows as ~), unless a name was typed
+  const entry = { id, name: opts.unnamed || (tilde && !opts.name) ? "" : name, folder: abs, machine, at: Date.now() };
+  const after = tilde ? list.indexOf(SP.everythingOf(list, home)) + 1 : list.length;   // the ~ space: right after Everything
+  await opts.store.set("spaces", [...list.slice(0, after), entry, ...list.slice(after)]);
   await iconOf(machine ? `${machine}/${id}` : id);
   const place = machine ? `${machine}/${id}` : id;
   const chosen = opts.pick?.(place) ?? null;
@@ -165,7 +170,8 @@ export async function newSpace(hub: Hub, opts: { machine: string | null; path: s
 }
 
 /** What New space says when the folder has its space already, and it opened that one instead */
-export function existedWords(made: { home?: boolean; name?: string }, machine: string | null) {
+export function existedWords(made: { place?: string; home?: boolean; tilde?: boolean; name?: string }, machine: string | null) {
+  if (made.tilde) return "This computer's home space (~) already works in your home folder, so it's open now.";
   if (made.home && !machine) return "Everything already works in your home folder, so it's open now.";
   if (made.home) return `${machine}'s home space (~) already works in that folder, so it's open now.`;
   return `#${made.name || "that space"} already works in that folder, so it's open now.`;
