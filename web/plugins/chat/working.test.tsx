@@ -89,7 +89,7 @@ test('reduced motion: no bounce, a calm fade in turn, and the bubble fades in wi
   expect(styles).toContain(':root[data-motion="reduced"] .wsign{animation-name:fade}')
 })
 
-test('Stop sits by the dots while it works (the box\'s round button is the voice call when empty, SHEP-363)', async () => {
+test('Stop sits on the working row while it works (the box\'s round button is the voice call when empty, SHEP-363)', async () => {
   const { installPlugins } = await import('@client/kernel.ts')
   installPlugins([], ['voice'])
   const html = draw(chat({ working: true }))
@@ -97,4 +97,20 @@ test('Stop sits by the dots while it works (the box\'s round button is the voice
   expect(html).toContain('aria-label="Stop"')
   expect(html).toContain('wstop')
   expect(draw(chat({ working: false }, msgs({ who: 'you', text: 'go' }, { text: 'Done.' })))).toBe('')
+})
+
+test('layout: Stop sits at the right end of the row, centred over the box\'s round button', () => {
+  const row = rule('.wrow'), stop = rule('.wrow>.wstop')
+  expect(row).toContain('justify-self:stretch')
+  expect(row).toContain('gap:8px')
+  expect(stop).toContain('margin-left:auto')
+  // the box bar's right padding plus half the size difference: the two buttons share a centre line
+  expect(rule('.cbar')).toMatch(/padding:0 6px 6px/)
+  expect(stop).toContain('margin-right:calc(6px + (var(--send) - var(--ib))/2)')
+  // the chat column and the box share their edges, in the main chat and in a panel
+  expect(css).toContain('.chat .scroll,.chat>.foot{padding-inline:')
+  expect(css).toMatch(/\.pane \.scroll\{padding:0 8px 16px\}/)
+  expect(css).toContain('.pane .msgs{padding-inline:8px}')
+  expect(css).toContain('.pane>.foot{padding-inline:var(--gut)}')
+  expect(css).toMatch(/--gut:16px/)
 })

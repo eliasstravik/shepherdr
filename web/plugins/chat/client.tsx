@@ -686,8 +686,8 @@ export function WorkingSign({ chat, thread }: { chat: Chat | undefined; thread?:
       {sign.step && <span className="wstep">{sign.step}</span>}
     </div>
   )
-  // SHEP-363: Stop sits by the dots (the box's round button is the voice call while it is empty), outside the sign's
-  // grow-in so it is its full size from the start
+  // SHEP-363: Stop sits on the working row (the box's round button is the voice call while it is empty), at its right
+  // end over that round button, outside the sign's grow-in so it is its full size from the start
   if (!chat || !has('voice')) return el
   return (
     <div key={n} className="wrow">

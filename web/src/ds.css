@@ -401,9 +401,11 @@ html,body{height:100%}body{padding:0;overflow:hidden}
    `.wsign .wbub` outranks styles.css's `.b{display:block}`, which had left the dots at the bubble's top edge */
 .wsign{display:flex;align-items:center;gap:8px;max-width:min(82%,560px);min-width:0;margin-top:12px;color:var(--muted);font-size:14px;line-height:20px;transform-origin:left center;animation:wsin .24s ease-out .35s both}
 .pane .wsign{max-width:92%}
-/* SHEP-363: Stop by the dots (the box's round button is the voice call while it is empty), outside the sign's grow-in */
-.wrow{display:flex;align-items:center;gap:4px;min-width:0;margin-top:12px}.wrow>.wsign{margin-top:0}
-.wrow>.wstop{animation:fade .24s ease-out .35s both}
+/* SHEP-363: Stop on the working row (the box's round button is the voice call while it is empty), outside the sign's
+   grow-in. It sits at the row's right end, centred over the box's round button: the chat column and the box share their
+   edges (main chat and panel alike) and that button is the box bar's 6px padding in from the right */
+.wrow{display:flex;align-items:center;gap:8px;justify-self:stretch;min-width:0;margin-top:12px}.wrow>.wsign{margin-top:0}
+.wrow>.wstop{margin-left:auto;margin-right:calc(6px + (var(--send) - var(--ib))/2);animation:fade .24s ease-out .35s both}
 .wsign .wbub{display:flex;align-items:center;justify-content:center;flex:none;max-width:none;padding:6px 14px;line-height:24px}
 .wdots{display:flex;align-items:center;gap:5px;height:24px;color:var(--sub)}
 .wdots i{flex:none;width:7px;height:7px;border-radius:50%;background:currentColor;animation:rise 1.2s ease-in-out infinite}
