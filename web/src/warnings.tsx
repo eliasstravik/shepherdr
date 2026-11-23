@@ -1,23 +1,27 @@
 // The line just above Everything's message box: one line when a plan passes 75% or a machine runs low or can't be
-// reached. It opens Settings › Usage or Machines and can be dismissed; it comes back the next day, or when a new
-// warning appears. Several show as "2 things need a look".
+// reached. It opens Settings › Usage or Machines and can be closed; it comes back only when a warning shows that
+// wasn't there when it was closed (dismiss.ts). Several show as "2 things need a look", always all that are there now.
 import { isEverything } from '@shared/view.ts'
-import { openSettings, registry, setUI, useSnap, useUI, type Thread } from './kernel.ts'
+import { idsOf, kept, showing } from './dismiss.ts'
+import { getState, openSettings, registry, setUI, subscribe, useSnap, useUI, type Thread } from './kernel.ts'
 import { openMenu } from './overlay.tsx'
 import { I, IB } from './ui.tsx'
 
-const today = () => new Date().toDateString()
+// a closed warning that goes away leaves the closed set, wherever the person is, so its return counts as new
+subscribe(() => {
+  const { snap, ui } = getState()
+  if (!snap || !ui.banner) return
+  const what = kept((snap.warnings ?? []).map((w) => w.id), idsOf(ui.banner.what))
+  if (what !== ui.banner.what) setUI({ banner: what ? { what } : null })
+})
 
 function Warnings({ thread }: { thread: Thread }) {
   const snap = useSnap()
-  const off = useUI((u) => u.banner)
+  const closed = useUI((u) => u.banner?.what)
   if (!snap || thread.task || !isEverything(snap, thread.place)) return null
   const list = snap.warnings ?? []
-  if (!list.length) return null
-  const what = list.map((w) => w.id).sort().join('|')
-  // a machine out of reach stays in view; the rest can be dismissed until tomorrow or a new warning
-  const stays = list.some((w) => /^Can't reach/.test(w.text))
-  if (!stays && off && off.day === today() && what.split('|').every((id) => off.what.split('|').includes(id))) return null
+  const ids = list.map((w) => w.id)
+  if (!showing(ids, idsOf(closed))) return null
   const open = (w: (typeof list)[number]) => openSettings('all', w.kind === 'usage' ? 'Usage' : 'Machines')
   return (
     <div className="banner">
@@ -30,7 +34,7 @@ function Warnings({ thread }: { thread: Thread }) {
       >
         {list.length === 1 ? list[0]!.text : `${list.length} things need a look`}
       </button>
-      {!stays && <IB icon="x" label="Dismiss" onClick={() => setUI({ banner: { day: today(), what } })} />}
+      <IB icon="x" label="Close" onClick={() => setUI({ banner: { what: [...ids].sort().join('|') } })} />
     </div>
   )
 }
