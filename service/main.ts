@@ -985,7 +985,7 @@ const server = Bun.serve<{ who: string }>({
         await model.waitSpace(made.place);
         // its agent didn't start: made, not a plain ok; the page opens it and says why (warning)
         // the home folder here is Everything's (SHEP-296): it opens, said, never a second space there
-        if ("existed" in made) return json({ place: made.place, warning: "Your home folder is Everything's, so Everything is open now." });
+        if ("existed" in made) return json({ place: made.place, warning: "Everything already works in your home folder, so it's open now." });
         return json(made.error ? { place: made.place, ok: false, warning: made.error } : { place: made.place });
       } catch (err) { return json({ error: (err as Error).message }, 400); }
     }
