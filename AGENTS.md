@@ -177,3 +177,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - To see a Claude Code at phone width on a throwaway session: keep `sleep 600 | script -q -c 'stty cols 45 rows 50; hc attach <t>' /dev/null` running in the background (hc takes the attached client's size). (from SHEP-306)
 
 - A throwaway service serves `web/dist` from its own checkout (`live.ts` only proxies): for a before shot, swap in main's built `web/dist`; a `--init-script` that drops `{type:"chat"}` socket messages shows the label before a chat loads. (from SHEP-298)
+
+- herdr-browser's tab may lack page focus (focus events don't fire, set viewport/screenshot lag or time out): for focus/keyboard repros drive your own headless Chrome over CDP (Emulation.setFocusEmulationEnabled, setTouchEmulationEnabled, setDeviceMetricsOverride to shrink the height). (from SHEP-308)
