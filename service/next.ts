@@ -183,7 +183,7 @@ export function warningsOf(snap: Snapshot, plans: Config["plans"]): NonNullable<
     if (w && w.used > 75) out.push({ id: `u:${p.name}:${w.name}`, kind: "usage", text: `You've used ${w.used}% of ${/week/i.test(w.name) ? "this week's" : "your"} ${p.name.split(" ")[0]} plan` });
   }
   for (const m of snap.machines) {
-    if (m.status === "off" && !m.connecting) { out.push({ id: `m:${m.machine}:down`, kind: "machine", text: `Can't reach ${m.name}${m.unreachableSince ? ` · last seen ${m.unreachableSince}` : ""}` }); continue; }
+    if (m.status === "off" && !m.connecting) { out.push({ id: `m:${m.machine}:down`, kind: "machine", text: `Can't reach ${m.name}${m.unreachableSince ? ` · last seen ${m.unreachableSince}` : ""}${m.linkWhy ? " · its link is broken: run herdr-task carry-over to link it again" : ""}` }); continue; }
     const hot = m.health?.meters.find((x) => /disk|memory/i.test(x.name) && x.pct > 90);
     if (hot) out.push({ id: `m:${m.machine}:${hot.name.toLowerCase()}`, kind: "machine", text: `${m.name}: ${/disk/i.test(hot.name) ? "disk" : "memory"} nearly full` });
   }

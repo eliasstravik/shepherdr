@@ -200,15 +200,16 @@ def _core_file(name):
         return None
 
 
-def link_facts():
+def link_facts(ms=None):
     """What picks the lead (lead_of): {core (this machine's herdr-core id), overview (a window with
     Home on here), links (the core ids it reads: its connected herdr-core links), linked_by (how
-    many machines' cores link to this one)}."""
+    many machines' cores link to this one)}. ms: its links (hc machine ls), when read already."""
     from .machines import connected_machines
     core, peers, cfg = _core_file("core.json"), _core_file("peers.json"), read_settings()
+    ms = connected_machines() if ms is None else ms
     return {"core": core.get("id") if isinstance(core, dict) else None, "core_name": core.get("name") if isinstance(core, dict) else None,
             "overview": main_here() and home_on(cfg, cfg.get("here") or LOCAL_MACHINE),
-            "links": sorted(m["id"] for m in connected_machines() if m.get("id") and m.get("state") == "connected"),
+            "links": sorted(m["id"] for m in ms if m.get("id") and m.get("state") == "connected"),
             "linked_by": len(peers) if isinstance(peers, dict) else 0}
 
 
@@ -235,7 +236,10 @@ def local_report(candidates=None, since=None, news_only=False):
     news}. candidates: [[space id, folder]] of this machine's spaces; the first at the home folder
     is the home space. since: news log lines after this time (ms); None: none."""
     from .machine import sample
-    out = {"home": HOME, "at": now(), **link_facts()}
+    from .machines import connected_machines, stale_links
+    ms = connected_machines()
+    # SHEP-310: a link another herdr-core answers on, which stays down though its machine is up
+    out = {"home": HOME, "at": now(), **link_facts(ms), "stale_links": [{"name": x["name"], "answers": x["answers"]} for x in stale_links(ms)]}
     real = os.path.realpath(HOME)
     space = next((sid for sid, folder in candidates or [] if folder and os.path.realpath(folder) == real), None)
     if not space and candidates is not None:
@@ -378,7 +382,24 @@ def health_lines(name, rep, st):
         text = (f"{len(new_wt)} leftover worktree{'s' if len(new_wt) > 1 else ''} of finished tasks: {listed}. Tell the person and "
                 "offer to clean up only what is safely finished (`git worktree remove` in its repo); never remove one with uncommitted changes.")
         out.append((tagged("herdr-health", text, machine=name or "", event="worktrees"), f"{len(new_wt)} leftover worktree{'s' if len(new_wt) > 1 else ''}"))
+    if "stale_links" in rep:
+        # SHEP-310: each broken link told once (again if yet another core answers there later)
+        seen = [f"{x['name']}@{x['answers']}" for x in rep["stale_links"]]
+        told_l = set(st.get("stale_links") or [])
+        st["stale_links"] = seen
+        for x, k in zip(rep["stale_links"], seen):
+            if k not in told_l:
+                out.append((tagged("herdr-health", stale_text(x["name"], name), machine=name or "", event="link-stale"), f"its link to {x['name']} is broken"))
     return out
+
+
+def stale_text(link, on=None):
+    """A broken link (SHEP-310), for the home Assistant: what it is, and the fix it can run."""
+    from .machines import STALE_WORDS
+    where = "here" if not on else f"on {on} (`hc exec --on {on} -- herdr-task carry-over`)"
+    return (f"The link to {link} is broken: {STALE_WORDS}, and Shepherdr can't reach {link} until it's linked again. "
+            f"Run `herdr-task carry-over` {where}: it links {link} again when that's safe (same address, name and Shepherdr's "
+            "session there) and changes nothing else; otherwise it says the exact commands. Tell the person what you did.")
 
 
 def deliver(to, lines, quiet=None, idle_only=False):
@@ -579,7 +600,8 @@ def cmd_home(args):
     except (OSError, ValueError):
         lead = None
     out = {"home": home, "main": home and main_here() and not lead, "lead": lead, "machine": None if here == LOCAL_MACHINE else here,
-           "on": home_on(cfg, here), "health": rep["health"], "top": rep["top"], "stuck": rep["stuck"], "worktrees": rep["worktrees"]}
+           "on": home_on(cfg, here), "health": rep["health"], "top": rep["top"], "stuck": rep["stuck"], "worktrees": rep["worktrees"],
+           "stale_links": rep.get("stale_links") or []}
     if args.json:
         print(json.dumps(out))
         return
@@ -593,5 +615,7 @@ def cmd_home(args):
         if v:
             print(f"Most {k}: {', '.join(v)}")
     print(f"Stuck processes: {len(rep['stuck'])}" + "".join(f"\n  {p['name']} (pid {p['pid']}) {p['hours']} h at {round(p['share'] * 100)}%: {p['args']}" for p in rep["stuck"]))
+    for x in out["stale_links"]:
+        print(f"Broken link: {stale_text(x['name'])}")
     print(f"Leftover worktrees: {len(rep['worktrees'])}" + "".join(
         f"\n  {w['path']} ({w['task'] or 'no task'}{', uncommitted changes' if w.get('dirty') else ''})" for w in rep["worktrees"]))

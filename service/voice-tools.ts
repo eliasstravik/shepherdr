@@ -395,7 +395,7 @@ function lookMachines(snap: Snapshot) {
     const work = snap.tasks.filter((t) => tstate(t) === "working" && snap.places.find((p) => p.id === t.place)?.machine === m.machine).length;
     const plans = planWords((m as any).stats);
     const warn = machineWarn(m);
-    return `${m.name}${m.here ? " (serves Shepherdr)" : ""}: ${unreachable(m) ? `can't reach it${m.unreachableSince ? `, last seen ${m.unreachableSince}` : ""}` : m.connecting ? "connecting" : "online"}, ${sp} space${sp === 1 ? "" : "s"}, ${work} task${work === 1 ? "" : "s"} working.${warn && !unreachable(m) ? ` ${warn}.` : ""}${plans ? ` ${plans}` : ""}`;
+    return `${m.name}${m.here ? " (serves Shepherdr)" : ""}: ${unreachable(m) ? `can't reach it${m.unreachableSince ? `, last seen ${m.unreachableSince}` : ""}${m.linkWhy ? " (its link is broken: herdr-task carry-over links it again)" : ""}` : m.connecting ? "connecting" : "online"}, ${sp} space${sp === 1 ? "" : "s"}, ${work} task${work === 1 ? "" : "s"} working.${warn && !unreachable(m) ? ` ${warn}.` : ""}${plans ? ` ${plans}` : ""}`;
   });
   const warns = (snap.warnings ?? []).map((w) => plain(w.text));
   return done((rows.join("\n") || "No machines.") + (warns.length ? `\nWarnings: ${warns.join("; ")}.` : ""));

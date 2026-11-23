@@ -133,6 +133,9 @@ export interface Machine {
   status: 'idle' | 'off'
   unreachableSince?: string
   connecting?: boolean
+  /** why it can't be reached when that isn't just the network, in plain words with what to do (SHEP-310: its link
+   *  holds another herdr-core's id) */
+  linkWhy?: string
   /** how it is doing, sampled every 30 seconds */
   health?: MachineHealth
   /** what is left of the plans its CLIs are signed in to: each machine has its own sign-ins */

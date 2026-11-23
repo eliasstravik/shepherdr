@@ -395,7 +395,7 @@ const snapshotOf = (b: Parameters<NonNullable<typeof model.onBuild>>[0]) => live
       secrets: secretNames.filter((x) => (s.id === "all" ? !x.space : x.space === s.id)) }))], offPlugins: offPlugins(),
   // every machine: one not connected reads "Offline" (or "Connecting…") under its header
   // in the order the person dragged them into (SHEP-153): this computer first until then
-  machines: (SPm.byMachineOrder as any)([{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.known.map((m) => ({ name: m.name, here: false, state: m.state }))],
+  machines: (SPm.byMachineOrder as any)([{ name: me?.host ?? "this machine", here: true, state: "connected" }, ...b.known.map((m) => ({ name: m.name, here: false, state: m.state, why: m.why }))],
     (SPm.machineOrderOf as any)(model.value("spaces-chat")), (m: { name: string; here: boolean }) => (m.here ? null : m.name)),
 }), b)));
 // a task that moved on (accepted, done) changes its news lines in its Assistant's chat, whose conversation may not move:

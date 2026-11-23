@@ -356,6 +356,8 @@ def home_round(home, machines_mod, world, here, store, cfg=None, at=None, down=(
             out["news"] = [dict(x, at=since + 1) for x in w.get("news") or []]
         if not news_only:
             out.update(health=w["health"], top={}, stuck=[], worktrees=[])
+        if "stale_links" in w:
+            out["stale_links"] = w["stale_links"]
         return out
 
     def remote(m, candidates, since, news_only, timeout=40):
@@ -436,6 +438,28 @@ class HomeLead(unittest.TestCase):
         self.assertEqual(health(mini), ["t1"])
         self.assertEqual(health(laptop), ["t2"])
         self.assertEqual((self.lead("mini"), self.lead("laptop")), (None, "mini"))
+
+    def test_shep_310_a_broken_link_reaches_home_health_once_with_what_to_do(self):
+        world = home_world()
+        world["mini"]["stale_links"] = [{"name": "vm-demo", "answers": "e5a9"}]
+        line = lambda sent: [(to, l) for to, l in sent if 'event="link-stale"' in l]
+        [(to, l)] = line(self.round(world, "mini", at=1))
+        self.assertEqual(to, "t1", "this machine's own home Assistant")
+        self.assertIn("The link to vm-demo is broken: a different herdr-core answers there now", l)
+        self.assertIn("Run `herdr-task carry-over` here", l)
+        self.assertEqual(line(self.round(world, "mini", at=1 + 61000)), [], "told once")
+        world["mini"]["stale_links"] = [{"name": "vm-demo", "answers": "f00d"}]
+        self.assertEqual(len(line(self.round(world, "mini", at=1 + 122000))), 1, "yet another core there is news again")
+        # the stale_links fact itself: from herdr-core's own words on the link (hc machine ls)
+        from unittest import mock
+        ms = [{"name": "vm-demo", "id": "4f97", "state": "unreachable", "why": 'a different core answers there ("e5a9")', "target": "vm-demo.example.test", "session": "shepherdr"},
+              {"name": "vm-off", "id": "1234", "state": "unreachable", "why": "ssh: connect timed out"}]
+        with mock.patch.object(self.machines, "connected_machines", lambda: ms):
+            self.assertEqual([(x["name"], x["id"], x["answers"]) for x in self.machines.stale_links()], [("vm-demo", "4f97", "e5a9")])
+            with mock.patch.object(self.home, "read_settings", lambda: {}), mock.patch.object(self.home, "_core_file", lambda n: None), \
+                    mock.patch.object(self.home, "main_here", lambda: True):
+                rep = self.home.local_report(news_only=True)
+        self.assertEqual(rep["stale_links"], [{"name": "vm-demo", "answers": "e5a9"}])
 
     def test_a_hub_that_doesnt_link_back_gets_none_of_the_others_news(self):
         """#1188: the mini can't reach the laptop, so its home Assistant never gets the laptop's news

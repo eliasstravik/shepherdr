@@ -52,6 +52,12 @@ export const machineLabel = (snap: Snapshot, key: string) => machineOf(snap, key
 /** a machine the serving one can't reach now */
 export const unreachable = (m: Machine | undefined) => !!m && m.status === 'off' && !m.connecting
 
+/** SHEP-310: herdr-core's why for a link whose far side answers with another core than the one it holds */
+export const staleLink = (why: string | undefined) => !!why && /a different core answers there/.test(why)
+/** what the Machines page says of such a link (herdr-task's words: machines.STALE_WORDS) */
+export const STALE_LINK = 'A different herdr-core answers there now (it was set up again since it was linked), so nothing gets through. ' +
+  'Run herdr-task carry-over on the computer that serves this app to link it again.'
+
 /** the machine a space is on can't be reached */
 export function placeDown(snap: Snapshot, id: string): Machine | undefined {
   const p = snap.places.find((x) => x.id === id)
@@ -61,7 +67,7 @@ export function placeDown(snap: Snapshot, id: string): Machine | undefined {
 
 /** "Can't reach vm · last seen 14:02" */
 export function downWords(m: Machine): string {
-  return `Can't reach ${m.name}${m.unreachableSince ? ` · last seen ${m.unreachableSince}` : ''}`
+  return `Can't reach ${m.name}${m.unreachableSince ? ` · last seen ${m.unreachableSince}` : ''}${m.linkWhy ? ' · its link is broken' : ''}`
 }
 
 /** "#shop · mac-mini", or "Everything · mac-mini" */

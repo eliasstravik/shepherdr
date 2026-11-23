@@ -412,8 +412,33 @@ class CarryOver(unittest.TestCase):
             return 1, "", "unknown"
         self.run_fails = False
         import herdr_task.machines as m
+        # SHEP-310: Shepherdr's session's links (hc machine ls), and what answers at each address now
+        self.far = {"mini.test": {"id": "new-mini", "host": "mini-host", "session": co.SESSION}}
+        self.link_calls = []
+
+        def links():
+            return [{"name": n, "target": "mini.test", "host": "mini-host", "session": co.SESSION, **x} for n, x in self.cores[co.SESSION]["machines"].items()]
+
+        def hc_quiet(args, timeout=60):
+            self.link_calls.append(list(args))
+            ms = self.cores[co.SESSION]["machines"]
+            if args[:2] == ["machine", "add"]:
+                target = args[args.index("--via") + 1] if "--via" in args else args[2]
+                far = self.far.get(target)
+                if not far:
+                    return 1, None, "ssh: could not resolve"
+                name, session = args[args.index("--name") + 1], args[args.index("--session") + 1]
+                ms[name] = {"id": far["id"], "state": "connected", "target": target, "host": far["host"], "session": far["session"] if session == co.SESSION else session}
+                return 0, {"name": name, **ms[name]}, ""
+            if args[:2] == ["machine", "rm"]:
+                return (0, None, "") if ms.pop(args[2], None) else (1, None, "no such machine")
+            if args[:2] == ["machine", "rename"]:
+                ms[args[3]] = ms.pop(args[2])
+                return 0, None, ""
+            return 1, None, "unknown"
         for target, name, value in ((co, "hc_in", hc_in), (co, "rpc", rpc), (co, "core_dir", lambda s: os.path.join(self.dir, "herdr-core", s)),
                                     (co, "old_scheduler", lambda dry: "none"), (m, "adopt", lambda dry=False: [{"name": "mini", "state": "here"}]),
+                                    (m, "connected_machines", links), (m, "_hc_quiet", hc_quiet),
                                     (co, "FOREIGN_SESSION", False), (co.time, "sleep", lambda s: None)):
             p = mock.patch.object(target, name, value)
             p.start()
@@ -673,6 +698,72 @@ class CarryOver(unittest.TestCase):
         self.assertEqual(row["state"], "unknown", "without the default session the old id can't be told")
         self.assertEqual(self.sets, [])
 
+    def stale(self, answers="newer-mini"):
+        """mini's link in Shepherdr's session holds new-mini, but the core there now is another (SHEP-310)."""
+        self.cores[self.co.SESSION]["machines"]["mini"] = {"id": "new-mini", "state": "unreachable", "why": f'a different core answers there ("{answers}")'}
+        self.far["mini.test"] = {"id": answers, "host": "mini-host", "session": self.co.SESSION}
+
+    def test_shep_310_a_link_another_core_answers_on_is_linked_again_and_its_records_follow(self):
+        self.stale()
+        new = self.cores[self.co.SESSION]
+        new["docs"]["shepherdr.secrets"] = {"value": {"id": "new-mini", "at": 5, "by": "new-here"}, "version": 3}
+        dry = self.co.carry_over(dry=True)
+        [row] = dry["links"]
+        self.assertEqual((row["name"], row["id"], row["answers"], row["state"]), ("mini", "new-mini", "newer-mini", "would-relink"))
+        self.assertEqual(row["fix"], [f"HC_SESSION={self.co.SESSION} hc machine rm mini",
+                                      f"HC_SESSION={self.co.SESSION} hc machine add mini.test --name mini --session {self.co.SESSION}", "herdr-task carry-over"])
+        self.assertEqual((self.link_calls, self.sets), ([], []), "a dry run changes nothing")
+        out = self.co.carry_over()
+        self.assertTrue(out["ok"])
+        self.assertEqual([(x["name"], x["state"], x["to"]) for x in out["links"]], [("mini", "relinked", "newer-mini")])
+        self.assertEqual([c[:3] for c in self.link_calls], [["machine", "add", "mini.test"], ["machine", "rm", "mini"], ["machine", "rename", "mini-relink"]])
+        self.assertEqual(self.link_calls[0][3:], ["--name", "mini-relink", "--session", self.co.SESSION, "--json"])
+        self.assertEqual(new["machines"], {"mini": {"id": "newer-mini", "state": "connected", "target": "mini.test", "host": "mini-host", "session": self.co.SESSION}},
+                         "the same name, address and session; only the id is new")
+        self.assertEqual(self.new("shepherdr.secrets")["id"], "newer-mini", "the secrets record follows the machine linked again")
+        self.assertEqual([(x["name"], x["state"]) for x in out["records"]], [("shepherdr.secrets", "repaired")])
+        self.assertIn("linked again", self.co.link_line(out["links"][0]))
+        # again: nothing left to do
+        self.link_calls.clear()
+        self.assertEqual(self.co.carry_over()["links"], [])
+        self.assertEqual(self.link_calls, [])
+
+    def test_shep_310_another_host_answering_is_never_linked_and_the_fix_is_said(self):
+        self.stale()
+        self.far["mini.test"]["host"] = "someone-else"
+        out = self.co.carry_over()
+        [row] = out["links"]
+        self.assertEqual(row["state"], "refused")
+        self.assertIn("another host answers there", row["why"])
+        self.assertFalse(out["ok"])
+        self.assertEqual(self.cores[self.co.SESSION]["machines"]["mini"]["id"], "new-mini", "the old link is left as it was")
+        self.assertNotIn("mini-relink", self.cores[self.co.SESSION]["machines"], "the try is removed")
+        line = self.co.link_line(row)
+        self.assertIn("a different herdr-core answers there", line)
+        self.assertIn(f"`HC_SESSION={self.co.SESSION} hc machine add mini.test --name mini --session {self.co.SESSION}`", line)
+        # one that answers with yet another id than herdr-core saw isn't taken either
+        self.stale()
+        self.far["mini.test"]["id"] = "yet-another"
+        self.assertIn("changed again", self.co.carry_over()["links"][0]["why"])
+        # nor a link to the default session there (not Shepherdr's)
+        self.stale()
+        self.cores[self.co.SESSION]["machines"]["mini"]["session"] = "default"
+        self.link_calls.clear()
+        row = self.co.carry_over()["links"][0]
+        self.assertEqual((row["state"], self.link_calls), ("refused", []))
+
+    def test_shep_310_doctors_look_and_the_updates_links_run_need_no_default_session(self):
+        self.stale()
+        os.remove(os.path.join(self.dir, "herdr-core", self.co.OLD_SESSION, "core.json"))
+        out = self.co.carry_over(dry=True, records_only=True)
+        self.assertEqual([x["state"] for x in out["links"]], ["would-relink"])
+        self.assertEqual(self.link_calls, [])
+        self.cores[self.co.SESSION]["docs"]["shepherdr.host"] = {"value": {"id": "new-mini", "at": 5}, "version": 1}
+        out = self.co.carry_over(links_only=True)
+        self.assertEqual(([x["state"] for x in out["links"]], [x["state"] for x in out["records"]], out["documents"], out["agents"]),
+                         (["relinked"], ["repaired"], [], []))
+        self.assertEqual(self.new("shepherdr.host")["id"], "newer-mini")
+
     def test_agents_only_is_doctors_read_only_look(self):
         self.agent("t1", {"herdr.task": "shop#3"})
         out = self.co.carry_over(dry=True, agents_only=True)
@@ -815,6 +906,49 @@ class InstallerCarriesOver(unittest.TestCase):
             text = f.read()
         doctor = text[text.index("def cmd_doctor("):text.index("# ---- uninstall")]
         self.assertIn("bad += records_naming_nobody(root)", doctor, "a record naming no machine isn't whole")
+
+    def test_shep_310_doctor_says_a_link_another_core_answers_on_with_the_commands(self):
+        root = scratch(self)
+        helper = os.path.join(root, self.sh.SHARE, "mods", "tasks", "bin", "herdr-task")
+        os.makedirs(os.path.dirname(helper))
+        open(helper, "w").close()
+        fix = ["HC_SESSION=shepherdr hc machine rm vm-demo", "HC_SESSION=shepherdr hc machine add vm-demo.example.test --name vm-demo --session shepherdr", "herdr-task carry-over"]
+        answer = {"links": [{"name": "vm-demo", "id": "aaa", "answers": "bbb", "state": "would-relink", "fix": fix}], "records": []}
+
+        def run(argv, **k):
+            return subprocess.CompletedProcess(argv, 0, json.dumps(answer), "")
+        from unittest import mock
+        with mock.patch.object(self.sh.shutil, "which", lambda n: "/x/hc"):
+            [line] = self.sh.records_naming_nobody(root, run=run)
+        self.assertIn("the link to vm-demo is broken: a different herdr-core answers there now", line)
+        self.assertIn("`herdr-task carry-over` links it again", line)
+        self.assertIn("`HC_SESSION=shepherdr hc machine add vm-demo.example.test --name vm-demo --session shepherdr`", line)
+
+    def test_shep_310_every_update_links_again_what_another_core_answers_on(self):
+        ran, rec = [], {}
+        answer = {"ok": False, "links": [{"name": "vm-demo", "state": "relinked", "to": "bbb"},
+                                         {"name": "vm-old", "state": "refused", "why": "not linked again: another host answers there", "fix": ["x", "y", "herdr-task carry-over"]}],
+                  "records": [{"name": "shepherdr.secrets", "state": "repaired", "to": "bbb"}]}
+
+        def run(argv, **k):
+            ran.append(argv)
+            return subprocess.CompletedProcess(argv, 1, json.dumps(answer), "")
+        r = self.sh.Run(scratch(self), False)
+        said = []
+        from unittest import mock
+        with mock.patch.object(self.sh, "say", lambda *a: said.append(" ".join(map(str, a)))):
+            self.sh.carry_over_session(r, rec, True, run=run, links_only=True)
+        self.assertEqual(ran[0][2:], ["carry-over", "--links", "--json"])
+        self.assertEqual(rec, {}, "the switch's own records are left alone")
+        self.assertTrue(any("vm-demo was broken" in x and "linked again" in x for x in said), said)
+        self.assertTrue(any("shepherdr.secrets" in x for x in said), said)
+        [note] = r.notes
+        self.assertIn("vm-old is broken", note)
+        self.assertIn("another host answers there", note)
+        self.assertIn("`x` && `y` && `herdr-task carry-over`", note)
+        with open(os.path.join(ROOT, "bin", "shepherdr")) as f:
+            text = f.read()
+        self.assertIn("carry_over_session(r, rec, home, links_only=True)", text)
 
     def test_shep_305_the_update_says_what_it_repaired_and_what_it_cannot(self):
         _, rec, notes = self.go({"ok": True, "machines": [], "documents": [], "scheduler": "none", "records": [
