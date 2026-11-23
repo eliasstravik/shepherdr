@@ -54,11 +54,11 @@ const snap: Snapshot = {
 
 const draw = () => renderToStaticMarkup(<List snap={snap} />)
 /** the markup from a machine's heading to the next one */
-const part = (html: string, machine: string) => html.slice(html.indexOf(`data-machine="${machine}"`)).split('data-machine=')[1]!
+const part = (html: string, machine: string) => html.slice(html.indexOf(`data-heading="m:${machine}"`)).split('data-heading="m:')[1]!
 
 test('Everything has no filter and no plus; every machine heading has both, the one with a warning mark too', () => {
   const html = draw()
-  const everything = html.slice(html.indexOf('Everything'), html.indexOf('data-machine='))
+  const everything = html.slice(html.indexOf('Everything'), html.indexOf('data-heading="m:'))
   expect(everything).not.toContain('Show which spaces')
   expect(everything).not.toContain('aria-label="New"')
   for (const m of ['mini', 'vm', 'pi']) {
@@ -247,4 +247,65 @@ test("the heading opens the menu on a right click, never from its filter or plus
   expect(html).toContain('data-machine="vm"')
   expect(html).toContain('data-heading="m:vm"')
   expect(html).toContain('>Dev box<')
+})
+
+// SHEP-438: a tap on a machine's name folds its spaces; folded, it shows what they need and keeps the open one in sight
+test("a folded machine hides its spaces, says so on its name, and rolls up what they need", () => {
+  const needy = { ...snap, places: snap.places.map((p) => (p.id === 'garden' || p.id === 'vmh' ? { ...p, needs: true } : p)) }
+  setUI({ shut: { 'm:vm': true }, at: 'home' })
+  try {
+    const vm = part(renderToStaticMarkup(<List snap={needy} />), 'vm')
+    expect(vm).toContain('aria-expanded="false"')
+    expect(vm).not.toContain('data-project="garden"')
+    expect(vm).not.toContain('data-project="vmh"')
+    expect(vm).toContain('<span class="cnt">2</span>')
+    // the others stay open
+    const mini = part(renderToStaticMarkup(<List snap={needy} />), 'mini')
+    expect(mini).toContain('aria-expanded="true"')
+    expect(mini).toContain('data-project="shop"')
+  } finally {
+    setUI({ shut: {}, at: '' })
+  }
+})
+
+test('the open space stays in sight under its folded machine, and its own count is not counted twice', () => {
+  const needy = { ...snap, places: snap.places.map((p) => (p.id === 'garden' || p.id === 'vmh' ? { ...p, needs: true } : p)) }
+  setUI({ shut: { 'm:vm': true }, at: 'garden' })
+  try {
+    const vm = part(renderToStaticMarkup(<List snap={needy} />), 'vm')
+    expect(vm).toContain('data-project="garden"')
+    expect(vm).not.toContain('data-project="vmh"')
+    expect(vm.split('data-project')[0]).toContain('<span class="cnt">1</span>')
+  } finally {
+    setUI({ shut: {}, at: '' })
+  }
+})
+
+test("fold flips one machine's state on this device, beside the groups' (ui.shut, kept across loads)", async () => {
+  const { fold } = await import('./list.tsx')
+  setUI({ shut: { g1: true } })
+  try {
+    fold('m:vm')
+    expect(getState().ui.shut).toEqual({ g1: true, 'm:vm': true })
+    fold('m:vm')
+    expect(getState().ui.shut).toEqual({ g1: true })
+  } finally {
+    setUI({ shut: {} })
+  }
+})
+
+test('a dragged order shows at once; a machine it does not name (new) stays last', async () => {
+  const { inMachineOrder } = await import('./list.tsx')
+  const keys = ['mini', 'vm', 'pi', 'new']
+  expect(inMachineOrder(keys, (k) => k, ['pi', 'mini', 'vm'])).toEqual(['pi', 'mini', 'vm', 'new'])
+  expect(inMachineOrder(keys, (k) => k, null)).toEqual(keys)
+})
+
+test('every row of a machine carries its key, so dragging its heading takes them along', () => {
+  setUI({ at: '' })
+  const html = renderToStaticMarkup(<List snap={snap} />)
+  expect(html).toContain('data-project="garden" data-machine="vm"')
+  expect(html).toContain('data-project="shop" data-machine="mini"')
+  // the keyboard way to move it, for those who don't drag
+  expect(part(html, 'vm')).toContain('aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"')
 })

@@ -65,6 +65,10 @@ button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"])
 .mh>.mn{display:flex;align-items:center;gap:8px;flex:1;min-width:0;height:var(--ib);color:inherit;font:inherit;text-align:left}
 .mh>.mn>.n{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mh .mf{flex:none;color:var(--fg)}
 .mh>.mn>.i{flex:none}.mempty{padding:4px 8px}
+/* its fold: a quiet chevron that turns, the name area folds (SHEP-438); held by a finger, it lifts to be dragged */
+.mh>.mn>.chev{color:var(--muted);transition:transform .16s cubic-bezier(.2,0,0,1)}.mh>.mn[aria-expanded="false"]>.chev{transform:rotate(-90deg)}
+.mh[data-held]{background:var(--control);border-radius:8px}
+@media(prefers-reduced-motion:reduce){.mh>.mn>.chev{transition:none}}
 .hint{color:var(--muted);font-size:var(--sec);line-height:var(--secl)}
 .tabs{display:flex;gap:4px;padding:0 var(--gut) 8px}
 .tab{height:var(--tab);padding:0 10px;border-radius:6px;color:var(--muted);font-size:var(--sec);font-weight:500}

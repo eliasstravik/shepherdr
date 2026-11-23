@@ -133,8 +133,18 @@ const longDay = (s: Snapshot): Snapshot => ({
   artifacts: s.artifacts.map((a: any, i: number) => (i === 0 ? { ...a, title: `${a.title}: the whole story, with every screenshot and the numbers behind it` } : a)),
 })
 
-export function snapshot(mode: 'normal' | 'empty' | 'down' | 'more' | 'long' = 'normal'): Snapshot {
+// ?case=one and ?case=five (SHEP-438): the sidebar with one machine only, and with a fifth one to fold and drag
+const oneMachine = (s: Snapshot): Snapshot => ({ ...s, machines: s.machines.slice(0, 1), places: s.places.filter((p) => p.machine === s.host), warnings: [] })
+const fiveMachines = (s: Snapshot): Snapshot => ({
+  ...s,
+  machines: [...s.machines, { id: 'm:laptop', machine: 'laptop', name: 'laptop', status: 'idle' }],
+  places: [...s.places, { ...s.places.find((p) => p.machine === 'pi')!, id: 'p:laptop:home', chat: 'p:laptop:home', machine: 'laptop' }, { ...s.places.find((p) => p.machine === 'studio' && !p.home)!, id: 'p:laptop:notes', chat: 'p:laptop:notes', machine: 'laptop', name: 'notes' }],
+})
+
+export function snapshot(mode: 'normal' | 'empty' | 'down' | 'more' | 'long' | 'one' | 'five' = 'normal'): Snapshot {
   if (mode === 'long') return longDay(snapshot('normal'))
+  if (mode === 'one') return oneMachine(snapshot('normal'))
+  if (mode === 'five') return fiveMachines(snapshot('normal'))
   const empty = mode === 'empty'
   const down = mode === 'down'
   return {

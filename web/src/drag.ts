@@ -1,6 +1,6 @@
 // Dragging a machine or a project into the order you want. A mouse drags a row at once; a finger holds it first (a
 // project's menu opens then, as before) and slides it, which closes the menu. The rows it passes make room for it; let
-// go, it settles into its slot. A machine takes its projects along, a section its spaces; a space moves among those
+// go, it settles into its slot. Near the list's top or bottom edge it scrolls the list. A machine takes its projects along, a section its spaces; a space moves among those
 // beside it, or out onto another section (its heading, or a row in it: before that one) where it may go, which lights up.
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { flushSync } from 'react-dom'
@@ -26,6 +26,8 @@ export interface Press {
   hold?: (el: HTMLElement) => void
   lift?: () => void
   release?: () => void
+  /** a finger held the row and went up without moving it: a machine's menu opens then */
+  heldUp?: (el: HTMLElement) => void
 }
 
 interface Block {
@@ -37,9 +39,27 @@ interface Block {
 
 const EASE = 'transform 160ms cubic-bezier(0.2, 0, 0, 1)'
 let active = false
+let touching = false
 
 /** a row is being dragged: what a held finger would do otherwise (a context menu) waits */
 export const dragging = () => active
+/** a finger is down on a row that can be dragged: Android's long-press context menu waits for it to go up */
+export const pressing = () => touching
+
+/** how close to the list's top or bottom edge a dragged row scrolls it, and its fastest step a frame */
+const EDGE = 48
+const STEP = 14
+
+function scrollerOf(el: HTMLElement) {
+  for (let p = el.parentElement; p; p = p.parentElement) if (/auto|scroll/.test(getComputedStyle(p).overflowY)) return p
+  return null
+}
+
+function swallowClick(ms: number) {
+  const swallow = (c: MouseEvent) => (c.stopPropagation(), c.preventDefault())
+  addEventListener('click', swallow, { capture: true, once: true })
+  setTimeout(() => removeEventListener('click', swallow, { capture: true }), ms)
+}
 
 /** a pointer went down on a row that can be dragged: follows it until it goes up */
 export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
@@ -51,6 +71,15 @@ export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
   const y0 = e.clientY
   const movable = o.siblings.length > 1 || !!o.into
   let held = mouse
+  /** held, then moved: no menu as it goes up */
+  let strayed = false
+  touching = !mouse
+  const scroller = scrollerOf(el)
+  const s0 = scroller?.scrollTop ?? 0
+  /** how far the list scrolled since the drag began: rows were measured before it */
+  const scrolled = () => (scroller ? scroller.scrollTop - s0 : 0)
+  let last = { x: x0, y: y0 }
+  let frame = 0
   let blocks: Block[] = []
   let from = -1
   let to = -1
@@ -105,9 +134,11 @@ export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
     over = next
     for (const e of over?.lit ?? []) e.dataset.dropOver = e.dataset.heading ? 'heading' : 'before'
   }
-  const place = (y: number, x: number) => {
+  const place = (sy: number, x: number) => {
     const me = blocks[from]
-    light(target(x, y))
+    light(target(x, sy))
+    // where the pointer is in the list as it was measured, before any scroll
+    const y = sy + scrolled()
     if (over) {
       // out over another group: it follows the pointer, and the rest stay as they were
       dy = y - y0
@@ -142,7 +173,7 @@ export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
       flushSync(() => o.into!.go(group, before))
       return
     }
-    const at = me.top + dy
+    const at = me.top + dy - scrolled()
     const ids = blocks.filter((_, i) => i !== from).map((b) => b.id)
     ids.splice(to, 0, me.id)
     clear()
@@ -159,13 +190,32 @@ export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
     }, still() ? 0 : 170)
   }
 
+  /** held near the list's top or bottom edge, the list scrolls, faster the closer it is */
+  const edge = () => {
+    frame = 0
+    if (!active || !scroller) return
+    const r = scroller.getBoundingClientRect()
+    const by = last.y < r.top + EDGE ? last.y - (r.top + EDGE) : last.y > r.bottom - EDGE ? last.y - (r.bottom - EDGE) : 0
+    if (!by) return
+    const was = scroller.scrollTop
+    scroller.scrollTop += Math.sign(by) * Math.min(STEP, Math.ceil(Math.abs(by) / 3))
+    if (scroller.scrollTop === was) return
+    place(last.y, last.x)
+    frame = requestAnimationFrame(edge)
+  }
+  const follow = (x: number, y: number) => {
+    last = { x, y }
+    place(y, x)
+    if (!frame) frame = requestAnimationFrame(edge)
+  }
   const move = (ev: PointerEvent) => {
     if (ev.pointerId !== id) return
-    if (active) return place(ev.clientY, ev.clientX)
+    if (active) return follow(ev.clientX, ev.clientY)
     const far = Math.hypot(ev.clientX - x0, ev.clientY - y0)
     // a finger that moves before the hold scrolls the list
     if (!held) return far > 8 && end()
-    if (movable && far > (mouse ? 4 : 8) && begin()) place(ev.clientY, ev.clientX)
+    if (far > 8) strayed = true
+    if (movable && far > (mouse ? 4 : 8) && begin()) follow(ev.clientX, ev.clientY)
   }
   // once held, the finger drags the row instead of scrolling the list
   const touch = (ev: TouchEvent) => (held || active) && ev.cancelable && ev.preventDefault()
@@ -173,12 +223,17 @@ export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
     if (ev.pointerId !== id) return
     const was = active
     end()
-    if (!was) return
+    if (!was) {
+      // the click this lift sends lands on what the hold opened (its shade): it opens or shuts nothing
+      if (held && !mouse && !strayed && o.heldUp) {
+        o.heldUp(el)
+        swallowClick(400)
+      }
+      return
+    }
     settle()
     // the click a drag ends with opens nothing
-    const swallow = (c: MouseEvent) => (c.stopPropagation(), c.preventDefault())
-    addEventListener('click', swallow, { capture: true, once: true })
-    setTimeout(() => removeEventListener('click', swallow, { capture: true }), 50)
+    swallowClick(50)
   }
   const cancel = (ev: PointerEvent) => {
     if (ev.pointerId !== id) return
@@ -192,6 +247,9 @@ export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
   }
   const end = () => {
     clearTimeout(timer)
+    cancelAnimationFrame(frame)
+    frame = 0
+    touching = false
     removeEventListener('pointermove', move)
     removeEventListener('pointerup', up)
     removeEventListener('pointercancel', cancel)

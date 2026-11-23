@@ -17,7 +17,7 @@
 
 /* Motion › Reduced, like the device's own setting */
 :root[data-motion="reduced"] .sheet.in,:root[data-motion="reduced"] .drawer.in,:root[data-motion="reduced"] .pop.in,:root[data-motion="reduced"] .dlg.in,:root[data-motion="reduced"] .win.in{animation:none}
-:root[data-motion="reduced"] .tg i{transition:none}
+:root[data-motion="reduced"] .tg i,:root[data-motion="reduced"] .mh>.mn>.chev{transition:none}
 :root[data-motion="reduced"] .i.turn{animation:calm 2.4s ease-in-out infinite}
 /* the app's own Reduce motion switch: the working sign fades in, its dots brighten in turn without moving */
 :root[data-motion="reduced"] .wsign{animation-name:fade}
@@ -147,10 +147,12 @@ button:disabled{opacity:.5;cursor:default}
 .dlg:focus,.pop:focus,.win:focus,.scr:focus{outline:0}
 
 /* dragging a space into another order: the row lifts, and where it may land lights up */
-.rowx[data-dragging]{position:relative;z-index:5;background:var(--overlay);box-shadow:inset 0 0 0 1px var(--line2),var(--shadow);cursor:grabbing}
+.rowx[data-dragging]:not([data-dragging="machine"]){position:relative;z-index:5;background:var(--overlay);box-shadow:inset 0 0 0 1px var(--line2),var(--shadow);cursor:grabbing}
 [data-drop-over="heading"]{background:var(--control);border-radius:8px}
 [data-drop-over="before"]{box-shadow:inset 0 2px 0 var(--fg)}
-.side .rowx,.drawer .rowx{touch-action:pan-y}
+.side .rowx,.drawer .rowx,.side .mh,.drawer .mh{touch-action:pan-y}
+/* a machine dragged with its rows: they lift together, over what they pass */
+[data-dragging="machine"]{position:relative;z-index:5;border-radius:0;background:var(--control);box-shadow:0 1px 0 var(--control)}.mh[data-dragging="machine"]{border-radius:8px 8px 0 0;cursor:grabbing}
 .tbar span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* over a live picture nobody may click yet: the whole of it (Take over first) */
