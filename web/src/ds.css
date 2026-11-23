@@ -1,7 +1,7 @@
 /* Shepherdr's design system (3.2): tokens, sizes and classes. Desktop by default, phone under .app.phone. */
 :root{color-scheme:light;--canvas:#fff;--well:#fafafa;--raised:#f5f5f5;--overlay:#fff;--control:rgb(0 0 0/.05);--control2:rgb(0 0 0/.1);--fg:#0a0a0a;--sub:#404040;--muted:#737373;--line:rgb(0 0 0/.08);--line2:rgb(0 0 0/.12);--mine:#e5e5e5;--rx:#fff;--scrim:rgb(0 0 0/.3);--green:#15803d;--blue:#0369a1;--amber:#b45309;--red:#dc2626;--term:#0a0a0a;--shadow:0 8px 28px rgb(0 0 0/.14)}
-@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--canvas:#121212;--well:#0a0a0a;--raised:#1e1e1e;--overlay:#1f1f1f;--control:rgb(255 255 255/.1);--control2:rgb(255 255 255/.16);--fg:#fafafa;--sub:#d4d4d4;--muted:#a3a3a3;--line:rgb(255 255 255/.08);--line2:rgb(255 255 255/.12);--mine:rgb(255 255 255/.14);--rx:#3a3a3a;--scrim:rgb(0 0 0/.6);--green:#4ade80;--blue:#7dd3fc;--amber:#fbbf24;--red:#f87171;--shadow:0 0 0 0 transparent}}
-:root[data-theme="dark"]{color-scheme:dark;--canvas:#121212;--well:#0a0a0a;--raised:#1e1e1e;--overlay:#1f1f1f;--control:rgb(255 255 255/.1);--control2:rgb(255 255 255/.16);--fg:#fafafa;--sub:#d4d4d4;--muted:#a3a3a3;--line:rgb(255 255 255/.08);--line2:rgb(255 255 255/.12);--mine:rgb(255 255 255/.14);--rx:#3a3a3a;--scrim:rgb(0 0 0/.6);--green:#4ade80;--blue:#7dd3fc;--amber:#fbbf24;--red:#f87171;--shadow:0 0 0 0 transparent}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--canvas:#121212;--well:#0a0a0a;--raised:#1e1e1e;--overlay:#1f1f1f;--control:rgb(255 255 255/.1);--control2:rgb(255 255 255/.16);--fg:#fafafa;--sub:#d4d4d4;--muted:#a3a3a3;--line:rgb(255 255 255/.08);--line2:rgb(255 255 255/.12);--mine:rgb(255 255 255/.14);--rx:#262626;--scrim:rgb(0 0 0/.6);--green:#4ade80;--blue:#7dd3fc;--amber:#fbbf24;--red:#f87171;--shadow:0 0 0 0 transparent}}
+:root[data-theme="dark"]{color-scheme:dark;--canvas:#121212;--well:#0a0a0a;--raised:#1e1e1e;--overlay:#1f1f1f;--control:rgb(255 255 255/.1);--control2:rgb(255 255 255/.16);--fg:#fafafa;--sub:#d4d4d4;--muted:#a3a3a3;--line:rgb(255 255 255/.08);--line2:rgb(255 255 255/.12);--mine:rgb(255 255 255/.14);--rx:#262626;--scrim:rgb(0 0 0/.6);--green:#4ade80;--blue:#7dd3fc;--amber:#fbbf24;--red:#f87171;--shadow:0 0 0 0 transparent}
 *{box-sizing:border-box}[hidden]{display:none!important}html{background:var(--canvas);-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
 body{margin:0;background:var(--canvas);color:var(--fg);font:16px/24px InterVariable,ui-sans-serif,system-ui,sans-serif;font-feature-settings:"cv02","cv03","cv04","cv11";-webkit-font-smoothing:antialiased}
 button,input{font:inherit;color:inherit;letter-spacing:inherit}
@@ -141,7 +141,7 @@ button.b{cursor:pointer}
    it: a quote's one line (white-space:nowrap) would otherwise widen both to its full length, past the chat column */
 .bw{position:relative;display:grid;grid-template-columns:minmax(0,1fr);justify-self:start;max-width:min(82%,560px)}.bw.mine{justify-self:end}
 .pane .bw{max-width:92%}.bw>.bmv>.b{max-width:100%}
-.bmv{display:grid;grid-template-columns:minmax(0,1fr);justify-items:start}.bw.mine>.bmv{justify-items:end}
+.bmv{position:relative;display:grid;grid-template-columns:minmax(0,1fr);justify-items:start}.bw.mine>.bmv{justify-items:end}
 .bmv.settle{transition:transform 320ms cubic-bezier(.25,1.12,.4,1)}
 .rpl{position:absolute;inset-block:0;left:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;overflow:hidden;border-radius:18px;background:var(--control2);color:var(--fg);font-size:var(--sec);line-height:var(--secl);font-weight:600;white-space:nowrap;pointer-events:none}
 .rpl.on{background:var(--fg);color:var(--canvas)}
@@ -153,26 +153,28 @@ button.b{cursor:pointer}
 .qbtn{display:grid;place-items:center;width:max(var(--btn),var(--ib));height:max(var(--btn),var(--ib));border-radius:8px;color:var(--sub)}
 .qbtn:hover,.qbtn[aria-expanded="true"]{background:var(--control);color:var(--fg)}
 .qt{color:var(--muted);font-size:12px;line-height:16px;white-space:nowrap;font-variant-numeric:tabular-nums}
-/* reactions, as WhatsApp and iMessage: a pill that hugs its emoji (never a stretched track: width:max-content and
-   flex:none), tucked over the bubble's bottom edge by a third of its height, inset 8px from the bubble's own corner
-   (right for yours, left for the agent's, from .bmv's justify-items), a raised fill one step above the bubble with a
-   ring of the chat's background so the overlap reads clean; being in the flow, it reserves its own space below.
+/* reactions, placed as Claude Duet places them: a small pill pinned to the bubble's top corner that faces the middle
+   of the chat (top right for the agent's, top left for yours), straddling it: half above the top edge, half past the
+   side edge. Several sit side by side there, growing toward the middle. It hugs its emoji (width:max-content and
+   flex:none, never a stretched track): a surface a step above the chat with a hairline, the emoji at 18 px. Out of the
+   flow, it reserves no space below; a bubble with one gets a little room above so the chip clears the message there.
+   Where the bubble fills the column, the chip moves in to stay inside it (--rx-dx, set by the plugin's fit()).
    Its states are rx- classes only: 3.2.4's just-added chip carried "pop", the menu's own class, and drew as a 200px
    floating bar until a reload. .rxs>.rxc pins the size against any other class or container, in every state. */
-.rxs{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:4px;width:max-content;max-width:calc(100% - 16px);margin:-10px 8px 2px;justify-self:start;align-self:start}.bw.mine .rxs{justify-content:flex-end;justify-self:end}
-.rxc{position:relative;flex:none;display:inline-flex;align-items:center;justify-content:center;gap:3px;width:auto;min-width:28px;height:28px;padding:0 6px;border-radius:999px;background:var(--rx);box-shadow:0 0 0 2px var(--canvas);color:var(--sub);font-size:12px;line-height:16px;font-weight:600;font-variant-numeric:tabular-nums}
-.rxs>.rxc{position:relative;inset:auto;flex:none;align-self:center;justify-self:start;width:fit-content;min-width:28px;max-width:none;height:28px;min-height:0;max-height:none;margin:0;padding:0 6px;transform:none}
-/* the finger pad reaches further up, over the bubble it already overlaps: below it, a bar such as "waiting at a
-   prompt" may sit close and take the lower pad, and the chip must still give a finger 44px */
-.rxc::after{content:"";position:absolute;inset:-13px -2px -8px}
-.rxc .e{font-size:16px;line-height:1}
+.bw:has(>.bmv>.rxs){margin-top:14px}
+.rxs{position:absolute;z-index:1;top:0;left:calc(100% - 18px);right:auto;display:flex;gap:4px;width:max-content;margin:0;transform:translate(var(--rx-dx,0px),-50%)}
+.bw.mine .rxs{left:auto;right:calc(100% - 18px);flex-direction:row-reverse}
+.rxc{position:relative;flex:none;display:inline-flex;align-items:center;justify-content:center;gap:3px;width:auto;min-width:34px;height:28px;padding:0 8px;border-radius:999px;background:var(--rx);box-shadow:inset 0 0 0 1px var(--line2);color:var(--sub);font-size:12px;line-height:16px;font-weight:600;font-variant-numeric:tabular-nums}
+.rxs>.rxc{position:relative;inset:auto;flex:none;align-self:center;justify-self:start;width:fit-content;min-width:34px;max-width:none;height:28px;min-height:0;max-height:none;margin:0;padding:0 8px;transform:none}
+/* the finger pad: 28 + 8 + 8 = 44 px tall */
+.rxc::after{content:"";position:absolute;inset:-8px -5px}
+.rxc .e{font-size:15px;line-height:1}
 .rxc:hover{background:color-mix(in srgb,var(--fg) 6%,var(--rx))}
 .rxc[aria-pressed="true"]{background:color-mix(in srgb,var(--blue) 18%,var(--rx));color:var(--fg)}
 .rxc[aria-pressed="true"]:hover{background:color-mix(in srgb,var(--blue) 26%,var(--rx))}
 .rxc.rx-pending{opacity:.6}
 .rxs>.rxc.rx-new{animation:rxpop 280ms cubic-bezier(.25,1.12,.4,1)}
 @keyframes rxpop{0%{transform:scale(.3);opacity:0}60%{transform:scale(1.12);opacity:1}100%{transform:scale(1)}}
-.app.tap .rxc .e{font-size:18px}
 @media(prefers-reduced-motion:reduce){.rxs>.rxc.rx-new{animation:none}.bmv.settle{transition:none}}
 /* a finger's long press opens the menu, not the system's word selection (Select text turns it back on) */
 @media(pointer:coarse){.b[data-menu]:not(.sel){-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}}
