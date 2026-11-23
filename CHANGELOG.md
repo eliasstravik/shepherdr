@@ -1,5 +1,35 @@
 # Changelog
 
+## 3.2.4
+
+Fixes for 3.2.3 so updating every machine works again, and a tidier message box and chat.
+
+### Once, after updating
+
+- The "Update Shepherdr everywhere" schedule (or any schedule of yours that runs `shepherdr update`) needs your yes
+  once: `herdr-task auto edit <schedule> --may-update-shepherdr on`, from your own terminal or your Assistant (a task's
+  agent can't set it). Its runs then update Shepherdr outside their own terminal and say how it went; the schedule's
+  own words can stay as they are.
+
+### Updating machines
+
+- A schedule you allow can update Shepherdr again: 3.2.3's guard refused the update inside its run, so that machine
+  stayed on the old version. The next run is told how the last update went.
+- Machines sync works again: every machine read "can't reach" because one install step asked for more time than
+  herdr-core allows. A call that is refused now shows as failed with the reason.
+
+### The web app
+
+- Dictation fixed: its row stays inside the message box, the wave moves, and Done and Cancel sit where the box's
+  buttons are, in a soft green and red. A call's wave fills the row up to the mic.
+- The + menu is Photos, then Files; no separate photo button and no Paste image (pasting a picture still works).
+- Stop sits at the right end of the working row, and the tab chip lines up in the box.
+- Chat rows share one even spacing and one left edge; on a touch screen each row stays big enough to tap.
+- Reaction chips are small pills that hug their emoji, tucked over the bubble's corner.
+- The header's count badge sits on its icon's corner, inside the header.
+- Links in an artifact to other sites open in a new tab; a link to Shepherdr opens in the app. A page the artifact
+  can't show says so, with Back to the artifact.
+
 ## 3.2.3
 
 A big one: tasks named by their titles, task settings that follow the repo, a web app that updates itself, and a
