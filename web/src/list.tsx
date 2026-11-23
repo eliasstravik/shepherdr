@@ -1,10 +1,11 @@
-// The list: Shepherdr and search, Everything, machines as headings, groups that fold, spaces with a "needs you" count,
-// and at the foot New space, Feedback and Settings. Left on a desktop, behind the menu button on a phone. With it, a
-// space's menu and the small dialogs it opens (New space, New group, Rename, Archive, Remove, Feedback).
+// The list: Shepherdr and search, Everything, machines as headings (each with its own filter and New space, SHEP-342),
+// groups that fold, spaces with a "needs you" count, and at the foot Feedback and Settings. Left on a desktop, behind
+// the menu button on a phone. With it, a space's menu and the small dialogs it opens (New space, New group, Rename,
+// Archive, Remove, Feedback).
 import { useState } from 'react'
 import type { Snapshot } from '@shared/types.ts'
-import { everything, folderName, folderOf, groupOf, isEverything, listOf, machineLabel, needsCount, placeDown, placeOf, tasksIn, tstate, unreachable, type Space } from '@shared/view.ts'
-import { act, getState, go, notice, openSettings, registry, setUI, tryAct, useUI, type Filter, type MenuRow } from './kernel.ts'
+import { everything, folderName, folderOf, groupOf, isEverything, listOf, machineLabel, needsCount, placeDown, placeOf, tasksIn, tstate, unreachable, type ListMachine, type Space } from '@shared/view.ts'
+import { act, getState, go, notice, openSettings, registry, setUI, shownOn, tryAct, useUI, type Filter, type MenuRow } from './kernel.ts'
 import { confirm, openDialog, openForm, openMenu } from './overlay.tsx'
 import { AgentField, MachineField, pickFor, type Pick } from './picker.tsx'
 import { Btn, Cnt, I, IB, Row } from './ui.tsx'
@@ -14,28 +15,38 @@ import { press } from './drag.ts'
 
 const FILTERS: Filter[] = ['Active', 'Archived', 'All']
 
-function filterMenu(anchor: Element) {
+/** a machine's filter (SHEP-342): which of its spaces its heading shows, Active, Archived (with how many) or All. The
+ *  same filter button as the Tasks panel's. */
+export function filterMenu(anchor: Element, machine: string, name: string, archived: number) {
   openMenu(
     anchor,
     (close) => (
       <>
         <div className="cap">Show</div>
-        {FILTERS.map((f) => (
-          <Row
-            key={f}
-            label={f}
-            role="menuitemradio"
-            current={getState().ui.filter === f}
-            end={getState().ui.filter === f ? <I n="check" /> : undefined}
-            onClick={() => {
-              close()
-              setUI({ filter: f })
-            }}
-          />
-        ))}
+        {FILTERS.map((f) => {
+          const on = shownOn(getState().ui, machine) === f
+          return (
+            <Row
+              key={f}
+              label={f}
+              role="menuitemradio"
+              aria-checked={on}
+              value={!on && f === 'Archived' && archived ? String(archived) : undefined}
+              current={on}
+              end={on ? <I n="check" /> : undefined}
+              onClick={() => {
+                close()
+                const shown = { ...getState().ui.shown }
+                if (f === 'Active') delete shown[machine]
+                else shown[machine] = f
+                setUI({ shown })
+              }}
+            />
+          )
+        })}
       </>
     ),
-    { label: 'Show which spaces' },
+    { label: `Show which spaces on ${name}` },
   )
 }
 
@@ -49,7 +60,7 @@ function archive(snap: Snapshot, p: Space) {
   const run = async () => {
     if (await tryAct({ type: 'space-archive', place: p.id, on: !p.archived })) {
       const { ui } = getState()
-      if (!p.archived && ui.filter === 'Active' && ui.at === p.id) go(everything(snap)?.id ?? '')
+      if (!p.archived && shownOn(ui, p.machine) === 'Active' && ui.at === p.id) go(everything(snap)?.id ?? '')
     }
   }
   const busy = p.archived ? '' : busyWords(snap, p.id)
@@ -332,14 +343,46 @@ function SpaceRow({ snap, p, sub, under, siblings, section }: { snap: Snapshot; 
   )
 }
 
+/** a machine's heading (SHEP-342): its name (a button to Settings › Machines when it carries a warning mark), what its
+ *  filter shows when that is not Active, then its own filter and New space on it */
+function MachineHead({ snap, m }: { snap: Snapshot; m: ListMachine }) {
+  const { machine, warn, filter, archived } = m
+  const key = machine.machine
+  const name = machineLabel(snap, key)
+  const label = (
+    <>
+      <span className="n">{name}</span>
+      {filter !== 'Active' && <span className="mf">{filter}</span>}
+    </>
+  )
+  return (
+    <div className="lab mh" data-machine={key} data-heading={`m:${key}`} data-drop={`m:${key}`}>
+      {warn ? (
+        <button type="button" className="mn" aria-label={`${machine.name}: ${warn}. Open Machines`} onClick={() => openSettings('all', 'Machines')}>
+          {label}
+          <I n="warn" c="c-ask s16" />
+        </button>
+      ) : (
+        <span className="mn">{label}</span>
+      )}
+      <IB icon="filter" label={`Show which spaces on ${machine.name}`} aria-haspopup="menu" data-marks="" pressed={filter !== 'Active'} onClick={(e) => filterMenu(e.currentTarget, key, machine.name, archived)} />
+      <IB
+        icon="plus"
+        label={`New space on ${machine.name}`}
+        onClick={() => {
+          setUI({ drawer: false })
+          newSpaceDialog(key)
+        }}
+      />
+    </div>
+  )
+}
+
 export function List({ snap }: { snap: Snapshot }) {
   const ui = useUI()
   const ph = ui.phone
-  const f = ui.filter
   const ev = everything(snap)
-  const machines = listOf(snap, f)
-  const FilterBtn = <IB icon="filter" label="Show which spaces" aria-haspopup="menu" data-marks="" onClick={(e) => filterMenu(e.currentTarget)} />
-  const anyArchived = snap.places.some((p) => p.archived && !p.home)
+  const machines = listOf(snap, (m) => shownOn(ui, m))
   return (
     <>
       <div className="brand">
@@ -351,60 +394,37 @@ export function List({ snap }: { snap: Snapshot }) {
       {ev && (
         <div className="rowx">
           <Row icon="layers" label="Everything" current={ui.at === ev.id && !ui.wide} onClick={() => go(ev.id)} />
-          {!ph && FilterBtn}
-          {!ph && (
-            <IB
-              icon="plus"
-              label="New"
-              aria-haspopup="menu"
-              onClick={(e) =>
-                openMenu(e.currentTarget, [
-                  { icon: 'hash', label: 'New space', run: () => newSpaceDialog() },
-                  { icon: 'folder', label: 'New group', run: () => newGroupDialog() },
-                ])
-              }
-            />
-          )}
         </div>
       )}
-      {ph && <div className="h2">Spaces{FilterBtn}</div>}
-      {f === 'Archived' && <p className="hint" style={{ padding: '4px 8px' }}>Archived spaces and their messages are kept until you remove them.</p>}
-      {f === 'Archived' && !anyArchived && <p className="hint" style={{ padding: '4px 8px' }}>No archived spaces.</p>}
-      {(f === 'Archived' ? machines : listOf(snap, f)).map(({ machine, warn, groups, spaces }) => (
-        <div key={machine.id} style={{ display: 'contents' }}>
-          {f !== 'Archived' &&
-            (warn ? (
-              <button type="button" className="row lab" style={{ paddingTop: 0, paddingBottom: 0, marginTop: 8 }} aria-label={`${machine.name}: ${warn}. Open Machines`} onClick={() => openSettings('all', 'Machines')}>
-                <span className="n">{machine.name}</span>
-                <I n="warn" c="c-ask s16" />
-              </button>
-            ) : (
-              <div className="lab" data-heading={`m:${machine.machine}`} data-drop={`m:${machine.machine}`}>{machineLabel(snap, machine.machine)}</div>
-            ))}
-          {groups.flatMap((g) => [
-            // a group is dragged by its heading, among the groups of its machine; its spaces go with it
-            <div
-              className="rowx"
-              key={g.id}
-              data-section={g.id}
-              data-heading={g.id}
-              data-drop={g.id}
-              onPointerDown={(e) => {
-                if ((e.target as HTMLElement).closest('.ib')) return
-                press(e, { id: g.id, siblings: groups.map((x) => x.id), level: 'section', drop: (ids) => void tryAct({ type: 'order', under: `sections:m:${machine.machine}`, ids }) })
-              }}
-            >
-              <Row icon={ui.shut[g.id] ? 'right' : 'down'} label={g.name} expanded={!ui.shut[g.id]} onClick={() => setUI({ shut: { ...ui.shut, [g.id]: !ui.shut[g.id] } })} />
-              <IB icon="dots" label={`More for ${g.name}`} aria-haspopup="menu" onClick={(e) => groupMenu(e.currentTarget, g.id, g.name)} />
-            </div>,
-            ...(ui.shut[g.id] ? [] : g.spaces.map((p) => <SpaceRow key={p.id} snap={snap} p={p} sub under={g.id} siblings={g.spaces.map((x) => x.id)} section={g.id} />)),
-          ])}
-          {spaces.map((p) => <SpaceRow key={p.id} snap={snap} p={p} under={`m:${machine.machine}`} siblings={spaces.map((x) => x.id)} />)}
-        </div>
-      ))}
+      {machines.map((m) => {
+        const { machine, groups, spaces, filter } = m
+        return (
+          <div key={machine.id} style={{ display: 'contents' }}>
+            <MachineHead snap={snap} m={m} />
+            {filter === 'Archived' && !spaces.length && <p className="hint mempty">No archived spaces.</p>}
+            {groups.flatMap((g) => [
+              // a group is dragged by its heading, among the groups of its machine; its spaces go with it
+              <div
+                className="rowx"
+                key={g.id}
+                data-section={g.id}
+                data-heading={g.id}
+                data-drop={g.id}
+                onPointerDown={(e) => {
+                  if ((e.target as HTMLElement).closest('.ib')) return
+                  press(e, { id: g.id, siblings: groups.map((x) => x.id), level: 'section', drop: (ids) => void tryAct({ type: 'order', under: `sections:m:${machine.machine}`, ids }) })
+                }}
+              >
+                <Row icon={ui.shut[g.id] ? 'right' : 'down'} label={g.name} expanded={!ui.shut[g.id]} onClick={() => setUI({ shut: { ...ui.shut, [g.id]: !ui.shut[g.id] } })} />
+                <IB icon="dots" label={`More for ${g.name}`} aria-haspopup="menu" onClick={(e) => groupMenu(e.currentTarget, g.id, g.name)} />
+              </div>,
+              ...(ui.shut[g.id] ? [] : g.spaces.map((p) => <SpaceRow key={p.id} snap={snap} p={p} sub under={g.id} siblings={g.spaces.map((x) => x.id)} section={g.id} />)),
+            ])}
+            {spaces.map((p) => <SpaceRow key={p.id} snap={snap} p={p} under={`m:${machine.machine}`} siblings={spaces.map((x) => x.id)} />)}
+          </div>
+        )
+      })}
       <div className="foot">
-        <Row icon="plus" label="New space" onClick={() => { setUI({ drawer: false }); newSpaceDialog() }} />
-        {ph && <Row icon="archive" label={f === 'Archived' ? 'Back to spaces' : 'Archived'} onClick={() => setUI({ filter: f === 'Archived' ? 'Active' : 'Archived' })} />}
         <Row icon="feedback" label="Feedback" onClick={() => { setUI({ drawer: false }); feedbackDialog() }} />
         <Row icon="gear" label="Settings" onClick={() => openSettings('all')} />
       </div>

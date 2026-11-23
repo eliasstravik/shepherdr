@@ -77,10 +77,16 @@ export interface ListGroup {
   name: string
   spaces: Place[]
 }
+/** which spaces a machine's heading shows */
+export type ListFilter = 'Active' | 'Archived' | 'All'
+
 export interface ListMachine {
   machine: Machine
   /** a few words when it needs attention (a warning mark that opens Settings › Machines) */
   warn: string
+  /** what its filter shows, and how many of its spaces are archived (the filter's menu says) */
+  filter: ListFilter
+  archived: number
   /** groups first as the person ordered them, then the spaces in no group */
   groups: ListGroup[]
   spaces: Place[]
@@ -93,21 +99,21 @@ export function machineWarn(m: Machine): string {
   return hot ? `${/disk/i.test(hot.name) ? 'Disk' : 'Memory'} nearly full` : ''
 }
 
-/** the list under Everything: machines as headings, their groups and spaces, as the filter says */
-export function listOf(snap: Snapshot, filter: 'Active' | 'Archived' | 'All'): ListMachine[] {
-  const shown = (p: Place) => !p.home && (filter === 'All' || (filter === 'Archived') === !!p.archived)
+/** the list under Everything: machines as headings, their groups and spaces, as each machine's filter says (one for
+ *  all, or by machine key); every machine stays, with how many archived spaces it has */
+export function listOf(snap: Snapshot, filter: ListFilter | ((machine: string) => ListFilter)): ListMachine[] {
   const sections: Section[] = (snap.sections ?? []).filter((s) => s.id !== 'pinned')
-  return snap.machines
-    .map((machine) => {
-      const mine = snap.places.filter((p) => p.machine === machine.machine && shown(p))
-      const groups = sections
-        .filter((s) => (s.machine ?? snap.host) === machine.machine)
-        .map((s) => ({ id: s.id, name: s.name, spaces: s.spaces.map((id) => mine.find((p) => p.id === id)).filter((p): p is Place => !!p) }))
-      const grouped = new Set(groups.flatMap((g) => g.spaces.map((p) => p.id)))
-      // the archived view lists spaces only
-      return { machine, warn: machineWarn(machine), groups: filter === 'Archived' ? [] : groups, spaces: mine.filter((p) => filter === 'Archived' || !grouped.has(p.id)) }
-    })
-    .filter((m) => filter !== 'Archived' || m.spaces.length)
+  return snap.machines.map((machine) => {
+    const f = typeof filter === 'function' ? filter(machine.machine) : filter
+    const all = snap.places.filter((p) => p.machine === machine.machine && !p.home)
+    const mine = all.filter((p) => f === 'All' || (f === 'Archived') === !!p.archived)
+    const groups = sections
+      .filter((s) => (s.machine ?? snap.host) === machine.machine)
+      .map((s) => ({ id: s.id, name: s.name, spaces: s.spaces.map((id) => mine.find((p) => p.id === id)).filter((p): p is Place => !!p) }))
+    const grouped = new Set(groups.flatMap((g) => g.spaces.map((p) => p.id)))
+    // the archived view lists spaces only
+    return { machine, warn: machineWarn(machine), filter: f, archived: all.filter((p) => p.archived).length, groups: f === 'Archived' ? [] : groups, spaces: mine.filter((p) => f === 'Archived' || !grouped.has(p.id)) }
+  })
 }
 
 /** the group a space is in */
