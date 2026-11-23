@@ -757,9 +757,9 @@ function open(snap: Snapshot, where: Where, what: string, id: string, view: stri
       return showing(`${c.name}'s ${name}`, { kind: "space", place: c.place!.id }, { kind: "panel", panel: desk ? "desktop" : "screen" });
     }
     case "terminal": {
-      // "Switch to terminal": a chat's agent's own terminal, in the chat's place
+      // "View as terminal": a chat's agent's own terminal, in the chat's place
       const t = id && !isHere(id) && !findSpace(snap, id, where) ? findTask(snap, id, where) : isHere(id) || !id ? (where.task ? snap.tasks.find((x) => x.id === where.task) ?? null : null) : null;
-      if (t) return fail(`A task's terminal opens from its menu: open the task ${titled(t)}, then with screen press its menu's "Switch to terminal".`);
+      if (t) return fail(`A task's terminal opens from its menu: open the task ${titled(t)}, then with screen press its menu's "View as terminal".`);
       return panel("terminal", "agent's terminal");
     }
     case "tasks": case "needs": {

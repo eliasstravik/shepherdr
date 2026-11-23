@@ -2,7 +2,7 @@
 // while its view is open, and the same row takes you back to the chat.
 import { beforeEach, expect, test } from 'bun:test'
 import { getState, setUI } from '@client/kernel.ts'
-import { spaceTermRow, taskTermRow } from './menu.ts'
+import { spaceTermRow, taskTermRow, viewRow } from './menu.ts'
 import { screenKey, screenRow } from '../screens/menu.ts'
 
 beforeEach(() => setUI({ phone: false, term: false, tterm: false, pane: null, termTask: false, scr: null, task: null }))
@@ -10,7 +10,7 @@ beforeEach(() => setUI({ phone: false, term: false, tterm: false, pane: null, te
 test("a space's Terminal row: unchecked, opens the drawer, checked, then closes it", () => {
   const row = spaceTermRow(getState().ui)
   expect(row.label).toBe('Terminal')
-  expect(row.icon).toBe('term')
+  expect(row.icon).toBe('prompt')
   expect(row.on).toBe(false)
   row.run!()
   expect(getState().ui.term).toBe(true)
@@ -64,4 +64,21 @@ test('the Screen row opens that screen, is checked only for it, and closes back 
   open('task:t1')
   screenRow(getState().ui, 'task:t1', open).run!()
   expect(getState().ui.pane).toBe('tasks')
+})
+
+test('View as terminal / View as chat: its own swap icon apart from Terminal, below a line, marked while on', () => {
+  setUI({ aterm: {} })
+  const row = viewRow(getState().ui, 'c1', true)
+  expect(row).toMatchObject({ label: 'View as terminal', icon: 'viewswap', line: true })
+  expect(row.icon).not.toBe(spaceTermRow(getState().ui).icon)
+  expect(row.value).toBeUndefined()
+  // not a check row: it changes this chat's view, it opens nothing beside it
+  expect(row.on).toBeUndefined()
+  row.run!()
+  expect(getState().ui.aterm.c1).toBe(true)
+  const back = viewRow(getState().ui, 'c1')
+  expect(back).toMatchObject({ label: 'View as chat', value: 'Terminal now', line: false })
+  back.run!()
+  expect(getState().ui.aterm.c1).toBe(false)
+  expect(viewRow(getState().ui, 'c1').label).toBe('View as terminal')
 })

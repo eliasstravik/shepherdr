@@ -1,7 +1,7 @@
 // Your own terminal: one per space, a real shell through herdr-core in the space's folder on the space's machine
 // (Everything: the home folder on the serving machine), and one per task in the task's folder (its worktree when it
 // works on its own branch). It keeps running when the drawer is closed or the page reloads; once its shell exits,
-// opening the drawer again starts a fresh one. It is never an agent's session: that stays behind Switch to terminal.
+// opening the drawer again starts a fresh one. It is never an agent's session: that stays behind View as terminal.
 import type { Hub } from "./hub.ts";
 import { hc } from "./actions.ts";
 

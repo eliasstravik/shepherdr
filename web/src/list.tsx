@@ -259,7 +259,7 @@ export function folderMenu(anchor: Element, placeId: string) {
 }
 
 /** A space's menu: from its name in the header and from its row's ⋯. From the header it starts with Terminal and Screen
- *  (the header has no buttons for them), then Switch to terminal; Everything's then has Settings. From the header
+ *  (the header has no buttons for them), then below a line View as terminal / View as chat; Everything's then has Settings. From the header
  *  beside a pane it also swaps the chat and the pane (SHEP-352). */
 export function spaceMenu(anchor: Element, placeId: string, head = false) {
   const snap = getState().snap

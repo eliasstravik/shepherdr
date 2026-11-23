@@ -254,10 +254,10 @@ test("open: what it shows, as the page's voiceNav takes it", async () => {
   expect(await nav({ what: "screen", id: "garden" })).toEqual([{ kind: "space", place: "mini/sp2" }, { kind: "panel", panel: "screen" }]);
   expect(await nav({ what: "screen" })).toEqual({ kind: "panel", panel: "screen" });
   expect(await nav({ what: "screen", view: "desktop" }, top)).toEqual({ kind: "panel", panel: "desktop" });
-  // Switch to terminal: a chat's agent's; a task's is in its menu
+  // View as terminal: a chat's agent's; a task's is in its menu
   expect(await nav({ what: "terminal" }, top)).toEqual({ kind: "panel", panel: "terminal" });
   expect(await nav({ what: "terminal", id: "garden" })).toEqual([{ kind: "space", place: "mini/sp2" }, { kind: "panel", panel: "terminal" }]);
-  expect((await voiceTool("open", { what: "terminal" }, web, io())).result).toContain('press its menu\'s "Switch to terminal"');
+  expect((await voiceTool("open", { what: "terminal" }, web, io())).result).toContain('press its menu\'s "View as terminal"');
   // Tasks (Now), Needs you, Artifacts; a space's: there first
   expect(await nav({ what: "tasks" })).toEqual({ kind: "tasks" });
   expect(await nav({ what: "needs" })).toEqual({ kind: "needs" });
