@@ -16,7 +16,7 @@ const { CHOICE_KEY, choiceOf, withChoice, speedOf } = AGa as any;
 import * as SP from "../core/spaces.js";
 const { READ, assistantOf, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, withOrder, withMachineOrder, DELETED, deletedSection, withRestoredSection } = SP as any;
 import type { Compat } from "./compat.ts";
-import { noteFailed, once } from "./send-once.ts";
+import { noteFailed, once, wentIn } from "./send-once.ts";
 import { execTemplate, ownId, withoutSpace } from "./spaces.ts";
 import * as MA from "../core/machine-add.js";
 import { exec } from "./model.ts";
@@ -73,6 +73,24 @@ async function sendNow(hub: Hub, b: any, compat: Compat, again = false) {
   if (r.code !== 0) throw Object.assign(new Error(refusal(r).message), { stuck: !!r.stuck });
   return { ok: true, at };
 }
+
+/** Retry on one that went in but didn't show up in the chat (b.was: its first id; SHEP-312): when the agent's log has
+ *  it after all (it came back late, or without its id), it is not sent twice: its answer is the first's, and the chat
+ *  gives the log's message the new id. -> that answer, or null: send it. */
+export function arrived(b: any, compat: Compat): { ok: true; at: number; already: true } | null {
+  const at = wentIn(String(b.was).slice(0, 80));
+  if (at === null) return null;
+  const a = addr(b.addr), text = said(str(b.text ?? ""));
+  const items: any[] = compat.reader?.(a)?.conv?.items ?? [];
+  const sent: string[] = Array.isArray(b.attachments) ? b.attachments : [];
+  const x = items.find((x) => x.kind === "user" && !x.from && (x.at ?? 0) >= at - 60_000 && said(String(x.text ?? "").split("\n").filter((l) => !(/^[/~]\S+$/.test(l.trim()) && sent.some((p) => p.split("/").pop() === l.trim().split("/").pop()))).join("\n")) === text);
+  if (!x) return null;
+  // the first's id never takes it again: the new one does
+  compat.sends?.set(a, (compat.sends.get(a) ?? []).filter((s: any) => s.cid !== b.was));
+  compat.noteSend?.(a, { cid: String(b.cid).slice(0, 80), text: str(b.text ?? "").trim(), files: sent, at: x.at ?? at });
+  return { ok: true, at: x.at ?? at, already: true };
+}
+const said = (v: string) => v.replace(/\s+/g, " ").trim();
 
 // Messages held until their agent is free, sent in order, each once.
 const held: { addr: string; kind: string; body: string; hub: Hub; cid?: string; now?: boolean; note?: () => void }[] = [];
@@ -633,7 +651,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       // one page's send asked again (its answer lost on the way, a reload, Retry): the same one, never twice
       const cid = typeof b.cid === "string" && b.cid ? b.cid.slice(0, 80) : null;
       if (!cid) return sendNow(hub, b, compat);
-      return once(cid, (again) => sendNow(hub, b, compat, again));
+      return once(cid, async (again) => (typeof b.was === "string" && arrived(b, compat)) || sendNow(hub, b, compat, again));
     }
     case "steer": {
       // Send now on a message in Claude Code's own queue (#662): its Ctrl+Enter, only while its screen offers it

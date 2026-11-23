@@ -22,5 +22,19 @@ test("files alone", () => {
 
 test("other words, or before it went in, are not it", () => {
   expect(sentAs([send()], { text: "something else", at: 10_400 }, new Set())).toBeUndefined();
-  expect(sentAs([send()], { text: "thumbnails broken", at: 1_000 }, new Set())).toBeUndefined();
+  // (well before: another machine's clock may be up to a minute behind)
+  expect(sentAs([send()], { text: "thumbnails broken", at: 10_000 - 61_000 }, new Set())).toBeUndefined();
+});
+
+// SHEP-312: a pending copy never outlives its message
+test("the tag lines a send puts before the words, and another machine's clock half a minute behind", () => {
+  const x = { text: '<hc reply-to="Done: the seven"/>\nthumbnails   broken', at: 10_000 - 30_000 };
+  expect(sentAs([send()], x, new Set())).toBe("c1");
+});
+
+test("two identical messages sent in a row: each its own id, in order", () => {
+  const sends = [send({ cid: "A", at: 10_000 }), send({ cid: "B", at: 600_000 })];
+  const taken = new Set<string>();
+  expect(sentAs(sends, { text: "thumbnails broken", at: 10_300 }, taken)).toBe("A");
+  expect(sentAs(sends, { text: "thumbnails broken", at: 600_300 }, taken)).toBe("B");
 });

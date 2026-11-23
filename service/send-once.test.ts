@@ -46,3 +46,25 @@ test("a held one that couldn't go is told to its page, and its Retry goes again"
   await once("c-3", hold);
   expect(went).toBe(3);
 });
+
+// SHEP-312: Retry on one that went in but didn't show up in the chat never sends it twice when the log has it
+test("Retry of one that came back late: not sent again, the log's message takes the new id", async () => {
+  const { arrived } = await import("./actions.ts");
+  await once("w-1", async () => ({ ok: true, at: 50_000 }));
+  const sends = new Map<string, any[]>([["t1", [{ cid: "w-1", text: "hello", files: [], at: 50_000 }]]]);
+  const noted: any[] = [];
+  const compat: any = {
+    sends,
+    noteSend: (a: string, s: any) => { noted.push([a, s]); sends.set(a, [...(sends.get(a) ?? []), s]); },
+    reader: () => ({ conv: { items: [{ kind: "user", id: "u1", text: "hello", at: 52_000 }] } }),
+  };
+  const r = arrived({ was: "w-1", cid: "n-1", addr: "t1", text: "hello" }, compat);
+  expect(r).toEqual({ ok: true, at: 52_000, already: true });
+  expect(noted).toEqual([["t1", { cid: "n-1", text: "hello", files: [], at: 52_000 }]]);
+  expect(sends.get("t1")!.map((s) => s.cid)).toEqual(["n-1"]);
+  // not in the log: it goes again
+  compat.reader = () => ({ conv: { items: [{ kind: "user", id: "u1", text: "other words", at: 52_000 }] } });
+  expect(arrived({ was: "w-1", cid: "n-2", addr: "t1", text: "hello" }, compat)).toBeNull();
+  // the first never went in: it goes
+  expect(arrived({ was: "never", cid: "n-3", addr: "t1", text: "hello" }, compat)).toBeNull();
+});
