@@ -16,10 +16,10 @@ import { cx, Empty, I, IB, useScrolled } from './ui.tsx'
 import { SpaceIcon } from './space-icon.tsx'
 
 /** the thread the middle column shows: the open task when it has the middle, else the space's chat */
-export function middleThread(snap: Snapshot, ui: { at: string; task: string | null; wide: boolean }): Thread | null {
+export function middleThread(snap: Snapshot, ui: { at: string; max: string | null }): Thread | null {
   const p = placeOf(snap, ui.at)
   if (!p) return null
-  const t = ui.wide ? taskOf(snap, ui.task) : undefined
+  const t = ui.max ? taskOf(snap, ui.max) : undefined
   return t ? { chat: t.agent?.chat ?? `${t.id}/worker`, place: t.place, task: t, where: 'chat' } : { chat: p.chat, place: p.id, where: 'chat' }
 }
 
@@ -53,9 +53,9 @@ function ChatHeader({ snap, thread, place, scrolled }: { snap: Snapshot; thread:
 
 /** The header's "Show the list" button: on a narrow window with a pane open it brings the list back and closes the
  *  pane; else it shows the list hidden by its own button. */
-function showList() {
+export function showList() {
   const { ui } = getState()
-  if (ui.narrow && ui.pane && !ui.sideOff) setUI({ pane: null, task: null, art: null, wide: false, artWide: false })
+  if (ui.narrow && ui.pane && !ui.sideOff) setUI({ pane: null, task: null, art: null, artWide: false })
   else setUI({ sideOff: false })
 }
 
@@ -150,7 +150,7 @@ function Bar({ snap }: { snap: Snapshot }) {
           {registry.bar.map((b) => {
             const n = b.count?.(snap, at) ?? 0
             return (
-              <button type="button" key={b.pane} className="pt" aria-pressed={on === b.pane} onClick={() => setUI({ pane: b.pane, task: null, art: null, wide: false, artWide: false })}>
+              <button type="button" key={b.pane} className="pt" aria-pressed={on === b.pane} onClick={() => setUI({ pane: b.pane, task: null, art: null, artWide: false })}>
                 <span className="w">
                   <I n={b.icon} c="s22" />
                   {n > 0 && <span className="cnt">{n}</span>}

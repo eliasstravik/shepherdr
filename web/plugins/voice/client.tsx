@@ -45,7 +45,7 @@ function closeTop(): string | null {
   if (ui.settings) return setUI({ settings: null }), 'Closed Settings'
   if (ui.drawer) return setUI({ drawer: false }), 'Closed the list'
   if (ui.art) return setUI({ art: null, artWide: false }), 'Closed the artifact'
-  if (ui.task) return setUI({ task: null, wide: false }), 'Closed the task'
+  if (ui.task) return setUI({ task: null }), 'Closed the task'
   if (ui.pane) return setUI({ pane: null }), 'Closed the pane'
   return null
 }
@@ -93,7 +93,7 @@ export async function voiceNav(nav: Nav): Promise<NavAck> {
     return check(!!getState().ui.settings, "Settings didn't open")
   }
   if (nav.kind === 'tasks' || nav.kind === 'needs') {
-    setUI({ ...OFF, pane: 'tasks', task: null, art: null, wide: false, tab: 'Now' })
+    setUI({ ...OFF, pane: 'tasks', task: null, art: null, tab: 'Now' })
     return check(getState().ui.pane === 'tasks', "Tasks didn't open")
   }
   if (nav.kind === 'panel') {

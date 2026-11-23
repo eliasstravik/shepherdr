@@ -19,7 +19,7 @@ const task = { id: 'vm:SHOP-2', name: 'Fix login', place: 'garden', on: 'vm', st
 Object.assign(getState(), { snap: { name: '', host: 'mini', user: '', everything: 'home', places: [place('home', 'mini'), place('shop', 'mini'), place('garden', 'vm')], machines: [], tasks: [task], settings: {} } })
 
 afterEach(() => {
-  setUI({ reply: {}, pane: null, task: null, wide: false, phone: false })
+  setUI({ reply: {}, pane: null, task: null, max: null, phone: false })
   closeAll()
 })
 
@@ -42,9 +42,9 @@ test("on a phone the Tasks panel steps aside so the chat's box shows; a task ope
   setUI({ at: 'shop', phone: true, pane: 'tasks', task: 'vm:SHOP-2' })
   replyToTask(task)
   expect(getState().ui).toMatchObject({ pane: null, task: null, reply: { 'p:shop': { task: 'vm:SHOP-2' } } })
-  setUI({ phone: false, pane: 'tasks', task: 'vm:SHOP-2', wide: true })
+  setUI({ phone: false, pane: 'tasks', task: null, max: 'vm:SHOP-2' })
   replyToTask(task)
-  expect(getState().ui).toMatchObject({ wide: false, pane: 'tasks' })
+  expect(getState().ui).toMatchObject({ max: null, pane: 'tasks' })
   // let the box's late focus run here, not in another test file that has a document but no CSS (voice/call.test.ts)
   await new Promise((r) => setTimeout(r, 100))
 })

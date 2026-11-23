@@ -3,9 +3,9 @@
 // Start task dialog for one not started yet, and a task's menu. Now lists every task everywhere unless its filter says
 // otherwise (SHEP-331): a filter button in the header, the choices that are on as chips under it.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { PaneFrame, placeholderOf } from '@client/App.tsx'
+import { PaneFrame, placeholderOf, showList } from '@client/App.tsx'
 import { newSpaceDialog, renameDialog } from '@client/list.tsx'
-import { definePlugin, getState, go, has, notice, openTask, registry, setUI, togglePane, tryAct, act, useSnap, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
+import { definePlugin, getState, go, has, maximize, sideHidden, minimize, notice, openTask, registry, setUI, togglePane, tryAct, act, useSnap, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
 import { confirm, openDialog, openForm, openMenu } from '@client/overlay.tsx'
 import { AgentField, pickFor, type Pick } from '@client/picker.tsx'
 import { edge } from '@client/resize.ts'
@@ -25,7 +25,7 @@ export { StatusIcon }
 /** a repo's or folder's tasks: the Tasks panel with its filter on that repo (SHEP-331: one filter; its other picks
  *  stay, but not a space, which would hide the rest of the repo) */
 export function showRepo(key: string) {
-  setUI((ui) => ({ pane: 'tasks', task: null, wide: false, tab: 'Now', tf: { ...clean(ui.tf), repo: [key], space: [], here: false }, drawer: false, search: false, settings: null }))
+  setUI((ui) => ({ pane: 'tasks', task: null, tab: 'Now', tf: { ...clean(ui.tf), repo: [key], space: [], here: false }, drawer: false, search: false, settings: null }))
 }
 
 /** a task's tag: where it works ("shepherdr", "shepherdr · mac-mini"); a tap shows that repo's tasks. A row has its
@@ -144,7 +144,7 @@ function del(t: Task) {
     ok: 'Delete',
     danger: true,
     run: async () => {
-      if (await tryAct({ type: 'delete', chat: taskChat(t), force: true }) && getState().ui.task === t.id) setUI({ task: null, wide: false })
+      if (await tryAct({ type: 'delete', chat: taskChat(t), force: true })) setUI((ui) => ({ ...(ui.task === t.id ? { task: null } : {}), ...(ui.max === t.id ? { max: null } : {}) }))
     },
   })
 }
@@ -182,7 +182,7 @@ export function taskMenu(anchor: Element, t: Task, where: 'row' | 'thread') {
     // Stop pauses the agent, like pressing Esc: it drops what it was doing and waits
     ...(s === 'working' ? [{ icon: 'stop' as const, label: 'Stop', run: () => void tryAct({ type: 'stop', chat }) }] : []),
     ...extra.filter((r) => r.label !== 'Show screen' && r.on === undefined && r.icon !== 'viewswap'),
-    { icon: 'archive', label: t.archived ? 'Unarchive' : 'Archive', line: true, run: () => { void tryAct({ type: 'archive', chat, on: !t.archived }); if (!t.archived && getState().ui.task === t.id) setUI({ task: null, wide: false }) } },
+    { icon: 'archive', label: t.archived ? 'Unarchive' : 'Archive', line: true, run: () => { void tryAct({ type: 'archive', chat, on: !t.archived }); if (!t.archived) setUI((ui) => ({ ...(ui.task === t.id ? { task: null } : {}), ...(ui.max === t.id ? { max: null } : {}) })) } },
     { icon: 'bin', label: 'Delete', danger: true, run: () => del(t) },
   ]
   openMenu(anchor, rows, { label: t.name })
@@ -361,14 +361,28 @@ function taskCards(snap: Snapshot, thread: Thread): { key: string; at?: number; 
 
 /* ---------- an open task ---------- */
 
+/** An open task's header. In the pane: Back to tasks, and Maximize, which gives it the middle. Maximized (SHEP-435,
+ *  as Linear's and Notion's peek opened as a full page): Minimize in Back's place puts it back in the pane, and its
+ *  space shows under its title, so where it sits and the way back are in sight. */
 function TaskHead({ task: t, where, scrolled }: { task: Task; where: 'chat' | 'pane'; scrolled?: boolean }) {
   const ph = useUI((u) => u.phone)
+  const hidden = useUI(sideHidden)
+  const snap = useSnap()
   const thread: Thread = { chat: taskChat(t), place: t.place, task: t, where }
+  const big = where === 'chat'
   return (
-    <Hd back={where === 'chat' ? { label: 'Back', run: () => setUI({ wide: false, task: null }) } : { label: 'Back to tasks', run: () => setUI({ task: null }) }} title={t.name} scrolled={scrolled}>
+    <Hd
+      back={big ? undefined : { label: 'Back to tasks', run: () => setUI({ task: null }) }}
+      lead={big ? <>{hidden && !ph && <IB icon="panel" label="Show the list" onClick={showList} />}<IB icon="shrink" label="Minimize" onClick={minimize} /></> : undefined}
+      title={t.name}
+      sub={big && snap ? `Task in ${spaceLabel(snap, t.place)}` : undefined}
+      scrolled={scrolled}
+    >
       {registry.taskHeader.map((h, i) => <h.View key={i} thread={thread} />)}
       <IB icon="dots" label="More" aria-haspopup="menu" onClick={(e) => taskMenu(e.currentTarget, t, 'thread')} />
-      {where === 'pane' && !ph && <IB icon="expand" label="Expand" onClick={() => setUI({ wide: true })} />}
+      {/* maximized, the space header's own buttons (Tasks, Artifacts) open the pane beside it */}
+      {big && !ph && registry.header.map((h, i) => <h.View key={`h${i}`} thread={thread} />)}
+      {where === 'pane' && !ph && <IB icon="expand" label="Maximize" onClick={() => maximize(t.id)} />}
       {where === 'pane' && !ph && <IB icon="x" label="Close" onClick={() => togglePane(null)} />}
     </Hd>
   )
@@ -644,7 +658,7 @@ function TasksPane() {
   const snap = useSnap()
   const ui = useUI()
   if (!snap) return null
-  const t = ui.task && !ui.wide ? snap.tasks.find((x) => x.id === ui.task) : undefined
+  const t = ui.task ? snap.tasks.find((x) => x.id === ui.task) : undefined
   if (t) return <TaskPane t={t} />
   const Scheduled = has('schedules') ? registry.views.scheduled : undefined
   const tab = Scheduled ? ui.tab : 'Now'
