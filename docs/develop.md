@@ -44,7 +44,9 @@ copies.
 
 ## Checks
 
-Quick, fine on any machine:
+A task runs only the ones for what it touched (the test files for its area, plus a type check or build if its change
+could break one). The whole list below is the full suite: GitHub's run on main, and a release, which starts only from
+a green main and runs all of it before it ships.
 
 ```bash
 python3 bin/sync-shared --check

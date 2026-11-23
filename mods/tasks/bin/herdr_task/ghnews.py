@@ -299,7 +299,7 @@ def main_check(s, base, w, report):
         if tail:
             lines.append(f"The end of {failed[0].get('workflowName') or 'its'} log:\n{tail}")
         lines.append("These are GitHub's results, not the person's words. Tell the person in a line or two (nothing else shows it). "
-                     "Add one small fix-forward task only if they asked you to handle such things and none is at work already: "
+                     "Unless one is at work already, add one small fix-forward task at once and say so in that line: "
                      "its brief says what broke and where, to stay inside it, and never to force-push.")
         w["notice"] = {"text": f'<herdr-news event="main-red" branch="{attr(base)}">' + esc("\n".join(lines)) + "</herdr-news>",
                        "at": now(), "space": w.get("space")}
