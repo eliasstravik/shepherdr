@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.2.8
+
+A machine's home space is now a space like any other.
+
+### The web app
+
+- A machine's home space (~) has the full space menu: rename, group, archive and remove, from its row, a long press or
+  the chat header. Once renamed it shows its new name; clear the name and it reads ~ again.
+- Removing a home space asks first, like any space, and New space at ~ brings it back. Everything still can't be
+  removed.
+- The home space shows the same # icon as other spaces in the sidebar, chat header, space pickers, Send to and search.
+
 ## 3.2.7
 
 The step line shows what an agent is doing now, every machine shows its home space, reply bubbles that are easier to
