@@ -1,5 +1,46 @@
 # Changelog
 
+## 3.2.6
+
+Replies you tap to send, replying to a task from the chat, question cards where they were asked, and fewer hangs and
+stuck tasks.
+
+### Once, after updating
+
+- On Android, reinstall the app once to get the dark bottom bar: remove the installed app and add it to the home
+  screen again.
+
+### The web app
+
+- Up to three suggested replies show as bubbles above the message box: a tap sends one, a long press puts it in the box
+  to edit. The setting is now called "Suggested replies".
+- Reply to a task in the space's chat: Reply in chat in a task's menu, or slide the task's row to the right. The sent
+  message shows the task you replied to; tap it to open it.
+- Question cards, secret asks and review cards sit in the chat where they were asked, not stuck at the end. While one
+  waits out of view, a line above the message box takes you to it.
+- The app opens even when its address has no slash at the end (…/shepherdr), instead of a blank page.
+- While an agent works, its step line wraps up to three lines instead of being cut, and Stop stays put.
+- Reactions sit on the bubble's top corner, facing the middle of the chat.
+- Chat rows: a task's time no longer runs into its title, a closed question says what closed it and shows once, and
+  there's no empty logo spot after +.
+
+### Tasks
+
+- A merge conflict goes straight back to the task's agent; the card says "rebasing" only once it was asked to.
+- A pull request GitHub gives no clear can-merge answer for waits a few minutes at most, never Working for good.
+- A task waiting on checks stays Working whatever language its status line is in.
+- Ready no longer waits on a Monitor that has already run out.
+- Reviews: a later round looks only at what changed since the last one, and only must-fix findings use up a round.
+  The reviewer starts without your MCP servers, so it doesn't run out of room before reading the change.
+- herdr-task never hangs on a git password prompt: it says git can't sign in to the remote instead.
+
+### Machines
+
+- Other machines' task lists, artifacts and health are read only while a page is open (task lists every 2 minutes
+  otherwise, for alerts), so idle machines aren't kept busy.
+- Your sidebar sections, icons, pins and order stay put when the host can't name the machine that saved them.
+- The task browser works on Linux arm64: it uses the machine's Chromium, or says the one command to install one.
+
 ## 3.2.5
 
 Full screen Browser and Desktop on a phone, a sidebar that's easier to use, and no more macOS keychain prompts.
