@@ -437,10 +437,29 @@ textarea.cin{overflow-y:auto}
 .wtag{position:relative;display:inline-flex;align-items:center;gap:4px;max-width:100%;color:var(--muted);font-size:inherit;line-height:inherit;cursor:pointer;vertical-align:top}
 .wtag .i{flex:none;width:14px;height:14px}
 .wtag:hover{color:var(--fg)}
-.l2>.wtag{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-flex}
 @media (pointer:coarse){.wtag::after{content:"";position:absolute;inset:-8px -4px}}
 .status .wtag{color:var(--muted)}
 .card .s .wtag{color:inherit}
+/* SHEP-348: a row's repo line (a branch icon for its own branch, its pull request and one mark for its checks; a tap
+   opens the task at its strip), and the strip under a task's title */
+.rline{position:relative;display:flex;align-items:center;gap:4px;min-width:0;cursor:pointer}
+.rline .i{flex:none;width:calc(var(--secl) - 4px);height:calc(var(--secl) - 4px)}
+.rline .rn{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.rline .pn{flex:none;font-variant-numeric:tabular-nums}
+.rline:hover{color:var(--fg)}
+@media (pointer:coarse){.rline::after{content:"";position:absolute;inset:-4px -4px -8px}}
+.gstrip{justify-self:stretch;display:grid;gap:6px;margin:0 0 8px;padding:10px 12px;border-radius:12px;background:var(--raised);color:var(--sub);font-size:var(--sec);line-height:var(--secl)}
+.gstrip.jump{box-shadow:0 0 0 2px var(--fg)}
+.gstrip .gl{display:flex;align-items:center;gap:6px;min-width:0}
+.gstrip .i{flex:none;width:16px;height:16px}
+.gstrip .gl>.i:first-child{color:var(--muted)}
+.gstrip .tr{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gstrip .gb{user-select:text}
+.gstrip .mu{flex:none;color:var(--muted)}.gstrip .tr.mu{flex:initial}
+.gstrip .pn{flex:none;font-variant-numeric:tabular-nums}
+.gstrip .gh{position:relative;display:inline-flex;text-decoration:none;align-items:center;gap:4px;flex:none;margin-left:auto;color:var(--muted)}
+.gstrip .gh:hover{color:var(--fg)}
+@media (pointer:coarse){.gstrip .gh::after{content:"";position:absolute;inset:-12px -8px}}
 .rhead{display:flex;align-items:center;gap:8px;padding:0 0 8px 8px}
 .rhead>.i{flex:none;color:var(--muted)}
 .rhead .n{flex:1;min-width:0}.rhead .l1{font-weight:600}

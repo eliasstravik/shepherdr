@@ -61,6 +61,10 @@ export const IC = {
   "gauge": "<path d=\"M4 14a7 7 0 1 1 12 0M10 11l3-4\"/>",
   "plug": "<path d=\"M7 3v4M13 3v4M5 7h10v2a5 5 0 0 1-10 0V7ZM10 14v3\"/>",
   "bell": "<path d=\"M5 14V9a5 5 0 0 1 10 0v5l1.5 1.5h-13L5 14ZM8.5 17h3\"/>",
+  "branch": "<circle cx=\"6\" cy=\"5\" r=\"1.75\"/><circle cx=\"6\" cy=\"15\" r=\"1.75\"/><circle cx=\"14\" cy=\"6.5\" r=\"1.75\"/><path d=\"M6 6.75v6.5M14 8.25c0 3.25-3.5 3.75-7 5.25\"/>",
+  "pr": "<circle cx=\"6\" cy=\"5\" r=\"1.75\"/><circle cx=\"6\" cy=\"15\" r=\"1.75\"/><circle cx=\"14\" cy=\"15\" r=\"1.75\"/><path d=\"M6 6.75v6.5M14 13.25V8.5a2 2 0 0 0-2-2H9.5M11 5 9.5 6.5 11 8\"/>",
+  "merged": "<circle cx=\"6\" cy=\"5\" r=\"1.75\"/><circle cx=\"6\" cy=\"15\" r=\"1.75\"/><circle cx=\"14\" cy=\"11\" r=\"1.75\"/><path d=\"M6 6.75v6.5M6.4 6.9c1.1 2.4 3.6 4.1 5.85 4.1\"/>",
+  "checking": "<circle cx=\"10\" cy=\"10\" r=\"3.25\"/>",
   "agent": "<rect x=\"4\" y=\"6\" width=\"12\" height=\"9\" rx=\"2\"/><path d=\"M10 3.5V6M7.5 10v.2M12.5 10v.2\"/>",
 } as const
 

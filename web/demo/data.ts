@@ -21,24 +21,26 @@ const work = (folder: string, name: string): Task['work'] => ({ name, folder, sh
 const task = (id: string, name: string, pl: string, status: Task['status'], x: Partial<Task> = {}): Task => ({ id, name, place: pl, asked: pl, status, state: status, on: pl === P.garden || pl === P.vmShop || pl === P.vmRoot ? 'vm' : 'mac-mini', created: '', age: '', work: FOLDER[pl] && work(...FOLDER[pl]), ...(FOLDER[pl] ? { taskFolder: FOLDER[pl][0] } : {}), agent: { chat: `${id}/worker`, role: 'worker', cli: pl === P.garden ? 'codex' : 'claude', status: status === 'need' ? 'need' : 'work', running: true, age: '', note: '' }, ...x })
 
 export const tasks: Task[] = [
-  task('SHOP-12', 'Faster product search', P.shop, 'ready', { needsAt: NOW - 8 * hour, repo: 'branch', branch: 'task/faster-product-search', pr: { number: 212, url: 'https://github.com/example/shop/pull/212' }, summary: 'Results show in about 80 ms, down from 400.', proof: 'a-shop12' }),
+  // SHEP-348's six states on the repo line: own branch, no PR (SHOP-19); PR checks passed (SHOP-12), failed (SHOP-15),
+  // running (GARDEN-3); merged (SHOP-11); in the folder itself (BLOG-10); research, no repo (NOTES-4)
+  task('SHOP-12', 'Faster product search', P.shop, 'ready', { needsAt: NOW - 8 * hour, repo: 'branch', worktree: true, branch: 'task/faster-product-search', base: 'main', pr: { number: 212, url: 'https://github.com/example/shop/pull/212', checks: 'passed' }, summary: 'Results show in about 80 ms, down from 400.', proof: 'a-shop12' }),
   task('BLOG-10', 'Fix typo on the About page', P.blog, 'ready', { needsAt: NOW - hour, repo: 'folder', summary: 'Fixed the typo and two more I found on the same page.' }),
   task('NOTES-4', 'Compare supplier quotes', P.notes, 'ready', { needsAt: NOW - 3 * hour, summary: 'Brightpack is cheapest at your volume. Norbox ships fastest.', proof: 'a-quotes' }),
   task('SHOP-14', 'Switch payment provider', P.shop, 'need', { needsAt: NOW - 2 * hour, blocked: 'question', repo: 'branch', report: { msg: 'Which provider, Stripe or Adyen?', progress: 35, paused: true } }),
   task('vm:GARDEN-4', 'Photo upload', P.garden, 'need', { agent: { chat: 'vm:GARDEN-4/worker', role: 'worker', cli: 'claude', status: 'need', running: true, age: '', note: '' }, needsAt: NOW - 5 * min, blocked: 'permission', repo: 'branch', report: { msg: 'Wants to run a command', progress: 80, paused: true } }),
   task('SHOP-17', "Download last month's invoices", P.shop, 'need', { needsAt: NOW - 4 * min, blocked: 'auth', report: { msg: 'Needs your hands: enter the sign-in code', progress: 20, paused: true } }),
-  task('SHOP-15', 'Bigger checkout button on phones', P.shop, 'work', { started: NOW - 10 * min, repo: 'branch', pr: { number: 214, url: 'https://github.com/example/shop/pull/214' }, report: { msg: 'Changing the button', progress: 50, eta: 13 }, blocked: 'prompt' }),
+  task('SHOP-15', 'Bigger checkout button on phones', P.shop, 'work', { started: NOW - 10 * min, repo: 'branch', worktree: true, branch: 'task/bigger-checkout-button', base: 'main', pr: { number: 214, url: 'https://github.com/example/shop/pull/214', checks: 'failed' }, report: { msg: 'Changing the button', progress: 50, eta: 13 }, blocked: 'prompt' }),
   // asked in Everything, works in shop: #shop's Tasks holds it too (SHEP-325)
   task('EV-14', 'Fix the cart badge count', EV, 'work', { started: NOW - 6 * min, repo: 'branch', work: work(...FOLDER[P.shop]), also: [P.shop], report: { msg: 'Reading the cart code', progress: 20 } }),
   // a repo no space works in: its tag still shows its tasks (SHEP-325)
   task('EV-13', 'New level select', EV, 'need', { needsAt: NOW - 20 * min, repo: 'branch', work: work('/Users/sam/dev/tor-gameboy', 'tor-gameboy'), report: { msg: 'Should locked levels show?' } }),
   task('SHOP-16', 'Dependency check', P.shop, 'work', { started: NOW - 10 * min, schedule: 'Dependency check', report: { msg: 'Updating 3 packages', progress: 85, eta: 2 } }),
   task('vm:ACME-7', 'Shipping rates by region', P.vmRoot, 'todo', { agent: undefined }),
-  task('vm:GARDEN-3', 'Watering reminders', P.garden, 'work', { started: NOW - 30 * min, repo: 'branch', report: { msg: 'Writing tests', progress: 25, eta: 110 } }),
+  task('vm:GARDEN-3', 'Watering reminders', P.garden, 'work', { started: NOW - 30 * min, repo: 'branch', worktree: true, branch: 'task/watering-reminders', base: 'main', pr: { number: 31, url: 'https://github.com/example/garden-app/pull/31', checks: 'running' }, report: { msg: 'Writing tests', progress: 25, eta: 110 } }),
   // SHEP-321: a task just started (no % yet: the turning ring) and one stopped by an error part way
   task('SHOP-18', 'Product page copy', P.shop, 'work', { started: NOW - 2 * min, report: { msg: 'Reading the product pages' } }),
   task('BLOG-11', 'Newsletter signup form', P.blog, 'need', { needsAt: NOW - 12 * min, stopped: { by: 'error', why: 'its session ended' }, report: { msg: 'Adding the form', progress: 45, paused: true } }),
-  task('SHOP-19', 'Product page reviews', P.shop, 'work', { started: NOW - min, repo: 'branch' }),
+  task('SHOP-19', 'Product page reviews', P.shop, 'work', { started: NOW - min, repo: 'branch', worktree: true, branch: 'task/product-page-reviews', base: 'main' }),
   task('BLOG-9', 'Dark mode for code blocks', P.blog, 'queued', { afterTitle: 'Fix typo on the About page', desc: 'Adds a dark theme to the code blocks on the blog', agent: undefined }),
   task('SHOP-13', 'Gift cards at checkout', P.shop, 'todo', { desc: 'Lets shoppers pay with a gift card at checkout', agent: undefined }),
   task('NOTES-5', "Sort last year's notes", P.notes, 'todo', { desc: "Sorts last year's notes into folders by topic", agent: undefined }),
@@ -46,7 +48,7 @@ export const tasks: Task[] = [
   task('SHOP-9', 'Look for stuck work', P.shop, 'done', { doneAt: NOW - 48 * min, quiet: 'nothing', schedule: 'Look for stuck work' }),
   task('EV-12', 'Morning brief', EV, 'done', { doneAt: NOW - 4 * hour, quiet: 'told', doneNote: 'told you in Everything', schedule: 'Morning brief' }),
   task('BLOG-6', 'Broken link check', P.blog, 'done', { doneAt: NOW - 9 * hour, merged: true, doneNote: '1 link fixed', schedule: 'Broken link check' }),
-  task('SHOP-11', 'Fix cart rounding', P.shop, 'done', { doneAt: NOW - 7 * day, merged: true }),
+  task('SHOP-11', 'Fix cart rounding', P.shop, 'done', { doneAt: NOW - 7 * day, merged: true, repo: 'branch', worktree: true, branch: 'task/fix-cart-rounding', base: 'main', pr: { number: 205, url: 'https://github.com/example/shop/pull/205' } }),
   task('BLOG-8', 'New post template', P.blog, 'done', { doneAt: NOW - 7 * day, merged: true }),
   task('BLOG-7', 'Faster image loading', P.blog, 'done', { doneAt: NOW - 7 * day, merged: true }),
   // SHEP-331: more machines, spaces and states for the Tasks filter: a stopped one, a scheduled one, two on vm's shop and root

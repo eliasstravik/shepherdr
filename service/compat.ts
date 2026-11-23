@@ -407,7 +407,8 @@ export class Compat {
         ...(r.done_at ? { doneAt: r.done_at } : {}),
         // it ran (an agent once started): never "hasn't started", its summary when its chat is gone (SHEP-26)
         ...(r.started ? { started: r.started } : {}), ...(r.summary ? { summary: r.summary } : {}), ...(r.details ? { details: r.details } : {}),
-        ...(r.pr ? { pr: { number: r.pr.number, url: r.pr.url } } : {}),
+        ...(r.pr ? { pr: { number: r.pr.number, url: r.pr.url, ...(["running", "failed", "passed"].includes(r.pr.checks) ? { checks: r.pr.checks } : {}), ...(r.pr.closed ? { closed: true } : {}) } } : {}),
+        ...(r.worktree && r.folder && r.worktree !== r.folder ? { worktree: true } : {}),
         ...(r.branch ? { branch: r.branch } : {}), ...(r.base ? { base: r.base } : {}),
         // its Artifacts tab (SHEP-60): its proof first, then newest first; its chat logs as the fallback (this machine's)
         ...((arts) => (arts.length ? { artifacts: arts } : {}))(taskArtifacts(this.rawArts, { ref: r.ref, folder: r.folder, machine: r.machine ?? null, agents: r.agents, proof: r.proof },

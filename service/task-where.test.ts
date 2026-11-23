@@ -51,3 +51,15 @@ test("another machine's task: its folder with that machine's home as ~, held by 
   expect(t.also).toBeUndefined();
   expect(t.work.folder).toBe(SHOP);
 });
+
+test("SHEP-348: its pull request's checks word and closed, and whether it has its own worktree", () => {
+  const pr = { number: 12, url: "https://github.com/example/shop/pull/12", repo: "example/shop", watch: { seen: [] } };
+  const [a, b, c] = tasksOf(spaces, [
+    row({ ref: "SHOP-3", folder: SHOP, list: "shop", kind: "repo", worktree: `${HOME}/wt/shop/task-3`, branch: "task/3", pr: { ...pr, checks: "failed" } }),
+    row({ ref: "SHOP-4", folder: SHOP, list: "shop", kind: "repo", worktree: SHOP, pr: { ...pr, checks: "nonsense", closed: true } }),
+    row({ ref: "SHOP-5", folder: SHOP, list: "shop", kind: "repo" }),
+  ]);
+  expect([a.pr, a.worktree, a.branch]).toEqual([{ number: 12, url: pr.url, checks: "failed" }, true, "task/3"]);
+  expect([b.pr, b.worktree]).toEqual([{ number: 12, url: pr.url, closed: true }, undefined]);
+  expect([c.pr, c.worktree]).toEqual([undefined, undefined]);
+});

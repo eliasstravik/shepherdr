@@ -357,8 +357,11 @@ export interface Task {
   created: string
   /** its agent's job, while it works or pauses; none once it is done */
   report?: Report
-  /** its pull request on GitHub, once one is open */
-  pr?: { number: number; url: string }
+  /** its pull request on GitHub, once one is open; its checks in one word (SHEP-348: the mark on its row), closed on
+   *  GitHub without merging */
+  pr?: { number: number; url: string; checks?: 'running' | 'failed' | 'passed'; closed?: boolean }
+  /** SHEP-348: it works in its own git worktree (a folder of its own), not in its list's folder */
+  worktree?: boolean
   /** queued: the tasks it still waits for ("SHE-12", "vm-str:SHE-12" on another machine) */
   after?: string[]
   /** how it ended, for a task queued after it: done (merged, or closed with nothing to merge), stopped, failed */

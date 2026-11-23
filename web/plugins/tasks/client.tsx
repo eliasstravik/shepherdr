@@ -26,20 +26,103 @@ export function showRepo(key: string) {
   setUI((ui) => ({ pane: 'tasks', task: null, wide: false, tab: 'Now', tf: { ...clean(ui.tf), repo: [key], space: [], here: false }, drawer: false, search: false, settings: null }))
 }
 
-/** a task's tag: where it works ("shepherdr", "shepherdr · mac-mini"); a tap shows that repo's tasks. In a row it is a
- *  span (the row is the button), elsewhere a button. */
-export function WorkTag({ snap, t, inRow }: { snap: Snapshot; t: Task; inRow?: boolean }) {
+/** a task's tag: where it works ("shepherdr", "shepherdr · mac-mini"); a tap shows that repo's tasks. A row has its
+ *  repo line instead (RepoLine, SHEP-348). */
+export function WorkTag({ snap, t }: { snap: Snapshot; t: Task }) {
   const words = workWords(snap, t)
   if (!words) return null
   const go = (e: { stopPropagation: () => void }) => {
     e.stopPropagation()
     showRepo(workKey(t))
   }
-  const label = `All tasks in ${workName(t)}`
-  return inRow ? (
-    <span className="wtag" role="link" aria-label={label} onClick={go}><I n="folder" />{words}</span>
-  ) : (
-    <button type="button" className="wtag" aria-label={label} onClick={go}><I n="folder" />{words}</button>
+  return <button type="button" className="wtag" aria-label={`All tasks in ${workName(t)}`} onClick={go}><I n="folder" />{words}</button>
+}
+
+/* ---------- its branch and pull request (SHEP-348) ---------- */
+
+export type PrState = 'merged' | 'closed' | 'running' | 'failed' | 'passed' | 'open'
+
+/** what its pull request says, in one word: merged, closed on GitHub, else its checks (open when none are known) */
+export function prState(t: Task): PrState | null {
+  if (!t.pr) return null
+  if (t.merged) return 'merged'
+  if (t.pr.closed) return 'closed'
+  return t.pr.checks ?? 'open'
+}
+
+const PR_WORDS: Record<PrState, string> = { merged: 'merged', closed: 'closed', running: 'checks running', failed: 'checks failed', passed: 'checks passed', open: 'open' }
+
+/** the one tiny mark for its checks: running a quiet ring, failed red, passed green (nothing for the rest) */
+function ChecksMark({ st }: { st: PrState | null }) {
+  if (st === 'running') return <I n="checking" />
+  if (st === 'failed') return <I n="x" c="c-red" />
+  if (st === 'passed') return <I n="check" c="c-ready" />
+  return null
+}
+
+/** open a task at its branch and pull request strip (a row's repo line): the chat scrolls there and marks it a moment */
+export function openAtStrip(t: Task) {
+  if (tstate(t) === 'next' && !t.agent && !t.started) return startDialog(t)
+  openTask(t.id)
+  setUI({ jump: `strip:${t.id}` })
+}
+
+/** A row's repo line: where it works, the folder icon a branch one when it has its own branch (or worktree), and its
+ *  pull request with one mark for its checks ("PR #1318 ×"), or "Merged #1314". A tap opens the task at its strip. */
+export function RepoLine({ snap, t }: { snap: Snapshot; t: Task }) {
+  const words = workWords(snap, t)
+  if (!words) return null
+  const branch = onBranch(t)
+  const st = prState(t)
+  const n = t.pr?.number
+  const spoken = [words, branch ? 'own branch' : t.repo === 'folder' ? 'in the folder' : '', st === 'merged' ? `merged, pull request ${n}` : t.pr ? `pull request ${n}, ${PR_WORDS[st!]}` : ''].filter(Boolean).join(', ')
+  const go = (e: { stopPropagation: () => void }) => {
+    e.stopPropagation()
+    openAtStrip(t)
+  }
+  return (
+    <span className="l2 rline" role="link" aria-label={`${spoken}: show its branch`} onClick={go}>
+      <I n={branch ? 'branch' : 'folder'} />
+      <span className="rn">{words}</span>
+      {t.pr && <span aria-hidden="true">·</span>}
+      {st === 'merged' && <><I n="merged" /><span className="pn">Merged #{n}</span></>}
+      {t.pr && st !== 'merged' && <><span className="pn">PR #{n}</span><ChecksMark st={st} /></>}
+    </span>
+  )
+}
+
+/** The task's page, under its title: its full branch and what it builds on, its pull request (state, checks, a link to
+ *  GitHub), and where it works: its own worktree, or the folder itself. Nothing for a task outside a repo. */
+export function GitStrip({ t }: { t: Task }) {
+  const on = useUI((u) => u.jump === `strip:${t.id}`)
+  const branch = onBranch(t)
+  if (!branch && t.repo !== 'folder' && !t.pr) return null
+  const st = prState(t)
+  return (
+    <div className={cx('gstrip', on && 'jump')} data-card={`strip:${t.id}`}>
+      {branch && (
+        <div className="gl">
+          <I n="branch" />
+          <span className="tr gb">{t.branch || 'Its own branch'}</span>
+          {t.base && <span className="mu">from {t.base}</span>}
+        </div>
+      )}
+      {t.pr ? (
+        <div className="gl">
+          <I n={st === 'merged' ? 'merged' : 'pr'} />
+          <span className="pn">PR #{t.pr.number}</span>
+          <ChecksMark st={st} />
+          <span className={cx('tr', st === 'failed' ? 'c-red' : 'mu')}>{PR_WORDS[st!]}</span>
+          <a className="gh" href={t.pr.url} target="_blank" rel="noreferrer" aria-label={`Pull request ${t.pr.number} on GitHub`}>GitHub<I n="ext" /></a>
+        </div>
+      ) : branch && (
+        <div className="gl"><I n="pr" /><span className="tr mu">No pull request yet</span></div>
+      )}
+      <div className="gl">
+        <I n="folder" />
+        <span className="tr mu">{!branch ? 'Works in the folder itself, no branch' : t.worktree ? 'In its own worktree' : 'In the folder, on its own branch'}</span>
+      </div>
+    </div>
   )
 }
 
@@ -281,7 +364,8 @@ function TaskHead({ task: t, where, scrolled }: { task: Task; where: 'chat' | 'p
   )
 }
 
-/** the status line: its status, time left, its machine, its pull request (SHEP-322: never its key) */
+/** the status line: its status, time left, its machine (SHEP-322: never its key; its pull request is in the strip under
+ *  it, SHEP-348) */
 function TaskTop({ task: t }: { task: Task }) {
   const snap = useSnap()
   if (!snap) return null
@@ -293,7 +377,6 @@ function TaskTop({ task: t }: { task: Task }) {
       {strong ? <b className={w.tone === 'red' ? 'c-red' : `c-${w.tone}`}>{w.word}</b> : w.word}
       {left && <span>· {left}</span>}
       {t.work ? <span>· <WorkTag snap={snap} t={t} /></span> : <span>· {machineLabel(snap, t.on)}</span>}
-      {t.pr && <span>· <a className="lk" href={t.pr.url} target="_blank" rel="noreferrer">PR #{t.pr.number}</a></span>}
     </div>
   )
 }
@@ -335,6 +418,7 @@ function TaskPane({ t }: { t: Task }) {
         ) : (
           <>
             <TaskTop task={t} />
+            <GitStrip t={t} />
             <AskedIn snap={snap} t={t} />
             {Messages && <Messages thread={thread} />}
           </>
@@ -359,7 +443,7 @@ function TaskRow({ snap, t, tag }: { snap: Snapshot; t: Task; tag: boolean }) {
         <span className="n">
           <span className="l1">{t.name}</span>
           {sub && <span className="l2">{sub}</span>}
-          {tag && t.work && <span className="l2"><WorkTag snap={snap} t={t} inRow /></span>}
+          {tag && t.work && <RepoLine snap={snap} t={t} />}
         </span>
         {when && <span className="v">{when}</span>}
       </button>
