@@ -3,7 +3,8 @@
 // message box. The same parts draw a space's chat and a task's thread.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { copyText } from '@client/copy.ts'
-import { act, definePlugin, getState, notice, registry, setUI, tryAct, useChat, useDraft, useSnap, useStore, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
+import { TEXT_IN_CALL } from '@client/dictate.tsx'
+import { act, definePlugin, getState, has, notice, registry, setUI, tryAct, useChat, useDraft, useSnap, useStore, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
 import { partsOf, placeOutgoing, placesOf, keyOf, readNow, showsAs, type Outgoing } from '@client/outbox.ts'
 import { confirm, openMenu } from '@client/overlay.tsx'
 import { AgentLine, openPicker, pickFor, pickWords, type Pick } from '@client/picker.tsx'
@@ -638,13 +639,26 @@ export function WorkingSign({ chat, thread }: { chat: Chat | undefined; thread?:
   const report = thread?.task?.report
   const sign = signOf(chat, report && !report.paused ? report.msg : undefined)
   if (!sign) return null
-  return (
-    <div key={chat?.messages.length ?? 0} className="wsign" role="status" aria-label={sign.step || 'Working'}>
+  const n = chat?.messages.length ?? 0
+  const el = (
+    <div key={n} className="wsign" role="status" aria-label={sign.step || 'Working'}>
       <span className="b wbub" aria-hidden="true"><span className="wdots"><i /><i /><i /></span></span>
       {sign.step && <span className="wstep">{sign.step}</span>}
     </div>
   )
+  // SHEP-363: Stop sits by the dots (the box's round button is the voice call while it is empty), outside the sign's
+  // grow-in so it is its full size from the start
+  if (!chat || !has('voice')) return el
+  return (
+    <div key={n} className="wrow">
+      {el}
+      <IB icon="stop" label="Stop" className="wstop" onClick={() => void tryAct({ type: 'stop', chat: chat.key })} />
+    </div>
+  )
 }
+
+/** a tap on it takes no focus: the box's focus (and a phone's keyboard) stays as it was */
+export const keepFocus = (e: { preventDefault: () => void }) => e.preventDefault()
 
 /** A chat's own agent that crashed or was cut off is treated like a task's: a card in that chat with the reason and
  *  Restart. Shepherdr never starts it again on its own. */
@@ -706,8 +720,11 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   const machine = snap.places.find((p) => p.id === thread.place)?.machine ?? snap.host
   const pick = pickOf(snap, chat, thread)
   // a message sent while the agent works goes in at once (it steers); only Ctrl/Cmd+Enter asks it to wait its turn
+  // a suggested reply is never sent as it is: Tab (or its chip) writes it into the box first (SHEP-363). In a voice
+  // call the box takes no text (TEXT_IN_CALL).
   const go = (wait = false) => {
-    const t = text.trim() || (!files?.length ? (sug?.text ?? '') : '')
+    if (getState().ui.call && !TEXT_IN_CALL) return
+    const t = text.trim()
     if (!t && !files?.length) return
     if (sug) spent.add(sug.id)
     send(key, key, t, wait && busy)
@@ -722,11 +739,15 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
     } else notice(r.why, 4000)
   }
 
-  const useSug = () => {
+  /** the suggested reply written into the box. From the Tab key the box keeps the focus; from the chip (a tap) the
+   *  focus stays where it was, so a phone's keyboard doesn't come up just to send it (the chip takes no focus) */
+  const useSug = (key = false) => {
     if (!sug) return
     setText(sug.text)
-    ref.current?.focus()
+    if (key) ref.current?.focus()
   }
+  const filled = !!text.trim() || !!files?.length
+  const BoxEnd = has('voice') ? registry.views.boxEnd : undefined
   const stop = busy && !text.trim() && !files?.length
   return (
     <div
@@ -795,7 +816,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
             // Tab writes the suggested reply into the box, so you can keep typing
             if (e.key === 'Tab' && !e.shiftKey && sug && !text) {
               e.preventDefault()
-              return useSug()
+              return useSug(true)
             }
             // Enter sends and Shift+Enter makes a new line, the same on phone and desktop
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
@@ -805,8 +826,8 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
           }}
         />
         {sug && !text && (
-          <button type="button" className="kbd" aria-label="Use the suggested reply" onClick={useSug}>
-            {phone ? <I n="tab" /> : 'Tab'}
+          <button type="button" className="kbd" aria-label="Use suggestion" aria-keyshortcuts="Tab" onPointerDown={keepFocus} onMouseDown={keepFocus} onClick={() => useSug()}>
+            <I n="tab" c="s16" />
           </button>
         )}
       </div>
@@ -819,7 +840,9 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
         />
         <span className="sp" />
         {registry.boxButtons.map((b, i) => <b.View key={i} thread={thread} setText={setText} />)}
-        {stop ? (
+        {BoxEnd ? (
+          <BoxEnd thread={thread} setText={setText} filled={filled} send={() => go()} />
+        ) : stop ? (
           <button type="button" className="send" aria-label="Stop" onClick={() => void tryAct({ type: 'stop', chat: key })}>
             <I n="stop" c="s16" />
           </button>

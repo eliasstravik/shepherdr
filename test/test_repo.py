@@ -542,3 +542,7 @@ class TerminalAndScreenInMenus(unittest.TestCase):
     def test_header_keeps_tasks_and_artifacts(self):
         for name in ('tasks', 'artifacts'):
             self.assertIn('reg.header.push', self.src(name), name)
+
+    def test_no_voice_button_in_the_header(self):
+        # the voice call's button is the message box's round button (SHEP-363)
+        self.assertNotIn('reg.header.push', self.src('voice'))

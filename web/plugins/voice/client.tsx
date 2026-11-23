@@ -1,19 +1,19 @@
 // Voice: a hands-free, interruptible voice for Shepherdr as a whole, run over the app (no call screen). It operates
 // the app through tools: it looks, opens things, sends and acts, with a yes before anything that deletes, merges or
-// stops. The wave button starts it (furthest right in the header; at the right of a phone's bottom bar). In a call the
-// button becomes two of the same size, Mute and End call, beside a live wave of whoever is talking (the agent in blue,
-// you in the text colour, still dots while it connects). SHEP-326: a call shows no words anywhere: no state words, no
-// captions, nothing in a chat; what it did shows as the usual cards. The mic inside the message box is dictation only.
-import { useEffect, useState } from 'react'
-import { DictateButton } from '@client/dictate.tsx'
+// stops. SHEP-363: its button sits in the message box, between the mic and Send, on every size (none in the header or
+// the phone's bottom bar: there it was out of the thumb's reach on an open Fold). In a call that button is End call and
+// the mic beside it is Mute / Unmute yourself; a live wave of whoever is talking (the agent in blue, you in the text
+// colour, still dots while it connects) takes the agent line's place in the box. While dictating the same two buttons
+// are Done and Cancel. SHEP-326: a call shows no words anywhere; what it did shows as the usual cards.
+import { useEffect, useRef, useState } from 'react'
+import { canStartCall, DictRow, SlotsView, TEXT_IN_CALL, useDictation } from '@client/dictate.tsx'
 import type { Sample } from '@client/meter.ts'
 import { definePlugin, getState, go, launchHref, notice, openArtifact, openSettings, openTask, setUI, tryAct, useStore, useUI, type Thread } from '@client/kernel.ts'
 import { closeTop as closeLayer } from '@client/overlay.tsx'
-import { I, IB } from '@client/ui.tsx'
 import { isEverything, placeOf, taskOf } from '@shared/view.ts'
 import { callPhase, callSample, muteCall, sendWhere, startCall, stopCall, type Nav, type NavAck } from './call.ts'
 import { wantsCall, withoutVoice } from './launch.ts'
-import { CallButtonsView, CallMarkView } from './mark.tsx'
+import { CallMarkView } from './mark.tsx'
 import { resetScreen, screenAction, type Head } from './screen.ts'
 
 /** what this page shows, told to the call as it changes: its "here" and "this task" */
@@ -129,6 +129,8 @@ export function endCall() {
 export function toggleCall(resume: string | null = null) {
   const { ui } = getState()
   if (ui.call) return endCall()
+  // the microphone is taken by a dictation: finish or cancel it first
+  if (!canStartCall()) return
   ;(document.activeElement as HTMLElement | null)?.blur?.()
   setUI({ call: true, callMuted: false })
   if (getState().snap?.demo) {
@@ -166,10 +168,10 @@ function usePhase() {
 }
 
 /** the call's mark, from its live phase */
-function CallMark({ phone }: { phone: boolean }) {
+function CallMark() {
   const phase = usePhase()
   const demo = useStore((s) => !!s.snap?.demo)
-  return <CallMarkView phone={phone} phase={demo ? 'listening' : phase} muted={useUI((u) => u.callMuted)} sample={demo ? demoSample : callSample} />
+  return <CallMarkView phase={demo ? 'listening' : phase} muted={useUI((u) => u.callMuted)} sample={demo ? demoSample : callSample} />
 }
 
 /** the demo's call has no audio: a made-up voice, you then the agent in turns, so its wave moves as a real one does */
@@ -180,39 +182,46 @@ function demoSample(): Sample {
   return { level: words * (who === 'agent' || !getState().ui.callMuted ? 0.6 : 0), who: words > 0.05 ? who : null }
 }
 
-function CallButtons({ phone }: { phone: boolean }) {
-  return <CallButtonsView phone={phone} muted={useUI((u) => u.callMuted)} onMute={toggleMute} onEnd={endCall} />
-}
-
-function HeaderVoice(_: { thread: Thread }) {
+/** The message box's right end (SHEP-363): the mic, and the round button where Send is: a voice call while the box is
+ *  empty, Send once it has words or files. The same two buttons serve a call (Mute, End call) and a dictation (Done,
+ *  Cancel); the call's wave or the recording takes the place of + and the agent line, so the buttons never move. In a
+ *  call the box takes no text (TEXT_IN_CALL), its draft kept for after. */
+function BoxEnd({ thread, setText, filled, send }: { thread: Thread; setText: (value: string) => void; filled: boolean; send: () => void }) {
+  const el = useRef<HTMLSpanElement>(null)
+  const d = useDictation(setText, thread.chat, () => el.current)
   const call = useUI((u) => u.call)
-  if (!call) return <IB icon="wave" label="Talk to Shepherdr" onClick={() => toggleCall()} />
+  const muted = useUI((u) => u.callMuted)
+  const { s } = d
+  const dict = s.k !== 'idle'
+  const quiet = call && !TEXT_IN_CALL
+  useEffect(() => {
+    const box = el.current?.closest('.cbox')?.querySelector('textarea')
+    if (!box || dict) return
+    box.readOnly = quiet
+    return () => void (box.readOnly = false)
+  }, [quiet, dict])
   return (
     <>
-      <CallMark phone={false} />
-      <CallButtons phone={false} />
+      <span ref={el} hidden />
+      {dict ? <DictRow s={s} /> : call ? <span className={quiet ? 'vin quiet' : 'vin'}><CallMark /></span> : null}
+      <SlotsView
+        at={dict ? { k: 'dict', d: s.k } : call ? { k: 'call', muted } : { k: 'idle', filled }}
+        round
+        on={{
+          mic: dict ? (s.k === 'error' ? d.start : d.done) : call ? toggleMute : d.start,
+          press: d.press,
+          second: dict ? (s.k === 'error' ? d.dismiss : d.cancel) : call ? endCall : filled ? send : () => toggleCall(),
+        }}
+      />
     </>
   )
-}
-
-function BarVoice() {
-  const call = useUI((u) => u.call)
-  return call ? <CallButtons phone /> : <button type="button" className="vbtn" aria-label="Talk to Shepherdr" onClick={() => toggleCall()}><I n="wave" c="s22" /></button>
-}
-
-function BarMark() {
-  const call = useUI((u) => u.call)
-  return call ? <div className="vcap"><CallMark phone /></div> : null
 }
 
 export default definePlugin({
   name: 'voice',
   setup(reg) {
-    reg.header.push({ order: 50, View: HeaderVoice })
-    reg.barEnd.push(BarVoice)
-    reg.barAbove.push(BarMark)
     reg.overlays.push(CallWhere)
-    reg.boxButtons.push({ order: 10, View: ({ thread, setText }) => <DictateButton setText={setText} scope={thread.chat} /> })
+    reg.views.boxEnd = BoxEnd
     reg.voiceWake = () => !getState().ui.call && toggleCall()
     // opened from the home screen's "Talk" shortcut (?voice=1): straight into a call
     if (wantsCall(launchHref)) {
