@@ -349,10 +349,11 @@ function TypingTail({ chat }: { chat: Chat | undefined }) {
 /** suggested replies already used or typed over: gone once you send something */
 const spent = new Set<string>()
 
-/** what a chat runs on now: its agent's own report, else what is set for its kind */
+/** what a chat runs on now: its agent's own report; before its chat came, its space's (an Assistant's chat: what its
+ *  Assistant runs, else what its first message starts it on, SHEP-298); else what is set for its kind */
 export function pickOf(snap: Snapshot, chat: Chat | undefined, thread: Thread): Pick {
-  const a = chat?.agent
-  if (a?.kind) return { agent: a.kind, label: a.modelLabel ?? a.planned?.modelLabel ?? null, model: a.model ?? a.planned?.model ?? null, effort: a.effort ?? a.planned?.effort ?? null, fast: a.speed === 'ultrafast' ? 'ultrafast' : a.speed === 'fast', perm: (a as { perm?: string }).perm ?? null }
+  const a = chat?.agent ?? (!thread.task ? snap.places.find((p) => p.id === thread.place && p.chat === thread.chat)?.agent : undefined)
+  if (a?.kind) return { agent: a.kind, label: a.modelLabel ?? a.planned?.modelLabel ?? null, model: a.model ?? a.planned?.model ?? null, effort: a.effort ?? a.planned?.effort ?? null, fast: a.speed === 'ultrafast' ? 'ultrafast' : a.speed === 'fast', perm: a.perm ?? null }
   return pickFor(snap, isEverything(snap, thread.place) ? 'all' : thread.place, thread.task ? 'Tasks' : 'Chats')
 }
 

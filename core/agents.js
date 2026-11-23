@@ -475,3 +475,31 @@ export const FORK_LIVE = {
   verb: "Fork anyway",
   cancel: "Keep the live one",
 };
+
+// The arguments an agent's terminal runs with (SHEP-298): its CLI's own while it runs, else the ones its resume label
+// kept (herdr.resume argv: an Assistant started from a template runs under `sh -c "… exec claude --model …"`, so the
+// terminal's own argv names no model once it ended), else the terminal's.
+export function argvOf(t) {
+  if (Array.isArray(t?.foreground?.argv) && t.foreground.argv.length) return t.foreground.argv;
+  try {
+    const r = JSON.parse(t?.labels?.["herdr.resume"] || "{}");
+    if (Array.isArray(r?.argv) && r.argv.length) return r.argv;
+  } catch {}
+  return Array.isArray(t?.argv) ? t.argv : [];
+}
+
+// What an agent's terminal really runs on, as its chat's model button says it (SHEP-298): its arguments, its log's
+// newest turn (a /model in place too) and, for what neither says, its CLI's own settings (dflt). A resumed log's model
+// counts only once this process writes. { kind, words, model, modelLabel, effort, speed, perm, flags? }.
+export function liveAgent(kind, t, meta, dflt) {
+  meta = meta ?? {};
+  if (t?.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
+  const argv = argvOf(t);
+  const c = current(kind, argv, meta, dflt ?? {});
+  const row = rowFor(kind, c), label = menuFor(kind, {}).models.find((m) => m.id === row)?.name ?? c.label ?? modelName(c.model);
+  // the window's model button (mods/chat pickParts): model, level, Fast
+  const words = [c.label ?? modelName(c.model), levelName(c.effort), speedName(c.fast)].filter(Boolean).join(" · ") || NAMES[kind] || "Agent";
+  const extra = extraFlags(kind, argv);
+  return { kind, words, ...(extra.length ? { flags: extra } : {}), ...(c.model ? { model: c.model, modelLabel: label } : {}), ...(c.effort ? { effort: c.effort } : {}),
+    speed: speedWordOf(c.fast), ...(c.perm ? { perm: c.perm } : {}) };
+}

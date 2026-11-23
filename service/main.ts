@@ -979,7 +979,7 @@ const server = Bun.serve<{ who: string }>({
         // the name typed and the agent picked in the New space dialog (none: named after its folder, on Settings' choice)
         const name = typeof b?.name === "string" && b.name.trim() ? b.name.trim().slice(0, 80) : undefined;
         const picked = pickFrom(b?.agent);
-        const made = await newSpace(hub, { machine, path: String(b?.path ?? ""), ...(name ? { name } : {}), makeRepo: !!b?.makeRepo, icon, store: compat.shared!, pick: picked ? () => picked : compat.assistantPick });
+        const made = await newSpace(hub, { machine, path: String(b?.path ?? ""), ...(name ? { name } : {}), makeRepo: !!b?.makeRepo, icon, store: compat.shared!, pick: picked ? () => picked : compat.assistantPick, keepPick: !!picked });
         if (made.error) console.error(`new space ${made.place}: ${made.error}`);
         // the page opens it once the sidebar has it: in the snapshot before the answer
         await model.waitSpace(made.place);

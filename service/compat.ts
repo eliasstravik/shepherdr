@@ -27,7 +27,7 @@ import { HOME, appHome } from "./paths.ts";
 const { spaceName } = SPc as any;
 import type { Where } from "./worktree.ts";
 import * as AGc from "../core/agents.js";
-const { current, extraFlags, rowFor, menuFor, modelName, levelName, NAMES } = AGc as any;
+const { liveAgent } = AGc as any;
 
 const { ago } = T as any;
 
@@ -226,7 +226,28 @@ export class Compat {
     const f = (this.agents as any).fresh(s.machine ?? null, this.assistantPick?.(s.id) ?? null);
     const kind = f.sel.agent === "codex" ? "codex" : "claude";
     return { key, fresh: true, messages: [], cli: kind, working: false,
-      agent: { kind, words: f.words, planned: { ...(f.sel.model ? { model: f.sel.model } : {}), ...(f.label ? { modelLabel: f.label } : {}), ...(f.effort ? { effort: f.effort } : {}) } } } as Chat;
+      agent: { kind, words: f.words, speed: f.sel.fast === "ultrafast" ? "ultrafast" : f.sel.fast ? "fast" : "normal", ...(f.sel.perm ? { perm: f.sel.perm } : {}), planned: { ...(f.sel.model ? { model: f.sel.model } : {}), ...(f.label ? { modelLabel: f.label } : {}), ...(f.effort ? { effort: f.effort } : {}) } } } as Chat;
+  }
+  /** What an agent's terminal t runs on now (core/agents.js liveAgent): its arguments, its log's meta, its CLI's own
+   *  settings on its machine for the rest. */
+  agentNow(kind: string, t: any, meta: any, machine: string | null) {
+    return liveAgent(kind, t, meta ?? {}, (this.agents as any)?.cached?.(kind, machine) ?? {});
+  }
+  /** What a space's Assistant runs on, for its place (SHEP-298: the chat's model button said Settings' Assistant until
+   *  the chat itself came): the Assistant's own (live, else the one that ended, whose chat it reads), else what its
+   *  first message starts (freshChat: the choice kept for it, else Settings'). null: not known. */
+  placeAgent(s: Space, key: string): Chat["agent"] | null {
+    try {
+      if (s.assistant) {
+        const t: any = (this as any).terminalsOf?.(s.assistant);
+        let kind: string | null = kindOfTerm(t);
+        if (!kind) { try { kind = JSON.parse(t?.labels?.["herdr.resume"] || "{}").kind ?? null; } catch {} }
+        if (!t || (kind !== "claude" && kind !== "codex")) return null;
+        const { flags: _, ...a } = this.agentNow(kind, t, this.reader?.(s.assistant)?.conv?.meta, s.machine ?? null);
+        return a;
+      }
+      return this.freshChat(key)?.agent ?? null;
+    } catch { return null; }
   }
   agents: { info(addr: string, reader: any): Promise<unknown>; restart(addr: string, reader: any, pick: any): Promise<string>; revive?(addr: string, reader: any): Promise<string>; choices(machine: string | null): Promise<unknown>; ownDefaults(): Promise<{ claude: unknown; codex: unknown }> } | null = null;
 
@@ -331,7 +352,7 @@ export class Compat {
       // machine's too, as its own window shows it); the space's folder until it has one
       const live = ak?.foreground?.cwd ?? ak?.cwd;
       const cwd = live ? (s.machine ? SPc.tilde(live) : shortHome(live)) : null;
-      return { id: s.id, name, ...(!s.name || s.name === "~" ? { unnamed: true } : {}), ...(s.icon ? { emoji: s.icon } : {}),...(s.git ? { git: s.git.linked ? "linked" : "main", repo: s.git.repo, gitName: s.git.name, branch: s.git.branch ?? null } : {}), ...(s.git?.linked ? { worktree: true } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", chat: key, header, where, ...(cwd ? { cwd } : {}), store: artifactStore(s as any), ...((s as any).changedAt ? { changedAt: (s as any).changedAt } : {}) };
+      return { id: s.id, name, ...(!s.name || s.name === "~" ? { unnamed: true } : {}), ...(s.icon ? { emoji: s.icon } : {}),...(s.git ? { git: s.git.linked ? "linked" : "main", repo: s.git.repo, gitName: s.git.name, branch: s.git.branch ?? null } : {}), ...(s.git?.linked ? { worktree: true } : {}), machine: s.machine ?? host, level: 0, status: AGENT[s.assistantStatus] ?? "idle", chat: key, header, where, ...(cwd ? { cwd } : {}), store: artifactStore(s as any), ...((s as any).changedAt ? { changedAt: (s as any).changedAt } : {}), ...((a) => (a ? { agent: a } : {}))(this.placeAgent(s, key)) };
     });
 
     // every agent's own helper agents (SHEP-54): their chats open by t:<address>
@@ -640,18 +661,10 @@ export class Compat {
     // what it runs on, for the line under the box (core/agents.js: the window's model button says the same)
     let agent: any;
     try {
-      // as the window's chat: the CLI's own settings fill what its arguments and log don't say; a resumed log's model
-      // counts only once this process writes
-      const kind = reader.kind ?? "claude", dflt = (this.agents as any)?.cached?.(kind, machine) ?? {};
-      let meta = reader.conv?.meta ?? {};
-      if (t?.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
-      const c = current(kind, t?.foreground?.argv ?? t?.argv ?? [], meta, dflt);
-      const row = rowFor(kind, c), label = menuFor(kind, {}).models.find((m: any) => m.id === row)?.name ?? modelName(c.model);
-      // the window's model button (mods/chat pickParts): model, level, Fast
-      const words = [c.label ?? modelName(c.model), levelName(c.effort), c.fast === "ultrafast" ? "Ultrafast" : c.fast ? "Fast" : null].filter(Boolean).join(" · ") || NAMES[kind] || "Agent";
-      // #1222: the extra flags it was started with, beside its model and effort
-      const extra = extraFlags(kind, t?.foreground?.argv ?? t?.argv ?? []);
-      agent = { kind, words, ...(extra.length ? { flags: extra } : {}), ...(c.model ? { model: c.model, modelLabel: label } : {}), ...(c.effort ? { effort: c.effort } : {}), ...(c.model ? { runtime: { model: c.model, modelLabel: label, ...(c.effort ? { effort: c.effort } : {}), speed: c.fast === "ultrafast" ? "ultrafast" : c.fast ? "fast" : "normal", source: "session", at: Date.now() } } : {}) };
+      // as the window's chat: the CLI's own settings fill what its arguments and log don't say (core/agents.js liveAgent)
+      const kind = reader.kind ?? "claude";
+      agent = this.agentNow(kind, t, reader.conv?.meta, machine);
+      if (agent.model) agent = { ...agent, runtime: { model: agent.model, modelLabel: agent.modelLabel, ...(agent.effort ? { effort: agent.effort } : {}), speed: agent.speed, source: "session", at: Date.now() } };
     } catch {}
     // the first row: the log's very start, or earlier pages to load as it scrolls up
     const head = reader.start === 0 ? { top: true } : reader.start ? { earlier: true } : {};
