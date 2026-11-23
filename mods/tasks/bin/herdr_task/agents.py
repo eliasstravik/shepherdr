@@ -66,6 +66,30 @@ def agent_running(k):
     return bool(k.get("agent")) and k.get("agent") not in SHELLS
 
 
+# SHEP-324: what is in front of an agent's terminal, checked right before anything is typed into it. A terminal whose
+# agent exited (or that herdr-core gave a fresh shell after losing its program) is still live: a message pasted there
+# runs as a shell command. Only "agent" may be typed into. The same rule is core/send.js inFront().
+RUNTIMES = {"node", "bun", "deno"}  # a CLI run as a script shows its runtime's name
+
+
+def front(k):
+    """What is in front in terminal k (its hc get): "agent", "shell" (its agent exited: a plain shell), "other" (another
+    program than its agent, an editor say) or "gone" (no such terminal, or finished)."""
+    if not k or k.get("state") != "live":
+        return "gone"
+    fg = k.get("foreground") or {}
+    name = os.path.basename(str(fg.get("name") or ""))
+    if not name:
+        # not told (an older hc's record): hc ls's own word for its program, else as before (core/send.js: null)
+        return "shell" if os.path.basename(str(k.get("agent") or "")) in SHELLS else "agent"
+    if name in SHELLS:
+        return "agent" if runs_command(fg.get("argv")) else "shell"
+    kind = (k.get("labels") or {}).get("herdr.agent")
+    if kind in ("claude", "codex") and not name.startswith(kind) and name not in RUNTIMES and not name[:1].isdigit():
+        return "other"
+    return "agent"
+
+
 def runs_command(argv):
     """A shell's argv that runs a command (-c, -ic, -lic, --command), not a plain shell."""
     for a in (argv or [])[1:]:

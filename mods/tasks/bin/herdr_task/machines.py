@@ -26,7 +26,9 @@ import threading
 import time
 
 from .base import QUEUED, ASK_HOME, OLD_SESSION, SESSION, SHARE, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, layout, now, PACKAGE, run, STORE, WHERE
-from .news import news_send, send_or_hold, typing
+from .news import NO_AGENT, news_send, send_or_hold, typing
+from .agents import front
+from .revive import restart_assistant
 from .settings import TEMPLATES
 
 
@@ -1173,6 +1175,20 @@ def _deliver(names, hows, address, text):
         if i == 5:
             raise Fail("not sent: the person is writing to that Assistant right now; try again in a few minutes")
         time.sleep(5)
+    # SHEP-324: never into a terminal whose agent isn't in front (a plain shell would run it), checked last thing
+    try:
+        k = json.loads(there(["hc", "get", address, "--json"]).stdout or "null")
+    except ValueError:
+        k = None
+    f = front(k)
+    if f == "shell":
+        raise Fail("its agent isn't running there (its terminal is a plain shell now), so nothing was typed into it. "
+                   "Restart that Assistant from its chat, then send again")
+    if f == "other":
+        raise Fail("another program than its agent is in front of its terminal, so nothing was typed into it; try again "
+                   "in a few minutes")
+    if f != "agent":
+        return False
     if there(["hc", "send", address, text]).returncode != 0:
         return False
     for i in range(6):
@@ -1211,16 +1227,23 @@ def tell(target, text, sender=None):
              "machine": here.get("name"), "space": (mine or {}).get("space_name") or (mine or {}).get("space") or "", "can-reply": "yes" if back is not None and me else "no"}
     esc = lambda s: str(s).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
     msg = "<herdr-assistant " + " ".join(f'{k}="{esc(v)}"' for k, v in attrs.items()) + ">" + text.replace("</herdr-assistant", "&lt;/herdr-assistant") + "</herdr-assistant>"
-    held = False
+    held, restarted = False, None
     if not to["route"]:
         # While the person writes to it, it waits for them (news.py's held_pass).
         got = send_or_hold(to["address"], msg, "news")
+        if got == NO_AGENT:
+            # SHEP-324: its agent exited (a plain shell is in front): never typed there; it starts again with this
+            restarted = restart_assistant(hc_json("get", to["address"]), msg)
+            if not restarted:
+                raise Fail("its agent isn't running (its terminal is a plain shell now), so nothing was typed into it, "
+                           "and it couldn't be started again. Restart that Assistant from its chat, then send again")
         ok, held = bool(got), got == "held"
     else:
         ok = _deliver(to["route"].split(">"), to["how"], to["address"], msg)
     if not ok:
         raise Fail(f"couldn't deliver to {to['target']}")
-    return {"to": to["target"], "space": to.get("space_name"), "can_reply": attrs["can-reply"] == "yes", "from": attrs["from"], "held": held}
+    return {"to": to["target"], "space": to.get("space_name"), "can_reply": attrs["can-reply"] == "yes", "from": attrs["from"], "held": held,
+            **({"restarted": restarted} if restarted else {})}
 
 
 # #1079 #1141: tell-assistant never returned, and nobody knew whether it went. It now ends within TELL_WAIT seconds and
@@ -1274,5 +1297,6 @@ def cmd_tell(args):
     except Fail as e:
         raise Fail(f"Not delivered to {args.target}: {e}") from None
     say(args, r, ("Not delivered yet, held for" if r.get("held") else "Delivered to") + f" {r['to']}" + (f" ({r['space']})" if r.get("space") else "") +
+        (f": its agent had stopped, so it started again ({r['restarted']}) with this as its first message" if r.get("restarted") else "") +
         (": the person is writing to it; it goes once they've sent or cleared that" if r.get("held") else "") +
         ("." if r["can_reply"] else ". It can't reach this machine back, so it can't reply."))

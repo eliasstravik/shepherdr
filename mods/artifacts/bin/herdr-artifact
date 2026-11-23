@@ -1011,8 +1011,16 @@ def tell(o, extra, lines):
         lines = lines + [f"(The agent that made this page has ended, so this comes to you. Its files: {os.path.join(FILES, a['id'], 'v' + str(a['version']))}; "
                          f"change a copy and `herdr-artifact update {a['id']} <dir>`.)"]
     body = f'<hc from="artifact" id="{attr(a["id"])}" version="{v}" title="{attr(a["title"])}"{extra}>\n' + "\n\n".join(lines) + "\n</hc>"
-    r = run(["hc", "send", to, body])
     out = {"to": to, "why": why, "version": v}
+    if shell_in_front(to):
+        # SHEP-324: its agent exited and left a plain shell, which would run the note as a command: kept instead (an
+        # Assistant starts again with it, a task's agent gets it when the task is restarted)
+        if not hold_note(to, body):
+            raise Fail("Its agent isn't running (its terminal is a plain shell now), so nothing was typed into it. Restart it, then send this again.")
+        out.update(held=True, said=STOPPED_NOTE)
+        print(json.dumps(out) if o.json else f"Kept for {to}: {STOPPED_NOTE}")
+        return 0
+    r = run(["hc", "send", to, body])
     if r.returncode != 0:
         kind, msg = plain_error(r.stderr.strip() or r.stdout.strip())
         if kind != "blocked":
@@ -1051,6 +1059,26 @@ def cmd_say(o):
 
 
 HELD_NOTE = "It's waiting on a question: your note goes to it once that's answered."
+STOPPED_NOTE = "Its agent had stopped, so nothing was typed into it: your note goes to it once it's running again."
+SHELLS = {"bash", "zsh", "fish", "sh", "dash", "ksh", "tcsh", "csh", "nu", "xonsh", "pwsh", "powershell", "elvish"}
+
+
+def shell_in_front(to):
+    """Whether a plain shell is in front of terminal `to` (its agent exited): nothing may be typed there (SHEP-324; the
+    same rule as herdr-task's agents.front)."""
+    try:
+        k = json.loads(run(["hc", "get", to, "--json"]).stdout or "null") or {}
+    except ValueError:
+        return False
+    fg = k.get("foreground") or {}
+    if k.get("state") != "live" or os.path.basename(str(fg.get("name") or "")) not in SHELLS:
+        return False
+    for a in (fg.get("argv") or [])[1:]:  # a shell running a command (fish -ic "claude …") still holds its agent
+        if a == "--command" or a.startswith("--command=") or (a.startswith("-") and not a.startswith("--") and "c" in a[1:]):
+            return False
+        if not a.startswith("-") or a.startswith("--"):
+            break
+    return True
 
 
 def plain_error(text):

@@ -3,6 +3,7 @@
 import { SESSION } from "./session.ts";
 import { CoreClient } from "./hc/client.ts";
 import type { CoreNotification, CoreTerminal } from "./hc/protocol.ts";
+import { inFront, NOT_TYPED } from "../core/send.js";
 
 type Listener = (e: { type: string; terminal?: string; data?: any } | { type: "reset" }) => void;
 
@@ -37,9 +38,27 @@ export class Hub {
   async send(terminal: string, text: string): Promise<{ code: number; stdout: string; stderr: string }> {
     const fail = (kind: string | null, message: string) => ({ code: 1, stdout: "", stderr: JSON.stringify({ error: { kind, message } }) });
     if (!this.client) return fail("unavailable", "herdr-core isn't answering here.");
+    // SHEP-324: never into a terminal whose agent isn't in front (a plain shell would run the words), checked last thing
+    const f = await this.front(terminal);
+    if (f && f !== "agent") return fail("no_agent", NOT_TYPED[f]);
     // it waits for a person to pause typing there (~3 s), so longer than a plain call
     try { return { code: 0, stdout: JSON.stringify(await this.call("terminal.send", { terminal, text }, 120_000)), stderr: "" }; }
     catch (e: any) { return fail(e?.kind ?? null, e?.message ?? String(e)); }
+  }
+
+  /** What is in front of a terminal now (core/send.js inFront()), asked of herdr-core afresh: the live list's
+   *  foreground can lag; null when it can't be told. */
+  async front(terminal: string): Promise<"agent" | "shell" | "other" | "gone" | null> {
+    let k: any = this.terminals.get(terminal);
+    try {
+      const d: any = await this.call("terminal.get", { terminal }, 8000);
+      const got = d?.terminal ?? d;
+      if (got && typeof got === "object") k = { ...(k ?? {}), ...got };
+    } catch (e: any) {
+      if (e?.kind === "not_found" || e?.kind === "finished") return "gone";
+    }
+    // no record to tell by: terminal.send's own answer decides, as before
+    return k && typeof k === "object" && "state" in k ? (inFront(k) as any) : null;
   }
 
   private async connect(): Promise<CoreClient> {

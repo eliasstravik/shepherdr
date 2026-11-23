@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { HOME, appHome, writable } from "./paths.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { sendBody, steerNow, messageBody, refusal, reactionLine, mentionedIn, taskTag } from "../core/send.js";
+import { sendBody, steerNow, messageBody, refusal, reactionLine, mentionedIn, taskTag, inFront, NOT_TYPED } from "../core/send.js";
 import { kindOf } from "../core/chat-reader.js";
 import { WORDS } from "../core/chat-view.js";
 import { settle } from "../core/pending.js";
@@ -279,7 +279,7 @@ async function sendToEnded(hub: Hub, b: any, compat: Compat, old: string): Promi
     p = (async () => {
       // one started meanwhile (another device's message, the Restart card): that one
       const live = assistantOf(sp, [...hub.terminals.values()]);
-      if (live) return { addr: live.address as string };
+      if (live && live.address !== old && inFront(live) !== "shell") return { addr: live.address as string };
       try {
         if (!compat.agents?.revive) throw new Error("no restart here");
         return { addr: await compat.agents.revive(old, r ?? null) };
@@ -322,6 +322,9 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const a = chat(b.chat);
     const item = (compat.reader?.(a)?.conv?.items ?? []).find((x: any) => x.kind === "ask" && x.id === b.question.slice(3));
     if (!item?.questions?.length || item.closed) throw new Error("That question was answered already.");
+    // SHEP-324: answered by typing on its screen: only while Codex itself is in front
+    const f = await hub.front?.(a);
+    if (f && f !== "agent") throw new Error(NOT_TYPED[f]);
     const why = await answerCodex(hc, a, item.questions, b);
     if (why) throw new Error(why);
     return { ok: true };
@@ -572,7 +575,9 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     // a space's Assistant that ended (killed, crashed, exited: SHEP-297): the message starts it again and goes to it,
     // once (the same id asked again gets the same answer: send-once.ts), never to the finished terminal
     const old = compat.addrOf(b.chat)!;
-    if (!old.startsWith("log:") && hub.terminals.get(old)?.state !== "live") {
+    // SHEP-324: one whose agent exited and left a plain shell (herdr-core lost it, or it quit) is ended too: the words
+    // would run there as a shell command
+    if (!old.startsWith("log:") && (hub.terminals.get(old)?.state !== "live" || (await hub.front?.(old)) === "shell")) {
       const cid = typeof b.cid === "string" && b.cid ? b.cid.slice(0, 80) : null;
       return cid ? once(cid, () => sendToEnded(hub, b, compat, old)) : sendToEnded(hub, b, compat, old);
     }
@@ -581,7 +586,8 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     // a reply typed into a task whose agent is gone (Done, or stopped): herdr-task starts its agent again in the same
     // thread with the reply, and the task goes back to Working
     const t = compat.taskOf(b.chat.split("/")[0]), a = compat.addrOf(b.chat);
-    if (t && (!a || a.startsWith("log:") || hub.terminals.get(a)?.state !== "live")) {
+    // (SHEP-324: a plain shell left where its agent was counts as gone: never typed into)
+    if (t && (!a || a.startsWith("log:") || hub.terminals.get(a)?.state !== "live" || (await hub.front?.(a)) === "shell")) {
       const text = str(b.text ?? "", 100_000).trim();
       if (!text) throw new Error("Nothing to send.");
       const files = Array.isArray(b.attachments) ? b.attachments.filter((x: unknown) => typeof x === "string").slice(0, 50) : [];

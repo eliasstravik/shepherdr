@@ -9231,3 +9231,264 @@ class ParallelCollisions(unittest.TestCase):
         self.assertIn("that fix round is the accepted price", words)
         self.assertNotIn("as parallel edits there conflict at merge", words)
         self.assertIn("tasks touching different files run in parallel", words)
+
+
+class NeverTypedIntoAShell(unittest.TestCase):
+    """SHEP-324: herdr-core lost the agents' programs and kept their terminals as plain shells; messages meant for the
+    agents (another Assistant's, news, a task's) were typed into those shells as commands. Now nothing is typed into a
+    terminal whose agent isn't in front: an Assistant starts again with the message, a task's agent's message is kept
+    for the agent that restarts the task, and the sender is told. A fake hc (no real one runs), a throwaway held file."""
+
+    WORKER_KEY = "dev-shop#7"
+
+    def setUp(self):
+        import shutil
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.agents as agents
+        import herdr_task.news as news
+        import herdr_task.revive as revive
+        import herdr_task.machines as machines
+        import herdr_task.commands as commands
+        self.agents, self.news, self.revive, self.machines, self.commands = agents, news, revive, machines, commands
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.terms = {}
+        self.calls = []
+        self.next_address = "t9"
+
+        def hc_json(*args):
+            return json.loads(json.dumps(self.terms.get(args[1]))) if args[:1] == ("get",) and args[1] in self.terms else None
+
+        def run(args, **kw):
+            self.calls.append(list(args))
+            out = ""
+            if args[:2] == ["hc", "run"]:
+                out = json.dumps({"address": self.next_address}) if self.next_address else ""
+            if args[:2] == ["hc", "get"]:
+                out = json.dumps(self.terms.get(args[2]))
+            return types.SimpleNamespace(returncode=0 if (args[:2] != ["hc", "run"] or self.next_address) else 1, stdout=out, stderr="")
+
+        for mod, name, value in ((news, "HELD", os.path.join(self.tmp, "held.json")), (news, "hc_json", hc_json),
+                                 (news, "run", run), (news, "guard", lambda a: None), (news.time, "sleep", lambda s: None),
+                                 (news, "typing", lambda *a, **k: None),
+                                 (news.subprocess, "run", lambda args, **kw: run(args)),
+                                 (revive, "hc_json", hc_json), (revive, "run", run),
+                                 (revive, "RESTARTS", os.path.join(self.tmp, "restarts.json")),
+                                 (revive, "STORE", self.tmp)):
+            p = mock.patch.object(mod, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def term(self, address, fg, labels=None, **more):
+        self.terms[address] = {"address": address, "state": "live", "cwd": "/w", "labels": dict(labels or {}),
+                               "foreground": fg, "status": None, **more}
+        return self.terms[address]
+
+    SHELL = {"name": "bash", "argv": ["/bin/bash"], "pid": 11}
+    CLAUDE = {"name": "claude", "argv": ["claude", "--model", "opus"], "pid": 12}
+    RECORD = json.dumps({"kind": "claude", "session": "s-1", "argv": ["claude", "--model", "opus"], "cwd": "/w/shop"})
+
+    def typed(self):
+        return [c for c in self.calls if c[:2] == ["hc", "send"]]
+
+    def held(self):
+        try:
+            with open(self.news.HELD) as f:
+                return json.load(f)
+        except OSError:
+            return {}
+
+    # ---- what is in front ------------------------------------------------------------------------------------------
+    def test_front(self):
+        f = self.agents.front
+        live = lambda fg, **k: {"state": "live", "foreground": fg, **k}
+        self.assertEqual(f(live(self.SHELL)), "shell")
+        self.assertEqual(f(live({"name": "zsh", "argv": ["-zsh"]})), "shell")
+        self.assertEqual(f(live({"name": "bash", "argv": ["/bin/bash", "-ic", '"$@"; exec "$0" -i', "/bin/bash", "claude"]})), "agent")
+        self.assertEqual(f(live({"name": "fish", "argv": ["fish", "-ic", "claude; exec fish -i"]})), "agent")
+        self.assertEqual(f(live(self.CLAUDE, labels={"herdr.agent": "claude"})), "agent")
+        self.assertEqual(f(live({"name": "node", "argv": ["node", "codex"]}, labels={"herdr.agent": "codex"})), "agent")
+        self.assertEqual(f(live({"name": "2.1.330"}, labels={"herdr.agent": "claude"})), "agent")
+        self.assertEqual(f(live({"name": "vim", "argv": ["vim"]}, labels={"herdr.agent": "claude"})), "other")
+        self.assertEqual(f({"state": "finished"}), "gone")
+        self.assertEqual(f(None), "gone")
+        self.assertEqual(f({"state": "live", "agent": "bash"}), "shell")
+        self.assertEqual(f({"state": "live"}), "agent", "not told: as before")
+
+    # ---- a task's agent ----------------------------------------------------------------------------------------------
+    def test_a_task_agents_message_is_kept_never_typed_then_goes_with_its_restart(self):
+        self.term("t5", self.SHELL, {"herdr.task": self.WORKER_KEY, "herdr.agent": "claude"})
+        self.assertTrue(self.news.plain_send("t5", "rm -rf build; your merge failed"))
+        self.assertTrue(self.news.news_send("t5", "<herdr-news>checks failed</herdr-news>"))
+        self.assertEqual(self.typed(), [], "nothing typed into the shell")
+        self.assertEqual([(x["task"], x["text"]) for x in self.held()["t5"]],
+                         [(self.WORKER_KEY, "rm -rf build; your merge failed"), (self.WORKER_KEY, "<herdr-news>checks failed</herdr-news>")])
+        # the scheduler's pass keeps it (never types it), even once the old terminal is gone
+        self.news.held_pass({})
+        del self.terms["t5"]
+        self.news.held_pass({})
+        self.assertEqual(self.typed(), [])
+        self.assertEqual(len(self.held()["t5"]), 2)
+        # the task restarts: its new agent's first message carries them, and they're gone from the held file
+        text = self.news.take_kept(self.WORKER_KEY)
+        self.assertTrue(text.startswith(self.news.KEPT_INTRO))
+        self.assertIn("your merge failed", text)
+        self.assertIn("checks failed", text)
+        self.assertEqual(self.held(), {})
+        self.assertIsNone(self.news.take_kept(self.WORKER_KEY))
+
+    def test_a_live_agent_still_gets_its_message(self):
+        self.term("t5", self.CLAUDE, {"herdr.task": self.WORKER_KEY, "herdr.agent": "claude"})
+        self.assertTrue(self.news.plain_send("t5", "carry on"))
+        self.assertEqual(self.typed(), [["hc", "send", "t5", "carry on"]])
+        self.assertEqual(self.news.send_or_hold("t5", "and this", "news"), "sent")
+        self.assertEqual(self.typed()[-1], ["hc", "send", "t5", "and this"])
+        self.assertEqual(self.held(), {})
+
+    def test_send_or_hold_says_no_agent_and_types_nothing(self):
+        self.term("t5", self.SHELL, {"herdr.task": self.WORKER_KEY})
+        self.assertEqual(self.news.send_or_hold("t5", "hello"), self.news.NO_AGENT)
+        self.assertEqual(self.typed(), [])
+        self.assertEqual(self.held(), {}, "the caller decides")
+
+    def test_the_persons_reply_types_nothing_into_a_shell(self):
+        self.term("t5", self.SHELL, {"herdr.task": self.WORKER_KEY, "herdr.agent": "claude"})
+        self.assertEqual(self.news.person_send("t5", "hello"), self.news.NO_AGENT)
+        self.assertEqual(self.typed(), [])
+        self.assertEqual(self.held(), {}, "the caller restarts its agent with it")
+
+    def test_another_program_in_front_holds_it_until_the_agent_is_back(self):
+        self.term("t5", {"name": "vim", "argv": ["vim"]}, {"herdr.agent": "claude"})
+        self.assertEqual(self.news.send_or_hold("t5", "hello"), "held")
+        self.news.held_pass({})
+        self.assertEqual(self.typed(), [])
+        self.terms["t5"]["foreground"] = self.CLAUDE
+        self.terms["t5"]["status"] = {"state": "idle"}
+        self.news.held_pass({})
+        self.assertEqual(self.typed(), [["hc", "send", "t5", "hello"]])
+
+    def test_a_reply_to_a_task_whose_agent_just_exited_restarts_it_with_the_reply(self):
+        from unittest import mock
+        started = []
+        t = {"id": 7, "state": "running"}
+        with mock.patch.object(self.commands, "workers", lambda s, t: [{"address": "t5"}]), \
+                mock.patch.object(self.news, "send_or_hold", lambda a, m, how="send": self.news.NO_AGENT), \
+                mock.patch.object(self.commands, "start_again", lambda s, t, space, *a, message=None, **k: (started.append(message), ({"address": "t9"}, True))[1]):
+            got = self.commands.tell(types.SimpleNamespace(dirty=False), t, "the reply", types.SimpleNamespace(space="sp1"))
+        self.assertEqual(got, ("t9", True))
+        self.assertEqual(started, ["the reply"])
+        self.assertEqual(self.typed(), [])
+
+    def test_a_restart_carries_what_was_kept(self):
+        from unittest import mock
+        self.news.hold("t5", "news for it", "news", task=self.WORKER_KEY)
+        seen = []
+        s = types.SimpleNamespace(dirty=False, key=lambda t: self.WORKER_KEY)
+        with mock.patch.object(self.commands, "live_agents", lambda key: []), \
+                mock.patch.object(self.commands, "_start_again", lambda s, t, space, key, argv, message, parent, nudge: (seen.append(message), ({"address": "t9"}, True))[1]):
+            self.commands.start_again(s, {"id": 7, "state": "running"}, "sp1", nudge="Carry on.")
+        self.assertEqual(len(seen), 1)
+        self.assertTrue(seen[0].startswith("Carry on.\n\n" + self.news.KEPT_INTRO))
+        self.assertIn("news for it", seen[0])
+        self.assertEqual(self.held(), {})
+        # a start that fails keeps them for the next one
+        self.news.hold("t5", "again", "send", task=self.WORKER_KEY)
+        with mock.patch.object(self.commands, "live_agents", lambda key: []), \
+                mock.patch.object(self.commands, "_start_again", mock.Mock(side_effect=self.commands.Fail("no"))):
+            with self.assertRaises(self.commands.Fail):
+                self.commands.start_again(s, {"id": 7, "state": "running"}, "sp1")
+        self.assertIn("again", self.news.take_kept(self.WORKER_KEY))
+
+    # ---- an Assistant ------------------------------------------------------------------------------------------------
+    def assistant(self, address="t3", record=True):
+        labels = {"herdr.role": "coordinator", "herdr.space": "sp1", "herdr.coordinator.space": "sp1", "herdr.agent": "claude"}
+        if record:
+            labels["herdr.resume"] = self.RECORD
+        return self.term(address, self.SHELL, labels)
+
+    def test_an_assistant_starts_again_on_its_conversation_with_the_message(self):
+        self.assistant()
+        self.assertTrue(self.news.news_send("t3", "<herdr-news>SHOP-7 is ready</herdr-news>"))
+        self.assertEqual(self.typed(), [])
+        runs = [c for c in self.calls if c[:2] == ["hc", "run"]]
+        self.assertEqual(len(runs), 1)
+        r = runs[0]
+        self.assertEqual(r[r.index("--cwd") + 1], "/w/shop")
+        self.assertIn("--keep", r, "no tab: kept in the background, as restart.sh")
+        for label in ("herdr.role=coordinator", "herdr.space=sp1", "herdr.coordinator.space=sp1", "herdr.agent=claude"):
+            self.assertIn(label, r)
+        self.assertEqual(r[-6:], ["claude", "--model", "opus", "--resume", "s-1", "<herdr-news>SHOP-7 is ready</herdr-news>"])
+        self.assertIn(["hc", "kill", "t3"], self.calls)
+        self.assertIn(["hc", "rm", "t3"], self.calls)
+
+    def test_an_assistant_without_a_record_starts_fresh_with_the_message_as_its_task(self):
+        self.assistant(record=False)
+        self.assertEqual(self.revive.restart_assistant(self.terms["t3"], "hello"), "t9")
+        r = [c for c in self.calls if c[:2] == ["hc", "run"]][0]
+        self.assertEqual(r[-2:], ["assistant", "hello"])
+
+    def test_a_failed_restart_is_kept_and_not_tried_in_a_loop(self):
+        self.assistant()
+        self.next_address = None
+        self.assertTrue(self.news.news_send("t3", "news"))
+        self.assertEqual([x["text"] for x in self.held()["t3"]], ["news"])
+        self.assertNotIn(["hc", "kill", "t3"], self.calls)
+        self.news.held_pass({})
+        self.assertEqual(len([c for c in self.calls if c[:2] == ["hc", "run"]]), 1, "tried again only after a while")
+        self.assertEqual(self.typed(), [])
+
+    def test_a_restart_is_never_started_twice(self):
+        self.assistant()
+        self.assertEqual(self.revive.restart_assistant(self.terms["t3"], "a"), "t9")
+        self.assertIsNone(self.revive.restart_assistant(self.terms["t3"], "b"))
+        self.assertEqual(len([c for c in self.calls if c[:2] == ["hc", "run"]]), 1)
+
+    def test_a_held_message_for_an_assistant_that_exited_starts_it_again(self):
+        self.term("t3", self.CLAUDE, {"herdr.role": "coordinator", "herdr.resume": self.RECORD})
+        self.news.hold("t3", "first")
+        self.news.hold("t3", "second")
+        self.terms["t3"]["foreground"] = self.SHELL
+        report = {}
+        self.news.held_pass(report)
+        self.assertEqual(self.typed(), [])
+        self.assertEqual(report["restarted"], [{"from": "t3", "to": "t9", "messages": 2}])
+        r = [c for c in self.calls if c[:2] == ["hc", "run"]][0]
+        self.assertEqual(r[-1], "first\n\nsecond")
+        self.assertEqual(self.held(), {})
+
+    # ---- tell-assistant -----------------------------------------------------------------------------------------------
+    def tell(self, row):
+        from unittest import mock
+        graph = {"core": {"name": "vm", "id": "c1"}, "assistants": []}
+        with mock.patch.object(self.machines, "directory", lambda refresh=False: ({"graph": graph}, [row])), \
+                mock.patch.object(self.machines, "nodes", lambda g: []), \
+                mock.patch.object(self.machines, "hc_json", lambda *a: self.news.hc_json(*a)):
+            return self.machines.tell("sp1", "Can you check SHOP-7?", sender="t1")
+
+    def test_tell_assistant_to_one_that_exited_restarts_it_and_says_so(self):
+        self.assistant()
+        r = self.tell({"target": "t3", "route": "", "address": "t3", "space": "sp1", "space_name": "shop"})
+        self.assertEqual(r["restarted"], "t9")
+        self.assertEqual(self.typed(), [])
+        self.assertIn("Can you check SHOP-7?", [c for c in self.calls if c[:2] == ["hc", "run"]][0][-1])
+
+    def test_tell_assistant_says_plainly_when_it_couldnt(self):
+        self.assistant()
+        self.next_address = None
+        with self.assertRaises(self.machines.Fail) as e:
+            self.tell({"target": "t3", "route": "", "address": "t3", "space": "sp1", "space_name": "shop"})
+        self.assertIn("plain shell", str(e.exception))
+        self.assertIn("nothing was typed", str(e.exception))
+        self.assertEqual(self.typed(), [])
+
+    def test_tell_assistant_on_another_machine_types_nothing_into_its_shell(self):
+        from unittest import mock
+        self.assistant()
+        with mock.patch.object(self.machines.subprocess, "run", lambda argv, **kw: self.news.run(argv[argv.index("--") + 1:])), \
+                mock.patch.object(self.machines, "guard", lambda a: None), \
+                mock.patch.object(self.machines, "typing", lambda *a, **k: None):
+            with self.assertRaises(self.machines.Fail) as e:
+                self.machines._deliver(["vm-b"], ["herdr-core"], "t3", "hello")
+        self.assertIn("plain shell", str(e.exception))
+        self.assertEqual(self.typed(), [])

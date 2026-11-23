@@ -6,6 +6,8 @@
 // (one JSON-RPC line in, its answer out), the documented way in that names nobody.
 // Shared core: the source is core/person.js; bin/sync-shared copies it into the mods in lib/COPIES.
 
+import { inFront, NOT_TYPED } from "./send.js";
+
 // The one request line: terminal.send for addr with text, no caller.
 export const personRequest = (addr, text) => JSON.stringify({ jsonrpc: "2.0", id: 1, method: "terminal.send", params: { terminal: addr, text } });
 
@@ -23,6 +25,12 @@ export function personResult(r) {
 // Sends text to addr as the person. exec: herdr's exec(command, args). When hc connect gave no answer (no sh, an hc
 // without it), hc send instead: the words still go, named as before.
 export async function sendAsPerson({ hc, exec }, addr, text) {
+  // SHEP-324: never into a terminal whose agent isn't in front (a plain shell would run the words)
+  const got = await hc(["get", addr, "--json"]).catch(() => null);
+  let k = null;
+  try { k = got?.code === 0 ? JSON.parse(got.stdout || "null") : null; } catch {}
+  const f = k?.state ? inFront(k) : null;
+  if (f === "shell" || f === "other") return { code: 1, stdout: "", stderr: JSON.stringify({ error: { kind: "no_agent", message: NOT_TYPED[f] } }) };
   const r = await exec("sh", ["-c", 'printf "%s\\n" "$1" | hc connect', "hc-send", personRequest(addr, text)]).catch(() => null);
   return personResult(r) ?? hc(["send", addr, text]);
 }

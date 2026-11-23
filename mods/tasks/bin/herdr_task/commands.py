@@ -931,18 +931,25 @@ def cmd_review_more(args):
         t.pop("review_out", None)
         s.dirty = True
         live = workers(s, t)
-        told, held = None, False
+        told, held, kept = None, False, False
         if live:
             ht, folder = own_path(), shlex.quote(s.loc["folder"])
-            from .news import send_or_hold
-            r = send_or_hold(live[-1]["address"],
-                     f"Your Assistant added one review round to {s.ref(t)}: {rounds + 1} in all. Have your final commit reviewed, "
-                     f"record it with `{ht} reviewed {s.ref(t)} --folder {folder} --report \"<findings, a line>\"`, then run ready again.")
-            told = live[-1]["address"] if r else None
+            from .news import hold, NO_AGENT, send_or_hold
+            note = (f"Your Assistant added one review round to {s.ref(t)}: {rounds + 1} in all. Have your final commit reviewed, "
+                    f"record it with `{ht} reviewed {s.ref(t)} --folder {folder} --report \"<findings, a line>\"`, then run ready again.")
+            r = send_or_hold(live[-1]["address"], note)
+            if r == NO_AGENT:
+                # SHEP-324: its agent exited just now: kept for the agent that restarts the task
+                hold(live[-1]["address"], note, "send", task=s.key(t))
+                kept = True
+            told = live[-1]["address"] if r and not kept else None
             held = r == "held"
         v = view(s, t)
     # #1207: "told" only once it went; held (someone writes to that agent) is said, as when it couldn't go
-    if told and held:
+    if kept:
+        end = (f"; its agent had stopped, so nothing was typed to it: the message is kept and goes to it once "
+               f"{s.ref(t)} is restarted.")
+    elif told and held:
         end = (f"; the message to {told} is held while its input holds unsent words: it goes once they're sent or "
                "cleared.")
     elif told:
@@ -951,7 +958,7 @@ def cmd_review_more(args):
         end = f"; couldn't send it to {live[-1]['address']}: tell it yourself."
     else:
         end = "; no agent is running to tell."
-    say(args, {**v, "rounds": rounds + 1, "told": None if held else told, "held": told if held else None},
+    say(args, {**v, "rounds": rounds + 1, "told": None if held else told, "held": told if held else None, **({"kept": True} if kept else {})},
         f"{s.ref(t)} may now use {rounds + 1} review rounds" + end)
 
 
@@ -1389,6 +1396,19 @@ def start_again(s, t, space, key=None, argv_json=None, message=None, parent=None
     unarchive(s, t)
     if clear_stopped(t):  # a restart: no longer stopped
         s.dirty = True
+    # SHEP-324: messages that came while its agent was stopped (never typed into its shell) go with its first message
+    from .news import hold, take_kept
+    kept = take_kept(s.key(t), [k["address"] for k in live_agents(s.key(t))])
+    try:
+        first = message or (nudge if kept else None)
+        return _start_again(s, t, space, key, argv_json, "\n\n".join(x for x in (first, kept) if x) or None, parent, nudge)
+    except BaseException:
+        if kept:
+            hold("", kept, "send", task=s.key(t))  # kept again for the next start
+        raise
+
+
+def _start_again(s, t, space, key, argv_json, message, parent, nudge):
     prev = last_agent(t)
     parent = parent_for(parent or (prev or {}).get("parent"), space)
     # The last agent's argv again, unless the task's agent, model, effort or flags changed since (edit).
@@ -1506,12 +1526,15 @@ def tell(s, t, msg, args, person=False):
         raise Fail(f"{s.ref(t)} started its agent moments ago ({fresh['address']}); send this again once it is up.")
     if live:
         # While the person writes to it, the message waits for them (news.py's held_pass).
-        from .news import person_send, send_or_hold
-        if not (person_send if person else send_or_hold)(live[-1]["address"], msg):
+        from .news import NO_AGENT, person_send, send_or_hold
+        r = (person_send if person else send_or_hold)(live[-1]["address"], msg)
+        if not r:
             raise Fail(f"hc send to {live[-1]['address']} failed")
-        if clear_stopped(t):  # a message to it carries on
-            s.dirty = True
-        return live[-1]["address"], False
+        if r != NO_AGENT:
+            if clear_stopped(t):  # a message to it carries on
+                s.dirty = True
+            return live[-1]["address"], False
+        # SHEP-324: its agent exited just now (a plain shell in front): never typed there; it starts again with it
     space = bare(args.space) if getattr(args, "space", None) else (t.get("space") or default_space())
     a, _ = start_again(s, t, space, getattr(args, "agent", None), getattr(args, "argv", None), message=msg)
     return a["address"], True

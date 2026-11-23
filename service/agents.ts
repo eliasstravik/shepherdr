@@ -12,6 +12,7 @@ import { RESTART } from "./paths.ts";
 import * as AG from "../core/agents.js";
 import { chatLabel } from "../core/spaces.js";
 import { kindOf } from "../core/chat-reader.js";
+import { inFront } from "../core/send.js";
 import * as LS from "../core/live-switch.js";
 import * as SC from "../core/settings.js";
 import { spawn } from "./spawn.ts";
@@ -233,14 +234,16 @@ export class Agents {
   async restart(addr: string, reader: any, pick: { kind: string; model?: string; effort?: string; speed?: string; perm?: string }) {
     const t: any = this.hub.terminals.get(addr);
     if (!t) throw new Error("That agent isn't here any more.");
-    const kind = kindOf(t) ?? reader?.kind ?? "claude";
+    // a plain shell in front: its agent exited (SHEP-324), so the shell says nothing of how it ran
+    const fg = inFront(t) === "shell" ? null : t.foreground;
+    const kind = (fg ? kindOf(t) : null) ?? reader?.kind ?? kindOf(t) ?? "claude";
     // (reader.argv: how an agent that ended ran, from its record: revive())
-    const old = { agent: kind, argv: t.foreground?.argv ?? reader?.argv ?? t.argv ?? [], session: sessionOf(kind, reader?.path ?? null) };
+    const old = { agent: kind, argv: fg?.argv ?? reader?.argv ?? t.argv ?? [], session: sessionOf(kind, reader?.path ?? null) };
     const built = argvFor({ agent: pick.kind, model: pick.model, effort: pick.effort, fast: speedOf(pick.speed), perm: pick.perm ?? current(kind, old.argv, {}, {}).perm }, old);
     const pane = t.labels?.["herdr.chat"] ?? "";
     const task = t.labels?.["herdr.task"];
     if (task) {
-      const r = await run(["herdr-task", "switch", task, "--folder", t.foreground?.cwd ?? t.cwd, "--argv", JSON.stringify(built.base), "--json"]);
+      const r = await run(["herdr-task", "switch", task, "--folder", fg?.cwd ?? t.cwd, "--argv", JSON.stringify(built.base), "--json"]);
       let out: any = {};
       try { out = JSON.parse(r.out || "{}"); } catch {}
       if (r.code !== 0 || !out.terminal) throw new Error((r.err || r.out).trim() || "herdr-task switch failed");

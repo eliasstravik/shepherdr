@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from .base import guard, hc_json, now, QUEUED, run, STORE
 from .settings import bare
 from .agents import (
-    agent_log, agent_running, asking, detail, from_person, live_agents, log_tail, said, starting, status_word,
+    agent_log, agent_running, asking, detail, from_person, front, live_agents, log_tail, said, starting, status_word,
     STATUSES, trust_asked,
 )
 from .sessions import session_of
@@ -309,10 +309,17 @@ def news_send(address, text, check=True):
     """Delivers news as the chat delivers the person's words: typed in, sent at once mid-turn (for
     Claude Code its "send now", Ctrl+Enter). Not as a message from this terminal: no <hc from>.
     False when it can't take it now (a dialog of its own is open, or the person is writing to it:
-    typing()): tried again next time. check=False: typing() was just asked."""
-    if check and typing(address):
+    typing()): tried again next time. check=False: typing() was just asked. Never typed into a terminal
+    whose agent isn't in front (SHEP-324: not_typed())."""
+    k = hc_json("get", address)
+    f = front(k)
+    if f == "shell":
+        return bool(not_typed(address, text, "news", k))
+    if f != "agent":
         return False
-    if codex_busy(hc_json("get", address)):
+    if check and typing(address, k):
+        return False
+    if codex_busy(k):
         return False
     env = {k: v for k, v in os.environ.items() if k != "HC_TERMINAL_ID"}
     guard(["hc"])
@@ -402,8 +409,13 @@ def steer(address, grace=STEER_GRACE):
 
 def person_send(address, text):
     """The person's message to an agent (herdr-task reply): sent now, a working one steered (see above). Held only
-    while the person writes in that agent's own box (typing()). Returns "sent", "held" or None (hc refused it)."""
-    if typing(address):
+    while the person writes in that agent's own box (typing()), or another program than its agent is in front. Returns
+    "sent", "held", NO_AGENT (a plain shell is in front: nothing typed, the caller restarts it) or None (hc refused it)."""
+    k = hc_json("get", address)
+    f = front(k)
+    if f == "shell":
+        return NO_AGENT
+    if f == "other" or typing(address, k):
         hold(address, text)
         return "held"
     if run(["hc", "send", address, text]).returncode != 0:
@@ -417,7 +429,14 @@ def person_send(address, text):
 
 
 def plain_send(address, text):
-    """An agent's message (hc send) to `address`; for Codex, its input box checked after (codex_settle)."""
+    """An agent's message (hc send) to `address`; for Codex, its input box checked after (codex_settle). Never typed
+    into a terminal whose agent isn't in front (SHEP-324: not_typed())."""
+    k = hc_json("get", address)
+    f = front(k)
+    if f == "shell":
+        return bool(not_typed(address, text, "send", k))
+    if f != "agent":
+        return False
     if run(["hc", "send", address, text]).returncode != 0:
         return False
     if is_codex(hc_json("get", address)):
@@ -587,9 +606,15 @@ def suggested(k):
     return None
 
 
+_held_open = []  # the HELD this process has open under its lock: a hold() from inside held_pass uses it (no deadlock)
+
+
 @contextmanager
 def held_messages():
     """HELD under its lock (the scheduler and an agent's herdr-task may both write it)."""
+    if _held_open:
+        yield _held_open[-1]
+        return
     os.makedirs(STORE, exist_ok=True)
     with open(HELD + ".lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -598,25 +623,85 @@ def held_messages():
                 held = json.load(f)
         except (OSError, ValueError):
             held = {}
-        yield held
+        _held_open.append(held)
+        try:
+            yield held
+        finally:
+            _held_open.pop()
         tmp = f"{HELD}.{os.getpid()}.tmp"
         with open(tmp, "w") as f:
             json.dump(held, f)
         os.replace(tmp, HELD)
 
 
-def hold(address, text, how="send"):
+def hold(address, text, how="send", task=None):
     """Keeps a message for an agent the person is writing to, or one waiting on a question (a Mark up note, #1213);
     held_pass sends it once they've stopped, or it's answered. how: "send" (a plain hc send, as an agent's message)
-    or "news" (news_send)."""
+    or "news" (news_send). task: the task whose agent it is for (its key), when that agent has stopped: kept for the
+    agent that restarts the task (take_kept), however long that takes (TASK_KEEP_MS)."""
     with held_messages() as held:
-        held.setdefault(address, []).append({"text": text, "how": how, "at": now()})
+        held.setdefault(address, []).append({"text": text, "how": how, "at": now(), **({"task": task} if task else {})})
+
+
+# SHEP-324: a message for an agent that isn't in front of its terminal any more (it exited, or herdr-core lost it and
+# left a plain shell) is never typed there, where the shell would run it. NO_AGENT is send_or_hold's word for it.
+NO_AGENT = "no-agent"
+TASK_KEEP_MS = 14 * 86400000   # kept for a stopped task's next agent this long
+KEPT_INTRO = "While your agent was stopped, these messages came for you:"
+
+
+def is_assistant(k):
+    labels = (k or {}).get("labels") or {}
+    return labels.get("herdr.role") == "coordinator" or (k or {}).get("template") in ("assistant", "coordinator")
+
+
+def not_typed(address, text, how, k):
+    """A message for `address`, whose agent isn't in front (front(k) == "shell"): nothing is typed. An Assistant starts
+    again on its own conversation with the message as its first (revive.restart_assistant); a task's agent's message
+    is kept for the agent that restarts the task (take_kept). -> "restarted:<new address>", "kept", or None (neither:
+    not sent)."""
+    task = ((k or {}).get("labels") or {}).get("herdr.task")
+    if task:
+        hold(address, text, how, task=task)
+        return "kept"
+    if is_assistant(k):
+        from .revive import restart_assistant
+        new = restart_assistant(k, text)
+        if new:
+            return f"restarted:{new}"
+        hold(address, text, how)  # held_pass tries again (it waits a while between tries)
+        return "kept"
+    return None
+
+
+def take_kept(key, addresses=()):
+    """The messages kept for task `key`'s stopped agent (or held for one of its old terminals, `addresses`), taken out
+    for its new agent's first message: one text, or None."""
+    out = []
+    with held_messages() as held:
+        for addr, items in list(held.items()):
+            mine = [x for x in items if x.get("task") == key or addr in addresses]
+            if not mine:
+                continue
+            out += mine
+            items[:] = [x for x in items if x not in mine]
+            if not items:
+                held.pop(addr)
+    if not out:
+        return None
+    out.sort(key=lambda x: x.get("at") or 0)
+    return KEPT_INTRO + "\n\n" + "\n\n".join(x["text"] for x in out)
 
 
 def send_or_hold(address, text, how="send"):
-    """Sends it now, or holds it while the person is writing to that agent. Returns "sent",
-    "held", or None when it couldn't go (hc refused it)."""
-    if typing(address) or codex_busy(hc_json("get", address)):
+    """Sends it now, or holds it while the person is writing to that agent (or another program than its agent is in
+    front). Returns "sent", "held", NO_AGENT (its agent isn't running: a plain shell is in front; nothing was typed or
+    kept, the caller decides) or None when it couldn't go (hc refused it)."""
+    k = hc_json("get", address)
+    f = front(k)
+    if f == "shell":
+        return NO_AGENT
+    if f == "other" or typing(address, k) or codex_busy(k):
         hold(address, text, how)
         return "held"
     if how == "news":
@@ -626,17 +711,31 @@ def send_or_hold(address, text, how="send"):
 
 def held_pass(report):
     """Sends what was held for agents the person no longer writes to, one message per agent and
-    kind. Dropped once its agent has ended, or after NEWS_KEEP_MS."""
+    kind. Dropped once its agent has ended, or after NEWS_KEEP_MS; one kept for a stopped task's agent stays for the
+    agent that restarts it (take_kept). An Assistant whose agent exited starts again with them (SHEP-324)."""
     if not os.path.exists(HELD):
         return
+    restart = []
     with held_messages() as held:
         for addr, items in list(held.items()):
-            items[:] = [x for x in items if now() - (x.get("at") or 0) < NEWS_KEEP_MS]
+            items[:] = [x for x in items if now() - (x.get("at") or 0) < (TASK_KEEP_MS if x.get("task") else NEWS_KEEP_MS)]
             k = hc_json("get", addr) if items else None
-            if not k or k.get("state") != "live":
-                held.pop(addr)
+            f = front(k)
+            if f == "gone":
+                items[:] = [x for x in items if x.get("task")]
+                if not items:
+                    held.pop(addr)
                 continue
-            if typing(addr, k) or codex_busy(k) or status_word(k) == "blocked":
+            if f == "shell":
+                # never typed into its shell: a task's waits for its next agent, an Assistant's starts it again
+                task = ((k or {}).get("labels") or {}).get("herdr.task")
+                for x in items:
+                    if task:
+                        x["task"] = task
+                if not task and is_assistant(k):
+                    restart.append((k, list(items)))
+                continue
+            if f == "other" or typing(addr, k) or codex_busy(k) or status_word(k) == "blocked":
                 continue  # blocked: on a question card (#1213), and hc send would answer its dialog
             for how in ("news", "send"):
                 batch = [x for x in items if x.get("how", "send") == how]
@@ -649,3 +748,15 @@ def held_pass(report):
                     report.setdefault("held", []).append({"to": addr, "messages": len(batch)})
             if not items:
                 held.pop(addr)
+    # outside the lock: the restart takes a while
+    from .revive import restart_assistant
+    for k, items in restart:
+        new = restart_assistant(k, "\n\n".join(x["text"] for x in items))
+        if new:
+            with held_messages() as held:
+                left = [x for x in held.get(k["address"], []) if x not in items]
+                if left:
+                    held[k["address"]] = left
+                else:
+                    held.pop(k["address"], None)
+            report.setdefault("restarted", []).append({"from": k["address"], "to": new, "messages": len(items)})

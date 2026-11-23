@@ -26,8 +26,9 @@ test("sent through hc connect, never hc send", async () => {
   const r = await sendAsPerson(f.io, "vm/t5", "hello");
   expect(r.code).toBe(0);
   expect(JSON.parse(r.stdout).started).toBe(true);
-  expect(f.calls).toHaveLength(1);
-  const [, cmd, , script, , line] = f.calls[0];
+  const sends = f.calls.filter((c) => c[0] === "exec");
+  expect(sends).toHaveLength(1);
+  const [, cmd, , script, , line] = sends[0];
   expect(cmd).toBe("sh");
   expect(script).toContain("hc connect");
   expect(JSON.parse(line).params).toEqual({ terminal: "vm/t5", text: "hello" });
@@ -44,7 +45,7 @@ test("no answer from hc connect: hc send still sends the words", async () => {
   const f = fake("", 127);
   const r = await sendAsPerson(f.io, "t5", "hello");
   expect(r.code).toBe(0);
-  expect(f.calls.map((c) => c[0])).toEqual(["exec", "hc"]);
+  expect(f.calls.filter((c) => c[1] !== "get").map((c) => c[0])).toEqual(["exec", "hc"]);
   expect(personResult({ stdout: "not json" })).toBeNull();
 });
 
@@ -54,5 +55,18 @@ test("asPerson: only a plain send goes as the person", async () => {
   await h(["send", "t5", "hi"]);
   await h(["keys", "t5", "esc"]);
   await h(["send", "t5", "hi", "--force"]);
-  expect(f.calls.map((c) => c[0] === "exec" ? "connect" : c[1])).toEqual(["connect", "keys", "send"]);
+  expect(f.calls.filter((c) => c[1] !== "get").map((c) => c[0] === "exec" ? "connect" : c[1])).toEqual(["connect", "keys", "send"]);
+});
+
+// SHEP-324: a plain shell where the agent was (herdr-core lost it, or it exited): the words never go, the window says why.
+test("a plain shell in front: nothing sent, refused in plain words", async () => {
+  const calls = [];
+  const io = {
+    exec: async (...a) => { calls.push(["exec", ...a]); return { code: 0, stdout: '{"id":1,"jsonrpc":"2.0","result":{}}', stderr: "" }; },
+    hc: async (args) => { calls.push(["hc", ...args]); return { code: 0, stdout: JSON.stringify({ state: "live", foreground: { name: "zsh", argv: ["-zsh"] } }), stderr: "" }; },
+  };
+  const r = await sendAsPerson(io, "t5", "hello");
+  expect(r.code).not.toBe(0);
+  expect(refusal(r).kind).toBe("no_agent");
+  expect(calls.map((c) => c[1])).toEqual(["get"]);
 });
