@@ -32,12 +32,12 @@ herdr-artifact update <id> ./report --note "what changed"     # a new version; t
 ## The starter style
 
 Start from this, so the page looks at home in light and dark, on a phone and on a desktop.
-Black and white; colour only says a status (`good`, `warn`, `bad`). Wrap a wide table in
+Black and white; colour only says a status (`good`, `warn`, `bad`) or a link (`--link`, the app's link blue). Wrap a wide table in
 `<div class="scroll">`.
 
 ```css
-:root { color-scheme: light dark; --fg: #111; --bg: #fff; --muted: #666; --line: #ddd; --good: #1a7f37; --warn: #9a6700; --bad: #cf222e; }
-@media (prefers-color-scheme: dark) { :root { --fg: #eee; --bg: #111; --muted: #999; --line: #333; --good: #3fb950; --warn: #d29922; --bad: #f85149; } }
+:root { color-scheme: light dark; --fg: #111; --bg: #fff; --muted: #666; --line: #ddd; --good: #1a7f37; --warn: #9a6700; --bad: #cf222e; --link: #1d4ed8; }
+@media (prefers-color-scheme: dark) { :root { --fg: #eee; --bg: #111; --muted: #999; --line: #333; --good: #3fb950; --warn: #d29922; --bad: #f85149; --link: #8ab4f8; } }
 * { box-sizing: border-box; }
 body { margin: 0 auto; padding: 16px; max-width: 720px; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--fg); background: var(--bg); overflow-wrap: anywhere; }
 h1 { font-size: 22px; line-height: 1.25; margin: 0 0 12px; }
@@ -51,7 +51,7 @@ table { border-collapse: collapse; width: 100%; font-size: 15px; }
 th, td { text-align: left; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
 pre { overflow-x: auto; padding: 12px; border: 1px solid var(--line); border-radius: 6px; }
 pre, code { font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
-a { color: inherit; }
+a { color: var(--link); text-underline-offset: 3px; }
 button { font: inherit; padding: 8px 14px; border: 1px solid var(--fg); border-radius: 6px; background: var(--fg); color: var(--bg); }
 .good { color: var(--good); } .warn { color: var(--warn); } .bad { color: var(--bad); }
 ```

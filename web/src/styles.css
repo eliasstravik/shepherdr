@@ -40,10 +40,11 @@ div.b[data-menu]{cursor:pointer}
 .md p,.md ul,.md ol,.md table,.md blockquote,.md .code.block{margin:8px 0}
 .md ul,.md ol{padding-left:22px}.md li+li{margin-top:2px}
 .md h1,.md h2,.md h3,.md h4{margin:12px 0 4px;font-size:16px;line-height:24px;font-weight:600}
-.md a:not(.lk){text-decoration:underline;text-decoration-color:var(--line2);text-underline-offset:3px;color:inherit}
 .md strong{font-weight:600}
 .md code{font:13px/20px ui-monospace,SFMono-Regular,Menlo,monospace;padding:1px 4px;border-radius:6px;background:var(--control);cursor:pointer}
 .md code[data-copied]{background:var(--control2)}
+/* code or a file path that is a link: the link's blue, on a faint tint of it */
+.md a code{color:inherit;background:color-mix(in srgb,var(--link) 12%,transparent)}
 .md pre{margin:0;flex:1;min-width:0;overflow-x:auto;font:13px/20px ui-monospace,SFMono-Regular,Menlo,monospace}
 .md pre code{padding:0;background:none;cursor:text}
 .md .code.block{align-items:flex-start;padding:8px 4px 8px 12px}
