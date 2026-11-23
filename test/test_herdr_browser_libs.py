@@ -269,15 +269,18 @@ class Arm64Chromium(unittest.TestCase):
     fake_ldd = MissingLibraries.fake_ldd
     ldd_checked = MissingLibraries.ldd_checked
     os_release = MissingLibraries.os_release
+    tool_dirs = ("/usr/bin", "/bin")
 
     def run_hb(self, *args, arch="aarch64", extra=None):
         # PATH: this machine's tools minus any real Chrome or Chromium, so only the test's fakes can be found
         tools = os.path.join(self.tmp, "tools")
         if not os.path.isdir(tools):
             os.makedirs(tools)
-            for d in ("/usr/bin", "/bin"):
-                for n in os.listdir(d) if os.path.isdir(d) else []:
-                    if "chrom" in n or n.startswith("google-chrome") or os.path.exists(os.path.join(tools, n)):
+            # the first folder with a name wins, as in a shell; lexists, as a dangling link "exists" for symlink()
+            # (GitHub's runner has broken links like grub-ntldr-img in both /usr/bin and /bin)
+            for d in self.tool_dirs:
+                for n in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+                    if "chrom" in n or n.startswith("google-chrome") or os.path.lexists(os.path.join(tools, n)):
                         continue
                     os.symlink(os.path.join(d, n), os.path.join(tools, n))
         env = {"HOME": self.home, "PATH": f"{self.fakes}:{self.bin}:{tools}", "HERDR_BROWSER_ARCH": arch,
@@ -307,6 +310,19 @@ class Arm64Chromium(unittest.TestCase):
         self.assertIn("ran --session herdr-a-1", p.stdout)
         self.assertEqual(self.ldd_checked(), sys_chromium)
         self.assertTrue(self.run_hb("--install").returncode == 0)
+
+    def test_tools_folders_that_overlap(self):
+        # GitHub's runner: the same names, dangling links among them, in two of the PATH's folders
+        a, b = os.path.join(self.tmp, "a"), os.path.join(self.tmp, "b")
+        for d in (a, b):
+            os.makedirs(d)
+            for n in os.listdir("/usr/bin"):
+                os.symlink(os.path.join("/usr/bin", n), os.path.join(d, n))
+            os.symlink(os.path.join(self.tmp, "gone"), os.path.join(d, "dangling-tool"))
+            self.exe(os.path.join(d, "same-tool"))
+        self.tool_dirs = (a, b)
+        self.test_system_chromium_is_used()
+        self.assertEqual(os.readlink(os.path.join(self.tmp, "tools", "same-tool")), os.path.join(a, "same-tool"))
 
     def test_playwright_chromium_comes_first(self):
         self.no_own_chrome()
