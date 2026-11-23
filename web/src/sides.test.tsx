@@ -1,10 +1,16 @@
 // SHEP-336: the chat swaps to the right of a pane with one tap, and each layout class keeps its own choice on this
 // device: a phone never splits, an unfolded fold or tablet and a desktop never move each other.
-import { beforeEach, expect, test } from 'bun:test'
+import { afterAll, beforeEach, expect, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 // a device's localStorage, before the module reads what it keeps
 const disk = new Map<string, string>()
+const had = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+// the other test files run in this same process: put it back as it was
+afterAll(() => {
+  if (had) Object.defineProperty(globalThis, 'localStorage', had)
+  else delete (globalThis as { localStorage?: unknown }).localStorage
+})
 Object.assign(globalThis, {
   localStorage: { getItem: (k: string) => disk.get(k) ?? null, setItem: (k: string, v: string) => void disk.set(k, v), removeItem: (k: string) => void disk.delete(k) },
 })
