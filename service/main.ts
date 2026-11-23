@@ -391,7 +391,7 @@ const screens = createScreens({
   send: (m) => void hub.send(m.address, m.text).catch(() => null),
   changed: () => model.rebuild(),
   // a Mac's Screen Sharing password: the secret SCREEN_SHARING_PASSWORD (Settings › Secrets), as herdr-desktop's doctor names it
-  password: () => secretValue(SCREEN_PASSWORD),
+  password: () => secretValue(SCREEN_PASSWORD, hub),
   machines: async () => ((await hub.call<{ machines: any[] }>("machine.list", {}, 8000)).machines ?? []).map((m) => ({ name: String(m.name), target: String(m.target ?? ""), via: !!m.via, state: String(m.state ?? "") })),
 });
 if (pluginOn("screens")) screens.start();

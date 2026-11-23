@@ -179,6 +179,8 @@ function BrowserView({ k, drive, ring, send, state, onFrameRef }: { k: string; d
         onTouchMove={(e) => touch('touchMove', e)}
         onTouchEnd={(e) => touch('touchEnd', e)}
       />
+      {/* why there is no page to show (its machine can't be reached, its tool isn't there), in its own line */}
+      {blank && state?.error && <div className="empty desk-why" role="status"><b>{state.error}</b><span>Shepherdr looks again by itself.</span></div>}
       {/* a phone's own keyboard types into the page through this box */}
       {drive && phone && <input ref={typed} aria-label="Type into the page" autoCapitalize="off" autoCorrect="off" style={{ position: 'absolute', opacity: 0, width: 1, height: 1, bottom: 0 }} onChange={(e) => { const t = e.target.value; e.target.value = ''; if (t) send({ type: 'text', text: t }) }} onKeyDown={(e) => { const k1 = e.key.length > 1 ? keyEvent(e.nativeEvent, 'keyDown') : null; if (k1) send(k1) }} />}
       {!drive && <button type="button" className="veil" aria-label="Live view. Take over to click and type" onClick={() => notice('Take over to click and type')} />}
@@ -322,7 +324,7 @@ function DesktopView({ k, drive, ring, apiRef, busy, onMac }: { k: string; drive
         ) : null}
         {!drive && status === 'live' && <button type="button" className="veil" aria-label="Live view. Take over to click and type" onClick={() => notice('Take over to click and type')} />}
       </div>
-      {drive && phone && (
+      {drive && phone && status === 'live' && (
         <div className="keys" style={{ background: 'none', padding: '8px 0 0' }}>
           <button type="button" aria-label="Keyboard" style={{ background: 'var(--control)', color: 'var(--fg)' }} onClick={() => typed.current?.focus()}><I n="term" c="s16" /></button>
           {KEYS.map(([l, sym, code]) => <button type="button" key={code} aria-label={`${code} key`} style={{ background: 'var(--control)', color: 'var(--fg)' }} onClick={() => rfb.current?.sendKey(sym, code)}>{l}</button>)}
