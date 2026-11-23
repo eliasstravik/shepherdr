@@ -316,8 +316,8 @@ button.fake .n span,button.fake>.i{color:var(--muted)}
 .crow{display:flex;align-items:center;min-width:0}
 .crow .cin{flex:1;min-width:0;text-overflow:ellipsis}
 .cin::placeholder{text-overflow:ellipsis}
-/* the agent's suggested replies above the box (SHEP-186), as smart replies are: one line of pills, the first softly
-   filled (the primary), the others outlined; a row that scrolls sideways (no bar) rather than wrapping. A long one
+/* the agent's suggested replies above the box (SHEP-186), as smart replies are: one line of pills, all alike (outlined,
+   no first pick filled); a row that scrolls sideways (no bar) rather than wrapping. A long one
    truncates in its pill; a short one (a "1") is never narrower than it is tall: at least the send button and, by touch,
    the 44 px fingertip (--sugh), its text centred. Hover only with a mouse, so a tap never leaves an outlined bubble grey.
    A held press is the app's (edit), never the phone's text selection or callout.
@@ -334,7 +334,6 @@ button.fake .n span,button.fake>.i{color:var(--muted)}
 .sugs::-webkit-scrollbar{display:none}
 .sug{--sugh:max(36px,var(--send));flex:none;max-width:min(280px,78%);min-width:var(--sugh);height:var(--sugh);padding:0 14px;border-radius:calc(var(--sugh)/2);text-align:center;box-shadow:inset 0 0 0 1px var(--line2);background:var(--canvas);color:var(--sub);font-size:var(--sec);line-height:var(--secl);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:pan-x}
 @media (hover:hover) and (pointer:fine){.sug:hover{background:var(--control)}}
-.sug.pri{background:var(--control2);box-shadow:none;color:var(--fg);font-weight:500}
 .sug:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .app.tap .sug{--sugh:max(var(--hit),var(--send))}
 

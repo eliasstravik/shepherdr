@@ -26,10 +26,11 @@ export function suggestionOf(chat: Chat | undefined, on: boolean): { id: string;
   return null
 }
 
-/** When the bubbles hide though the chat has some: anything in the box, a dictation or a call on, the agent working
- *  on a new reply, a message of yours still on its way (it outlives a reload), or this set already used. */
-export function repliesHidden(s: { text: string; files: number; dictating: boolean; call: boolean; working: boolean; sending: boolean; spent: boolean }): boolean {
-  return !!s.text.trim() || s.files > 0 || s.dictating || s.call || s.working || s.sending || s.spent
+/** When the bubbles hide though the chat has some: a dictation or a call on, the agent working on a new reply, a
+ *  message of yours still on its way (it outlives a reload), or this set already used. What is in the box never hides
+ *  them: they stay while you type, until you send or a new reply replaces them. */
+export function repliesHidden(s: { dictating: boolean; call: boolean; working: boolean; sending: boolean; spent: boolean }): boolean {
+  return s.dictating || s.call || s.working || s.sending || s.spent
 }
 
 // Settings › Agents › Suggested replies: on unless it's off (the snapshot's rows, as Everywhere has it)

@@ -110,22 +110,27 @@ test('the round button and Enter send only what is in the box; a suggested reply
   expect(chat).toContain('placeholder={placeholder}')
   expect(chat).not.toContain('Use suggestion')
   expect(chat).not.toContain("e.key === 'Tab'")
-  // a tap sends it at once as your message (no focus taken: no keyboard), a hold fills the box and focuses it
+  // a tap sends exactly its text at once as its own message, alone (the box's draft and files stay; no focus taken:
+  // no keyboard), a hold fills the box and focuses it
   const tap = chat.slice(chat.indexOf('const sendSug = '), chat.indexOf('const editSug = '))
-  expect(tap).toContain('send(key, key, t, false)')
+  expect(tap).toContain('send(key, key, t, false, true)')
   expect(tap).toContain('spent.add(sug.id)')
-  expect(chat).toMatch(/className=\{cx\('sug', primary && 'pri'\)\}\s*onMouseDown=\{keepFocus\}/)
+  expect(tap).not.toMatch(/setText|text\b(?!\))/)
+  expect(chat).toMatch(/className="sug"\s*onMouseDown=\{keepFocus\}/)
   const edit = chat.slice(chat.indexOf('const editSug = '), chat.indexOf('const filled'))
   expect(edit).toContain('setText(t)')
   expect(edit).toContain('box.focus()')
 })
 
-test('the bubbles hide in a call, while dictating, while typing, while the agent replies and while a send is on its way', () => {
+test('the bubbles stay while typing; they hide in a call, while dictating, while the agent replies and while a send is on its way', () => {
   const box = chat.slice(chat.indexOf('function Box('), chat.indexOf('const go = '))
   expect(box).toContain('const call = useUI((u) => u.call)')
   expect(box).toContain('const dictating = useDictating()')
   expect(box).toContain('const sending = useStore((s) => s.outbox.some((o) => o.chat === key))')
-  expect(box).toContain('repliesHidden({ text, files: files?.length ?? 0, dictating, call, working: busy, sending, spent: spent.has(sg.id) })')
+  const hidden = box.match(/repliesHidden\(\{([^}]*)\}\)/)![1]!
+  for (const x of ['dictating', 'call', 'working: busy', 'sending', 'spent: spent.has(sg.id)']) expect(hidden).toContain(x)
+  // what is in the box never hides them
+  expect(hidden).not.toMatch(/\btext\b|files/)
   // above the box, not in it; the chat keeps its bottom in view when they come
   expect(chat).toMatch(/\{sug && <Replies texts=\{sug\.texts\} onSend=\{sendSug\} onEdit=\{editSug\} \/>\}\s*<div\s+className="cbox"/)
   expect(chat).toContain('ro.observe(sc)')
@@ -147,7 +152,6 @@ test('the bubbles are one line of pills that scroll sideways, a long one truncat
   const sug = css.match(/\.sug\{([^}]*)\}/)![1]
   for (const x of ['flex:none', 'white-space:nowrap', 'overflow:hidden', 'text-overflow:ellipsis', 'user-select:none', '-webkit-touch-callout:none'])
     expect(sug).toContain(x)
-  expect(css).toContain('.sug.pri{')
   expect(css).not.toContain('.kbd')
 })
 
@@ -162,6 +166,17 @@ test('a short reply ("1") gets a bubble at least the send button and a fingertip
   const tap = css.match(/\.app\.tap \.sug\{([^}]*)\}/)![1]
   expect(tap).toMatch(/--sugh:max\([^;]*var\(--hit\)/)
   expect(tap).toContain('var(--send)')
+})
+
+test('every bubble looks the same: no filled first pick or other variant at rest', () => {
+  const css = read('../../src/ds.css')
+  // only the bubble's own rule, the touch size, a mouse's hover and the keyboard's focus ring style a bubble
+  const rules = [...css.matchAll(/([^{}]*\.sug\b[^{}]*)\{/g)].map((m) => m[1]!.trim().replace(/^.*\*\/\s*/s, ''))
+  for (const r of rules) expect(r).toMatch(/^(\.sug|\.app\.tap \.sug|\.sug:hover|\.sug:focus-visible)$/)
+  // and the code gives each the same class
+  const row = chat.slice(chat.indexOf('export function Replies('), chat.indexOf('export function pickOf('))
+  expect(row).not.toMatch(/primary|'pri'/)
+  expect(row).toContain("text={t} onSend={onSend}")
 })
 
 test("a tap never leaves an outlined bubble grey: its hover is only for a mouse", () => {
