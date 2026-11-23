@@ -167,3 +167,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - The demo's `?case=more` adds a third warning: close the warnings line on `?case=normal`, then open `?case=more` to see it come back. (from SHEP-301)
 
 - Touch `:active` in headless Chrome: CDP touch/tap gestures don't set `:active`; use mouse.down with `--blink-settings=primaryPointerType=4` to see pointer:coarse press styles. (from SHEP-303)
+
+- A throwaway service's API from curl: `Authorization: Bearer $(cat <SHEPHERDR_DATA>/token)` plus `x-shepherdr: 1`; GET /api/state shows the spaces list. Publish proof artifacts from the worktree (cwd), not from a scratch folder, or they land in the scratch folder's store. (from SHEP-296)
