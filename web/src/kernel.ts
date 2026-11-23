@@ -212,7 +212,7 @@ export interface UI {
   callCap: string
   callError: string | null
   /** files in each message box, not sent yet */
-  files: Record<string, { name: string; path?: string; id?: string }[]>
+  files: Record<string, { name: string; path?: string; id?: string; failed?: string }[]>
   /** the message each box replies to */
   reply: Record<string, ReplyQuote & { id: string }>
   /** the on-screen keyboard is up */

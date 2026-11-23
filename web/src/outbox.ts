@@ -9,7 +9,8 @@ export interface Outgoing {
   cid: string
   chat: string
   text: string
-  files: { name: string; path: string }[]
+  /** id: the box's own (its picture on this screen, send.ts localOf) */
+  files: { name: string; path: string; id?: string }[]
   /** the message it answers, and its quote to show at once */
   reply?: ReplyQuote & { id: string }
   /** when Send (or Retry) was tapped, by this screen's clock */
