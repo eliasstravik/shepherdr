@@ -221,6 +221,38 @@ class ProofAndFlags(Base):
         self.assertFalse(self.publish(title="Fix login · Proof")["proof"])       # no task: nothing to stay on
         self.assertFalse(self.publish(title="Proof of concept", task="SHOP-4")["proof"])
 
+    def task_list(self, slug, prefix, folder, ids):
+        tdir = os.path.join(self.dir, "tasks")
+        os.makedirs(tdir, exist_ok=True)
+        with open(os.path.join(tdir, slug + ".json"), "w") as f:
+            json.dump({"prefix": prefix, "folder": folder, "tasks": [{"id": i} for i in ids]}, f)
+        return tdir
+
+    def test_a_task_page_is_filed_under_its_tasks_folder_wherever_it_is_published_from(self):
+        """Published from a scratch folder, a task's proof goes to its task's folder, where ready looks."""
+        tdir = self.task_list("proj", "SHOP", os.path.realpath(self.folder), [4])
+        scratch = os.path.join(self.dir, "scratch")
+        os.makedirs(scratch)
+        here = os.getcwd()
+        os.chdir(scratch)
+        try:
+            with mock.patch.object(A, "SHEP", lambda rel: tdir if rel == ".herdr/tasks" else rel):
+                a = self.publish(title="Fix login · Proof", task="SHOP-4", proof=True, folder=None)
+                self.assertEqual(a["folder"], os.path.realpath(self.folder))
+                b = self.publish(title="Notes", task="SHOP-9", folder=None)       # a task no list has: here
+                self.assertEqual(b["folder"], os.path.realpath(scratch))
+                c = self.publish(title="Elsewhere", task="SHOP-4", folder=scratch)  # --folder still wins
+                self.assertEqual(c["folder"], os.path.realpath(scratch))
+                # two lists with that prefix both have #4: this agent's own list decides, else here
+                other = os.path.join(self.dir, "other")
+                os.makedirs(other)
+                self.task_list("other", "SHOP", other, [4])
+                self.assertEqual(self.publish(title="Two", task="SHOP-4", folder=None)["folder"], os.path.realpath(scratch))
+                with mock.patch.dict(os.environ, {"HERDR_BROWSER_TASK": "other#4"}):
+                    self.assertEqual(A.task_folder("SHOP-4"), other)
+        finally:
+            os.chdir(here)
+
     def test_pin_unpin_and_rename(self):
         a = self.publish(title="Plan")
         self.assertTrue(self.run_cmd(A.cmd_pin, id=a["id"])["pinned"])
