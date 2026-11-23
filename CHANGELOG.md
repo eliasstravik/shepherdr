@@ -1,11 +1,30 @@
 # Changelog
 
-## Next release
+## 3.2.5
+
+Full screen Browser and Desktop on a phone, a sidebar that's easier to use, and no more macOS keychain prompts.
 
 ### Once, after updating
 
 - On Android, reinstall the app once to get the dark bottom bar: remove the installed app and add it to the home
   screen again. An app installed before 3.2.3 keeps its old white bar, as Chrome rarely refreshes its colours itself.
+
+### The web app
+
+- Browser and Desktop open full screen: pinch to zoom and two fingers to pan; a tap clicks, a drag drags, a long press
+  right-clicks. A keyboard button brings up the phone's keyboard with a row of keys (Esc, Tab, Ctrl, Alt, Cmd, arrows,
+  Enter, Paste). Back leaves full screen.
+- Rename a machine from the sidebar: long-press or right click its heading. The menu also shows its real name, puts
+  its own name back, and opens Machine settings.
+- A long space name stays on one line in the sidebar, cut with "…", and the list never scrolls sideways.
+- "Switch to terminal" is now "View as terminal" ("View as chat" while it's on), with its own icon below a line.
+- Stop is a round stop button: a ring around a filled square.
+- A reaction you just added is a small pill again, not a wide bar until you reload.
+
+### On a Mac
+
+- Every Chrome Shepherdr starts (the desktop, artifact pictures) skips the macOS keychain, so the "Chromium Safe
+  Storage" question no longer pops up again and again.
 
 ## 3.2.4
 
