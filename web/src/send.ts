@@ -112,7 +112,7 @@ async function deliver(cid: string, pending: Promise<string>[]) {
     let r: { waiting?: boolean; waitsFor?: Outgoing['waitsFor']; at?: number }
     try {
       r = await retrying(
-        () => act<typeof r>({ type: 'send', chat: o.chat, text: o.text, attachments: files.map((f) => f.path), cid, reply: o.reply?.id, human: true, ...(o.hold ? { hold: true } : {}), ...(o.was ? { was: o.was } : {}) }, AbortSignal.timeout(SEND_TIMEOUT)),
+        () => act<typeof r>({ type: 'send', chat: o.chat, text: o.text, attachments: files.map((f) => f.path), cid, ...(o.reply?.task ? { replyTask: o.reply.task } : { reply: o.reply?.id }), human: true, ...(o.hold ? { hold: true } : {}), ...(o.was ? { was: o.was } : {}) }, AbortSignal.timeout(SEND_TIMEOUT)),
         first.at,
         { onWait: (offline) => patch((x) => (!!x.offline === offline ? {} : { offline: offline || undefined })) },
       )

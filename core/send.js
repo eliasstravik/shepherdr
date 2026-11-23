@@ -80,9 +80,11 @@ export function mentionedIn(text, tasks) {
   });
 }
 
-// The words as the agent gets them: the reply tag, the task tags, then the person's text.
-export function messageBody({ text, quote = null, tags = "" }) {
-  const reply = quote ? `<hc reply-to="${excerpt(quote, 80)}"/>\n` : "";
+// The words as the agent gets them: the reply tag, the task tags, then the person's text. task: a reply to a task
+// (the chat's Reply on a task row): its id on the reply tag, so the chat shows the quoted task; its tag line is in tags.
+/** @param {{ text: string, quote?: string | null, tags?: string, task?: string | null }} m */
+export function messageBody({ text, quote = null, tags = "", task = null }) {
+  const reply = quote ? `<hc reply-to="${excerpt(quote, 80)}"${task ? ` task="${attr(task)}"` : ""}/>\n` : "";
   return reply + tags + text;
 }
 
