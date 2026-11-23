@@ -210,38 +210,34 @@ async function main() {
   const skipped: string[] = []
   const rhythmOff: string[] = []
   try {
-    for (const [width, height] of [[390, 844], [820, 1180], [1024, 1366]] as const) {
-      for (const theme of ['light']) {
-        const ctx = await browser.newContext({ viewport: { width, height }, hasTouch: true, colorScheme: theme as 'light' })
-        await ctx.addInitScript(MIC)
-        const page = await ctx.newPage()
-        for (const s of SCENES) {
-          if (s.wide && width < 768) continue // a phone has no such button
-          await page.goto(base + (s.path ?? '/'), { waitUntil: 'networkidle' })
-          await page.evaluate(() => { localStorage.clear() })
-          await page.goto(base + (s.path ?? '/'), { waitUntil: 'networkidle' })
-          await page.waitForTimeout(300)
-          try {
-            for (const st of s.steps ?? []) { await step(page, st); await page.waitForTimeout(350) }
-          } catch (e) {
-            skipped.push(`${width}px · ${s.name}`)
-            continue
-          }
-          if (s.name === 'list') for (const o of await rhythm(page)) rhythmOff.push(`${width}px · ${o}`)
-          for (const m of await measure(page, ALLOW.map((a) => a.sel))) {
-            const hit = { scene: s.name, width, what: m.what, w: m.w, h: m.h }
-            all.push(hit)
-            if (!m.ok) bad.push(hit)
-          }
+    // the three widths at once, each in its own window; every screen starts from a fresh load with nothing remembered
+    await Promise.all(([[390, 844], [820, 1180], [1024, 1366]] as const).map(async ([width, height]) => {
+      const ctx = await browser.newContext({ viewport: { width, height }, hasTouch: true })
+      await ctx.addInitScript(MIC)
+      await ctx.addInitScript(() => { try { localStorage.clear() } catch { /* none */ } })
+      const page = await ctx.newPage()
+      for (const s of SCENES) {
+        if (s.wide && width < 768) continue // a phone has no such button
+        await page.goto(base + (s.path ?? '/'), { waitUntil: 'networkidle' })
+        await page.waitForTimeout(200)
+        try {
+          for (const st of s.steps ?? []) { await step(page, st); await page.waitForTimeout(300) }
+        } catch {
+          skipped.push(`${width}px · ${s.name}`)
+          continue
         }
-        await ctx.close()
+        if (s.name === 'list') for (const o of await rhythm(page)) rhythmOff.push(`${width}px · ${o}`)
+        for (const m of await measure(page, ALLOW.map((a) => a.sel))) {
+          const hit = { scene: s.name, width, what: m.what, w: m.w, h: m.h }
+          all.push(hit)
+          if (!m.ok) bad.push(hit)
+        }
       }
-    }
+      await ctx.close()
+    }))
     // the desktop, with a mouse: the same rhythm, denser
     const fine = await chromium.launch({ executablePath: chrome() })
     const page = await (await fine.newContext({ viewport: { width: 1280, height: 900 } })).newPage()
-    await page.goto(base, { waitUntil: 'networkidle' })
-    await page.evaluate(() => { localStorage.clear() })
     await page.goto(base, { waitUntil: 'networkidle' })
     await page.waitForTimeout(300)
     for (const o of await rhythm(page)) rhythmOff.push(`1280px (mouse) · ${o}`)
