@@ -1,5 +1,19 @@
 # Changelog
 
+## 3.2.10
+
+Web addresses in a terminal open with a tap, links are easier to see, and you can put your machines in your own order.
+
+### The web app
+
+- Web addresses in every terminal open with a tap or click, a long one that wraps opens whole, and links a program
+  marks as links work too. A long press or right click offers Open and Copy link. Only web pages open; other links
+  can be copied.
+- Links in the chat, on task lines and on artifact pages are now one clear link blue, easy to read on every bubble, in
+  light and dark.
+- The sidebar's machines can be dragged into your own order (hold, then move, on a phone), and a tap on a machine folds
+  its spaces away or shows them again.
+
 ## 3.2.9
 
 Suggested replies give you one bubble per option when an agent asks you to pick.
