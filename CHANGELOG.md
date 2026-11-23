@@ -2,7 +2,8 @@
 
 ## 3.2.8
 
-Every space can have its own icon, and every machine, this one too, gets a home space (~) that works like any space.
+Every space can have its own icon, every machine, this one too, gets a home space (~) that works like any space, and a
+task's chat can take the whole middle.
 
 ### The web app
 
@@ -16,6 +17,9 @@ Every space can have its own icon, and every machine, this one too, gets a home 
   can't be removed.
 - The home space shows # like any space, or the icon you give it, in the sidebar, chat header, space pickers, Send to
   and search.
+- Maximize a task's chat: it moves to the middle and stays there while you close the side pane, open Tasks or
+  Artifacts, press Esc or reload. Minimize puts it back in the pane; going to another space does too. On a phone it
+  opens as the task, as before.
 
 ### Tasks
 
