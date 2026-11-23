@@ -9,6 +9,7 @@ import { IC } from '@client/icons.ts'
 import { go, notice, openTask, useSnap } from '@client/kernel.ts'
 import type { Message, Snapshot } from '@shared/types.ts'
 import { spacesOf, taskRef } from '@shared/view.ts'
+import { parseTask } from '@core/mentions.js'
 
 marked.setOptions({ gfm: true, breaks: false })
 
@@ -83,7 +84,7 @@ function onCopy(e: MouseEvent) {
 
 const escMd = (t: string) => t.replace(/[\\\[\]]/g, (c) => `\\${c}`)
 
-/** Task names and #spaces as links: a picked `[#shop](space:…)` or `[@SHOP-2](task:…)`, a task's id the agent wrote
+/** Task names and #spaces as links: a picked `[#shop](space:…)` or `[@Fix login](task:SHOP-2…)`, a task's key the agent wrote
  *  (shown as the task's title, never its id) and a #space the list has. Code is left alone. */
 export function linked(text: string, snap: Snapshot | null, mentions: Message['mentions'] = []): string {
   if (!snap) return text
@@ -98,7 +99,11 @@ export function linked(text: string, snap: Snapshot | null, mentions: Message['m
       if (i % 2) return part
       return part
         .replace(/\[#([^\]\n]+)\]\(space:([^)\s]+)\)/g, (_, name: string, target: string) => `[#${escMd(name)}](#space=${encodeURIComponent(target)})`)
-        .replace(/\[@([^\]\n]+)\]\(task:([^)\s]+)\)/g, (_, ref: string, target: string) => `[${escMd(tasks.get(ref)?.title ?? ref)}](#task=${encodeURIComponent(tasks.get(ref)?.id ?? target)})`)
+        .replace(/\[@([^\]\n]+)\]\(task:([^)\s]+)\)/g, (_, words: string, target: string) => {
+          // SHEP-322: the task its target names (its key there); its words are its title (an older one's, its key)
+          const t = tasks.get(parseTask(target).ref) ?? tasks.get(words)
+          return `[${escMd(t?.title ?? (/^[A-Z][A-Z0-9]*-\d+$/.test(words) ? 'a task' : words))}](#task=${encodeURIComponent(t?.id ?? target)})`
+        })
         .replace(/(^|[^\w\[/=#-])([A-Z][A-Z0-9]*-\d+)\b(?!\]\()/g, (all, pre: string, ref: string) => {
           const t = tasks.get(ref)
           return t ? `${pre}[${escMd(t.title)}](#task=${encodeURIComponent(t.id)})` : all

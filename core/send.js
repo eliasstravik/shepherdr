@@ -61,14 +61,21 @@ export function taskTag(x, ref) {
   return `<hc task="${attr(ref.replace(/^#/, ""))}" title="${attr(x.title)}" state="${attr(x.status_text ?? x.state)}"${x.why ? ` why="${attr(x.why)}"` : ""} folder="${attr(x.folder)}">${String(x.prompt ?? "").slice(0, 500)}</hc>\n`;
 }
 
-// The tasks a message mentions: HAT-1 as written (or #HAT-1, @HAT-1 and a picked [@HAT-1](task:…), core/mentions.js); a
-// task without a prefix only as #4, never a bare number.
-// tasks: [{ ref, id, ... }] (the chat's folder's).
+// The tasks a message mentions (SHEP-322): by its title as written (a title of two words or more, or of ten letters or
+// more, so "Fix" never names one; case and spaces aside), or by its key: HAT-1 as written (or #HAT-1, @HAT-1 and a
+// picked [@…](task:HAT-1), core/mentions.js); a task without a prefix only as #4, never a bare number.
+// tasks: [{ ref, id, title, ... }] (the chat's folder's).
+const esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const words = (s) => String(s ?? "").replace(/\s+/g, " ").trim();
 export function mentionedIn(text, tasks) {
-  const t = String(text ?? ""), low = t.toLowerCase();
+  const t = String(text ?? ""), low = t.toLowerCase(), flat = words(t).toLowerCase();
   return (tasks ?? []).filter((x) => {
+    const title = words(x.title).toLowerCase();
+    if (title && (title.includes(" ") || title.length >= 10) && flat.includes(title) &&
+        new RegExp(`(^|[^\\p{L}\\p{N}])${esc(title).replace(/ /g, "\\s+")}(?![\\p{L}\\p{N}])`, "iu").test(t)) return true;
+    if (x.ref && new RegExp(`\\]\\(task:([^)\\s/]*/)?${esc(x.ref)}(\\?|\\))`, "i").test(t)) return true;
     if (!low.includes(String(x.ref ? x.ref : `#${x.id}`).toLowerCase())) return false;
-    const ref = x.ref ? `[#@]?${String(x.ref).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}` : `#${x.id}`;
+    const ref = x.ref ? `[#@]?${esc(x.ref)}` : `#${x.id}`;
     return new RegExp(`(^|[\\s([])${ref}\\b`, "i").test(t);
   });
 }

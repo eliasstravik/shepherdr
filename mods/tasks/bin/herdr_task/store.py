@@ -131,7 +131,7 @@ def prefixes_in_use(skip=None):
 
 
 def parse_ref(ref):
-    """"HAT-1", "hat-1", "#1", "1" or a label key "<slug>#1" -> (prefix or None, number)."""
+    """"HAT-1", "hat-1", "#1", "1" or a label key "<slug>#1" -> (prefix or None, number); else Fail (a title: find())."""
     r = str(ref).strip()
     if "#" in r[1:]:
         r = r.rsplit("#", 1)[-1]
@@ -142,6 +142,26 @@ def parse_ref(ref):
     if r.isdigit():
         return None, int(r)
     raise Fail(f"{ref!r} isn't a task id; use one like HAT-4 or 4.")
+
+
+def norm_title(text):
+    """A title as matched: case and runs of spaces ignored, quotes around it dropped."""
+    t = " ".join(str(text or "").split()).casefold()
+    return t[1:-1].strip() if len(t) > 1 and t[0] + t[-1] in ('""', "''", "\u201c\u201d") else t
+
+
+def by_title(tasks, text):
+    """The tasks (or schedules) a title names: those whose whole title it is, else those whose title holds it (SHEP-322)."""
+    q = norm_title(text)
+    if not q:
+        return []
+    exact = [t for t in tasks if norm_title(t.get("title")) == q]
+    return exact or [t for t in tasks if q in norm_title(t.get("title"))]
+
+
+def quoted(title):
+    """A title as said in a line: "Fix login"."""
+    return '"' + (" ".join(str(title or "").split()) or "untitled") + '"'
 
 
 def open_lock(path):
@@ -320,18 +340,34 @@ class Store:
         return self.data.get("prefix") or auto_prefix(os.path.basename(self.loc["folder"]))
 
     def ref(self, task):
-        """What people and agents call it: HAT-4."""
+        """Its hidden key, HAT-4: what commands, links and tags carry. Never shown to the person (SHEP-322):
+        people and agents' words name a task by its title (name())."""
         return f"{self.prefix}-{task['id']}"
 
-    def find(self, ref):
-        pre, n = parse_ref(ref)
-        if pre and pre != self.prefix:
-            raise Fail(f"{pre}-{n} isn't a task in {self.loc['folder']} (its tasks are {self.prefix}-n).")
-        for t in self.data["tasks"]:
-            if t["id"] == n:
-                return t
-        raise Fail(f"No task {self.prefix}-{n} in {self.loc['folder']}.")
+    def name(self, task):
+        """What people and agents call it: its title, in quotes ("Fix login")."""
+        return quoted(task.get("title"))
 
+    def find(self, ref):
+        """A task by its key (HAT-4, 4, #4, a label's key), else by its title: the exact title, else a unique part of
+        one (SHEP-322). Two or more that fit are refused with each listed, never a guess."""
+        try:
+            pre, n = parse_ref(ref)
+        except Fail:
+            pre = n = None
+        if n is not None and (not pre or pre == self.prefix):
+            for t in self.data["tasks"]:
+                if t["id"] == n:
+                    return t
+        hits = by_title(self.data["tasks"], ref)
+        if len(hits) == 1:
+            return hits[0]
+        if hits:
+            raise Fail(f"{len(hits)} tasks here fit {quoted(ref)}, so nothing was done. Name one by its key (for commands "
+                       f"only; never say it to the person) or its full title:\n" +
+                       "\n".join(f"  {self.ref(t)}  {t.get('state', 'todo'):<8} {' '.join(str(t.get('title') or '').split())}"
+                                  for t in hits[:12]) + (f"\n  … and {len(hits) - 12} more" if len(hits) > 12 else ""))
+        raise Fail(f"No task {quoted(ref)} in {self.loc['folder']}.")
 
     def new(self, title, prompt="", mode="here"):
         d = self.data

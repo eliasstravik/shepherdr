@@ -194,7 +194,7 @@ OWN_SECTIONS = {"Summary", "Details", "Proof"}
 
 def described(s, task, body, want):
     """The description a ready makes of the one there now (body), or None to leave it as it is: Shepherdr's marked part
-    replaced; an older unmarked one of Herdr's ("Task: SHEP-n" first) only while it holds nothing but its own sections;
+    replaced; an older unmarked one of Herdr's ("Task: SHEP-n" first, before SHEP-322) only while it holds nothing but its own sections;
     anything else is a person's or an agent's."""
     body = body or ""
     a, b = body.find(MARK_START), body.find(MARK_END)
@@ -231,29 +231,29 @@ def pr_describe(s, task, summary=None):
 
 
 def pr_title(s, task):
-    """The repo's commit titles read "SHEP-198: the task's title" (a squash merge adds "(#945)"): the
-    task's ref first, so the pull request stays findable by it. Its agent's own (--pr-title, #1087) when given."""
+    """The task's title (SHEP-322: no task number; a squash merge's commit then reads "Fix login (#945)"). An older
+    title that starts with its key keeps only the rest. Its agent's own (--pr-title, #1087) when given."""
     if task.get("pr_title"):
         return task["pr_title"]
     ref = s.ref(task)
     title = " ".join(str(task.get("title") or "").split())
-    rest = re.sub(rf"^{re.escape(ref)}\b[:\s-]*", "", title, flags=re.I)
-    return f"{ref}: {rest or ref}"
+    return re.sub(rf"^{re.escape(ref)}\b[:\s-]*", "", title, flags=re.I) or title or "Task"
 
 
 def pr_body(s, task, summary=None):
-    """Short: the task's ref, what ready said (summary), the details and its proof's title. Never the
+    """Short: what ready said (summary), the details and its proof's title (SHEP-322: no task key; its marks find it). Never the
     brief: that stays with the task in Shepherdr. Between its marks (#1208), so a later ready keeps what was added around
     it. Its agent's own (--pr-body, #1087) instead, as written, when given."""
     if task.get("pr_body"):
         return task["pr_body"]
-    lines = [MARK_START, f"Task: {s.ref(task)}"]
+    lines = [MARK_START]
     if summary and summary.strip():
-        lines += ["", "## Summary", "", summary.strip()]
+        lines += ["## Summary", "", summary.strip()]
     if (task.get("details") or "").strip():
         lines += ["", "## Details", "", task["details"].strip()]
     proof = (task.get("proof") or {}).get("title")
     if proof:
+        proof = re.sub(rf"^{re.escape(s.ref(task))}\b[:\s-]*", "", proof, flags=re.I) or proof
         lines += ["", "## Proof", "", f"Shepherdr's proof artifact: {proof}"]
     return "\n".join(lines + [MARK_END])
 

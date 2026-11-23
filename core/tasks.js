@@ -221,8 +221,10 @@ export function queueReason(list, task) {
   const wait = (task.after ?? []).filter((i) => byId.has(i) && byId.get(i).state !== "done");
   // Another folder's or machine's task (herdr-task --after WEB-2, vm-b:HAT-12): its state as
   // herdr-task last read it ("gone": removed, it holds nothing up).
-  const ext = (task.after_ext ?? []).filter((x) => !["done", "gone"].includes(x.state)).map((x) => x.ref);
-  if (wait.length || ext.length) return `after ${[...wait.map((i) => refOf(list, { id: i })), ...ext].join(", ")}`;
+  // SHEP-322: by title, never by key.
+  const ext = (task.after_ext ?? []).filter((x) => !["done", "gone"].includes(x.state))
+    .map((x) => (x.title ? `"${x.title}"` : x.machine ? `a task on ${x.machine}` : "a task in another folder"));
+  if (wait.length || ext.length) return `after ${[...wait.map((i) => `"${byId.get(i).title ?? ""}"`), ...ext].join(", ")}`;
   // In plain words, as herdr-task's queue_reason: its machine too busy (herdr-task tick's "held": "vm-a's memory is
   // 92% full", HERD-40).
   return task.held ? `Waits: ${task.held}` : "Starts soon";

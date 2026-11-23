@@ -24,8 +24,10 @@ describe("rows", () => {
     const find = (a) => terms[a] ?? null;
     expect(senderName("t1", "", { find })).toBe("Reviewer");
     expect(senderName("t2", "", { find })).toBe("Assistant");
-    expect(senderName("vm/t3", "", { find })).toBe("HERD-12 on vm");
-    expect(senderName("t9 shep-7-web", "", { find, taskOf: () => null })).toBe("SHEP-7");
+    // SHEP-322: a task's agent by its task's title (taskOf), never its key; one not in the lists is "Task"
+    expect(senderName("vm/t3", "", { find })).toBe("Task on vm");
+    expect(senderName("t9 shep-7-web", "", { find, taskOf: () => null })).toBe("Task");
+    expect(senderName("t9 shep-7-web", "", { find, taskOf: () => "Web client" })).toBe("Web client");
     expect(senderName("box/ppid:12", "From Coverage: hi")).toBe("Coverage");
     expect(senderName("person")).toBe("You");
     expect(unsigned("From HERD-76 (t12u): the words")).toBe("the words");
@@ -35,8 +37,8 @@ describe("rows", () => {
     const terms = { t75: { template: "herdr-assistant-mw3acvzz", labels: { "herdr.role": "coordinator" } }, t80: { name: "shep-4-fix" }, t81: {} };
     const find = (a) => terms[a] ?? null;
     expect(senderName("m3/t75", "", { find, machine: "vm", here: "m3" })).toBe("Assistant on m3");
-    expect(senderName("m3/t80", "", { find, machine: "vm", here: "m3" })).toBe("SHEP-4 on m3");
-    expect(senderName("m3/t81", "", { find, machine: "vm", here: "m3", taskOf: (a) => (a === "t81" ? "SHEP-9" : null) })).toBe("SHEP-9 on m3");
+    expect(senderName("m3/t80", "", { find, machine: "vm", here: "m3" })).toBe("Task on m3");
+    expect(senderName("m3/t81", "", { find, machine: "vm", here: "m3", taskOf: (a) => (a === "t81" ? "Fix login" : null) })).toBe("Fix login on m3");
     // its own chat: no "on"
     expect(senderName("m3/t75", "", { find, machine: null, here: "m3" })).toBe("Assistant");
     // an Assistant known only by its template

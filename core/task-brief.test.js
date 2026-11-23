@@ -21,6 +21,8 @@ test("the prompt is what the Assistant wrote: from 'Your task' to where it works
   // a task in its folder (no worktree line): up to its notes or how to finish
   expect(briefPrompt(launch().replace(/\n\nYou work in [^\n]*/, ""))).toBe(PROMPT);
   expect(briefPrompt("Hello")).toBe("");
+  // SHEP-322: the header names the task by its title in quotes (a colon in it too)
+  expect(briefPrompt(launch().replace("Your task, SHOP-3:", 'Your task, "Card: bigger on phones":'))).toBe(PROMPT);
 });
 
 test("the Settings block's lines, apart", () => {

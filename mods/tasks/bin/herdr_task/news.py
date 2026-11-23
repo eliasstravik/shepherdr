@@ -68,21 +68,22 @@ def stall_of(task, v, live):
 
 
 def news_line(s, t, v, event, words=None):
-    ref, title = s.ref(t), " ".join(t["title"].split())
+    # SHEP-322: the words name the task by its title; its key rides only in the tag, for commands.
+    ref, title = s.ref(t), s.name(t)
     attr = lambda x: str(x).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
     note = " ".join(str(t.get("agents_md") or "").split())
     said = " ".join(str(t.get("summary") or "").split())
-    text = {"ready": f"{ref} is ready: {title}" + (f" · {said}" if said else "") + (f" · For AGENTS.md: {note}" if note else ""),
-            "needs-you": f"{ref} needs you: {v.get('why') or 'Needs you'} ({title})",
-            "failed": f"{ref} failed: {v.get('why') or 'Agent stopped'} ({title})",
-            "stalled": f"{ref} {words} ({title})",
-            "working-again": f"{ref} is working again: {(t.get('back') or {}).get('why') or 'its agent is at work again'} ({title})",
+    text = {"ready": f"{title} is ready" + (f" · {said}" if said else "") + (f" · For AGENTS.md: {note}" if note else ""),
+            "needs-you": f"{title} needs you: {v.get('why') or 'Needs you'}",
+            "failed": f"{title} failed: {v.get('why') or 'Agent stopped'}",
+            "stalled": f"{title} {words}",
+            "working-again": f"{title} is working again: {(t.get('back') or {}).get('why') or 'its agent is at work again'}",
             # A schedule's run that only had something to say (ready --told): its words, for the space's chat.
-            "told": f"{ref} ({title}), a schedule's run, says: {words}",
+            "told": f"{title}, a schedule's run, says: {words}",
             # Its space's "When a task is accepted" command failed (after_accept.py): the task stays done.
-            "accept-failed": f"{ref} is done, but its \"When a task is accepted\" command failed: {words} ({title})",
-            "done": f"{ref} is done" + (": merged" if t.get("merged") else ": nothing to merge" if t.get("nothing_to_merge")
-                                        else ": accepted" if t.get("accepted_at") else "") + f" ({title})"}[event]
+            "accept-failed": f"{title} is done, but its \"When a task is accepted\" command failed: {words}",
+            "done": f"{title} is done" + (": merged" if t.get("merged") else ": nothing to merge" if t.get("nothing_to_merge")
+                                          else ": accepted" if t.get("accepted_at") else "")}[event]
     return f'<herdr-news task="{attr(ref)}" event="{event}">{text.replace("<", "‹").replace(">", "›")}</herdr-news>'
 
 

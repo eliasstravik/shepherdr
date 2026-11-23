@@ -17,9 +17,9 @@ type Out = {
 };
 
 /**
- * What each push alert says, as the window's toasts (core/toasts.js): an agent that needs you, "HERD-4 · Needs you" or
+ * What each push alert says, as the window's toasts (core/toasts.js): an agent that needs you, "Fix login · Needs you" (a task by its title, SHEP-322) or
  * "tt-repo Assistant · Needs you", why under it (an Assistant only by its space's Notify); a task whose agent finished,
- * ready to accept, "HERD-4 · Finished" under its name, a tap opening its Accept card; a task done; an Assistant's new
+ * ready to accept, "Fix login · Finished", a tap opening its Accept card; a task done; an Assistant's new
  * message ("New message").
  * Keyed so each goes once; each with its topic and space, which every device chooses by (Settings › Notifications).
  */
@@ -85,13 +85,15 @@ export function agentAlerts(terminals: Iterable<any>, snap: any, chatOf: (addres
     const chat = chatOf(k.address) ?? undefined;
     const task = chat?.includes("/") ? snap.tasks?.find((t: any) => t.id === chat.slice(0, chat.lastIndexOf("/"))) : null;
     const coord = !task && chat ? snap.places?.find((p: any) => p.chat === chat) : null;
-    const ref = a.task ?? (task ? taskWho(snap, task.id) : null) ?? (k.labels?.["herdr.task"] ? (/^([a-z][a-z0-9]*-\d+)/.exec(k.name ?? "")?.[1] ?? "").toUpperCase() : "");
-    const who = ref || (k.labels?.["herdr.role"] === "coordinator" || coord ? T.assistantWho(coord?.name) : k.program?.name ?? "Agent");
+    // its task's key: the one it names (herdr-task alert --task), else its helper's name's ("<key>-review")
+    const key = a.task ?? (task ? null : k.labels?.["herdr.task"] ? (/^([a-z][a-z0-9]*-\d+)/.exec(k.name ?? "")?.[1] ?? "").toUpperCase() : "");
     // SHEP-255: the task it is about, so Tasks shows it on that task's row: its chat's task, else its herdr.task
     // label's (a task's own helper, by its name "<ref>-…" on its machine: a task here is "<ref>", elsewhere "<machine>:<ref>"); none: no task's, Chat and notifications only
     const machineOf = String(k.address ?? "").includes("/") ? String(k.address).slice(0, String(k.address).indexOf("/")) : null;
-    const labelled = !task && k.labels?.["herdr.task"] && ref ? snap.tasks?.find((t: any) => t.id === (machineOf ? `${machineOf}:${ref}` : ref)) : null;
-    const of = task ?? labelled;
+    const labelled = key ? snap.tasks?.find((t: any) => t.id === (machineOf ? `${machineOf}:${key}` : key)) : null;
+    const of = labelled ?? task;
+    // SHEP-322: a task's agent by its task's title, never its key
+    const who = (of ? taskWho(snap, of.id) : "") || (k.labels?.["herdr.role"] === "coordinator" || coord ? T.assistantWho(coord?.name) : k.program?.name ?? "Agent");
     const place = of?.place ?? coord?.id;
     const notify = Boolean(a.about || task || k.labels?.["herdr.task"] || !place || notifies(snap, { go: { place } }));
     // SHEP-246: what the glance feed needs to keep only what is still true: its terminal finished, its machine, and a

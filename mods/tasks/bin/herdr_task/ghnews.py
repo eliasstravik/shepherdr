@@ -294,7 +294,7 @@ def main_check(s, base, w, report):
             lines.append(f"Merged since {base} was last green ({green[:7]}): " + "; ".join(x[:120] for x in since[-20:]) + ".")
         ours = w.get("merged") or []
         if ours:
-            lines.append("Tasks merged while it was watched: " + "; ".join(f"{m['ref']} {m['title']} (#{m['pr']})" for m in ours[-10:]) + ".")
+            lines.append("Tasks merged while it was watched: " + "; ".join(f"\"{m['title']}\" (#{m['pr']}, key {m['ref']})" for m in ours[-10:]) + ".")
         tail = log_tail(repo, failed[0].get("databaseId") or run_id(failed[0].get("url"))) if failed else None
         if tail:
             lines.append(f"The end of {failed[0].get('workflowName') or 'its'} log:\n{tail}")

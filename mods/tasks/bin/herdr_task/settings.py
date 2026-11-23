@@ -783,8 +783,9 @@ def space_base(s, space=None):
 
 
 # Shepherdr settings > Tasks > Branch names (tasks.branch, #570): a folder's new task branches.
-# {n}: the task's number, {key}: its id (SHEP-4), {slug}: its title's words. Unset: this.
-BRANCH_PATTERN = "task/{n}-{slug}"
+# {slug}: its title's words (SHEP-322: the default, -2, -3 when taken); {n} its number and {key} its key still work
+# for a pattern someone set before. Unset: this.
+BRANCH_PATTERN = "task/{slug}"
 
 
 def branch_pattern_problem(pattern):
@@ -792,8 +793,8 @@ def branch_pattern_problem(pattern):
     p = str(pattern or "").strip()
     if not p:
         return None
-    if "{n}" not in p and "{key}" not in p:
-        return "Put {n} or {key} in it, so each task's branch is its own."
+    if "{slug}" not in p and "{n}" not in p and "{key}" not in p:
+        return "Put {slug} in it (the task's title), so each task's branch is its own."
     if re.search(r"\{(?!(?:n|key|slug)\})[^}]*\}", p):
         return "Only {n}, {key} and {slug} can be filled in."
     sample = p.replace("{n}", "4").replace("{key}", "ABC-4").replace("{slug}", "fix-login")

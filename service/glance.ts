@@ -91,8 +91,6 @@ const today = (now: number) => { const d = new Date(now); d.setHours(0, 0, 0, 0)
 export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()): Glance {
   const places = new Map<string, any>((snap.places ?? []).map((p: any) => [p.id, p]));
   const spaceOf = (id?: string) => (id ? places.get(id) : null);
-  /** a task's short name: its ref, without the machine ("VIBE-10", not "m3:VIBE-10"; the machine is its own field) */
-  const ref = (id: string) => id.slice(id.lastIndexOf(":") + 1);
   const items: Item[] = [];
   const taskRow = (t: any) => {
     const sp = spaceOf(t.place);
@@ -101,7 +99,7 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()):
   };
   const tasks = new Map<string, any>((snap.tasks ?? []).map((t: any) => [t.id, t]));
   const taskItem = (t: any, kind: Kind, at?: number): Item => ({ key: `task:${t.id}`, kind, type: "task", tag: t.id, task: t.id,
-    title: clip(`${ref(t.id)} · ${kind === "working" ? "Working" : kind === "done" ? "Done" : "Needs you"}`, WATCH_TITLE), body: clip(t.name, WATCH_BODY), ...taskRow(t), ...(at ? { at } : {}), alert: false, url: urlOf(t.place, t.id) });
+    title: clip(`${t.name} · ${kind === "working" ? "Working" : kind === "done" ? "Done" : "Needs you"}`, WATCH_TITLE), body: clip(t.name, WATCH_BODY), ...taskRow(t), ...(at ? { at } : {}), alert: false, url: urlOf(t.place, t.id) });
   // Needs you: what the web app's Tasks panel lists there, in its order (web/shared/needs-you.ts, SHEP-250): tasks only
   // (SHEP-255). Each says what its push alert says; one that isn't pushed (its space's Notify keeps it quiet) lists
   // without alerting

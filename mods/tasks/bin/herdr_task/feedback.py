@@ -346,7 +346,8 @@ def queue_news(to, text):
 def news_line(ref, title, line, details, key):
     attr = lambda x: str(x).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
     more = one_line(details, 900)
-    text = f"{ref} feedback: {line}" + (f" · {more}" if more else "") + f" ({one_line(title or 'Shepherdr', 80)})"
+    # SHEP-322: named by its task's title; the key rides only in the tag.
+    text = (f"\"{one_line(title, 80)}\" feedback: " if title else "Feedback: ") + line + (f" · {more}" if more else "")
     return f'<herdr-news task="{attr(ref)}" event="feedback" key="{key}">{text.replace("<", "‹").replace(">", "›")}</herdr-news>'
 
 

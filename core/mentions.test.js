@@ -121,10 +121,15 @@ test("a message with both kinds splits into spaces and tasks; the window's plain
   expect(hasMention("[@x](space:y) [#y](task:z)")).toBe(false);
   expect(split(text)).toEqual([
     { text: "tell " }, { mention: { name: "shop", target: "vm-demo/sp-shop", id: "sp-shop", route: "vm-demo" } },
-    { text: " about " }, { task: { ref: "SHOP-2", target: "vm-demo/SHOP-2?folder=~/dev/shop", route: "vm-demo", folder: "~/dev/shop" } }, { text: "." },
+    { text: " about " }, { task: { ref: "SHOP-2", target: "vm-demo/SHOP-2?folder=~/dev/shop", route: "vm-demo", folder: "~/dev/shop", name: "SHOP-2" } }, { text: "." },
   ]);
   expect(plain(text, new Set(["sp-shop"]), null, (t) => (t.ref === "SHOP-2" ? "Fix the checkout total rounding" : null))).toBe(
-    "tell `#shop · vm-demo` about `@SHOP-2 · Fix the checkout total roun… · vm-demo`.");
+    "tell `#shop · vm-demo` about `@Fix the checkout total roun… · vm-demo`.");
+  // SHEP-322: a picked task's words are its title; its key rides in the target only
+  const titled = taskToken({ ref: "SHOP-2", title: "Fix [the] login", route: "vm-demo", folder: "~/dev/shop" });
+  expect(titled).toBe("[@Fix the login](task:vm-demo/SHOP-2?folder=~/dev/shop)");
+  expect(split(titled)[0].task).toMatchObject({ ref: "SHOP-2", name: "Fix the login" });
+  expect(plain(titled, null, null, () => null)).toBe("`@Fix the login · vm-demo`");
 });
 
 test("the list puts tasks waiting on you and at work first, Done last; IDs before titles", () => {

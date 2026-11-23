@@ -11,7 +11,7 @@ import { AgentField, pickFor, type Pick } from '@client/picker.tsx'
 import { edge } from '@client/resize.ts'
 import { Btn, Cnt, cx, Empty, Hd, I, IB, Row } from '@client/ui.tsx'
 import type { MergeEvidence, Snapshot, Task } from '@shared/types.ts'
-import { askedWords, isEverything, machineLabel, nowGroups, onBranch, placeDown, reposOf, spaceLabel, spaceOnFolder, spacesOf, etaOf, leftWords, statusWord, taskChat, taskLine, taskRef, taskWhen, tasksIn, tstate, workKey, workName, workWords, type Repo } from '@shared/view.ts'
+import { askedWords, isEverything, machineLabel, nowGroups, onBranch, placeDown, reposOf, spaceLabel, spaceOnFolder, spacesOf, etaOf, leftWords, statusWord, taskChat, taskLine, taskWhen, tasksIn, tstate, workKey, workName, workWords, type Repo } from '@shared/view.ts'
 import { DoneRow } from '@plugins/chat/cards.tsx'
 import { StatusIcon } from './icon.tsx'
 import { chipsOf, choices, clean, filterCount, filterOn, filterTasks, hereOn, NO_FILTER, toggle, type GroupKey, type TaskFilter } from '@shared/task-filter.ts'
@@ -281,7 +281,7 @@ function TaskHead({ task: t, where, scrolled }: { task: Task; where: 'chat' | 'p
   )
 }
 
-/** the status line: its status, time left, its id as small print, its machine, its pull request */
+/** the status line: its status, time left, its machine, its pull request (SHEP-322: never its key) */
 function TaskTop({ task: t }: { task: Task }) {
   const snap = useSnap()
   if (!snap) return null
@@ -292,7 +292,6 @@ function TaskTop({ task: t }: { task: Task }) {
     <div className="status">
       {strong ? <b className={w.tone === 'red' ? 'c-red' : `c-${w.tone}`}>{w.word}</b> : w.word}
       {left && <span>· {left}</span>}
-      <span>· {taskRef(t)}</span>
       {t.work ? <span>· <WorkTag snap={snap} t={t} /></span> : <span>· {machineLabel(snap, t.on)}</span>}
       {t.pr && <span>· <a className="lk" href={t.pr.url} target="_blank" rel="noreferrer">PR #{t.pr.number}</a></span>}
     </div>

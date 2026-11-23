@@ -804,7 +804,7 @@ class BackToWork(unittest.TestCase):
         self.tick.back_pass(self.store, t, report)
         self.assertEqual((t["state"], report["working_again"]), ("running", ["SHEP-7"]))
         self.assertEqual(self.news.news_line(self.store, t, {}, "working-again"),
-                         '<herdr-news task="SHEP-7" event="working-again">SHEP-7 is working again: its agent is at work again (Web client)</herdr-news>')
+                         '<herdr-news task="SHEP-7" event="working-again">"Web client" is working again: its agent is at work again</herdr-news>')
 
     def test_a_dead_agents_shell_is_no_agent(self):
         """#1022: a Codex worker that died mid-turn left its plain shell, hc still saying "working" (as real hc does
@@ -883,7 +883,7 @@ class BackToWork(unittest.TestCase):
         self.tick.back_pass(self.store, t, report)
         self.assertEqual((t["state"], report["working_again"]), ("running", ["SHEP-7"]))
         self.assertEqual(self.news.news_line(self.store, t, {}, "working-again"),
-                         '<herdr-news task="SHEP-7" event="working-again">SHEP-7 is working again: its agent asked something (Web client)</herdr-news>')
+                         '<herdr-news task="SHEP-7" event="working-again">"Web client" is working again: its agent asked something</herdr-news>')
         # and the words: GitHub's news and the brief tell a woken Ready worker to ask with its question tool
         from herdr_task import ghnews, templates
         with open(os.path.join(ROOT, "templates", "worker.md")) as f:
@@ -2214,7 +2214,7 @@ class NewWorktrees(unittest.TestCase):
 
     def test_default_branch_name_stays(self):
         t, _ = self.new_worktree(self.task("Fix the login page"))
-        self.assertEqual(t["branch"], "task/1-fix-the-login-page")
+        self.assertEqual(t["branch"], "task/fix-the-login-page")  # SHEP-322: no number in it
 
     def write_settings(self, d):
         with open(self.settings_file, "w") as f:
@@ -2228,15 +2228,19 @@ class NewWorktrees(unittest.TestCase):
         self.assertEqual(self.git(path, "rev-parse", "--abbrev-ref", "HEAD"), "SHEP-1")
         self.write_settings({"everywhere": {"tasks": {"branch": "feat/{key}-{slug}"}}})
         self.assertEqual(self.new_worktree(self.task("Fix login"))[0]["branch"], "feat/SHEP-2-fix-login")
-        # one that can't be used (no {n} or {key}: every task would share it) falls back to the default
+        # SHEP-322: {slug} alone is fine: a name already taken gets -2
         self.write_settings({"everywhere": {"tasks": {"branch": "feat/{slug}"}}})
-        self.assertEqual(self.new_worktree(self.task("Fix login"))[0]["branch"], "task/3-fix-login")
+        self.assertEqual(self.new_worktree(self.task("Fix login"))[0]["branch"], "feat/fix-login")
+        self.assertEqual(self.new_worktree(self.task("Fix login"))[0]["branch"], "feat/fix-login-2")
+        # one that can't be used (nothing of the task in it: every task would share it) falls back to the default
+        self.write_settings({"everywhere": {"tasks": {"branch": "feat/x"}}})
+        self.assertEqual(self.new_worktree(self.task("Fix login"))[0]["branch"], "task/fix-login")
 
     def test_pattern_problems(self):
         problem = self.settings.branch_pattern_problem
-        for ok in ("", "task/{n}-{slug}", "{key}", "users/me/{key}-{slug}"):
+        for ok in ("", "task/{n}-{slug}", "{key}", "users/me/{key}-{slug}", "feat/{slug}"):
             self.assertIsNone(problem(ok), ok)
-        for bad in ("feat/{slug}", "x/{n}/{bad}", "{n} x", "-{n}", "a..{n}", "{key}.lock"):
+        for bad in ("feat/x", "x/{n}/{bad}", "{n} x", "-{n}", "a..{n}", "{key}.lock"):
             self.assertIsNotNone(problem(bad), bad)
 
     def test_an_exact_branch(self):
@@ -2262,7 +2266,7 @@ class NewWorktrees(unittest.TestCase):
         with self.assertRaisesRegex(self.Fail, "origin already has"):
             set_branch(self.store, t, "ABC-1")
         set_branch(self.store, self.task(), "ABC-2")
-        with self.assertRaisesRegex(self.Fail, "SHEP-2 already uses it"):
+        with self.assertRaisesRegex(self.Fail, 'the task "Check base" already uses it'):
             set_branch(self.store, t, "ABC-2")
         self.assertNotIn("branch", t)
         set_branch(self.store, t, "ABC-3")
@@ -3402,6 +3406,9 @@ class Store:
 
     def ref(self, t):
         return f"SHEP-{t['id']}"
+
+    def name(self, t):
+        return '"' + " ".join(str(t.get("title") or "").split()) + '"'
 
     def key(self, t):
         return f"f#{t['id']}"
@@ -4782,8 +4789,8 @@ class Feedback(unittest.TestCase):
         self.assertEqual(len(self.held), 1)
         to, text, how = self.held[0]
         self.assertEqual((to, how), ("t5", "news"))
-        self.assertRegex(text, r'^<herdr-news task="SHEP-7" event="feedback" key="[0-9a-f]{10}">SHEP-7 feedback: The Accept card shows an empty diff · '
-                               r'Goal: accept SHEP-7\. Expected: its 3 files\. \(Fix login\)</herdr-news>$')
+        self.assertRegex(text, r'^<herdr-news task="SHEP-7" event="feedback" key="[0-9a-f]{10}">"Fix login" feedback: The Accept card shows an empty diff · '
+                               r'Goal: accept SHEP-7\. Expected: its 3 files\.</herdr-news>$')
         # the same problem again (other small words): nothing more is sent
         code, out = self.say("the accept card shows the empty diff")
         self.assertIn("already has this one", out)
@@ -5374,7 +5381,7 @@ class TaskFlow(unittest.TestCase):
         # #1056: the mode a new session would get (none set on this home: default), not the old session's
         self.assertEqual(resume, ["claude", "--model", "opus", "--permission-mode", "default", "--resume", "S1"])
         self.assertEqual(message, self.commands.SWITCH_NUDGE)
-        self.assertEqual(self.said[-1], "SHEP-1: claude t2 resumed its session, t1 ended")
+        self.assertEqual(self.said[-1], '"Flow": claude t2 resumed its session, t1 ended')
 
     def test_a_resumed_claude_starts_in_the_configured_mode(self):
         """#1056: Claude Code resumes a session in the permission mode it ended in (a stuck agent left in plan or
@@ -5663,7 +5670,7 @@ class TaskFlow(unittest.TestCase):
         self.assertIn("Couldn't push task/1", str(e.exception))
 
     def test_the_pull_request_title_and_body_are_short(self):
-        """SHEP-198 (GitHub #924): the title follows the repo's commit titles ("SHEP-198: ..."), and the
+        """SHEP-198 (GitHub #924), SHEP-322: the title is the task's title (no task number), and the
         body is the summary, details and proof's title, never the brief."""
         import herdr_task.github as github
         wt, remote = self.task["worktree"], os.path.join(self.root, "remote.git")
@@ -5682,15 +5689,16 @@ class TaskFlow(unittest.TestCase):
         self.assertEqual(github.pr_open(self.store, self.task, "o/r", "The flow works now")["number"], 9)
         create = next(a for a in asked if a[:2] == ("pr", "create"))
         title, body = create[create.index("--title") + 1], create[create.index("--body") + 1]
-        self.assertEqual(title, f"{ref}: Flow")
+        # SHEP-322: the title alone, no task key in the title or the body
+        self.assertEqual(title, "Flow")
         self.assertNotIn("BRIEF-ONLY-LINE", body)
-        self.assertIn(f"Task: {ref}", body)
+        self.assertNotIn(ref, body)
         self.assertIn("The flow works now", body)
         self.assertIn("- Checked the flow", body)
-        self.assertIn(f"{ref}: Flow · Proof", body)
+        self.assertIn("Flow · Proof", body)
         self.assertLess(len(body), 400)
-        # A title that already names the ref doesn't name it twice.
-        self.assertEqual(github.pr_title(self.store, {**self.task, "title": f"{ref} Flow"}), f"{ref}: Flow")
+        # An older title that starts with its key keeps only the rest.
+        self.assertEqual(github.pr_title(self.store, {**self.task, "title": f"{ref} Flow"}), "Flow")
 
     def test_ready_keeps_the_pull_request_the_task_continues(self):
         """#828: the work pushed to an open pull request's own branch: ready takes that one, never a second."""
@@ -6456,8 +6464,8 @@ class ReadyMergeGit(unittest.TestCase):
         from herdr_task import launch
         wts = os.path.join(self.root, "worktrees")
         self.patch(launch, "settings_for", lambda s, space=None: {"tasks": {"worktree_root": wts}})
-        path = os.path.join(wts, "repo", "task-1-flow")
-        self.git(self.main, "worktree", "add", "-q", "-b", "task/1-flow", path, "main")
+        path = os.path.join(wts, "repo", "task-flow")
+        self.git(self.main, "worktree", "add", "-q", "-b", "task/flow-old", path, "main")
         self.commit(path, "work", "a.txt")
         self.git(path, "switch", "-q", "-c", "task/1-flow-reland")
         t = {"id": 1, "title": "Flow", "state": "running", "mode": "worktree", "agents": []}
@@ -7371,8 +7379,8 @@ class AcceptCommandNews(unittest.TestCase):
         self.news.news_pass({})
         self.assertEqual(len(self.sent), 1)
         self.assertIn('event="accept-failed"', self.sent[0][1])
-        self.assertIn('SHEP-4 is done, but its "When a task is accepted" command failed: it ended with exit code 3: '
-                      'dropdb: database is in use. All its output: /logs/f-4.log (Test databases)', self.sent[0][1].replace("&quot;", '"'))
+        self.assertIn('"Test databases" is done, but its "When a task is accepted" command failed: it ended with exit code 3: '
+                      'dropdb: database is in use. All its output: /logs/f-4.log', self.sent[0][1].replace("&quot;", '"'))
         self.assertTrue(self.task["after_accept"]["told"])
         self.news.news_pass({})
         self.assertEqual(len(self.sent), 1)
@@ -8622,7 +8630,7 @@ class Next32(unittest.TestCase):
             t = s.find(1)
             v, event, _ = news.news_state(s, t, list(self.live))
             self.assertEqual(event, "failed")
-            self.assertIn("APP-1 failed: Out of allowance until 3pm", news.news_line(s, t, v, event))
+            self.assertIn('"Fix login" failed: Out of allowance until 3pm', news.news_line(s, t, v, event))
 
     # ---- replying ----
 
@@ -8994,7 +9002,7 @@ class Schedules32(unittest.TestCase):
         self.assertTrue(news.untold(t))  # its words go to its space's chat, once (news_pass)
         with self.store_mod.Store(self.store_mod.locate(self.folder), write=False) as s:
             line = news.news_line(s, s.find(1), {}, "told", t["told"])
-        self.assertEqual(line, '<herdr-news task="APP-1" event="told">APP-1 (Morning brief), a schedule\'s run, says: '
+        self.assertEqual(line, '<herdr-news task="APP-1" event="told">"Morning brief", a schedule\'s run, says: '
                                'Two tasks are ready for review; nothing is stuck.</herdr-news>')
         self.assertFalse(news.untold({**t, "told_sent": 5}))
         self.assertEqual(self.auto("show", id="1")["last"]["ended"], "told")

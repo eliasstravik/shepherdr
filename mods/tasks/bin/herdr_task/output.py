@@ -115,9 +115,10 @@ def line(v):
     if v["status"] in ("ready", "merging") and not extra:
         extra = f"PR #{v['pr']['number']}" if v.get("pr") else v.get("branch") or ""
     elif v["status"] == "queued":
-        wait = [f"{v['prefix']}-{i}" for i in v.get("waiting_for") or []] + (v.get("waiting_ext") or [])
-        extra = v.get("reason") or ("after " + ", ".join(wait) if wait else "")
+        n = len(v.get("waiting_for") or []) + len(v.get("waiting_ext") or [])
+        extra = v.get("reason") or (f"after {n} other task{'s' if n > 1 else ''}" if n else "")
     elif v["status"] == "working" and v.get("report") and not extra:
         w = v["report"]
         extra = w["text"] + (f" · {w['done']}%" if w.get("done") is not None else "") + (f" · ~{minutes(w['left'])} left" if w.get("left") is not None else "")
-    return f"{v['ref']:<7} {word:<9} {v['title']}" + (f"  ({extra})" if extra else "")
+    # SHEP-322: the title first; the key last, for commands only
+    return f"{word:<9} {v['title']}" + (f"  ({extra})" if extra else "") + f"  [key {v['ref']}]"
