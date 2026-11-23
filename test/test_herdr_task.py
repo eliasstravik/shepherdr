@@ -1537,6 +1537,17 @@ class OwnBackgroundWork(unittest.TestCase):
         self.finished(-60_000)
         self.assertEqual(self.status()[0], "needs")
 
+    def test_its_status_line_says_so_in_another_language(self):
+        """#1259: a status line in Chinese (or another language) that waits on GitHub's checks is Working too;
+        one that waits on the person still Needs you."""
+        self.say(-200_000, "Pushed.")
+        for text, want in (("等待 GitHub 檢查完成", "working"), ("CI 檢查執行中，等待結果", "working"), ("CIの完了待ち", "working"),
+                           ("CI 검사 대기 중", "working"), ("Esperando a CI", "working"), ("Warte auf die Checks", "working"),
+                           ("Жду проверки CI", "working"), ("等待本人批准合併", "needs"), ("レビューの承認待ち", "needs"),
+                           ("Esperando tu aprobación", "needs"), ("修好了選單", "needs"), ("等待結果", "needs")):
+            self.task["progress"] = {"text": text, "set": self.clock - 120_000, "at": self.clock - 120_000}
+            self.assertEqual(self.status()[0], want, text)
+
     def test_codex_background_terminal(self):
         self.stamp(-300_000, {"type": "response_item", "payload": {"type": "function_call", "call_id": "c1", "name": "exec_command",
                                                                    "arguments": json.dumps({"cmd": "gh run watch", "yield_time_ms": 1000})}})
