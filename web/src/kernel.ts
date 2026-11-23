@@ -720,10 +720,11 @@ if (typeof window !== 'undefined') {
   writeMark(after.keep)
   // said once the page is on screen: an update while it was hidden is told when you come back
   const say = () => {
-    if (!after.said || document.visibilityState !== 'visible') return
+    const said = after.said
+    if (!said || document.visibilityState !== 'visible') return
     document.removeEventListener('visibilitychange', say)
-    setTimeout(() => notice(after.said!, 4000), 600)
     after.said = null
+    setTimeout(() => notice(said, 4000), 600)
   }
   if (after.said) {
     document.addEventListener('visibilitychange', say)
