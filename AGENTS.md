@@ -163,3 +163,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - A real carry-over try: `env -i` with `SHEPHERDR_FROM_SESSION=<old> SHEPHERDR_SESSION=<new>` throwaway sessions and a fake `claude` script first on PATH as the agent; `hc server stop` both and rm their `~/.local/state/herdr-core/<name>` after. (from SHEP-295)
 
 - Service children: spawn only via `service/spawn.ts` (Bun.spawn without env drops runtime process.env changes); `test/test_repo.py` enforces it. (from SHEP-294)
+
+- The demo's `?case=more` adds a third warning: close the warnings line on `?case=normal`, then open `?case=more` to see it come back. (from SHEP-301)
