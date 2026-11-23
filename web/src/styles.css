@@ -7,6 +7,8 @@
 /* the shell is a column: thin lines on top, the three columns, the phone's call wave and bar */
 .device,.app.phone .device{display:flex;flex-direction:column}
 .shell{flex:1}
+/* no bottom bar (a tablet, an unfolded phone): the inset under the gesture bar stays clear, the canvas painted there */
+.app:not(.phone) .device{padding-bottom:env(safe-area-inset-bottom)}
 .shell>.side,.shell>.col{grid-row:1}
 
 /* a thin line at the very top: the link to Shepherdr is gone */
