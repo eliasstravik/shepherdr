@@ -4,7 +4,7 @@
 import { useSyncExternalStore, type FC, type ReactNode } from 'react'
 import { buildId } from '@shared/build.ts'
 import type { Action, Chat, Message, ReplyQuote, ServerEvent, Snapshot, Task, UpdateStatus } from '@shared/types.ts'
-import { everything, placeOf, taskChat, taskOf, type Space } from '@shared/view.ts'
+import { everything, placeOf, taskChat, taskOf, type ListFilter, type Space } from '@shared/view.ts'
 import { clean, NO_FILTER, type TaskFilter } from '@shared/task-filter.ts'
 import type { IconName } from './icons.ts'
 import { catchLink } from './applink.ts'
@@ -161,7 +161,10 @@ export function installPlugins(plugins: ClientPlugin[], enabled: string[], user:
 
 /* ---------- what is on screen ---------- */
 
-export type Filter = 'Active' | 'Archived' | 'All'
+export type Filter = ListFilter
+
+/** what a machine's heading in the list shows (SHEP-342): its own filter, Active until changed */
+export const shownOn = (ui: { shown?: Record<string, ListFilter> }, machine: string): ListFilter => ui.shown?.[machine] ?? 'Active'
 
 /** an agent's browser or desktop on screen: whose (chat:<place>, task:<id>, machine:<key>), which, and who drives */
 export interface ScreenAt {
@@ -193,7 +196,8 @@ export interface UI {
   drawer: boolean
   /** the list is hidden (desktop) */
   sideOff: boolean
-  filter: Filter
+  /** SHEP-342: which spaces each machine's heading shows (by machine key; none: Active) */
+  shown: Record<string, Filter>
   /** your own terminal is open under the chat (desktop), under an open task */
   term: boolean
   tterm: boolean
@@ -260,7 +264,7 @@ function store(key: string, v: unknown) {
 }
 
 /** kept on this device across visits */
-const KEPT: (keyof UI)[] = ['sideOff', 'filter', 'shut', 'banner', 'term', 'tf']
+const KEPT: (keyof UI)[] = ['sideOff', 'shown', 'shut', 'banner', 'term', 'tf']
 const params = new URLSearchParams(typeof location === 'undefined' ? '' : location.search)
 export const launchHref = typeof location === 'undefined' ? '' : location.href
 
@@ -284,7 +288,7 @@ let state: State = {
     tab: 'Now',
     drawer: false,
     sideOff: false,
-    filter: 'Active',
+    shown: {},
     term: false,
     tterm: false,
     termTask: false,
@@ -337,7 +341,9 @@ export function setUI(patch: Partial<UI> | ((ui: UI) => Partial<UI>)) {
 
 /** Pick only what a part shows: it redraws when that changes. */
 export function useStore<T>(pick: (s: State) => T): T {
-  return useSyncExternalStore(subscribe, () => pick(state))
+  const get = () => pick(state)
+  // the same on a server render (tests draw parts with react-dom/server)
+  return useSyncExternalStore(subscribe, get, get)
 }
 export function useUI(): UI
 export function useUI<T>(pick: (ui: UI) => T): T
