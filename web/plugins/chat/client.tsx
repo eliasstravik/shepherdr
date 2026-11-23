@@ -29,7 +29,7 @@ import { landLaunchShare, putAway, useLanded, watchLastChat } from './share.ts'
 import { openSendTo } from './sendto.tsx'
 import { ReplyPress, repliesHidden, suggestionOf, suggestionsOn } from './suggest.ts'
 import { BoxThumb, openPreview, SentThumb, sourcesOf } from './thumbs.tsx'
-import { signOf } from './typing.ts'
+import { heldStep, signOf } from './typing.ts'
 import { newsRow, type NewsRow } from './news.ts'
 import { outOfView, setAway, useAway, type Waiting } from './away.ts'
 
@@ -689,12 +689,14 @@ export function WorkingSign({ chat, thread }: { chat: Chat | undefined; thread?:
   // a task's own status line, what its agent last said it does (not while it waits on you)
   const report = thread?.task?.report
   const sign = signOf(chat, report && !report.paused ? report.msg : undefined)
+  // SHEP-421: the line stays while the sign shows, the last step held until the next fades in over it
+  const step = chat ? heldStep(chat.key, sign) : ''
   if (!sign) return null
   const n = chat?.messages.length ?? 0
   const el = (
-    <div key={n} className="wsign" role="status" aria-label={sign.step || 'Working'}>
+    <div key={n} className="wsign" role="status" aria-label={step}>
       <span className="b wbub" aria-hidden="true"><span className="wdots"><i /><i /><i /></span></span>
-      {sign.step && <span className="wstep">{sign.step}</span>}
+      <span key={step} className="wstep">{step}</span>
     </div>
   )
   // SHEP-363: Stop sits on the working row (the box's round button is the voice call while it is empty), at its right

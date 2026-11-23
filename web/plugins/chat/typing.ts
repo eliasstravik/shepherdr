@@ -76,3 +76,19 @@ export function signOf(chat: Chat | undefined, said?: string): { step: string } 
   const own = said?.replace(/\s+/g, ' ').trim()
   return { step: own || stepWords(chat.doing || now?.doing || now?.title || '') }
 }
+
+// SHEP-421: the step line stays for as long as the sign shows. A chat's last named step is held here until the next
+// one replaces it (between tools its agent thinks or writes, and the step it was on still reads true), and goes with
+// the sign. Before any step is known it reads "Thinking".
+const held = new Map<string, string>()
+
+/** the words beside the sign: this step, else the last one this chat named while the sign showed, else "Thinking";
+ *  pass null when the sign doesn't show, which forgets it */
+export function heldStep(key: string, sign: { step: string } | null): string {
+  if (!sign) {
+    held.delete(key)
+    return ''
+  }
+  if (sign.step) held.set(key, sign.step)
+  return held.get(key) || 'Thinking'
+}

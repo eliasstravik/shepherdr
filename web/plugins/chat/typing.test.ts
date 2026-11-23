@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { signOf, stepWords } from './typing.ts'
+import { heldStep, signOf, stepWords } from './typing.ts'
 import type { Chat, Message, TurnActivity } from '@shared/types.ts'
 
 const msgs = (...m: Partial<Message>[]) => m.map((x, i) => ({ id: `m${i}`, who: 'agent', ...x })) as Message[]
@@ -83,4 +83,13 @@ test('a pattern, a glob or other code reads as the tool, not the code', () => {
 test('no step shows any shell characters, whatever the command', () => {
   for (const c of ["python3 - <<'EOF'", 'a && b', 'x | y', 'FOO=1 bar', 'node -e "x"', 'echo $HOME', '`date`', './run.sh --fast'])
     expect(stepWords(`Running ${c}`)).not.toMatch(/[<>|&$`='"]|--|\.\//)
+})
+
+test('heldStep keeps the last named step while the sign shows, Thinking before any, and forgets it with the sign', () => {
+  expect(heldStep('p:h', { step: '' })).toBe('Thinking')
+  expect(heldStep('p:h', { step: 'Reading app.ts' })).toBe('Reading app.ts')
+  expect(heldStep('p:h', { step: '' })).toBe('Reading app.ts')
+  expect(heldStep('p:other', { step: '' })).toBe('Thinking')
+  expect(heldStep('p:h', null)).toBe('')
+  expect(heldStep('p:h', { step: '' })).toBe('Thinking')
 })
