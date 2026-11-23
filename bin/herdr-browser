@@ -32,7 +32,8 @@
 # agent-browser itself (SHEP-156): any 0.41.x from the pin on, found on the PATH, or Shepherdr's own copy in
 # ~/.local/share/shepherdr/agent-browser/<pin>/ (preferred once there). When there's none, an agent's first command
 # installs it there: agent-browser's own release binary for this machine, checked against the pin's checksum (no
-# npm, no sudo), and Chrome for Testing with `agent-browser install` when no Chrome is found. Install and update run
+# npm, no sudo), and Chrome for Testing with `agent-browser install` when no Chrome is found. Linux arm64 has no
+# Chrome for Testing: there it uses a Chromium already here (Playwright's or the system's), or says how to install one. Install and update run
 # --install too. A failed try isn't repeated for 10 minutes, except by --install.
 # --install  makes sure a working agent-browser and Chrome are here (installs them), and says what it found
 # --status   what's here, as JSON, installing nothing (shepherdr doctor)
@@ -145,6 +146,10 @@ install_mine() {
 # Chrome for the binary picked: agent-browser's own check, else `agent-browser install` (Chrome for Testing into
 # ~/.agent-browser). -> 0, or 1 with $why.
 chrome() {
+  [ -n "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ] && [ -x "$AGENT_BROWSER_EXECUTABLE_PATH" ] && return 0
+  if arm64_linux && [ -z "$(chrome_bin)" ]; then
+    fix=$(chromium_hint); why="there's no Chrome download for Linux arm64, and no Chromium here"; return 1
+  fi
   "$bin" doctor --offline --quick --json 2>/dev/null | python3 -c 'import json,sys
 try: sys.exit(0 if any(c.get("id") == "chrome.installed" and c.get("status") == "pass" for c in json.load(sys.stdin)["checks"]) else 1)
 except Exception: sys.exit(1)' && return 0
@@ -206,6 +211,42 @@ chrome_bin() {
   for _f in "$HOME/.agent-browser/browsers"/chrome-*/chrome; do [ -x "$_f" ] && _c=$_f; done
   echo "$_c"
 }
+# Linux arm64 has no Chrome for Testing to download (GitHub #1264): there, with no Chrome of agent-browser's own, the
+# task browser runs a Chromium already on the machine: Playwright's (newest), else the system's. Ubuntu's snap one is
+# skipped: its confinement can't use a profile under a hidden folder. -> its path, or nothing.
+arm64_linux() {
+  [ "$(uname -s)" = Linux ] || return 1
+  case "${HERDR_BROWSER_ARCH:-$(uname -m)}" in aarch64|arm64) return 0 ;; esac
+  return 1
+}
+system_chromium() {
+  _c=
+  for _f in "${XDG_CACHE_HOME:-$HOME/.cache}/ms-playwright"/chromium-[0-9]*/chrome-linux*/chrome; do [ -x "$_f" ] && _c=$_f; done
+  [ -n "$_c" ] && { echo "$_c"; return; }
+  for _n in chromium chromium-browser google-chrome-stable google-chrome; do
+    _f=$(command -v "$_n" 2>/dev/null) || continue
+    case "$(readlink -f "$_f" 2>/dev/null || echo "$_f")" in /snap/*) continue ;; esac
+    # Ubuntu's chromium-browser package is a script that runs the snap
+    [ "$(head -c 2 "$_f" 2>/dev/null)" = "#!" ] && grep -q snap "$_f" 2>/dev/null && continue
+    echo "$_f"; return
+  done
+}
+# The one command that puts a Chromium here that the task browser can use (Ubuntu's is a snap, so Playwright's there).
+chromium_hint() {
+  _ids=$(grep -E '^(ID|ID_LIKE)=' "${HERDR_BROWSER_OS_RELEASE:-/etc/os-release}" 2>/dev/null | cut -d= -f2- | tr -d '"' | tr '\n' ' ')
+  case " $_ids " in
+    *" ubuntu "*) echo "npx playwright install chromium" ;;
+    *" debian "*) echo "sudo apt-get install -y chromium" ;;
+    *" fedora "*|*" rhel "*|*" centos "*) echo "sudo dnf install -y chromium" ;;
+    *" arch "*) echo "sudo pacman -S --needed chromium" ;;
+    *" alpine "*) echo "sudo apk add chromium" ;;
+    *) echo "npx playwright install chromium" ;;
+  esac
+}
+if [ -z "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ] && arm64_linux && [ -z "$(chrome_bin)" ]; then
+  _sc=$(system_chromium)
+  [ -n "$_sc" ] && export AGENT_BROWSER_EXECUTABLE_PATH="$_sc"
+fi
 # The libraries ldd says Chrome can't find, space-separated. Nothing where ldd can't say (macOS, no Chrome yet).
 missing_libs() {
   [ "$(uname -s)" = Linux ] && command -v ldd >/dev/null 2>&1 || return 0
@@ -246,6 +287,12 @@ install_hint() {
   done
   if [ -n "$_pk" ]; then echo "Install: $_cmd$_pk"; fi
   if [ -n "$_no" ]; then echo "No package name is known here for:$_no. Find the package that provides each file (your distro's package search)."; fi
+}
+# Linux arm64 with no Chrome at all: says the one command that installs a Chromium. -> 0, or 1 (said).
+chromium_check() {
+  [ -z "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ] && arm64_linux && [ -z "$(chrome_bin)" ] || return 0
+  echo "herdr-browser: there's no Chrome download for Linux arm64, and no Chromium here. Fix it: $(chromium_hint)"
+  return 1
 }
 # Chrome can't start without its libraries: says which are missing and how to install them. -> 0, or 1 (said).
 libs_check() {
@@ -317,7 +364,8 @@ case "${1-}" in
       echo "herdr-browser: agent-browser $ver is ready ($bin), with Chrome."
       exit 0
     fi
-    pick; problem >&2
+    pick
+    if usable; then echo "herdr-browser: $why. Fix it: $fix" >&2; else problem >&2; fi
     exit 1 ;;
   --status)
     pick; why=
@@ -431,6 +479,7 @@ if ! usable; then
   fi
   if ! usable; then problem >&2; exit 127; fi
 fi
+chromium_check >&2 || exit 127
 libs_check >&2 || exit 127
 sandbox_check >&2 || exit 127
 
