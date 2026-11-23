@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { afterDone, askWhen, heard, liveSession, micError, SAY } from './dictation.ts'
+import { afterDone, askWhen, heard, liveSession, micError, MIC, SAY, wholeLive } from './dictation.ts'
 
 // SHEP-10: a failed transcription used to come back as no words at all, so nothing landed in the box and nothing said why
 describe('what the service answered to a recording', () => {
@@ -197,5 +197,29 @@ describe('1: "Allow the microphone" only when the browser really asks', () => {
     stop()
     await Bun.sleep(50)
     expect(asked).toBe(false)
+  })
+})
+
+// SHEP-334: "in the beginning, it loses some words". The live words' tap started after the recording (its audio module
+// loaded and a phone's audio resumed only once the microphone was on), so speech from 0 ms reached the recording but not
+// the live words, and Done took the live words.
+describe('the opening words are never lost', () => {
+  test('a clip that starts speaking at 0 ms: live words that missed its start are not taken; the recording is', async () => {
+    // 5 s recorded from the first sample; the tap joined 0.8 s late and heard 4.2 s
+    expect(wholeLive(4.2, 5.0)).toBe(false)
+    const u = { calls: 0 }
+    const said = wholeLive(4.2, 5.0) ? async () => 'we should send this to the repo.' : null
+    const r = await afterDone(said, async () => { u.calls++; return { text: 'So I think we should send this to the repo.' } })
+    expect(r).toEqual({ text: 'So I think we should send this to the repo.' })
+    expect(u.calls).toBe(1)
+  })
+  test('live words that heard it all are taken (fast), within a tap’s small lag', () => {
+    expect(wholeLive(5.0, 5.0)).toBe(true)
+    expect(wholeLive(4.8, 5.0)).toBe(true)
+    expect(wholeLive(0, 0.1)).toBe(false)
+  })
+  test('the microphone isn’t gated: no noise suppression or echo cancellation to clip the first syllables', () => {
+    expect(MIC.noiseSuppression).toBe(false)
+    expect(MIC.echoCancellation).toBe(false)
   })
 })
