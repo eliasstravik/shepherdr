@@ -185,3 +185,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Android keyboard/edge colours can't be seen headless (they're the phone's window behind the page): check color-scheme, html background and the manifest colours over CDP instead; Emulation.setSafeAreaInsetsOverride emulates the gesture-bar inset. (from SHEP-311)
 
 - Reproduce a lost send answer on a throwaway service: click Send, kill the `live.ts` proxy ~0.4 s later, restart the service, then reload the page (the outbox entry stays "sending"). (from SHEP-312)
+
+- A public X/Twitter video (e.g. a product demo) downloads with yt-dlp in a scratch venv (`pip install yt-dlp`); ffmpeg tile/crop pulls frames to study an animation. (from SHEP-313)
