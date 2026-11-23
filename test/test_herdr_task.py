@@ -3227,6 +3227,15 @@ class ChecksBeforeReady(PrLooks):
         self.assertEqual(self.look(t), ("working", "Waiting for GitHub", None))
         self.assertEqual(self.look(t, after=5 * 60_000)[:2], ("ready", None))
 
+    def test_no_clear_mergeable_answer_is_ready_after_a_few_minutes(self):
+        # #1049: a mergeable answer that is neither yes, no nor UNKNOWN (missing, a host's own word) is asked again
+        # and waits a few minutes at most, never Working for good
+        for word in ("", "FALSE"):
+            t = self.said_ready()
+            self.github_says(mergeable=word, checks=[self.PASSED])
+            self.assertEqual(self.look(t), ("working", "Waiting for GitHub", None))
+            self.assertEqual(self.look(t, after=5 * 60_000)[:2], ("ready", None))
+
     def test_a_failing_check_goes_back_to_its_agent_never_ready_first(self):
         t = self.said_ready()
         self.github_says(checks=[self.FAILED])

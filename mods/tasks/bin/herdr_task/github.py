@@ -788,8 +788,10 @@ def pr_wait(v, since, expect=None, mergeable_head=None):
         return CHECKS_RUNNING
     mergeable = (v.get("mergeable") or "").upper()
     if mergeable != "MERGEABLE":
+        # #1049: anything short of a clear answer (UNKNOWN, or none: a conflict went back above) is asked again each
+        # look and waits UNKNOWN_MERGEABLE_MS at most, never parks the task as Working for good.
         seen = mergeable_head and mergeable_head == v.get("headRefOid")
-        if not (mergeable == "UNKNOWN" and (seen or now() - (since or 0) >= UNKNOWN_MERGEABLE_MS)):
+        if not (seen or now() - (since or 0) >= UNKNOWN_MERGEABLE_MS):
             return GITHUB_LOOKS
     if checks_missing(v, since, expect) == "waiting":
         return CHECKS_RUNNING
