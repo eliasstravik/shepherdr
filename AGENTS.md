@@ -169,3 +169,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Touch `:active` in headless Chrome: CDP touch/tap gestures don't set `:active`; use mouse.down with `--blink-settings=primaryPointerType=4` to see pointer:coarse press styles. (from SHEP-303)
 
 - A throwaway service's API from curl: `Authorization: Bearer $(cat <SHEPHERDR_DATA>/token)` plus `x-shepherdr: 1`; GET /api/state shows the spaces list. Publish proof artifacts from the worktree (cwd), not from a scratch folder, or they land in the scratch folder's store. (from SHEP-296)
+
+- A send to a space by API on a throwaway service: POST /api/action `{type:"send", chat:"p:<space id>", text, cid}` through `web/demo/live.ts`; a new space's Claude Assistant waits on "trust this folder" (`hc keys <t> down enter`). (from SHEP-297)
