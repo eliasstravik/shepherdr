@@ -34,6 +34,23 @@ def artifacts_of(folder):
     return []
 
 
+def artifact_anywhere(ref):
+    """An artifact by id from any folder's list on this machine, or None: a proof an older herdr-artifact filed under
+    the folder it was published from (a scratch folder), not its task's."""
+    for f in sorted(os.listdir(ARTIFACTS)) if os.path.isdir(ARTIFACTS) else []:
+        if not f.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(ARTIFACTS, f)) as fh:
+                d = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        for a in (d.get("artifacts") or []) if isinstance(d, dict) else []:
+            if isinstance(a, dict) and a.get("id") == ref:
+                return a
+    return None
+
+
 def find_proof(s, t, given=None):
     """The task's proof artifact, {id, title}: the one given (ready --proof <id>), else, of the pages it
     published since it started, the newest marked as its proof (herdr-artifact publish --proof), else the
@@ -41,9 +58,9 @@ def find_proof(s, t, given=None):
     a page (its files include index.html), so any of them can be a proof."""
     arts = artifacts_of(s.loc["folder"])
     if given:
-        a = next((a for a in arts if a.get("id") == given.strip()), None)
+        a = next((a for a in arts if a.get("id") == given.strip()), None) or artifact_anywhere(given.strip())
         if not a:
-            raise Fail(f"No artifact {given} in {s.loc['folder']} (herdr-artifact list shows them).")
+            raise Fail(f"No artifact {given} on this machine (herdr-artifact list --all shows them).")
     else:
         ref, since = s.ref(t).upper(), t.get("started") or 0
         mine = [a for a in arts if (a.get("task") or "").upper() == ref and (a.get("at") or 0) >= since

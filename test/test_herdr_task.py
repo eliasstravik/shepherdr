@@ -3709,6 +3709,58 @@ class AcceptCardArtifacts(unittest.TestCase):
             self.assertIsNone(proof.find_proof(s, t))
 
 
+class ProofFromAnotherFolder(unittest.TestCase):
+    """A proof published from a scratch folder (herdr-artifact publish --task, the real command on a throwaway
+    home) is found by ready --proof in its task's folder; one an older herdr-artifact filed under the scratch folder
+    is found by its id too."""
+
+    def setUp(self):
+        import shutil
+        self.home = os.path.realpath(tempfile.mkdtemp(prefix="shepherdr-proof-elsewhere-"))
+        self.addCleanup(shutil.rmtree, self.home, True)
+        self.task_folder, self.scratch = os.path.join(self.home, "proj"), os.path.join(self.home, "scratch")
+        os.makedirs(os.path.join(self.scratch, "page"))
+        os.makedirs(self.task_folder)
+        os.makedirs(os.path.join(self.home, ".herdr", "tasks"))
+        with open(os.path.join(self.home, ".herdr", "tasks", "proj.json"), "w") as f:
+            json.dump({"prefix": "SHEP", "folder": self.task_folder, "tasks": [{"id": 1}]}, f)
+        with open(os.path.join(self.scratch, "page", "index.html"), "w") as f:
+            f.write("<!doctype html><title>x</title><h1>Proof</h1>")
+
+    def publish(self, *args):
+        tool = os.path.join(ROOT, "mods", "artifacts", "bin", "herdr-artifact")
+        env = {**os.environ, "HOME": self.home, "HERDR_ARTIFACT_CHROME": ""}
+        for k in ("SHEPHERDR_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_STATE_HOME", "HC_TERMINAL_ID", "HERDR_BROWSER_TASK"):
+            env.pop(k, None)
+        p = subprocess.run([sys.executable, "-B", tool, "publish", "page", "--title", "Reactions · Proof", "--json", *args],
+                           cwd=self.scratch, env=env, capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stderr + p.stdout)
+        return json.loads(p.stdout.strip().splitlines()[-1])
+
+    def found(self, given=None):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.proof as proof
+        s = Store([{"id": 1, "title": "Reactions", "state": "doing", "started": 0, "agents": []}])
+        s.loc["folder"] = self.task_folder
+        with mock.patch.object(proof, "ARTIFACTS", os.path.join(self.home, ".herdr", "artifacts")), \
+                mock.patch.object(proof, "HOME", self.home):
+            return proof.find_proof(s, s.data["tasks"][0], given)
+
+    def test_published_from_a_scratch_folder_ready_finds_it(self):
+        a = self.publish("--task", "SHEP-1", "--proof")
+        self.assertEqual(a["folder"], self.task_folder)
+        self.assertEqual(self.found(a["id"]), {"id": a["id"], "title": "Reactions · Proof"})
+        self.assertEqual(self.found()["id"], a["id"])  # ready without --proof finds it too
+
+    def test_a_proof_an_older_version_filed_under_the_scratch_folder_is_found_by_its_id(self):
+        a = self.publish("--task", "SHEP-1", "--proof", "--folder", self.scratch)  # where an older one put it
+        self.assertEqual(a["folder"], self.scratch)
+        self.assertEqual(self.found(a["id"])["id"], a["id"])
+        with self.assertRaisesRegex(Exception, "No artifact nope-0009"):
+            self.found("nope-0009")
+
+
 class ReviewerFlags(unittest.TestCase):
     """#803: add/edit's --reviewer-model and --reviewer-effort set the task's reviewer, as --set does."""
 

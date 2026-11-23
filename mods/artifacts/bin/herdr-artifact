@@ -238,6 +238,31 @@ def me():
     return {"terminal": t, "task": task_ref(key)}
 
 
+def task_folder(task):
+    """The folder of a task ("SHOP-4"): the one task list with that prefix that has it, else (several do) the one this
+    agent's own task (HERDR_BROWSER_TASK, "<list slug>#<n>") is in. None: no list says, or it's still unclear."""
+    prefix, _, n = (task or "").rpartition("-")
+    if not prefix or not n.isdigit():
+        return None
+    tdir, found = SHEP(".herdr/tasks"), {}
+    for f in sorted(os.listdir(tdir)) if os.path.isdir(tdir) else []:
+        if not f.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(tdir, f)) as fh:
+                d = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(d, dict) or (d.get("prefix") or "").upper() != prefix.upper() or not d.get("folder"):
+            continue
+        if any(str(x.get("id")) == n for x in d.get("tasks") or [] if isinstance(x, dict)) and os.path.isdir(d["folder"]):
+            found[f[:-5]] = d["folder"]
+    if len(set(found.values())) == 1:
+        return next(iter(found.values()))
+    mine = (os.environ.get("HERDR_BROWSER_TASK") or "").rpartition("#")[0]
+    return found.get(mine)
+
+
 def task_ref(key):
     """A task's key ("dev-shop#4") as its people know it ("SHOP-4"): its list's prefix, else "#4"."""
     if not key or "#" not in key:
@@ -550,7 +575,10 @@ def trim(art):
 def cmd_publish(o):
     src, files = gather(o.dir)
     who = me()
-    loc = find_anywhere(o.id) if o.id and not o.folder else locate(o.folder)
+    # A new page for a task is filed under that task's folder, wherever it's published from (a scratch folder's
+    # store is one its task's ready never reads); --folder still wins.
+    loc = find_anywhere(o.id) if o.id and not o.folder else \
+        locate(o.folder or (None if o.id else task_folder(o.task or who["task"])))
     with Store(loc, write=False) as s:
         art = s.find(o.id) if o.id else None
     if not art and not o.title:
@@ -1848,7 +1876,7 @@ def main():
     c.add_argument("dir", help="the folder with index.html and the files beside it")
     c.add_argument("--title", help="what it is, for people (needed for a new one)")
     c.add_argument("--id", help="an artifact's id: publish a new version of it")
-    c.add_argument("--folder", help="the folder it belongs to (default: here)")
+    c.add_argument("--folder", help="the folder it belongs to (default: its task's, else here)")
     c.add_argument("--task", help="the task it's for (default: this agent's task)")
     c.add_argument("--note", help="what changed in this version")
     c.add_argument("--proof", action="store_true", help="it is its task's proof: it stays on the task, not in Artifacts")
