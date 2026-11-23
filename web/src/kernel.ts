@@ -206,7 +206,8 @@ export interface UI {
   /** chats switched to their agent's own terminal */
   aterm: Record<string, boolean>
   scr: ScreenAt | null
-  settings: { scope: string; sec: string | null } | null
+  /** repo: on Everywhere's Tasks page, the repo whose task settings it shows (Config.repos key, SHEP-335); none: Everywhere's */
+  settings: { scope: string; sec: string | null; repo?: string | null } | null
   search: boolean
   /** Now's groups folded or opened by hand, by name */
   open: Record<string, boolean>
@@ -763,8 +764,8 @@ export function togglePane(pane: string | null) {
   })
 }
 
-export function openSettings(scope = 'all', sec: string | null = null) {
-  setUI({ settings: { scope, sec }, drawer: false })
+export function openSettings(scope = 'all', sec: string | null = null, repo: string | null = null) {
+  setUI({ settings: { scope, sec, ...(repo ? { repo } : {}) }, drawer: false })
 }
 
 /** the list is hidden: by its button, or by an open pane on a narrow window */

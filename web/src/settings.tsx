@@ -4,13 +4,13 @@
 // Everything", or "Set here" with a Reset button beside it. A row is a label and a control: no hint lines under one.
 import { useState, type ReactNode } from 'react'
 import { choose, TELL, turnOn, useDeviceAlerts, WHY, type Tell } from '@plugins/alerts/device.ts'
-import type { Config, LevelConfig, Snapshot } from '@shared/types.ts'
-import { isEverything, machineWarn, placeOf, spaceLabel, unreachable } from '@shared/view.ts'
+import type { Config, LevelConfig, RepoConfig, Snapshot } from '@shared/types.ts'
+import { isEverything, machineLabel, machineWarn, placeOf, spaceLabel, unreachable } from '@shared/view.ts'
 import { copyText } from './copy.ts'
 import type { IconName } from './icons.ts'
-import { notice, registry, setUI, tryAct, useUI } from './kernel.ts'
+import { notice, openSettings, registry, setUI, tryAct, useUI } from './kernel.ts'
 import { openDialog, openForm } from './overlay.tsx'
-import { openPicker, pickFor, sayPick, useCatalog, type Role } from './picker.tsx'
+import { openPicker, PickerHead, pickFor, sayPick, useCatalog, type Role } from './picker.tsx'
 import { MOTIONS, setPref, THEMES, usePrefs, WIDTHS } from './prefs.ts'
 import { setChatSide, useSides, type Layout, type Side } from './sides.ts'
 import { Btn, cx, I, IB, Meter, Row, Seg, Tgl } from './ui.tsx'
@@ -47,7 +47,7 @@ function Own({ place, own, k }: { place: string; own: boolean; k: string }) {
 }
 
 function levelOf(c: Config, place: string): { lv: LevelConfig; own: (k: string) => boolean } {
-  const sp = place === 'all' ? undefined : c.spaces[place]
+  const sp = place === 'all' ? undefined : place.startsWith('repo:') ? c.repos?.find((r) => r.key === place.slice(5)) : c.spaces[place]
   return { lv: sp ?? c.all, own: (k) => !!sp?.own.includes(k) }
 }
 
@@ -61,6 +61,95 @@ export function SidesRow({ layout, side }: { layout: Layout; side: Side }) {
     <SRow label="Sides" wrap>
       <Seg label="Sides" values={SIDES.map((x) => x[1])} value={SIDES.find((x) => x[0] === side)![1]} onChange={(v) => setChatSide(layout, SIDES.find((x) => x[1] === v)![0])} />
     </SRow>
+  )
+}
+
+/* ---------- SHEP-335: task settings are a repo's ---------- */
+
+/** a folder as it shows: a home folder as ~ */
+const tilde = (f: string) => f.replace(/^\/(home\/[^/]+|Users\/[^/]+|root)(?=\/|$)/, '~')
+/** a task's repo key, as the service keys Config.repos (its folder here, machine:folder on another machine) */
+const taskRepo = (snap: Snapshot, t: { on?: string; taskFolder?: string; work?: { folder: string } }) => {
+  const f = t.work?.folder ?? t.taskFolder
+  return f ? (!t.on || t.on === snap.host ? f : `${t.on}:${f}`) : null
+}
+/** the repo a space sits on */
+export const repoOfSpace = (snap: Snapshot, id: string): RepoConfig | undefined => snap.config?.repos?.find((r) => r.spaces.includes(id))
+/** the repos a space's tasks work in, most tasks first, with how many; the one it sits on first, unless that isn't a repo
+ *  and its tasks all work elsewhere (root, on /) */
+function reposOfSpace(snap: Snapshot, id: string): [RepoConfig, number][] {
+  const n = new Map<string, number>()
+  // the space that asked for it (SHEP-325: `place` may be the space working in its folder)
+  for (const t of snap.tasks) if ((t.asked ?? t.place) === id) { const k = taskRepo(snap, t); if (k) n.set(k, (n.get(k) ?? 0) + 1) }
+  const own = repoOfSpace(snap, id)
+  const used = (snap.config?.repos ?? []).filter((r) => n.has(r.key) && r.key !== own?.key).sort((a, b) => n.get(b.key)! - n.get(a.key)!)
+  const git = !!snap.places.find((p) => p.id === id)?.git
+  const first = own && (git || n.has(own.key) || !used.length) ? [own] : []
+  return [...first, ...used].map((r) => [r, n.get(r.key) ?? 0])
+}
+const repoMachine = (snap: Snapshot, r: RepoConfig) => machineLabel(snap, r.machine ?? snap.host)
+
+function RepoPicker({ snap, value, onPick, close }: { snap: Snapshot; value: string | null; onPick: (key: string | null) => void; close: () => void }) {
+  const [q, setQ] = useState('')
+  const repos = snap.config?.repos ?? []
+  const hit = (...words: string[]) => !q.trim() || words.join(' ').toLowerCase().includes(q.trim().toLowerCase())
+  const pick = (key: string | null) => {
+    onPick(key)
+    close()
+  }
+  const machines = [...new Set(repos.map((r) => r.machine ?? snap.host))]
+  const blocks = machines.map((m) => ({ m, list: repos.filter((r) => (r.machine ?? snap.host) === m && hit(r.name, r.folder, machineLabel(snap, m))) })).filter((b) => b.list.length)
+  const all = hit('Everything')
+  return (
+    <div className="pk">
+      <PickerHead title="Applies to" close={close} />
+      <input className="inp" name="rq" aria-label="Search repos and folders" placeholder="Search repos and folders" value={q} autoComplete="off" data-autofocus onChange={(e) => setQ(e.target.value)} />
+      <div className="list">
+        {all && <Row icon="layers" label="Everything" current={!value} end={!value ? <I n="check" /> : undefined} onClick={() => pick(null)} />}
+        {blocks.map((b) => (
+          <div key={b.m} style={{ display: 'contents' }}>
+            <div className="lab">{machineLabel(snap, b.m)}</div>
+            {b.list.map((r) => (
+              <Row key={r.key} icon="folder" label={r.name} sub={tilde(r.folder)} current={value === r.key} end={value === r.key ? <I n="check" /> : undefined} onClick={() => pick(r.key)} />
+            ))}
+          </div>
+        ))}
+        {!all && !blocks.length && <p className="hint" style={{ padding: 8 }}>No repo or folder matches.</p>}
+      </div>
+    </div>
+  )
+}
+
+/** Everything's Tasks page: which level its rows set, Everything or one repo (a searchable picker: there can be dozens) */
+function AppliesTo({ snap, repo }: { snap: Snapshot; repo: RepoConfig | undefined }) {
+  const s = useUI((u) => u.settings)!
+  const name = repo ? repo.name : 'Everything'
+  const where = repo ? `${tilde(repo.folder)}${repo.machine ? ` · ${repoMachine(snap, repo)}` : ''}` : ''
+  return (
+    <div className="fld">
+      <span>Applies to</span>
+      <button type="button" className="fake" aria-label={`Applies to ${name}. Change`}
+        onClick={() => openDialog((close) => <RepoPicker snap={snap} value={repo?.key ?? null} close={close} onPick={(key) => setUI({ settings: { ...s, repo: key } })} />, { wide: true, bare: true, label: 'Applies to' })}>
+        <I n={repo ? 'folder' : 'layers'} />
+        <span className="n"><b>{name}</b> {where && <span>{where}</span>}</span>
+        <I n="right" c="s16" />
+      </button>
+    </div>
+  )
+}
+
+/** A space's Tasks page: its tasks follow the repos they work in; each opens that repo's settings */
+function SpaceRepos({ snap, place }: { snap: Snapshot; place: string }) {
+  const list = reposOfSpace(snap, place)
+  return (
+    <>
+      <p className="hint">Tasks get the settings of the repo they work in.</p>
+      {list.map(([r, n]) => (
+        <Row key={r.key} icon="folder" label={r.name} sub={`${tilde(r.folder)}${r.machine ? ` · ${repoMachine(snap, r)}` : ''}`} value={n ? `${n} ${n === 1 ? 'task' : 'tasks'}` : undefined}
+          end={<I n="right" c="s16" />} onClick={() => openSettings('all', 'Tasks', r.key)} />
+      ))}
+      {!list.length && <div className="empty"><span>No tasks yet.</span></div>}
+    </>
   )
 }
 
@@ -100,29 +189,45 @@ function General() {
   )
 }
 
-function Agents({ snap, place }: { snap: Snapshot; place: string }) {
+function Agents({ snap, place, only }: { snap: Snapshot; place: string; only?: Role[] }) {
   const c = snap.config!
   const { own } = levelOf(c, place)
-  const machine = (place !== 'all' && snap.places.find((p) => p.id === place)?.machine) || snap.host
+  const repo = place.startsWith('repo:') ? c.repos?.find((r) => r.key === place.slice(5)) : undefined
+  const machine = (repo ? repo.machine : place !== 'all' && snap.places.find((p) => p.id === place)?.machine) || snap.host
   const cat = useCatalog(machine)
+  // on a repo's Tasks page: what its tasks and their reviews run on
+  const name = (role: Role) => (repo ? (role === 'Tasks' ? 'Agent' : role === 'Reviews' ? 'Reviewer' : role) : role)
   const row = (role: Role, title: string) => {
     const pick = pickFor(snap, place, role)
+    // the small print under the name, as Review, Merge and Proof have it (beside the value it ran into the value)
     return (
-      <SRow key={role} label={role} wrap>
-        <span className="val">
-          {sayPick(pick, cat)}
-          <Own place={place} own={own(`agents.${role}`)} k={`agents.${role}`} />
-        </span>
+      <SRow key={role} label={<>{name(role)}<Own place={place} own={own(`agents.${role}`)} k={`agents.${role}`} /></>} wrap>
+        <span className="val">{sayPick(pick, cat)}</span>
         <Btn small onClick={() => openPicker({ title, machine, pick, onChange: () => undefined, onClose: (now) => JSON.stringify(now) !== JSON.stringify(pick) && void set(place, `agents.${role}`, now) })}>Change</Btn>
       </SRow>
     )
   }
-  return <>{row('Chats', 'Chats run on')}{row('Tasks', 'Tasks run on')}{row('Reviews', 'Reviews run on')}</>
+  const rows: [Role, string][] = [['Chats', 'Chats run on'], ['Tasks', 'Tasks run on'], ['Reviews', 'Reviews run on']]
+  return <>{rows.filter(([r]) => !only || only.includes(r)).map(([r, t]) => row(r, t))}</>
 }
 
 const MERGE: [LevelConfig['merge'], string][] = [['done', 'When I mark it as done'], ['checks', 'When checks pass'], ['now', 'Right away']]
 
 function Tasks({ snap, place }: { snap: Snapshot; place: string }) {
+  // a space's page: the repos its tasks work in (SHEP-335); Everywhere's: Everywhere or one repo
+  const ui = useUI((u) => u.settings)
+  if (place !== 'all') return <SpaceRepos snap={snap} place={place} />
+  const repo = ui?.repo ? snap.config?.repos?.find((r) => r.key === ui.repo) : undefined
+  return (
+    <>
+      <AppliesTo snap={snap} repo={repo} />
+      {repo && <Agents snap={snap} place={`repo:${repo.key}`} only={['Tasks', 'Reviews']} />}
+      <TaskRows snap={snap} place={repo ? `repo:${repo.key}` : 'all'} />
+    </>
+  )
+}
+
+function TaskRows({ snap, place }: { snap: Snapshot; place: string }) {
   const { lv, own } = levelOf(snap.config!, place)
   return (
     <>
@@ -302,7 +407,8 @@ function Section({ snap, place, sec }: { snap: Snapshot; place: string; sec: str
   if (extra) return <extra.View place={place} />
   if (!snap.config) return null
   if (sec === 'General') return <General />
-  if (sec === 'Agents') return <Agents snap={snap} place={place} />
+  // a space's Agents: its own Assistant only (its tasks' agents are its repos', SHEP-335)
+  if (sec === 'Agents') return <Agents snap={snap} place={place} only={place === 'all' ? undefined : ['Chats']} />
   if (sec === 'Tasks') return <Tasks snap={snap} place={place} />
   if (sec === 'Secrets') return <Secrets snap={snap} place={place} />
   if (sec === 'Machines') return <Machines snap={snap} />
