@@ -270,7 +270,8 @@ def main():
     g.add_argument("--here", action="store_true", help="work in the folder itself")
     g.add_argument("--worktree", action="store_true", help="work in a git worktree (default in repos)")
     c.add_argument("--after", help="start only once these tasks are done: 3,5; another folder's by its id (WEB-2), another "
-                                   "machine's with the machine first (vm-b:HAT-12)")
+                                   "machine's with the machine first (vm-b:HAT-12). Only for a task that needs their result "
+                                   "(or a release): with worktrees, tasks on the same files still run in parallel")
     c.add_argument("--space", help="the space it's for, whose settings it takes (default: yours)")
     when_opts(c)
     c = cmd("show", cmd_show, "one task")

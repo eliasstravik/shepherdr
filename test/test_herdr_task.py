@@ -8980,3 +8980,214 @@ class Schedules32(unittest.TestCase):
             self.ready(id="2", nothing=True, told="x")
         with self.assertRaises(self.Fail):
             self.ready(id="2", told="  ")
+
+
+class ParallelCollisions(unittest.TestCase):
+    """SHEP-320: tasks run in parallel, also on the same lines; a merge collision goes back to the later task's agent
+    fast, naming the files and the task that merged first, the card says why in one line, and the merge already asked
+    for goes through by itself once fixed. A real throwaway origin, clone and worktrees; gh and hc are faked."""
+
+    def setUp(self):
+        from unittest import mock
+        import shutil
+        sys.path.insert(0, BIN)
+        import herdr_task.commands as commands
+        import herdr_task.github as github
+        import herdr_task.ghnews as ghnews
+        import herdr_task.launch as launch
+        import herdr_task.tick as tick
+        self.commands, self.github, self.ghnews, self.launch, self.tick, self.mock = commands, github, ghnews, launch, tick, mock
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.origin, self.main, self.other = (os.path.join(self.root, x) for x in ("origin.git", "repo", "other"))
+        self.git(self.root, "init", "-q", "--bare", "-b", "main", self.origin)
+        self.git(self.root, "clone", "-q", self.origin, self.main)
+        self.write(self.main, "app.txt", "title\nhello\nend\n")
+        self.write(self.main, "other.txt", "x\n")
+        self.commit(self.main, "first")
+        self.git(self.main, "push", "-q", "origin", "main")
+        self.start = self.git(self.main, "rev-parse", "HEAD")
+        self.store = Store([])
+        self.store.loc["folder"] = self.main
+        self.patch(commands, "open_store", lambda args, write=True, wait=None: self.store)
+        self.patch(commands, "view", lambda s, t, live=None: dict(t))
+        self.patch(commands, "say", lambda *a: self.said.append(a))
+        self.patch(commands, "live_agents", lambda key: [])
+        self.patch(commands, "refresh_sessions", lambda *a: None)
+        self.said, self.told = [], []
+        self.patch(commands, "tell", lambda s, t, msg, args: (self.told.append(msg), ("t9", False))[1])
+
+    def patch(self, mod, name, value):
+        p = self.mock.patch.object(mod, name, value)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def git(self, cwd, *args):
+        return subprocess.run(["git", "-C", cwd, "-c", "user.name=T", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false",
+                               *args], capture_output=True, text=True, check=True).stdout.strip()
+
+    def write(self, cwd, name, text):
+        with open(os.path.join(cwd, name), "w") as f:
+            f.write(text)
+
+    def commit(self, cwd, words):
+        self.git(cwd, "add", "-A")
+        self.git(cwd, "commit", "-q", "-m", words)
+        return self.git(cwd, "rev-parse", "HEAD")
+
+    def task(self, n, line, name="app.txt", state="running"):
+        """Task n in its own worktree from the start, changing name's middle line to line, committed."""
+        wt, br = os.path.join(self.root, f"wt{n}"), f"task/{n}"
+        self.git(self.main, "worktree", "add", "-q", "-b", br, wt, self.start)
+        self.write(wt, name, "title\n" + line + "\nend\n" if name == "app.txt" else line + "\n")
+        self.commit(wt, f"task {n}")
+        t = {"id": n, "title": f"Task {n}", "state": state, "mode": "worktree", "worktree": wt, "branch": br, "base": "main",
+             "start": self.start, "agents": []}
+        self.store.data["tasks"].append(t)
+        return t
+
+    def merge_first(self, t, words="SHEP-1: Task 1 (#11)"):
+        """t's work lands on GitHub's main as a squash commit (as GitHub would), from another clone."""
+        self.git(self.root, "clone", "-q", self.origin, self.other)
+        self.git(self.other, "fetch", "-q", t["worktree"], t["branch"])
+        self.git(self.other, "merge", "-q", "--squash", "FETCH_HEAD")
+        self.commit(self.other, words)
+        self.git(self.other, "push", "-q", "origin", "main")
+
+    def test_two_tasks_on_the_same_line_collide_and_its_agent_hears_what(self):
+        a, b, c = self.task(1, "A"), self.task(2, "B"), self.task(3, "C", name="other.txt")
+        self.assertIsNone(self.github.collision(self.store, b, fetch=True))  # nothing merged yet
+        self.merge_first(a)
+        hit = self.github.collision(self.store, b, fetch=True)
+        self.assertEqual((hit["files"], hit["by"], hit["ref"]), (["app.txt"], ["SHEP-1"], "origin/main"))
+        self.assertEqual(self.github.collision_reason(hit), "Conflicts with main after SHEP-1 merged: its agent is rebasing")
+        words = self.github.collision_words(hit)
+        self.assertIn("Files that collide with origin/main: app.txt.", words)
+        self.assertIn("SHEP-1: Task 1 (#11)", words)
+        self.assertIn("git rebase origin/main", words)
+        self.assertIsNone(self.github.collision(self.store, c))  # behind, but clean: no collision
+        # without a task's name in the base's commit: the card names the file
+        self.assertEqual(self.github.collision_reason({**hit, "by": []}), "Conflicts with main in app.txt: its agent is rebasing")
+        # its agent rebases and resolves: no collision any more
+        self.git(b["worktree"], "fetch", "-q", "origin")
+        r = subprocess.run(["git", "-C", b["worktree"], "rebase", "origin/main"], capture_output=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.write(b["worktree"], "app.txt", "title\nA and B\nend\n")
+        self.git(b["worktree"], "add", "app.txt")
+        self.git(b["worktree"], "-c", "core.editor=true", "rebase", "--continue")
+        self.assertIsNone(self.github.collision(self.store, b, fetch=True))
+
+    def ready_args(self, **kw):
+        import argparse
+        return argparse.Namespace(id=f"SHEP-{kw.pop('n', 2)}", json=False, folder=None, summary="Fixed it", details=None, pr=None,
+                                  agents_md=None, proof=None, nothing=False, told=None, **kw)
+
+    def test_ready_refuses_a_branch_that_conflicts_with_its_base(self):
+        a, b, c = self.task(1, "A"), self.task(2, "B"), self.task(3, "C", name="other.txt")
+        self.merge_first(a)
+        for name in ("take_pr", "base_pr", "pr_words"):
+            self.patch(self.commands, name, lambda *x, **k: None)
+        self.patch(self.commands, "review_refusal", lambda s, t, wt: None)
+        self.patch(self.commands, "finalize", lambda s, t: f"{s.ref(t)} is ready.")
+        self.patch(self.commands, "find_proof", lambda *x: None)
+        self.patch(self.commands, "task_settings", lambda s, t: [])
+        with self.assertRaises(self.commands.Fail) as e:
+            self.commands.cmd_ready(self.ready_args())
+        self.assertIn("SHEP-2's branch conflicts with origin/main, which moved on since it started (SHEP-1 merged)", str(e.exception))
+        self.assertIn("app.txt", str(e.exception))
+        self.assertEqual(b["state"], "running")
+        # behind but clean: ready
+        self.commands.cmd_ready(self.ready_args(n=3))
+        self.assertEqual(self.said[-1][2], "SHEP-3 is ready.")
+
+    def test_a_merge_that_collides_goes_back_named_and_merges_without_a_second_ask(self):
+        a, b = self.task(1, "A"), self.task(2, "B", state="ready")
+        b["pr"] = {"number": 12, "repo": "o/r", "checked": 5, "url": "https://github.example/o/r/pull/12"}
+        self.merge_first(a)
+        conflict = {"state": "OPEN", "mergeable": "CONFLICTING", "statusCheckRollup": [], "headRefOid": "abc"}
+        self.patch(self.commands, "pr_view", lambda t: conflict)
+        self.patch(self.commands, "merge_checks", lambda t, v: v)
+        self.patch(self.commands, "note_checks", lambda *x: None)
+        import argparse
+        with self.assertRaises(SystemExit):
+            self.commands.cmd_accept(argparse.Namespace(id="SHEP-2", json=False, folder=None))  # the person's Mark as done
+        self.assertEqual(b["state"], "running")
+        self.assertEqual(b["merge_failed"], "Conflicts with main after SHEP-1 merged: its agent is rebasing")
+        self.assertIn("Files that collide with origin/main: app.txt.", self.told[-1])
+        self.assertIn("rebase task/2 onto origin/main", self.told[-1])
+        self.assertIn("the merge already asked for then goes through by itself", self.told[-1])
+        self.assertTrue(b["merge_asked"])
+        # fixed and handed in again: Settings say ask first, yet the merge it already had goes through once checks pass
+        self.patch(self.commands, "github", lambda s: "o/r")
+        self.patch(self.commands, "pr_open", lambda s, t, repo, summary: t["pr"])
+        self.patch(self.commands, "merge_policy", lambda s, t: "ask")
+        msg = self.commands.finalize(self.store, b)
+        self.assertEqual((b["state"], b["auto_merge"]), ("ready", "checks"))
+        self.assertIn("The person already asked to merge it: it merges by itself once its checks pass.", msg)
+        # a task never asked to merge still waits for the person
+        b.pop("merge_asked")
+        msg = self.commands.finalize(self.store, b)
+        self.assertNotIn("auto_merge", b)
+        self.assertIn("The person marks it as done on its card", msg)
+
+    def test_a_ready_tasks_conflict_shows_on_its_card_and_reaches_its_agent_with_the_files(self):
+        a, b = self.task(1, "A"), self.task(2, "B", state="ready")
+        b.update(pr={"number": 12, "repo": "o/r", "checked": 0, "url": "https://github.example/o/r/pull/12"}, ready_at=1)
+        self.merge_first(a)
+        conflict = {"state": "OPEN", "mergeable": "CONFLICTING", "statusCheckRollup": [], "headRefOid": "abc"}
+        for name, value in (("pr_view", lambda t: conflict), ("note_checks", lambda *x: None), ("seen_pr", lambda s, t: None),
+                            ("queue_entry", lambda t: None), ("needs_approval", lambda v: False),
+                            ("checks_since", lambda s, t, v: 0), ("expected_checks", lambda s, t, h: []),
+                            ("held_by_base", lambda s, t, v: False)):
+            self.patch(self.tick, name, value)
+        self.patch(self.ghnews, "resting", lambda s, t: {"address": "t9"})
+        self.patch(self.ghnews, "pr_comments", lambda repo, n: [])
+        report = {"attention": [], "done": []}
+        self.tick.facts(self.store, b, report)  # no auto_merge: the person hasn't asked to merge it
+        self.assertEqual(b["attention"], "It conflicts with the base branch.")
+        self.assertEqual(b["merge_failed"], "Conflicts with main after SHEP-1 merged: its agent is rebasing")
+        news = b["pr"]["news"]["text"]
+        self.assertIn("It conflicts with main: rebase onto main", news)
+        self.assertIn("Files that collide with origin/main: app.txt.", news)
+
+    def test_a_merge_tells_working_tasks_that_now_collide_at_once(self):
+        a, b, c = self.task(1, "A"), self.task(2, "B"), self.task(3, "C", name="other.txt")
+        d = self.task(4, "D", state="ready")
+        d["pr"] = {"number": 14, "repo": "o/r", "checked": 99}
+        self.merge_first(a)
+        self.patch(self.github, "after_accept", lambda s, t: None)
+        self.patch(self.github, "remove_worktree", lambda s, t: None)
+        self.patch(self.github, "mid_turn", lambda s, t: True)
+        a["merged"] = True
+        self.github.finish(self.store, a)
+        self.assertTrue(b.get("base_moved") and c.get("base_moved"))
+        self.assertEqual(d["pr"]["checked"], 0)  # a Ready one's pull request is read at the next tick
+        sent = []
+        import herdr_task.news as news
+        self.patch(news, "send_or_hold", lambda address, text, how="send": (sent.append((address, text)), True)[1])
+        self.patch(self.tick, "workers", lambda s, t: [{"address": f"t{t['id']}"}])
+        report = {}
+        for t in (b, c):
+            self.tick.heads_up(self.store, t, report)
+        self.assertEqual(report["collides"], ["SHEP-2"])  # the clean one hears nothing
+        self.assertEqual(sent[0][0], "t2")
+        self.assertIn("main moved on (SHEP-1 merged) and now conflicts with your branch task/2", sent[0][1])
+        self.assertIn("app.txt", sent[0][1])
+        self.assertNotIn("base_moved", b)
+        b["base_moved"] = 1  # another merge elsewhere, the same collision: not told twice
+        self.tick.heads_up(self.store, b, report)
+        self.assertEqual(len(sent), 1)
+
+    def test_the_brief_and_the_assistant_say_so(self):
+        t = self.task(1, "A")
+        line = self.launch.closing_line(self.store, t)
+        self.assertIn("before ready, fetch and rebase your branch onto main's newest", line)
+        self.assertIn("git rebase origin/main", line)
+        self.assertNotIn("rebase your branch", self.launch.closing_line(self.store, {**t, "mode": "here"}))
+        with open(os.path.join(ROOT, "templates", "assistant.md")) as f:
+            words = f.read()
+        self.assertIn("With worktrees, tasks run in parallel by default, also when they touch the same files or screens", words)
+        self.assertIn("`--after` is only for a task that needs another's result first", words)
+        self.assertIn("that fix round is the accepted price", words)
+        self.assertNotIn("as parallel edits there conflict at merge", words)
+        self.assertIn("tasks touching different files run in parallel", words)

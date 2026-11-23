@@ -21,7 +21,7 @@ from .agents import (
     status_word, STATUSES, SUMMARY_MAX, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
-from .github import (already_merged, checks_missing, github_unreachable, pr_for_branch, checks_since, drop_branch, expected_checks, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
+from .github import (already_merged, checks_missing, collision, collision_reason, collision_words, github_unreachable, pr_for_branch, checks_since, drop_branch, expected_checks, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
                      merge_checks, pr_pending, pr_problem, pr_view, queue_refusal, remote_of, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
@@ -644,9 +644,17 @@ def cmd_ready(args):
                 base_pr(s, t)
             pr_words(t, args)
             own_work(s, t)
+            # SHEP-320: other tasks run in parallel and may have merged meanwhile: a branch that conflicts with its
+            # base's newest is refused here, with what collided, rather than at its merge. Behind but clean passes.
+            c = collision(s, t, fetch=True) if t.get("start") and not (t.get("pr") or {}).get("from_base") else None
+            collides = (f"{s.ref(t)}'s branch conflicts with {c['ref']}, which moved on since it started"
+                        + (f" ({', '.join(c['by'][:3])} merged)" if c["by"] else "") + f". {collision_words(c)} "
+                        "Then commit and run ready again.") if c else None
         elif getattr(args, "pr", None):
             raise Fail("--pr is for tasks in a worktree; this one works in the folder itself.")
-        refused = review_refusal(s, t, wt)
+        else:
+            collides = None
+        refused = collides or review_refusal(s, t, wt)
         if refused:
             # Kept (the task's line says why it waits); refused after the store is saved.
             s.dirty = True
@@ -1097,6 +1105,11 @@ def finalize(s, t):
         t["auto_merge"] = "checks"
         return msg + (" It was in GitHub's merge queue: Herdr took it out to push, and it goes back in once its "
                       "checks pass.")
+    if policy not in ("auto", "checks") and t.get("merge_asked") and t.get("pr"):
+        # SHEP-320: the person already asked to merge it (Mark as done, merge) and the try failed (a conflict, a
+        # check): its agent's fix merges once its checks pass, never asked for again.
+        t["auto_merge"] = "checks"
+        return msg + " The person already asked to merge it: it merges by itself once its checks pass."
     if policy in ("auto", "checks"):
         t["auto_merge"] = policy
         if t.get("pr"):
@@ -1169,7 +1182,7 @@ def cmd_state(args, state):
             # pull request merged and close it again at once) until its agent says ready.
             if t["state"] == "done" and t.get("merged"):
                 t["kept_open"] = True
-            for k in ("reviews", "review", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "merge_queued", "closed_unmerged",
+            for k in ("reviews", "review", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "merge_asked", "merge_queued", "closed_unmerged",
                       "quiet", "told", "told_sent"):
                 t.pop(k, None)
         if state == "done" and t.get("worktree") and merged_here(s, t):
@@ -1551,7 +1564,7 @@ def cmd_reply(args):
             # as reopen: Working again, kept open though its work merged (until its agent says ready)
             if t.get("merged"):
                 t["kept_open"] = True
-            for k in ("reviews", "review", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "merge_queued", "closed_unmerged",
+            for k in ("reviews", "review", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "merge_asked", "merge_queued", "closed_unmerged",
                       "quiet", "told", "told_sent", "attention"):
                 t.pop(k, None)
             t["state"], t["reopened_at"] = "running", now()
@@ -1585,10 +1598,14 @@ def merge_failed(s, t, why, args=None):
     (then it needs the person: its attention says why)."""
     note_merge_failed(t, why)
     main, wt, br, base = s.loc["folder"], t.get("worktree"), t.get("branch"), t.get("base") or "main"
-    msg = (f"Task {s.ref(t)} \"{t['title']}\" couldn't be merged: {why}\n"
-           f"Fix it in {wt}: for conflicts, rebase {br} onto {base} (or merge {base} in) and resolve them; for failing "
+    c = collision(s, t, fetch=True) if str(why).startswith("It conflicts") else None
+    if c:
+        # SHEP-320: the card says what collided, and its agent gets the files and the base's commits
+        t["merge_failed"] = collision_reason(c)
+    msg = (f"Task {s.ref(t)} \"{t['title']}\" couldn't be merged: {why}\n" + (f"{collision_words(c)}\n" if c else "") +
+           f"Fix it in {wt}: for conflicts, rebase {br} onto {c['ref'] if c else base} (or merge it in) and resolve them; for failing "
            f"checks, find out why and fix them. Run the checks, commit, then run `herdr-task ready {t['id']} --folder "
-           f"{shlex.quote(main)}` to hand it in again.")
+           f"{shlex.quote(main)}` to hand it in again" + (": the merge already asked for then goes through by itself." if t.get("merge_asked") else "."))
     t["fix_requested"] = t["handed_at"] = now()
     s.dirty = True
     try:
@@ -1719,6 +1736,8 @@ def cmd_merge(args):
         if t.get("pr") or own_open_pr(s, t):
             # On GitHub: Herdr merges the pull request itself (squash), then tidies up here.
             how = "github"
+            # SHEP-320: asked once; a failed try fixed by its agent merges at its next ready without a second ask
+            t["merge_asked"] = now()
             error = merge_now(s, t)
             if error == IN_QUEUE:
                 how, error = "queue", None
@@ -1811,6 +1830,7 @@ def cmd_accept(args):
             finish(s, t)
         elif t.get("pr") or own_open_pr(s, t):
             how = "github"
+            t["merge_asked"] = now()  # SHEP-320: as cmd_merge
             error = merge_now(s, t, accept=True)
             if error == IN_QUEUE:
                 how, error = "queue", None
@@ -1887,8 +1907,9 @@ def cmd_fix(args):
             raise Fail(f"{s.ref(t)} works in the folder itself; tell its agent what to fix.")
         problem = args.reason or t.get("attention") or "The pull request can't merge yet."
         main, wt, br, base = s.loc["folder"], t["worktree"], t["branch"], t.get("base") or "main"
-        msg = (f"Task {s.ref(t)} \"{t['title']}\" can't merge yet: {problem}\n"
-               f"Fix it in {wt}: for conflicts, rebase {br} onto {base}; for failing checks, find out why and fix them. "
+        c = collision(s, t, fetch=True)
+        msg = (f"Task {s.ref(t)} \"{t['title']}\" can't merge yet: {problem}\n" + (f"{collision_words(c)}\n" if c else "") +
+               f"Fix it in {wt}: for conflicts, rebase {br} onto {c['ref'] if c else base}; for failing checks, find out why and fix them. "
                f"Run the checks, commit, then run `herdr-task ready {t['id']} --folder {shlex.quote(main)}` to push the fix.")
         # Handed the problem: someone is on it while its agent starts (on_it()).
         t["fix_requested"] = t["handed_at"] = now()

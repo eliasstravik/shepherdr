@@ -621,6 +621,13 @@ def closing_line(s, task, parent=None, argv=None):
             f"--summary \"<what the person now sees or can do, plain words, at most {SUMMARY_MAX} characters>\"` (optionally "
             f"`--details \"<a few short bullets in plain words, one per line: what changed for the person first, then how it was checked>\"`; with `--agents-md \"<one line>\"` when you learned something "
             f"about setting up or testing this repo that its AGENTS.md lacks). The person marks it as done from there; never mark it done yourself.")
+    if task.get("mode") == "worktree":
+        # SHEP-320: tasks run in parallel, also on the same files: catching up with its base is part of finishing
+        base = task.get("base") or "main"
+        text += (f" Other tasks run in parallel and may merge into {base} meanwhile: before ready, fetch and rebase your "
+                 f"branch onto {base}'s newest (`git fetch`, then `git rebase {remote_of(s.loc['folder'])}/{base}`, or "
+                 f"`git rebase {base}` without a remote) and resolve what collides; ready refuses a branch that conflicts "
+                 f"with it. Your own branch may be force-pushed with lease, never {base}.")
     on, rounds = review_limits(s, task)
     if on:
         text += (f" Review is on: after each review round, record it on the commit it reviewed with `{ht} reviewed {s.ref(task)} "
@@ -647,7 +654,7 @@ def closing_line(s, task, parent=None, argv=None):
         # #1136 #1142: run in the sandbox, hc can't open Herdr's core and the browser's socket folder is read-only
         text += (" Codex's sandbox can't reach Herdr nor write git's data, so give those commands, herdr-browser's (your task's "
                  "browser), herdr-desktop's (your desktop), herdr-artifact's (your proof), `git add`/`git commit` and your review's `hc run`/`hc wait`/`hc read`/"
-                 "`hc get`/`hc kill` (its prompt in single quotes) "
+                 "`hc get`/`hc kill` (its prompt in single quotes), `git fetch`/`git rebase` "
                  "sandbox_permissions \"require_escalated\" from the first try, each as one plain command (no && chains, no $(…), "
                  "no git options before the verb): then they run without asking.")
     # No "report to your coordinator": Herdr tells the Assistant itself (news_pass).

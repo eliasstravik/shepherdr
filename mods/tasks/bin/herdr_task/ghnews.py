@@ -7,7 +7,7 @@ import re
 
 from .base import now
 from .agents import status_word
-from .github import BAD, gh
+from .github import BAD, collision, collision_words, gh
 from .launch import coordinator_in
 from .commands import workers
 from .news import news_send
@@ -163,6 +163,10 @@ def pr_news(s, t, v, report):
         what = "conflicts with" if news_conflict.endswith(":conflict") else "is behind, and must be up to date with,"
         lines.append(f"- It {what} {base}: rebase onto {base}, resolve any conflicts, run the checks, then run your "
                      "ready command again.")
+        c = collision(s, t, fetch=True) if news_conflict.endswith(":conflict") else None
+        if c:
+            # SHEP-320: the files and the base's commits that collided, so the fix round is quick
+            lines.append(f"  {collision_words(c)}")
     for c in news_checks[:10]:
         name, url = c.get("name") or c.get("context") or "A check", c.get("detailsUrl") or c.get("targetUrl") or ""
         lines.append(f"- Check \"{name}\" failed: {url}")
