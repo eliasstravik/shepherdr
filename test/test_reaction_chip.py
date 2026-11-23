@@ -18,11 +18,23 @@ import unittest
 from test_bubble_width import CSS, chrome
 
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# the state classes the chip really carries (pending, just added), read from the component: 3.2.4's just-added chip
+# carried "pop", the menu's class, and drew as a 200 px floating bar, which a chip with only "rxc" never showed
+_SRC = open(os.path.join(ROOT, "web", "plugins", "reactions", "client.tsx"), encoding="utf-8").read()
+STATES = re.findall(r"'([\w-]+)'", re.search(r"cx\('rxc',(.*?)\)\}", _SRC).group(1))
+VARIANTS = [" ".join(v) for v in ([], *([x] for x in STATES), STATES)]
+
+
 def row(mine, text, chips, img=False):
+    """chips: (emoji, count) or (emoji, count, state classes, pressed)"""
     side = " mine" if mine else ""
     pic = '<img class="pic" style="display:block;width:240px;height:160px" alt="">' if img else ""
-    btns = "".join(f'<button class="rxc"><span class="e">{e}</span>{f"<span class=n>{n}</span>" if n > 1 else ""}</button>'
-                   for e, n in chips)
+    btns = ""
+    for i, c in enumerate(chips):
+        e, n, cls, pressed = (*c, VARIANTS[i % len(VARIANTS)], i % 2 == 0)[:4] if len(c) == 2 else c
+        btns += (f'<button type="button" class="rxc {cls}" aria-pressed="{str(pressed).lower()}"><span class="e">{e}</span>'
+                 f'{f"<span class=n>{n}</span>" if n > 1 else ""}</button>')
     return (f'<div class="bw{side}"><div class="bmv"><div class="b{side}" data-menu>{pic}<div class="md">{text}</div></div>'
             f'<div class="rxs">{btns}</div></div></div><div class="b next">next</div>')
 
@@ -35,12 +47,24 @@ ROWS = [row(m, t, c, i) for m in (True, False) for t, c, i in (
     ("a photo", [("❤️", 1)], True),
     (LONG, [("👍", 1), ("👀", 1), ("🎉", 2)], False),
 )]
+# one chip alone in every state: settled, pending, just added (popping in), both; yours or the agent's; with a count
+ROWS += [row(m, t, [(e, n, v, p)]) for m in (True, False) for t in ("ok", LONG) for e in ("👍", "🫡") for n in (1, 2)
+         for v in VARIANTS for p in (True, False)]
 
 PAGE = """<!doctype html><html><head><meta charset="utf-8"><style>{css}</style></head><body>
 <div class="app{cls}"><div class="chat"><div class="scroll" id="col" style="width:{w}px;padding-inline:16px"><div class="msgs">{rows}</div></div></div></div>
 <pre id="out"></pre>
 <script>
-const col = document.getElementById('col'), c = col.getBoundingClientRect(), bad = [], seen = []
+const col = document.getElementById('col'), bad = [], seen = []
+// during the pop: a just-added chip's laid-out size (its scale aside) is already a small pill, never a bar
+for (const x of col.querySelectorAll('.rxc')) {{
+  const s = getComputedStyle(x), tag = 'popping ' + x.className + ': '
+  if (x.offsetWidth > (x.children.length > 1 ? 72 : 56)) bad.push(tag + 'chip ' + x.offsetWidth + ' wide')
+  if (x.offsetHeight !== 28) bad.push(tag + 'chip height ' + x.offsetHeight)
+  if (s.position !== 'relative') bad.push(tag + 'chip is ' + s.position)
+}}
+document.getAnimations().forEach((a) => a.finish())
+const c = col.getBoundingClientRect()
 for (const bw of col.querySelectorAll('.bw')) {{
   const mine = bw.classList.contains('mine'), b = bw.querySelector('.b').getBoundingClientRect()
   const rxs = bw.querySelector('.rxs').getBoundingClientRect(), chips = [...bw.querySelectorAll('.rxc')]
@@ -53,6 +77,8 @@ for (const bw of col.querySelectorAll('.bw')) {{
     seen.push(Math.round(r.width))
     if (r.width > Math.max(inner, 28) + 1) bad.push(tag + 'chip ' + r.width + ' wider than its content ' + inner)
     if (Math.abs(r.height - 28) > 0.5) bad.push(tag + 'chip height ' + r.height)
+    if (r.width > (x.children.length > 1 ? 72 : 56)) bad.push(tag + x.className + ' chip ' + r.width + ' wide')
+    if (s.position !== 'relative') bad.push(tag + x.className + ' chip is ' + s.position)
     const tuck = b.bottom - r.top
     if (tuck < 7 || tuck > 12) bad.push(tag + 'overlap ' + tuck)
     if (r.left < c.left + 16 - 0.5 || r.right > c.right - 16 + 0.5) bad.push(tag + 'outside the column')

@@ -156,9 +156,12 @@ button.b{cursor:pointer}
 /* reactions, as WhatsApp and iMessage: a pill that hugs its emoji (never a stretched track: width:max-content and
    flex:none), tucked over the bubble's bottom edge by a third of its height, inset 8px from the bubble's own corner
    (right for yours, left for the agent's, from .bmv's justify-items), a raised fill one step above the bubble with a
-   ring of the chat's background so the overlap reads clean; being in the flow, it reserves its own space below */
-.rxs{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:4px;width:max-content;max-width:calc(100% - 16px);margin:-10px 8px 2px}.bw.mine .rxs{justify-content:flex-end}
+   ring of the chat's background so the overlap reads clean; being in the flow, it reserves its own space below.
+   Its states are rx- classes only: 3.2.4's just-added chip carried "pop", the menu's own class, and drew as a 200px
+   floating bar until a reload. .rxs>.rxc pins the size against any other class or container, in every state. */
+.rxs{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:4px;width:max-content;max-width:calc(100% - 16px);margin:-10px 8px 2px;justify-self:start;align-self:start}.bw.mine .rxs{justify-content:flex-end;justify-self:end}
 .rxc{position:relative;flex:none;display:inline-flex;align-items:center;justify-content:center;gap:3px;width:auto;min-width:28px;height:28px;padding:0 6px;border-radius:999px;background:var(--rx);box-shadow:0 0 0 2px var(--canvas);color:var(--sub);font-size:12px;line-height:16px;font-weight:600;font-variant-numeric:tabular-nums}
+.rxs>.rxc{position:relative;inset:auto;flex:none;align-self:center;justify-self:start;width:fit-content;min-width:28px;max-width:none;height:28px;min-height:0;max-height:none;margin:0;padding:0 6px;transform:none}
 /* the finger pad reaches further up, over the bubble it already overlaps: below it, a bar such as "waiting at a
    prompt" may sit close and take the lower pad, and the chip must still give a finger 44px */
 .rxc::after{content:"";position:absolute;inset:-13px -2px -8px}
@@ -166,11 +169,11 @@ button.b{cursor:pointer}
 .rxc:hover{background:color-mix(in srgb,var(--fg) 6%,var(--rx))}
 .rxc[aria-pressed="true"]{background:color-mix(in srgb,var(--blue) 18%,var(--rx));color:var(--fg)}
 .rxc[aria-pressed="true"]:hover{background:color-mix(in srgb,var(--blue) 26%,var(--rx))}
-.rxc.pending{opacity:.6}
-.rxc.pop{animation:rxpop 280ms cubic-bezier(.25,1.12,.4,1)}
+.rxc.rx-pending{opacity:.6}
+.rxs>.rxc.rx-new{animation:rxpop 280ms cubic-bezier(.25,1.12,.4,1)}
 @keyframes rxpop{0%{transform:scale(.3);opacity:0}60%{transform:scale(1.12);opacity:1}100%{transform:scale(1)}}
 .app.tap .rxc .e{font-size:18px}
-@media(prefers-reduced-motion:reduce){.rxc.pop{animation:none}.bmv.settle{transition:none}}
+@media(prefers-reduced-motion:reduce){.rxs>.rxc.rx-new{animation:none}.bmv.settle{transition:none}}
 /* a finger's long press opens the menu, not the system's word selection (Select text turns it back on) */
 @media(pointer:coarse){.b[data-menu]:not(.sel){-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}}
 .b[data-menu]{touch-action:pan-y pinch-zoom}
