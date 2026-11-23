@@ -14,8 +14,9 @@ import { parseTask } from '@core/mentions.js'
 
 marked.setOptions({ gfm: true, breaks: false })
 
-// a link goes to a new tab, never in place of the app; one to this app is caught by kernel.ts and opens in it
-DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+// a link goes to a new tab, never in place of the app; one to this app is caught by kernel.ts and opens in it.
+// Without a browser (bun test) DOMPurify has no hooks: the module still loads, so a test's mock can keep its real exports.
+if (DOMPurify.isSupported) DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (node.tagName !== 'A' || !node.getAttribute('href')) return
   node.setAttribute('target', '_blank')
   node.setAttribute('rel', 'noopener noreferrer')
