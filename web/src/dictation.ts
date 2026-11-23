@@ -420,11 +420,18 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
         const src = c.createMediaStreamSource(stream)
         level = meter(c)
         src.connect(level)
+        // the wave's meter is pulled by the graph on its own (a silent path out), whatever the live words do: in 3.2.3
+        // only the live words' tap led out, and the audio was made to run only after their module loaded, so a module
+        // that failed or hung could leave the wave reading nothing (a flat row of dots)
+        const hush = c.createGain()
+        hush.gain.value = 0
+        level.connect(hush).connect(c.destination)
         // the live words: the microphone's samples, 16 kHz, to the socket as they come (kept until it opens), the tap
-        // joined before the audio is made to run, so it hears from the first sample the audio gives
-        if (live && loaded) {
-          await loaded
-          if (state !== 'on' || ctx !== c) return
+        // joined before the audio is made to run, so it hears from the first sample the audio gives; a module that
+        // fails or takes too long only drops the live words (Done uploads the recording)
+        const ready = live && loaded ? await Promise.race([loaded.then(() => true, () => false), new Promise<boolean>((r) => setTimeout(() => r(false), RESUME_WAIT))]) : false
+        if (state !== 'on' || ctx !== c) return
+        if (live && ready) {
           const tap = new AudioWorkletNode(c, 'shepherdr-tap')
           const down = to16k(c.sampleRate)
           tap.port.onmessage = (e) => {
@@ -441,6 +448,8 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
         } else live?.close()
         await running(c)
       } catch {
+        // the wave still moves when only the live words failed
+        void running(c)
         // no wave or live words (a failed worklet): Done uploads the recording
         live?.close()
       }

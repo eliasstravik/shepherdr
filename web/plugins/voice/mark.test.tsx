@@ -37,5 +37,5 @@ test('while it connects the wave is still dots that breathe; once live it draws 
   expect(renderToStaticMarkup(<CallMarkView phase="connecting" muted={false} sample={quiet} />)).toContain('vmark wait')
   const live = renderToStaticMarkup(<CallMarkView phase="speaking" muted={false} sample={quiet} />)
   expect(live).toContain('class="vmark"')
-  expect(live).toContain('class="vwave"')
+  expect(live).toMatch(/class="wv vwave"[^>]*><canvas>/)
 })

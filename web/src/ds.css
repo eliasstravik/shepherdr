@@ -105,7 +105,10 @@ button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"])
 .tbtn{display:inline-flex;align-items:center;gap:4px;max-width:100%;height:var(--btn);padding:0 8px;margin-left:-4px;border-radius:8px;font-weight:600;min-width:0}
 .tbtn:hover,.tbtn[aria-expanded="true"]{background:var(--control)}.tbtn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* SHEP-326: the call's mark, no words: a live wave of whoever talks, still dots that breathe while it connects */
-.vmark{display:inline-flex;align-items:center;flex:none;width:100%;max-width:120px;height:20px;color:var(--fg)}
+/* the call's wave fills the box's row up to the mic, as dictation's does (one wave, wave.tsx) */
+.vmark{display:flex;align-items:center;flex:1 1 0;min-width:0;height:24px;color:var(--fg)}.app.tap .vmark{height:28px}
+/* a wave's canvas fills its box and never sizes it (wave.tsx) */
+.wv{position:relative;display:block;min-width:0;overflow:hidden}.wv>canvas{position:absolute;inset:0;display:block;width:100%;height:100%}
 .vmark.wait{animation:calm 1.6s ease-in-out infinite}
 .vwave{width:100%;height:100%}
 .vwave.off{color:var(--muted)}
