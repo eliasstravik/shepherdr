@@ -184,6 +184,8 @@ export interface UI {
   /** the open artifact has the middle column */
   artWide: boolean
   tab: 'Now' | 'Scheduled'
+  /** SHEP-325: Everything's Tasks shows one repo's or folder's tasks (its key: machine and folder), none: all */
+  repo: string | null
   /** the phone's list of spaces is out */
   drawer: boolean
   /** the list is hidden (desktop) */
@@ -275,6 +277,7 @@ let state: State = {
     artV: null,
     artWide: false,
     tab: 'Now',
+    repo: null,
     drawer: false,
     sideOff: false,
     filter: 'Active',
@@ -696,6 +699,8 @@ export function go(place: string) {
     wide: false,
     artWide: false,
     search: false,
+    // another space: Everything's repo filter is dropped (SHEP-325)
+    ...(place !== ui.at ? { repo: null } : {}),
     // another space: the open task goes with the one it was opened in
     ...(ui.phone ? { pane: null, task: null, art: null } : { task: null }),
     ...(ui.pane === 'screen' && ui.scr ? (ui.scr.key.startsWith('chat:') ? { scr: { key: `chat:${place}`, src: 'b' as const, drive: false } } : { pane: null }) : {}),

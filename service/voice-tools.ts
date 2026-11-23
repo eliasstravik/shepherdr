@@ -9,7 +9,7 @@ import type { AgentPick, Need, Snapshot, Task, Place } from "../web/shared/types
 import { ACTS, ASK_FIRST, navWords, REPLY_MAX, SETTINGS } from "../core/voice.js";
 import { screenParams, screenWords } from "../core/screen.js";
 import { planRows, windowWords, whyWords, healthWords } from "../core/machines.js";
-import { artifactsIn, everything, isEverything, listOf, machineLabel, machineWarn, needsCount, nowGroups, onBranch, scheduleLine, schedulesOf, spaceLabel, spacesOf, etaOf, leftWords, statusWord, taskLine, taskWhen, tstate, unreachable, whereWords } from "../web/shared/view.ts";
+import { artifactsIn, everything, isEverything, listOf, machineLabel, machineWarn, needsCount, nowGroups, onBranch, scheduleLine, schedulesOf, spaceLabel, spacesOf, etaOf, leftWords, statusWord, taskInSpace, taskLine, taskWhen, tstate, unreachable, whereWords } from "../web/shared/view.ts";
 import { SOURCES, scrub, render, at, search, segments, type SourceArgs } from "./voice-data.ts";
 
 /** Where a call comes from and what its app shows now (sent by the page as it changes). SHEP-105: a call is with
@@ -375,7 +375,7 @@ async function lookChat(io: VoiceIO, snap: Snapshot, where: Where, id: unknown, 
 function lookSpaces(snap: Snapshot) {
   const out: string[] = [];
   const counts = (id: string) => {
-    const n = needsCount(snap, id), w = snap.tasks.filter((t) => t.place === id && tstate(t) === "working").length;
+    const n = needsCount(snap, id), w = snap.tasks.filter((t) => taskInSpace(t, id) && tstate(t) === "working").length;
     return [n ? `${n} ${n === 1 ? "needs" : "need"} you` : "", w ? `${w} working` : ""].filter(Boolean).join(", ");
   };
   const ev = everything(snap);
@@ -424,7 +424,7 @@ function lookTasks(snap: Snapshot, where: Where, id: unknown, query: string, cou
     const m = snap.machines.find((x) => machineAliases(x).some((a) => norm(a) === norm(id)));
     const p = m ? null : findSpace(snap, id, where);
     if (m) { ts = ts.filter((t) => snap.places.find((p) => p.id === t.place)?.machine === m.machine); scope = ` on ${m.name}`; }
-    else if (p && !isEverything(snap, p.id)) { ts = ts.filter((t) => t.place === p.id); scope = ` in ${label(snap, p.id)}`; }
+    else if (p && !isEverything(snap, p.id)) { ts = ts.filter((t) => taskInSpace(t, p.id)); scope = ` in ${label(snap, p.id)}`; }
     else if (!p) return fail(`I can't find a space or machine called "${cut(id, 60)}".`);
   }
   const st = stateOf(query);
@@ -924,7 +924,7 @@ async function act(snap: Snapshot, where: Where, io: VoiceIO, p: any, id: string
     if (hits.length !== 1) return isHere(id) && !hits.length ? fail("Which space?") : which(snap, hits, id);
     const sp = hits[0], n = label(snap, sp.id);
     if (isEverything(snap, sp.id)) return fail("Everything is the root chat: it can't be renamed, archived or removed.");
-    const working = snap.tasks.filter((t) => t.place === sp.id && tstate(t) === "working").length;
+    const working = snap.tasks.filter((t) => taskInSpace(t, sp.id) && tstate(t) === "working").length;
     const stops = `${working ? `Its ${working} working task${working === 1 ? " stops" : "s stop"}, and its` : "Its"} schedules stop.`;
     switch (action) {
       case "rename_space":
