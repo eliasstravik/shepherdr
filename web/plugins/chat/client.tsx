@@ -5,7 +5,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyn
 import { copyText } from '@client/copy.ts'
 import { TEXT_IN_CALL, useDictating } from '@client/dictate.tsx'
 import { attr } from '@client/attr.ts'
-import { act, definePlugin, getState, has, notice, registry, setUI, tryAct, useChat, useDraft, useSnap, useStore, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
+import { act, definePlugin, getState, has, notice, openTask, registry, setUI, tryAct, useChat, useDraft, useSnap, useStore, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
 import { partsOf, placeOutgoing, placesOf, keyOf, readNow, showsAs, type Outgoing } from '@client/outbox.ts'
 import { confirm, openMenu } from '@client/overlay.tsx'
 import { AgentLine, openPicker, pickFor, pickWords, type Pick } from '@client/picker.tsx'
@@ -144,7 +144,7 @@ function TaskRef({ id, title, t }: { id: string; title: string; t?: Task }) {
   // a slide to the right replies to the task here, as to a message
   const { on, slide, armed, skip, moving } = useSlide(() => replyToTask({ id, name: title }))
   return (
-    <button type="button" className="ref tslide" {...on} onClick={() => (skip.current ? void (skip.current = false) : setUI({ task: id, pane: 'tasks', wide: false }))}>
+    <button type="button" className="ref tslide" {...on} onClick={() => (skip.current ? void (skip.current = false) : openTask(id))}>
       <SlideHint slide={slide} armed={armed} />
       <span className={cx('tmv', moving.className)} style={moving.style} onTransitionEnd={moving.onTransitionEnd}>
         {t ? <StatusIcon t={t} time="side" /> : <I n="chat" c="s16" />}
@@ -166,7 +166,7 @@ function TaskQuote({ id, title }: { id: string; title: string }) {
       aria-label={`Replying to the task ${t?.name ?? title}${word ? `, ${word}` : ''}`}
       onClick={(e) => {
         e.stopPropagation()
-        setUI({ task: id, pane: 'tasks', wide: false })
+        openTask(id)
       }}
     >
       {t ? <StatusIcon t={t} time="none" /> : <I n="tasks" c="s16" />}

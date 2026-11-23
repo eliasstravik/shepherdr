@@ -386,13 +386,12 @@ function dragSpace(snap: Snapshot, p: Space, under: string, siblings: string[]) 
 
 function SpaceRow({ snap, p, sub, under, siblings, section }: { snap: Snapshot; p: Space; sub?: boolean; under: string; siblings: string[]; section?: string }) {
   const at = useUI((u) => u.at)
-  const wide = useUI((u) => u.wide)
   const n = needsCount(snap, p.id)
   const dim = !!placeDown(snap, p.id) || p.archived
   const tilde = isTilde(snap, p)
   return (
     <div className="rowx" data-project={p.id} data-section={section} data-drop={under} onPointerDown={dragSpace(snap, p, under, siblings)}>
-      <Row lead={<SpaceIcon snap={snap} id={p.id} />} label={tilde ? '~' : p.name} {...(tilde ? { 'aria-label': spaceLabel(snap, p.id) } : {})} className={[sub ? 'sub' : '', dim ? 'dim' : ''].join(' ')} current={at === p.id && !wide} end={<Cnt n={n} />} onClick={() => go(p.id)} />
+      <Row lead={<SpaceIcon snap={snap} id={p.id} />} label={tilde ? '~' : p.name} {...(tilde ? { 'aria-label': spaceLabel(snap, p.id) } : {})} className={[sub ? 'sub' : '', dim ? 'dim' : ''].join(' ')} current={at === p.id} end={<Cnt n={n} />} onClick={() => go(p.id)} />
       <IB
         icon="dots"
         label={`More for ${tilde ? spaceLabel(snap, p.id) : p.name}`}
@@ -541,7 +540,7 @@ export function List({ snap }: { snap: Snapshot }) {
       </div>
       {ev && (
         <div className="rowx">
-          <Row lead={<SpaceIcon snap={snap} id={ev.id} />} label="Everything" current={ui.at === ev.id && !ui.wide} onClick={() => go(ev.id)} />
+          <Row lead={<SpaceIcon snap={snap} id={ev.id} />} label="Everything" current={ui.at === ev.id} onClick={() => go(ev.id)} />
         </div>
       )}
       {machines.map((m) => {

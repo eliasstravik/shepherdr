@@ -7,7 +7,7 @@
 // and the arrows.
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { PaneFrame } from '@client/App.tsx'
-import { definePlugin, getState, setUI, useSnap, useUI, type Thread } from '@client/kernel.ts'
+import { definePlugin, getState, openTask, setUI, useSnap, useUI, type Thread } from '@client/kernel.ts'
 import { Btn, Hd, I, IB } from '@client/ui.tsx'
 import type { Chat, Task } from '@shared/types.ts'
 import { machineLabel, placeOf, taskChat, taskOf, tasksIn, tstate } from '@shared/view.ts'
@@ -332,7 +332,7 @@ function Stuck({ chat: own, thread }: { chat: Chat | undefined; thread: Thread }
     <div className="banner" style={{ margin: '8px 0 0' }} key={key}>
       <I n="warn" c="c-ask" />
       <span className="n">{words}</span>
-      <Btn small onClick={() => { if (open) setUI({ task: open.id, pane: 'tasks', wide: false }); switchView(chat, true) }}>View as terminal</Btn>
+      <Btn small onClick={() => { if (open) openTask(open.id); switchView(chat, true) }}>View as terminal</Btn>
     </div>
   )
   if (thread.task) return stuck(thread.task) ? banner('t', 'Waiting at a prompt', thread.chat) : null

@@ -188,8 +188,9 @@ export interface UI {
   pane: string | null
   /** the open task */
   task: string | null
-  /** the open task has the middle column */
-  wide: boolean
+  /** the task maximized into the middle column (SHEP-435): it stays there, whatever the pane shows, until its own
+   *  Minimize or another space; the pane's own task (`task`) is another matter */
+  max: string | null
   /** the open artifact, at a version picked or its latest */
   art: string | null
   artV: number | null
@@ -277,7 +278,9 @@ const KEPT: (keyof UI)[] = ['sideOff', 'shown', 'shut', 'banner', 'term', 'tf']
 const params = new URLSearchParams(typeof location === 'undefined' ? '' : location.search)
 export const launchHref = typeof location === 'undefined' ? '' : location.href
 
-const paneOfUrl = (q: URLSearchParams) => (q.get('artifact') ? 'artifacts' : q.get('task') ? 'tasks' : q.get('pane'))
+const paneOfUrl = (q: URLSearchParams) => (q.get('artifact') ? 'artifacts' : q.get('task') || (MQ?.matches && q.get('max')) ? 'tasks' : q.get('pane'))
+/** the pane's task from a link: on a phone a maximized one is the pane's */
+const taskOfUrl = (q: URLSearchParams) => q.get('task') ?? (MQ?.matches ? q.get('max') : null)
 
 let state: State = {
   snap: null,
@@ -290,8 +293,9 @@ let state: State = {
     narrow: !!MQ2?.matches,
     at: params.get('place') ?? stored('shepherdr.at', ''),
     pane: paneOfUrl(params),
-    task: params.get('task'),
-    wide: false,
+    task: taskOfUrl(params),
+    // a phone has no middle beside a pane: a maximized task opens as its pane
+    max: MQ?.matches ? null : params.get('max'),
     art: params.get('artifact'),
     artV: null,
     artWide: false,
@@ -336,7 +340,7 @@ export const subscribe = (l: () => void) => {
 export const getState = () => state
 
 /** what makes a step in the browser's history: Back closes a task, a pane, the settings */
-const STEPS: (keyof UI)[] = ['at', 'pane', 'task', 'art', 'wide', 'artWide', 'scrFull', 'settings', 'drawer', 'search']
+const STEPS: (keyof UI)[] = ['at', 'pane', 'task', 'art', 'max', 'artWide', 'scrFull', 'settings', 'drawer', 'search']
 
 export function setUI(patch: Partial<UI> | ((ui: UI) => Partial<UI>)) {
   const p = typeof patch === 'function' ? patch(state.ui) : patch
@@ -410,12 +414,13 @@ if (typeof window !== 'undefined')
 
 /* ---------- the address bar and Back ---------- */
 
-type Step = Pick<UI, 'at' | 'pane' | 'task' | 'art' | 'wide' | 'artWide' | 'scrFull' | 'settings' | 'drawer' | 'search'>
-const stepOf = (ui: UI): Step => ({ at: ui.at, pane: ui.pane, task: ui.task, art: ui.art, wide: ui.wide, artWide: ui.artWide, scrFull: ui.scrFull, settings: ui.settings, drawer: ui.drawer, search: ui.search })
+type Step = Pick<UI, 'at' | 'pane' | 'task' | 'art' | 'max' | 'artWide' | 'scrFull' | 'settings' | 'drawer' | 'search'>
+const stepOf = (ui: UI): Step => ({ at: ui.at, pane: ui.pane, task: ui.task, art: ui.art, max: ui.max, artWide: ui.artWide, scrFull: ui.scrFull, settings: ui.settings, drawer: ui.drawer, search: ui.search })
 
 function urlOf(s: Step) {
   const q = new URLSearchParams()
   if (s.at) q.set('place', s.at)
+  if (s.max) q.set('max', s.max)
   if (s.task) q.set('task', s.task)
   else if (s.art) q.set('artifact', s.art)
   else if (s.pane) q.set('pane', s.pane)
@@ -437,20 +442,22 @@ function writeUrl(replace: boolean) {
   if (deeper) history.pushState({ shep: 2, step }, '', urlOf(step))
   else history.replaceState({ shep: 2, step }, '', urlOf(step))
 }
-const depth = (s: Step) => (s.drawer || s.search ? 1 : 0) + (s.settings ? 1 + (s.settings.sec ? 1 : 0) : 0) + (s.pane ? 1 : 0) + (s.task || s.art ? 1 : 0) + (s.wide || s.artWide ? 1 : 0) + (s.scrFull && s.pane === 'screen' ? 1 : 0)
+const depth = (s: Step) => (s.drawer || s.search ? 1 : 0) + (s.settings ? 1 + (s.settings.sec ? 1 : 0) : 0) + (s.pane ? 1 : 0) + (s.task || s.art ? 1 : 0) + (s.max ? 1 : 0) + (s.artWide ? 1 : 0) + (s.scrFull && s.pane === 'screen' ? 1 : 0)
 
 if (typeof window !== 'undefined') {
   addEventListener('popstate', (e) => {
     const st = (e as PopStateEvent).state as { shep?: number; step?: Step } | null
     const q = new URLSearchParams(location.search)
-    const step: Partial<Step> = st?.shep === 2 && st.step ? st.step : { at: q.get('place') ?? state.ui.at, task: q.get('task'), art: q.get('artifact'), pane: paneOfUrl(q), wide: false, artWide: false, scrFull: false, settings: null, drawer: false, search: false }
+    const step: Partial<Step> = st?.shep === 2 && st.step ? st.step : { at: q.get('place') ?? state.ui.at, task: taskOfUrl(q), art: q.get('artifact'), pane: paneOfUrl(q), max: MQ?.matches ? null : q.get('max'), artWide: false, scrFull: false, settings: null, drawer: false, search: false }
     state = { ...state, ui: { ...state.ui, ...step } }
     written = JSON.stringify(stepOf(state.ui))
     stayOnShown()
     watchVisible()
     emit()
   })
-  const sized = () => setUI({ phone: !!MQ?.matches, narrow: !!MQ2?.matches, ...(MQ?.matches ? {} : { drawer: false }) })
+  // folding to a phone: a maximized task becomes the open pane's task, as a phone shows one
+  const sized = () =>
+    setUI((ui) => ({ phone: !!MQ?.matches, narrow: !!MQ2?.matches, ...(MQ?.matches ? (ui.max ? { max: null, task: ui.max, pane: 'tasks', art: null } : {}) : { drawer: false }) }))
   MQ?.addEventListener('change', sized)
   MQ2?.addEventListener('change', sized)
 }
@@ -470,11 +477,12 @@ export function openLink(href: string, step = false) {
       drawer: false,
       search: false,
       ...(place ? { at: place } : {}),
-      task,
+      task: task ?? (state.ui.phone ? q.get('max') : null),
       art,
       ...(art ? { artV: null } : {}),
       pane: art ? 'artifacts' : task ? 'tasks' : pane && pane !== 'screen' ? pane : state.ui.phone ? null : state.ui.pane,
-      wide: false,
+      // a link that names a maximized task lands in it; another space's leaves it; else it stays
+      max: q.has('max') && !state.ui.phone ? q.get('max') : place && place !== state.ui.at ? null : state.ui.max,
       artWide: false,
       scrFull: false,
       jump: q.get('focus'),
@@ -577,7 +585,7 @@ export function connect() {
     if (typeof ev.data !== 'string') return
     const msg = JSON.parse(ev.data) as ServerEvent
     if (msg.type === 'pong') return
-    if (msg.type === 'show') return setUI({ art: msg.artifact, artV: null, pane: 'artifacts', task: null, wide: false })
+    if (msg.type === 'show') return setUI({ art: msg.artifact, artV: null, pane: 'artifacts', task: null })
     if (msg.type === 'voice') return registry.voiceWake?.()
     if (msg.type === 'go') return openLink(msg.url)
     if (msg.type === 'snapshot') {
@@ -708,9 +716,11 @@ function stayOnShown() {
   if (!snap) return
   const here = placeOf(snap, ui.at)
   const at = here?.id ?? everything(snap)?.id ?? ''
-  const task = ui.task && !taskOf(snap, ui.task) && !snap.machines.some((m) => m.connecting) ? null : ui.task
-  if (at === ui.at && task === ui.task) return
-  state = { ...state, ui: { ...ui, at, task, wide: task ? ui.wide : false } }
+  const gone = (id: string | null) => !!id && !taskOf(snap, id) && !snap.machines.some((m) => m.connecting)
+  const task = gone(ui.task) ? null : ui.task
+  const max = gone(ui.max) ? null : ui.max
+  if (at === ui.at && task === ui.task && max === ui.max) return
+  state = { ...state, ui: { ...ui, at, task, max } }
   writeUrl(true)
 }
 
@@ -790,7 +800,8 @@ export function go(place: string) {
   setUI((ui) => ({
     at: place,
     drawer: false,
-    wide: false,
+    // any space's chat in the middle: a maximized task gives it back
+    max: null,
     artWide: false,
     search: false,
     // another space: the open task goes with the one it was opened in
@@ -799,21 +810,35 @@ export function go(place: string) {
   }))
 }
 
-/** open a task in the pane (one not started yet opens its Start dialog instead: the tasks plugin decides) */
-export function openTask(id: string, wide = false) {
-  setUI({ task: id, pane: 'tasks', wide, artWide: false, art: null, drawer: false, search: false, settings: null })
+/** open a task in the pane (one not started yet opens its Start dialog instead: the tasks plugin decides); a task
+ *  maximized in the middle stays there */
+export function openTask(id: string) {
+  const shut = { artWide: false, drawer: false, search: false, settings: null }
+  // the one already in the middle stays there, not shown twice
+  if (getState().ui.max === id) return setUI(shut)
+  setUI({ ...shut, task: id, pane: 'tasks', art: null })
+}
+
+/** a task's chat takes the middle and stays (SHEP-435): the pane it was in closes, free for anything else */
+export function maximize(id: string) {
+  setUI((ui) => ({ max: id, artWide: false, ...(ui.task === id ? { task: null, pane: null } : {}) }))
+}
+
+/** the maximized task goes back to the pane, the space's chat back to the middle */
+export function minimize() {
+  setUI((ui) => (ui.max ? { max: null, task: ui.max, pane: 'tasks', art: null, artWide: false } : {}))
 }
 
 export function openArtifact(id: string, v: number | null = null) {
-  setUI({ art: id, artV: v, pane: 'artifacts', task: null, wide: false, drawer: false, search: false, settings: null })
+  setUI({ art: id, artV: v, pane: 'artifacts', task: null, drawer: false, search: false, settings: null })
 }
 
 /** open or close a pane from its button: pressed again on a desktop, it closes */
 export function togglePane(pane: string | null) {
   setUI((ui) => {
-    if (!pane) return { pane: null, task: null, art: null, wide: false, artWide: false }
+    if (!pane) return { pane: null, task: null, art: null, artWide: false }
     const shut = ui.pane === pane && !ui.phone
-    return { pane: shut ? null : pane, task: ui.wide ? ui.task : null, art: null, artWide: false }
+    return { pane: shut ? null : pane, task: null, art: null, artWide: false }
   })
 }
 
