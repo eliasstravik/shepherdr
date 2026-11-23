@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { place, queueReason, reportOf, estimated, order, ago, autoPrefix, refOf, taskKey, matches, busyAgain, secondLine, leftOf, ORDER, STATUS, WORKING_AGAIN, GRACE_MS, fromLine, autoWhere, inSpace, holdingItems } from "./tasks.js";
+import { place, queueReason, reportOf, ownReport, estimated, order, ago, autoPrefix, refOf, taskKey, matches, busyAgain, secondLine, leftOf, ORDER, STATUS, WORKING_AGAIN, GRACE_MS, fromLine, autoWhere, inSpace, holdingItems } from "./tasks.js";
 import { REASONS, fit } from "./needs.js";
 
 const NOW = 1_800_000_000_000;
@@ -88,6 +88,10 @@ test("what the agent last said, with minutes from its very first estimate", () =
   expect(reportOf(task({ text: "Writing tests", done: 40, at: NOW }), "working", null, NOW).left).toBeNull();
   expect(reportOf(task({ text: "x" }), "ready", null, NOW)).toBeNull();
   expect(reportOf(task(null), "working", { pct: 30, msg: "own words" }, NOW)).toMatchObject({ text: "own words", done: 30 });
+  // both sources in step (SHEP-321): the newer gives the %
+  expect(reportOf(task({ text: "x", done: 40, at: NOW - 5 }), "working", { pct: 70, msg: null, at: NOW }, NOW).done).toBe(70);
+  expect(reportOf(task({ text: "x", done: 40, at: NOW }), "working", { pct: 70, msg: null, at: NOW - 5 }, NOW).done).toBe(40);
+  expect(reportOf(task({ text: "x", at: NOW }), "working", { pct: 70, msg: null, at: NOW - 5 }, NOW).done).toBe(70);
   expect(estimated({ left: 1 })).toBe(true);
   expect(estimated({ done: 50 })).toBe(false);
 });
@@ -249,4 +253,13 @@ describe("Needs-you items the task's own status has moved past (SHEP-195)", () =
     const items = [item("check", { ref: "X-9" }), item("blocked", { terminal: "t1" }), item("provider")];
     expect(holdingItems(items, truthOf(done))).toHaveLength(3);
   });
+});
+
+test("the % a terminal reports itself, as hc keeps it (OSC 7501 status.progress) or the older Herdr's report", () => {
+  expect(ownReport({ status: { state: "working", progress: 42, msg: "Building" }, status_ms: 5 })).toEqual({ pct: 42, msg: "Building", at: 5 });
+  expect(ownReport({ report: { progress: 30 } })).toEqual({ pct: 30, msg: null, at: null });
+  expect(ownReport({ status: { state: "working", progress: 250 } }).pct).toBe(100);
+  expect(ownReport({ status: { state: "working" } })).toBeNull();
+  expect(ownReport({ status: null })).toBeNull();
+  expect(ownReport(undefined)).toBeNull();
 });
