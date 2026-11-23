@@ -1,7 +1,7 @@
 // The chat: an agent's messages (formatted text, code, tables, pictures), one quiet line while it works saying what
 // it is doing, one small folded row per turn ("Ran 4 commands · edited 2 files"), cards where it needs you, and the
 // message box. The same parts draw a space's chat and a task's thread.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { copyText } from '@client/copy.ts'
 import { TEXT_IN_CALL } from '@client/dictate.tsx'
 import { act, definePlugin, getState, has, notice, registry, setUI, tryAct, useChat, useDraft, useSnap, useStore, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
@@ -89,12 +89,14 @@ function QuietRow({ icon, label, meta = [], body, startOpen = false, kind }: { i
       </span>
     </>
   )
-  if (!body) return <div className={cx('fold quiet', kind)}><span className="qc" />{words}</div>
+  // its own icon stands in the chat's one icon column (SHEP-383), so its words line up with every other row's; the
+  // fold's chevron trails the words
+  if (!body) return <div className={cx('fold quiet', kind)}>{words}</div>
   return (
     <>
       <button type="button" className={cx('fold quiet', kind)} aria-expanded={open} onClick={() => setOpen(!open)}>
-        <I n={open ? 'down' : 'right'} c="s16" />
         {words}
+        <I n={open ? 'down' : 'right'} c="s16 qv" />
       </button>
       {open && <div className={cx('quietb', `${kind}b`)}>{body}</div>}
     </>
@@ -574,7 +576,7 @@ function Messages({ thread }: { thread: Thread }) {
   const cardsUntil = (at: number) => {
     while (cards.length && (cards[0]!.at ?? Infinity) <= at) {
       const c = cards.shift()!
-      out.push(<div key={`c:${c.key}`} style={{ display: 'contents' }}>{c.node}</div>)
+      out.push(<Fragment key={`c:${c.key}`}>{c.node}</Fragment>)
       prev = 'a'
     }
   }
@@ -643,9 +645,9 @@ function Messages({ thread }: { thread: Thread }) {
       )}
       {out}
       {thread.task && <StartLine chat={chat} thread={thread} />}
-      {cards.map((c) => <div key={`c:${c.key}`} style={{ display: 'contents' }}>{c.node}</div>)}
+      {cards.map((c) => <Fragment key={`c:${c.key}`}>{c.node}</Fragment>)}
       {registry.chatTail.map((t, i) => <t.View key={i} chat={chat} thread={thread} />)}
-      <div ref={end} />
+      <div ref={end} className="mend" />
     </>
   )
 }
