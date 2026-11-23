@@ -8807,6 +8807,112 @@ class Next32(unittest.TestCase):
         self.assertFalse(hasattr(settings, "instructions_part"))
 
 
+class NamedByTitle(unittest.TestCase):
+    """SHEP-322: no task numbers for people. A task is named by its title; its key (APP-1) stays the hidden id that
+    commands, links and tags carry. Commands take either; a title that fits several is refused, never guessed. A real
+    task list on disk and a throwaway git repo (Scheduled's)."""
+    setUp, run_cmd, add, task = Scheduled.setUp, Scheduled.run_cmd, Scheduled.add, Scheduled.task
+
+    def find(self, what):
+        with self.store_mod.Store(self.store_mod.locate(self.folder), write=False) as s:
+            return s.find(what)["id"]
+
+    def test_a_title_a_part_of_one_or_the_key(self):
+        a, b = self.add("Add the API route"), self.add("Use it in the page")
+        self.assertEqual((a["ref"], b["ref"]), ("APP-1", "APP-2"))
+        for what in ("Add the API route", "add the  api ROUTE", '"Add the API route"', "API route", "APP-1", "app-1", "1", "#1"):
+            self.assertEqual(self.find(what), 1, what)
+        self.assertEqual(self.find("in the page"), 2)
+        # a title that reads like a key is found by its title
+        self.add("GPT-5 support")
+        self.assertEqual(self.find("GPT-5 support"), 3)
+        self.assertEqual(self.find("gpt-5"), 3)
+        with self.assertRaisesRegex(self.Fail, 'No task "Nothing like it"'):
+            self.find("Nothing like it")
+
+    def test_a_title_that_fits_several_is_refused_with_each_listed(self):
+        self.add("Fix login")
+        self.add("Fix login")
+        self.add("Fix login on phones")
+        # the exact title fits two: refused, each listed with its key, nothing changed
+        with self.assertRaises(self.Fail) as e:
+            self.run_cmd(self.commands.cmd_edit, id="Fix login", prompt="Changed")
+        msg = str(e.exception)
+        self.assertIn('2 tasks here fit "Fix login", so nothing was done', msg)
+        self.assertIn("APP-1", msg)
+        self.assertIn("APP-2", msg)
+        self.assertNotIn("APP-3", msg)  # the exact title wins over a part of a longer one
+        self.assertEqual([self.task(n)["prompt"] for n in (1, 2)], ["", ""])
+        # a part that fits all three is refused too; the key always names one
+        with self.assertRaisesRegex(self.Fail, "3 tasks here fit"):
+            self.find("login")
+        self.assertEqual(self.find("on phones"), 3)
+        self.run_cmd(self.commands.cmd_edit, id="APP-2", prompt="Changed")
+        self.assertEqual([self.task(n)["prompt"] for n in (1, 2)], ["", "Changed"])
+
+    def test_old_keys_still_resolve_from_anywhere(self):
+        self.add("Add the API route")
+        elsewhere = tempfile.mkdtemp(dir=self.tmp)
+        cwd = os.getcwd()
+        os.chdir(elsewhere)
+        self.addCleanup(os.chdir, cwd)
+        v = self.run_cmd(self.commands.cmd_show, folder=None, id="APP-1")
+        self.assertEqual((v["ref"], v["title"]), ("APP-1", "Add the API route"))
+        self.assertEqual(self.run_cmd(self.commands.cmd_show, id="Add the API route")["ref"], "APP-1")
+
+    def test_after_by_title_and_its_reason_names_the_title(self):
+        self.add("Add the API route")
+        self.add("Write the docs")
+        v = self.add("Use it in the page", after="Add the API route, Write the docs")
+        t = self.task(3)
+        self.assertEqual(t["after"], [1, 2])
+        self.add("Ship it", after="1 2")  # keys alone, split by spaces as before
+        self.assertEqual(self.task(4)["after"], [1, 2])
+        self.run_cmd(self.commands.cmd_start, id="Add the API route")
+        q = self.run_cmd(self.commands.cmd_start, id="Use it in the page")
+        self.assertTrue(q["queued"])
+        self.assertEqual(q["reason"], 'after "Add the API route", "Write the docs"')
+        self.assertNotIn("APP-", q["reason"])
+        with self.assertRaisesRegex(self.Fail, 'No task "Nothing"'):
+            self.add("Later", after="Nothing")
+
+    def test_what_it_says_names_the_title(self):
+        out = self.io.StringIO()
+        with self.redirect(out):
+            self.commands.cmd_add(self.argparse.Namespace(**{**dict(folder=self.folder, json=False, title="Fix login", prompt=None,
+                prompt_file=None, here=False, worktree=False, after=None, space=None, at=None, in_=None, agent=None, model=None,
+                effort=None, argv=None, parent=None, now=False, base=None, start_notes=None, finish_notes=None, set=None)}))
+        self.assertTrue(out.getvalue().startswith('"Fix login" added'), out.getvalue())
+        from herdr_task.output import line
+        with self.store_mod.Store(self.store_mod.locate(self.folder), write=False) as s:
+            from herdr_task.output import view
+            text = line(view(s, s.find(1)))
+        self.assertTrue(text.startswith("To do") and "Fix login" in text and text.endswith("[key APP-1]"), text)
+
+    def test_the_brief_names_its_task_by_title(self):
+        from herdr_task import launch
+        self.add("Fix login", prompt="Make the login work.")
+        with self.store_mod.Store(self.store_mod.locate(self.folder), write=False) as s:
+            t = s.find(1)
+            b = launch.brief(s, t, space="sp1", argv=["claude"])
+            h = launch.handoff(s, t, None, argv=["claude"])
+        self.assertIn('Your task, "Fix login":\nMake the login work.', b)
+        self.assertNotIn("Your task, APP-1", b)
+        self.assertIn('You are taking over the task "Fix login" from another agent.', h)
+        # its commands still carry the key, which only commands read
+        self.assertIn("ready APP-1 --folder", b)
+
+    def test_the_prefix_setting_is_gone(self):
+        self.add("Fix login")
+        v = self.run_cmd(self.commands.cmd_config, prefix="ZZ")
+        self.assertTrue(v["prefix_ignored"])
+        self.assertNotIn("prefix", v)
+        self.assertEqual(self.task(1)["id"], 1)
+        self.assertEqual(self.find("APP-1"), 1)  # its key is as it was
+        r = subprocess.run([sys.executable, os.path.join(BIN, "herdr-task"), "config", "--help"], capture_output=True, text=True)
+        self.assertNotIn("--prefix", r.stdout)
+
+
 class Schedules32(unittest.TestCase):
     """3.2: a schedule (stored as an automation) runs on a time, a repeat or an event; every run is a new ordinary task
     named after it; a one-off leaves the list; a run that changed nothing ends without review (ready --nothing / --told)."""
@@ -8849,6 +8955,24 @@ class Schedules32(unittest.TestCase):
         with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
             self.au.automations_pass(s, seen, report)
         return report["fired"]
+
+    def test_a_schedule_by_its_title(self):
+        """SHEP-322: a schedule is named by its title too; one that fits several is refused."""
+        self.auto("add", title="Dependency check", prompt="x", when="mondays 9:00")
+        self.auto("add", title="Look for stuck work", prompt="x", when="every 30 minutes")
+        self.auto("add", title="Look for stuck work", prompt="x", when="every 2 hours")
+        self.assertEqual(self.auto("show", id="Dependency check")["ref"], "APP-A1")
+        self.assertEqual(self.auto("show", id="dependency")["ref"], "APP-A1")
+        self.assertEqual(self.auto("show", id="APP-A2")["title"], "Look for stuck work")
+        with self.assertRaisesRegex(self.Fail, '2 schedules here fit "Look for stuck work"'):
+            self.auto("pause", id="Look for stuck work")
+        self.assertFalse(self.auto("show", id="APP-A2")["paused"])
+        out = self.io.StringIO()
+        with self.redirect(out):
+            self.au.cmd_auto(self.argparse.Namespace(**dict(auto="pause", folder=self.folder, json=False, id="Dependency check", title=None,
+                prompt=None, prompt_file=None, every=None, on=None, when=None, match=None, from_=None, agent=None, space=None,
+                parent=None, set=None, here=True, worktree=False, all=False)))
+        self.assertEqual(out.getvalue().strip(), '"Dependency check" paused.')
 
     def test_when_in_plain_words(self):
         w = self.au.parse_when

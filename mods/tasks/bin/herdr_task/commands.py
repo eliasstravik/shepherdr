@@ -28,7 +28,7 @@ from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
     own_path, parent_for, resume_argv, set_branch, setup_for, space_for_folder, tab_title, task_tabs,
 )
-from .store import bare_by_mistake, is_task_list, locate, open_store, read_list, Store, store_files
+from .store import bare_by_mistake, is_task_list, locate, open_store, quoted, read_list, Store, store_files
 from .queues import after_refs, parse_after, queue_reason, set_after
 from .archive import unarchive
 from .output import line, minutes, say, view
@@ -302,6 +302,10 @@ def cmd_show(args):
             if last:
                 v["review_rounds"]["last"] = {"head": last.get("head"), "text": last.get("text") or ""}
         v["after_refs"] = after_refs(s, t)
+        # SHEP-322: what it comes after, by title (its keys stay in after_refs, for commands)
+        known = {o["id"]: o for o in s.data["tasks"]}
+        after_names = [s.name(known[i]) for i in t.get("after") or [] if i in known] + [
+            quoted(x["title"]) if x.get("title") else x["ref"] for x in t.get("after_ext") or []]
         block = settings_block(s, t)
         if getattr(args, "evidence", False):
             # What the Accept card shows: commits, files, checks and the proof (proof.py).
@@ -314,7 +318,7 @@ def cmd_show(args):
     if v.get("base_set"):
         text.append(f"merges into: {v['base']} (" + ("its space's base branch" if v.get("base_by") == "space" else "set for this task") + ")")
     if v.get("after_refs"):
-        text.append("comes after: " + ", ".join(v["after_refs"]))
+        text.append("comes after: " + ", ".join(after_names))
     if v.get("review_rounds"):
         r = v["review_rounds"]
         text.append(f"review rounds: {r['used']} of {r['of']} used" + (f" ({r['added']} added by the assistant)" if r["added"] else "")

@@ -65,6 +65,12 @@ describe("rows", () => {
   test("a task's news line: what happened and the rest, without its id and title", () => {
     expect(newsWords({ ref: "HERD-4", event: "needs-you", text: "HERD-4 needs you: Needs a go (Fix login)" }, { title: "Fix login" })).toEqual({ mark: "needs", what: "needs you", text: "Needs a go" });
     expect(newsWords({ ref: "HERD-4", event: "ready", text: "HERD-4 is ready: Fix login · It works" }, { title: "Fix login" })).toEqual({ mark: "ready", what: "ready", text: "It works" });
+    // SHEP-322: the title in quotes first, no key; an older herdr-task's lines above read as before
+    expect(newsWords({ ref: "HERD-4", event: "needs-you", text: '"Fix login" needs you: Needs a go (to screenshot it)' }, { title: "Fix login" })).toEqual({ mark: "needs", what: "needs you", text: "Needs a go (to screenshot it)" });
+    expect(newsWords({ ref: "HERD-4", event: "ready", text: '"Fix login" is ready · It works: really · For AGENTS.md: x' }, { title: "Fix login" })).toEqual({ mark: "ready", what: "ready", text: "It works: really" });
+    expect(newsWords({ ref: "HERD-4", event: "ready", text: '"Fix login" is ready' }, { title: "Fix login" })).toEqual({ mark: "ready", what: "ready", text: "Fix login" });
+    expect(newsWords({ ref: "HERD-4", event: "failed", text: '"Old name" failed: Agent stopped' }, { title: "New name" })).toEqual({ mark: "needs", what: "failed", text: "Agent stopped" });
+    expect(newsWords({ ref: "HERD-4", event: "done", text: '"Fix login" is done: merged' }, { title: "Fix login" })).toEqual({ mark: "done", what: "done", text: "Fix login" });
     expect(newsWords({ ref: "HERD-4", event: "working-again", text: "HERD-4 is working again: resumed (Fix login)" }, { title: "Fix login" })).toEqual({ mark: "started", what: "working again", text: "resumed" });
     expect(newsWords({ ref: "HERD-4", event: "done", text: "HERD-4 is done (Fix login)" }, { title: "Fix login" })).toEqual({ mark: "done", what: "done", text: "Fix login" });
     expect(newsWords({ ref: "HERD-4", event: "started", made: true }, { title: "Fix login" })).toEqual({ mark: "started", what: "started", text: "Fix login" });

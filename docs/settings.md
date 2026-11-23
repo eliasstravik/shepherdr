@@ -51,7 +51,7 @@ edits the file, or edit it yourself.
 | `tasks.worktrees` | Off: tasks work in the folder itself |
 | `tasks.worktree_root` | The folder new task worktrees go in |
 | `tasks.base` | A space's base branch |
-| `tasks.branch` | The pattern for new task branches (`{n}`, `{key}`, `{slug}`; empty: `task/{n}-{slug}`) |
+| `tasks.branch` | The pattern for new task branches (`{slug}`, the title; empty: `task/{slug}`, `-2` when taken; `{n}` and `{key}` still work) |
 | `tasks.claude_flags`, `tasks.codex_flags` | Extra flags for a task's agent |
 | `tasks.setup` | A shell command run in each new worktree before its agent starts |
 | `tasks.start_notes`, `tasks.finish_notes` | Steps a task's agent does first and last |
