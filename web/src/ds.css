@@ -30,7 +30,7 @@ p,h2,h3{margin:0}small{font-size:inherit}
 /* atoms */
 .i{width:var(--ic);height:var(--ic);flex:none;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
 .i *{vector-effect:non-scaling-stroke}.i.f{fill:currentColor;stroke:none}.i.s16{width:16px;height:16px}.i.s20{width:20px;height:20px}.i.s22{width:22px;height:22px}
-.c-ask{color:var(--amber)}.c-ready{color:var(--green)}.c-working{color:var(--blue)}.c-mute{color:var(--muted)}
+.c-ask{color:var(--amber)}.c-ready{color:var(--green)}.c-working{color:var(--amber)}.c-red{color:var(--red)}.c-mute{color:var(--muted)}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:var(--btn);padding:0 12px;border-radius:8px;background:var(--control);font-size:var(--sec);line-height:var(--secl);font-weight:500;white-space:nowrap;flex:none}
 .btn:hover{background:var(--control2)}.btn.s{height:var(--btns);padding:0 10px}
 .btn.pri{background:var(--fg);color:var(--canvas)}.btn.str{background:var(--control2)}.btn.danger{color:var(--red)}
@@ -375,10 +375,10 @@ html,body{height:100%}body{padding:0;overflow:hidden}
 @keyframes up{from{transform:translateY(24px);opacity:0}}
 @keyframes in{from{transform:translateX(-24px);opacity:0}}
 @keyframes fade{from{opacity:0}}
-/* a task's status icon (SHEP-321, tasks/client.tsx StatusIcon): the ring filled by the share done, the time left short
+/* a task's status icon (SHEP-321; Working in the app's yellow, Needs you red with its dot, SHEP-351, tasks/client.tsx StatusIcon): the ring filled by the share done, the time left short
    under it, centred on the icon without widening its column (a wider time overflows evenly); one-line rows: beside it */
-.tring{display:inline-flex;flex-direction:column;align-items:center;flex:none;width:var(--ic);color:var(--blue)}
-.tring.t-ask{color:var(--amber)}.tring.t-red{color:var(--red)}.tring.t-ready{color:var(--green)}.tring.t-mute{color:var(--muted)}
+.tring{display:inline-flex;flex-direction:column;align-items:center;flex:none;width:var(--ic);color:var(--amber)}
+.tring.t-ask{color:var(--red)}.tring.t-red{color:var(--red)}.tring.t-ready{color:var(--green)}.tring.t-mute{color:var(--muted)}
 .tring .mk{fill:currentColor;stroke:var(--canvas);stroke-width:1.5;paint-order:stroke}
 .tring .tk{stroke:var(--canvas);stroke-width:1.75}
 .tring .tl{margin-top:calc((var(--uil) - var(--ic))/2);font-size:calc(var(--sec) - 2px);line-height:var(--secl);font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}

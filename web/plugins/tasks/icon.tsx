@@ -28,8 +28,8 @@ function ringSvg(r: Ring): string {
 
 /**
  * A task's status icon, the one for every place it stands (SHEP-321; before 3.2.0 lib/dot.js and ui.tsx TaskDot): a
- * ring filled by the share done its agent reports, in every state that is not finished (blue working, amber needs
- * you, red stopped, grey and dashed up next), with the time left short under it ("13m", "2h"); Ready, merging and Done
+ * ring filled by the share done its agent reports, in every state that is not finished (yellow working, red needs
+ * you with a dot, red stopped with a square, grey and dashed up next), with the time left short under it ("13m", "2h"); Ready, merging and Done
  * the green (Done: grey) check. Working with no % yet: the turning ring (a calm pulse with reduced motion). `time`:
  * under the icon (a row with a second line) or beside it (a one-line row); `dim`: its machine can't be reached.
  */
