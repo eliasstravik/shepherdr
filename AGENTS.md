@@ -183,3 +183,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - A stale link ("a different core answers there") on throwaway cores: link a->b, then stop b, rm its core.json and start it again. (from SHEP-310)
 
 - Android keyboard/edge colours can't be seen headless (they're the phone's window behind the page): check color-scheme, html background and the manifest colours over CDP instead; Emulation.setSafeAreaInsetsOverride emulates the gesture-bar inset. (from SHEP-311)
+
+- Reproduce a lost send answer on a throwaway service: click Send, kill the `live.ts` proxy ~0.4 s later, restart the service, then reload the page (the outbox entry stays "sending"). (from SHEP-312)
