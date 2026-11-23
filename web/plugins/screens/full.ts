@@ -30,15 +30,17 @@ export const pxPer = (box: Size, pic: Size, v: View) => {
   return r.w ? pic.w / r.w : 1
 }
 
-/** zoom within 1..MAX, and no gap at an edge the picture is wide (or tall) enough to cover; narrower, it is centred */
+/** zoom within 1..MAX (whole at 1), no gap at an edge the picture is wide (or tall) enough to cover, and a picture
+ *  narrower (or shorter) than the screen kept inside it, where the pinch put it */
 export function clamp(v: View, box: Size, pic: Size): View {
   const z = Math.min(MAX, Math.max(1, v.z))
+  if (z < 1.001) return WHOLE
   const r = fit(box, pic)
   const axis = (t: number, at: number, len: number, room: number) => {
     const w = len * z
-    if (w <= room + 0.5) return (room - w) / 2 - at * z
     const s = t + at * z
-    return Math.min(0, Math.max(room - w, s)) - at * z
+    const [lo, hi] = w <= room ? [0, room - w] : [room - w, 0]
+    return Math.min(hi, Math.max(lo, s)) - at * z
   }
   return { z, x: axis(v.x, r.x, r.w, box.w), y: axis(v.y, r.y, r.h, box.h) }
 }

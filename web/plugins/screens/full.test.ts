@@ -35,10 +35,10 @@ test('the touch point maps right at several zooms, wherever the zoom was centred
   }
 })
 
-test("pinching about a point keeps that point under the fingers (once the picture is taller than the screen)", () => {
+test("pinching about a point keeps that point under the fingers", () => {
   const at = { x: 300, y: 360 }
   const before = toRemote(at, box, pic, WHOLE)!
-  const v = zoomAt(WHOLE, 4, at, box, pic)
+  const v = zoomAt(WHOLE, 2, at, box, pic)
   const after = toRemote(at, box, pic, v)!
   expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(1)
   expect(Math.abs(after.y - before.y)).toBeLessThanOrEqual(1)

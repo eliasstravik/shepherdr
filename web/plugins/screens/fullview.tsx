@@ -128,7 +128,7 @@ export function FullBar({ shown, setShown, close, title, addr, canType, keyboard
     if (!shown) return
     const t = setTimeout(() => {
       // not while typing an address
-      if (bar.current?.contains(document.activeElement)) return setPoke((n) => n + 1)
+      if (document.activeElement instanceof HTMLInputElement && bar.current?.contains(document.activeElement)) return setPoke((n) => n + 1)
       setShown(false)
     }, 3500)
     return () => clearTimeout(t)
