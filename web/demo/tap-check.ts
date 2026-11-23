@@ -27,7 +27,7 @@ export const ALLOW: { sel: string; why: string }[] = [
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 
-function chrome(): string {
+export function chrome(): string {
   if (process.env.CHROME) return process.env.CHROME
   const ab = join(homedir(), '.agent-browser', 'browsers')
   if (existsSync(ab)) {

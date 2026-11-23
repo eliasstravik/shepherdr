@@ -2,25 +2,28 @@
    and the agent line were; the mic and the round button stay where they are, as Done and Cancel.
    SHEP-334: no words while you talk; only an error, or the browser really asking for the microphone, says something. */
 .cbar:has(>.dsurf)>:not(.dsurf,.vs){display:none}
-.cbar:has(>.dsurf){align-items:flex-end}
-.dsurf{position:relative;flex:1;align-self:center;display:grid;gap:2px;min-width:0;animation:fade .15s ease-out}
+.cbar:has(>.dsurf.error){align-items:flex-end}
+/* the row stays inside the box at every width: one column that can shrink to nothing, nothing spills out */
+.dsurf{position:relative;flex:1 1 0;display:grid;grid-template-columns:minmax(0,1fr);gap:2px;min-width:0;overflow:hidden;animation:fade .15s ease-out}
 
 /* SHEP-363: the mic and the round button where Send is, icons only, the same size and place in every state: the round
    one is the voice call while the box is empty, Send once it has words, End call (red) in a call, Cancel (a red X) while
    dictating; the mic is Mute in a call (shown pressed), Done (a green check; a spinner while writing) while dictating.
    A new icon fades in, the button keeps its size. In a call the wave takes the place of + and the agent line, and the
    box takes no text (dictate.tsx TEXT_IN_CALL): it goes quiet, its draft kept. */
+/* Done and Cancel / End call: the app's own Ready green and Needs-you red, quiet (an icon in the colour on a soft tint
+   of it, as the app's other danger and ready marks are), never a loud filled disc; the size and place of the idle mic
+   and round button, unchanged */
 .ib.vs{border-radius:50%}
-.ib.vs.ok,.ib.vs.ok:hover{background:#15803d;color:#fff}
+.ib.vs.ok,.ib.vs.ok:hover{background:color-mix(in srgb,var(--green) 16%,transparent);color:var(--green)}
 .ib.vs.ok[aria-disabled="true"]:not(.wr){opacity:.4;cursor:default}
 .ib.vs.wr{cursor:default}
-.ib.end,.ib.end:hover{background:#dc2626;color:#fff}
-.send.vs.end,.send.vs.end:hover{background:#dc2626;color:#fff}
+.ib.end,.ib.end:hover,.send.vs.end,.send.vs.end:hover{background:color-mix(in srgb,var(--red) 16%,transparent);color:var(--red)}
 .vsi{display:grid;place-items:center;animation:fade .15s ease-out}
 .cbar:has(>.vin)>:not(.vin,.vs){display:none}
 .cbox:has(.vin.quiet) .cin{opacity:.4}
 .cbox:has(.vin.quiet) .kbd{display:none}
-.vin{display:flex;align-items:center;flex:1 1 0;min-width:0;padding:0 6px}
+.vin{display:flex;align-items:center;flex:1 1 0;min-width:0;padding-left:6px;overflow:hidden}
 @media(pointer:coarse){.ib.vs:not([aria-disabled="true"]):active{opacity:.6}}
 
 /* the words, only when something must be read: an error, or the browser asking for the microphone */
@@ -30,8 +33,8 @@
 .derr .i{margin-top:calc((var(--uil) - 16px) / 2);color:var(--red)}
 
 /* the recording: the wave and the time */
-.dctl{display:flex;align-items:center;gap:8px;min-height:var(--btn);padding-left:6px}
-.dwave{flex:1;min-width:0;height:24px;color:var(--fg)}
+.dctl{display:flex;align-items:center;gap:8px;min-width:0;min-height:var(--btn);padding-left:6px}
+.dwave{flex:1 1 0;min-width:0;height:24px;color:var(--fg)}
 .app.tap .dwave{height:28px}
 .dwave.off{color:var(--muted)}
 .dtime{display:inline-flex;align-items:center;gap:6px;min-width:5ch;color:var(--sub);font-size:var(--sec);line-height:var(--secl);font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}

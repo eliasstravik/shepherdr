@@ -71,7 +71,13 @@ export function Wave({ on, sample, className = 'dwave', tint }: { on: boolean; s
     raf = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(raf)
   }, [on, sample, tint])
-  return <canvas ref={ref} className={`${className}${on ? '' : ' off'}`} aria-hidden />
+  // the canvas fills its box and never sizes it: its pixel count (width x devicePixelRatio) once fed back into the
+  // row's layout (a canvas's size attributes are its intrinsic size), so the wave ran out of the message box (3.2.3)
+  return (
+    <span className={`wv ${className}${on ? '' : ' off'}`} aria-hidden>
+      <canvas ref={ref} />
+    </span>
+  )
 }
 
 function round(g: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
