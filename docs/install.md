@@ -1,6 +1,6 @@
 # Install
 
-Shepherdr 3.2.5 is one web app and the service behind it. One script puts everything in Shepherdr's own folder, starts
+Shepherdr 3.2.6 is one web app and the service behind it. One script puts everything in Shepherdr's own folder, starts
 the service and shares the app on your tailnet. There is one kind of install.
 
 ## Requirements
