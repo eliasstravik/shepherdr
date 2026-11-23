@@ -39,6 +39,7 @@ const chatFor = (s: Sock, key: string): Chat => {
 const each = (f: (snap: Snapshot) => void) => { for (const s of Object.values(state)) f(s); push() }
 const taskOf = (id: string) => state.normal.tasks.find((t) => t.id === id || `${t.id}/worker` === id)
 const patchTask = (id: string, p: Partial<Task>) => each((snap) => { snap.tasks = snap.tasks.map((t) => (t.id === id ? { ...t, ...p } : t)) })
+const uploaded = new Map<string, File>()
 const say = (key: string, m: Partial<Message>) => { (chats[key] ??= { key, messages: [], cli: 'claude', top: true }).messages.push({ id: `n${++n}`, who: 'agent', at: Date.now(), ...m } as Message); pushChat(key) }
 
 function action(a: Record<string, any>): unknown {
@@ -48,7 +49,17 @@ function action(a: Record<string, any>): unknown {
   }
   if (a.type === 'catalog') return { ok: true, catalog: catalog(a.machine) }
   if (a.type === 'send') {
-    say(a.chat, { who: 'you', text: a.text, cid: a.cid })
+    // as the service gives your message back from the log: its words, then each file under them, a moment later
+    const paths: string[] = Array.isArray(a.attachments) ? a.attachments.filter(Boolean) : []
+    if (!paths.length) say(a.chat, { who: 'you', text: a.text, cid: a.cid })
+    else setTimeout(() => {
+      const id = `n${++n}`
+      const at = Date.now()
+      const c = (chats[a.chat] ??= { key: a.chat, messages: [], cli: 'claude', top: true })
+      if (a.text) c.messages.push({ id, who: 'you', at, text: a.text, cid: a.cid } as Message)
+      for (const [i, path] of paths.entries()) c.messages.push({ id: `${id}:f${i}`, who: 'you', at, cid: a.cid, file: { name: path.split('/').pop() ?? 'image', path } } as Message)
+      pushChat(a.chat)
+    }, 1500)
     const text = String(a.text ?? '').trim()
     const from = state.normal.places.find((p) => p.chat === a.chat)?.id ?? EV
     const place = from === EV ? state.normal.places.find((p) => p.name === 'shop')?.id ?? EV : from
@@ -175,7 +186,14 @@ Bun.serve<Sock['data'], never>({
     if (path === '/api/screen/shot') return new Response(Bun.file(shotFile(url.searchParams.get('key') ?? '')), { headers: { 'content-type': 'image/jpeg', 'cache-control': 'no-store' } })
     if (path === '/api/me') return Response.json({ login: 'sam', off: [] })
     if (path === '/api/action') return Response.json(action((await req.json()) as Record<string, any>) ?? { ok: true })
-    if (path === '/api/upload') return Response.json({ path: `/tmp/demo/${Date.now()}`, name: 'file' })
+    if (path === '/api/upload') {
+      const f = (await req.formData()).get('file') as File | null
+      const name = (f?.name || 'file').replace(/[^\w.-]/g, '_')
+      if (f) uploaded.set(`/tmp/demo/${++n}-${name}`, f)
+      return Response.json({ path: `/tmp/demo/${n}-${name}`, name })
+    }
+    // a file you sent, at its own address (only what was sent to this demo)
+    if (path === '/api/file' && uploaded.has(url.searchParams.get('path') ?? '')) return new Response(uploaded.get(url.searchParams.get('path')!)!)
     const m = /^\/api\/artifacts\/([^/]+)\/(page|thumb)/.exec(path)
     // a picture beside a page's index.html
     const pic = /^\/api\/artifacts\/[^/]+\/page\/pic(\d)\.jpg$/.exec(path)

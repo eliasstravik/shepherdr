@@ -15,9 +15,12 @@ export const MAX_FILE = 25 * 1024 * 1024
 const uploads = new Map<string, Promise<string>>()
 const gates = new Map<string, Promise<void>>()
 
-/** what this screen still has of a file it put in a box: the file itself and a link to it for its picture */
-const local = new Map<string, { file: File; url: string }>()
-export const localOf = (id: string | undefined) => (id ? local.get(id) : undefined)
+/** what this screen still has of a file it put in a box: the file itself, a link to it for its picture and, once
+ *  read, the picture's size (so a sent copy keeps its box before the picture has drawn) */
+const local = new Map<string, { file: File; url: string; w?: number; h?: number }>()
+/** the box file an uploaded path came from: the delivered message names only the path, and finds the same copy */
+const fromPath = new Map<string, string>()
+export const localOf = (id: string | undefined, path?: string) => (id ? local.get(id) : undefined) ?? (path ? local.get(fromPath.get(path) ?? '') : undefined)
 
 const setBox = (key: string, fn: (fs: UIFile[]) => UIFile[]) => setUI((ui) => ({ files: { ...ui.files, [key]: fn(ui.files[key] ?? []) } }))
 type UIFile = ReturnType<typeof getState>['ui']['files'][string][number]
@@ -26,7 +29,10 @@ function upload(key: string, chat: string, id: string, f: File) {
   const up = retrying(() => postFile(chat, f), Date.now())
   uploads.set(id, up)
   up.then(
-    (path) => setBox(key, (fs) => fs.map((x) => (x.id === id ? { ...x, path, failed: undefined } : x))),
+    (path) => {
+      fromPath.set(path, id)
+      setBox(key, (fs) => fs.map((x) => (x.id === id ? { ...x, path, failed: undefined } : x)))
+    },
     (e) => {
       // it stays in the box and says so on its tile: a tap tries again, its x takes it out
       uploads.delete(id)
@@ -49,7 +55,16 @@ export function attach(key: string, chat: string, files: File[]) {
     } catch {
       /* no object links here: its tile waits for the upload */
     }
-    local.set(id, { file: f, url })
+    const l: { file: File; url: string; w?: number; h?: number } = { file: f, url }
+    local.set(id, l)
+    if (url && f.type.startsWith('image/') && typeof Image === 'function') {
+      const img = new Image()
+      img.onload = () => {
+        l.w = img.naturalWidth
+        l.h = img.naturalHeight
+      }
+      img.src = url
+    }
     setBox(key, (fs) => [...fs, { name: f.name, id }])
     upload(key, chat, id, f)
   }

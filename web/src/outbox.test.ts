@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from 'bun:test'
-import { expire, forgetDone, KEEP_PAST, loadOutbox, partsOf, readNow, settle, showsAs, type Outgoing } from './outbox.ts'
+import { expire, forgetDone, KEEP_PAST, keyOf, loadOutbox, partsOf, placeOutgoing, readNow, settle, showsAs, type Outgoing } from './outbox.ts'
 import type { Chat } from '@shared/types.ts'
 
 // What you sent comes back from the agent's log without its id: it takes the pending one's place by its words, files
@@ -267,4 +267,35 @@ test('read: yours from the log, not one in its queue nor one on its way', () => 
   expect(readNow({ id: 'q1', who: 'you', text: 'hi', at: 1, waiting: true, waitsFor: 'queue' })).toBe(false)
   expect(readNow({ id: 'out:c1', who: 'you', text: 'hi', at: 1 })).toBe(false)
   expect(readNow({ id: 'a1', who: 'agent', text: 'hi', at: 1 })).toBe(false)
+})
+
+// ---------- a sent message with pictures doesn't jump when the log gives it back ----------
+
+/** what the service makes of your message in the log (service/compat.ts): its words, then each file under them */
+const delivered = (id: string, cid: string, text: string, paths: string[]): Chat['messages'] => [
+  ...(text ? [{ id, who: 'you' as const, text, at: 5, cid }] : []),
+  ...paths.map((path, n) => ({ id: `${id}:f${n}`, who: 'you' as const, at: 5, cid, file: { name: path.split('/').pop()!, path } })),
+]
+const layout = (ms: Chat['messages']) => ms.map((m) => `${m.file ? 'file' : 'text'} ${keyOf(m)}`)
+
+for (const [what, text, paths] of [
+  ['words and two pictures', 'look at these', ['/u/a.png', '/u/b.jpg']],
+  ['one picture', 'this one', ['/u/a.png']],
+  ['pictures without words', '', ['/u/a.png', '/u/b.png', '/u/c.png']],
+  ['a file that is no picture', 'the report', ['/u/r.pdf']],
+] as const) {
+  test(`the copy on its way and the delivered one have the same layout: ${what}`, () => {
+    const o = sent({ cid: 'c9', text, files: paths.map((path, i) => ({ name: `orig${i}.${path.split('.').pop()}`, path, id: `f${i}` })) })
+    const before = chat([{ id: 'a1', who: 'agent', text: 'Send them', at: 1 }])
+    const pending = placeOutgoing(before.messages, [{ at: 1, rows: partsOf(o, before) }])
+    const after = [...before.messages, ...delivered('u9', 'c9', text, [...paths])]
+    // the same rows, in the same order, under the same keys: React keeps each in place
+    expect(layout(pending)).toEqual(layout(after))
+  })
+}
+
+test('sends at the same place keep the order they were sent in, each with its words over its files', () => {
+  const rows = ['a', 'b']
+  expect(placeOutgoing(rows, [{ at: 1, rows: ['1t', '1f'] }, { at: 2, rows: ['3t'] }, { at: 1, rows: ['2t', '2f'] }])).toEqual(['a', '1t', '1f', '2t', '2f', 'b', '3t'])
+  expect(placeOutgoing(rows, [{ at: 9, rows: ['x'] }])).toEqual(['a', 'b', 'x'])
 })
