@@ -1,6 +1,6 @@
 // Reactions, both ways: the agent reacts to some of your messages with one emoji by itself; you react from the quick
 // bar a tap on a message shows (its smiley), or from its menu (a row of your most used emoji, then + for every emoji,
-// with search). Each reaction is a small chip just under the bubble, on its inner edge, as in Slack and Telegram: the
+// with search). Each reaction is a small pill tucked over the bubble's bottom corner, as in WhatsApp and iMessage: the
 // emoji at about the text's size, a count when you both picked it, yours tinted; a tap on yours takes it back, a tap on
 // the agent's adds the same. You keep one reaction per message: picking another changes it. Your reaction reaches the
 // agent at once as a small message. Switched off: the row is gone (an agent's own reactions still show).
