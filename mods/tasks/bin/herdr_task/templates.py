@@ -127,7 +127,20 @@ LIVE_RULE = ("- Never stop, restart, update or reconfigure the live session you 
              "from an earlier shell call is gone, and your terminal's own HC_SESSION is the live one), and a throw"
              'away HOME. Your terminal refuses these; never work around it. If the live one really needs it, ask t'
              'he person.\n')
-WORKER_MD = WORKER_MD_BEFORE_LIVE.replace(LIVE_ANCHOR, LIVE_ANCHOR + LIVE_RULE)
+WORKER_MD_BEFORE_CLOCK = WORKER_MD_BEFORE_LIVE.replace(LIVE_ANCHOR, LIVE_ANCHOR + LIVE_RULE)
+# Since the time left is worked out from the clock and the agent's own pace, in agent time, not a person's days (SHEP-361).
+CLOCK_OLD = ("Each time, revise it honestly from how the work is really going (slower than you thought: say more), never "
+             "just count it down. A rough guess beats none.")
+CLOCK_RULE = ("Work it out from the clock, not a feeling: run `date +%s` once when you start and keep the number, then read "
+              "the clock again at every status. `--done` is the honest share of the whole task finished: steps done out of "
+              "all you now see, tests, proof and fixes too, not only the coding. `--left` is your own pace: minutes worked "
+              "x (100 - done) / done (worked 12 min, 40% done: about 18m left); adjust only for what you know is different "
+              "ahead (a long test run, a wait on checks), and say the likelier, smaller number, never a padded one. Think in "
+              "your own working time, minutes and hours, never a person's days or weeks: more than a few hours needs a reason "
+              "you can name. Before a few minutes or about 10%, guess from the task's size: a rough guess beats none. Each time, "
+              "compare with your last estimate and the clock, and revise it honestly by as much as you were off (slower than "
+              "you thought: say more), never just count it down.")
+WORKER_MD = WORKER_MD_BEFORE_CLOCK.replace(CLOCK_OLD, CLOCK_RULE)
 
 REVIEWER_MD_BEFORE_SUBAGENT = """You review one Herdr task's work before it can merge. Read only: never edit files, commit or push.
 - Read the task, then the diff of its branch against its base, and run the project's checks.
@@ -164,7 +177,7 @@ OLD_WORKER_READY = """You work on one Herdr task. Stay within the task's scope a
 - When the work is finished, run the `herdr-task ready` command given at the end of your brief, with a short summary. That puts the task in Ready for the person, who accepts it. Never mark a task done yourself.
 """
 OLD_WORKER_MD = OLD_WORKER_READY.split("- When the work is finished")[0]
-OLD_WORKERS = (WORKER_MD_BEFORE_LIVE, WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
+OLD_WORKERS = (WORKER_MD_BEFORE_CLOCK, WORKER_MD_BEFORE_LIVE, WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
 
 
 TEMPLATE_HEADS = {
