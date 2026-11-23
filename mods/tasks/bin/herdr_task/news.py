@@ -578,9 +578,9 @@ def typing(address, k=None, there=None):
     typed = typed_input(screen_raw(address, there))
     if not typed:
         return None
-    # #1207: the agent's own suggested next message (<hc suggest="…"/>) sitting in its input is no one typing: held
+    # #1207: one of the agent's own suggested replies (<hc suggest="…"/>) sitting in its input is no one typing: held
     # for it, review-more's message (and any news) waited for good, the agent idle till a person pressed Enter.
-    return None if not there and same_words(typed, suggested(k)) else "input"
+    return None if not there and any(same_words(typed, x) for x in suggested(k)) else "input"
 
 
 SUGGEST = re.compile(r"<hc\s+suggest=\"([^\"]*)\"\s*/?>")
@@ -591,20 +591,19 @@ def same_words(a, b):
 
 
 def suggested(k):
-    """The next message this agent's newest reply suggests (its last <hc suggest="…"/>), or None: none, or the person
-    wrote since. k: its hc get (its session log from its herdr.resume label)."""
+    """The replies this agent's newest reply suggests (its <hc suggest="…"/> lines, up to three), or []: none, or the
+    person wrote since. k: its hc get (its session log from its herdr.resume label)."""
     try:
         log = json.loads(((k or {}).get("labels") or {}).get("herdr.resume") or "{}").get("log")
     except (ValueError, AttributeError):
-        return None
+        return []
     for d in reversed(log_tail(log, 65536)):
         if from_person(d) is not None:
-            return None
+            return []
         text = said(d)
         if text:
-            found = SUGGEST.findall(text)
-            return html.unescape(found[-1]) if found else None
-    return None
+            return [html.unescape(x) for x in SUGGEST.findall(text)]
+    return []
 
 
 _held_open = []  # the HELD this process has open under its lock: a hold() from inside held_pass uses it (no deadlock)

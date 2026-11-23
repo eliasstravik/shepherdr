@@ -101,26 +101,34 @@ test('in a call the box takes no text: nothing is sent, and it goes read-only', 
   expect(voice).toMatch(/box\.readOnly = quiet/)
 })
 
-test('a suggested reply is never sent as it is: the round button and Enter send only what is in the box', () => {
-  const go = chat.slice(chat.indexOf('const go = '), chat.indexOf('const useSug = '))
+test('the round button and Enter send only what is in the box; a suggested reply is its own bubble, sent with a tap', () => {
+  const go = chat.slice(chat.indexOf('const go = '), chat.indexOf('const sendSug = '))
   expect(go).toContain('const t = text.trim()')
-  expect(go).not.toContain('sug?.text')
+  expect(go).not.toMatch(/sug\.texts/)
   expect(chat).toContain('const filled = !!text.trim() || !!files?.length')
+  // no greyed suggestion in the box, no Tab chip
+  expect(chat).toContain('placeholder={placeholder}')
+  expect(chat).not.toContain('Use suggestion')
+  expect(chat).not.toContain("e.key === 'Tab'")
+  // a tap sends it at once as your message (no focus taken: no keyboard), a hold fills the box and focuses it
+  const tap = chat.slice(chat.indexOf('const sendSug = '), chat.indexOf('const editSug = '))
+  expect(tap).toContain('send(key, key, t, false)')
+  expect(tap).toContain('spent.add(sug.id)')
+  expect(chat).toMatch(/className=\{cx\('sug', primary && 'pri'\)\}\s*onMouseDown=\{keepFocus\}/)
+  const edit = chat.slice(chat.indexOf('const editSug = '), chat.indexOf('const filled'))
+  expect(edit).toContain('setText(t)')
+  expect(edit).toContain('box.focus()')
 })
 
-test("the Tab chip fills the box without focusing it (no phone keyboard); the Tab key keeps the box's focus", () => {
-  const chip = chat.match(/<button type="button" className="ib kbd".*?\}>\n\s*(.*?)\n\s*<\/button>/s)!
-  expect(chip[0]).toContain('aria-label="Use suggestion"')
-  expect(chip[0]).toContain('onPointerDown={keepFocus}')
-  expect(chip[0]).toContain('onMouseDown={keepFocus}')
-  expect(chip[0]).toContain('onClick={() => useSug()}')
-  // the tab icon at every width, no "Tab" word
-  expect(chip[1]).toBe('<I n="tab" c="s16" />')
-  const use = chat.slice(chat.indexOf('const useSug = '), chat.indexOf('const filled'))
-  expect(use).toContain('if (key) ref.current?.focus()')
-  expect(chat).toContain('return useSug(true)')
-  // a tap that takes no focus: the default of a pointer down is what moves the focus
-  expect(chat).toContain('export const keepFocus = (e: { preventDefault: () => void }) => e.preventDefault()')
+test('the bubbles hide in a call, while dictating, while typing, while the agent replies and while a send is on its way', () => {
+  const box = chat.slice(chat.indexOf('function Box('), chat.indexOf('const go = '))
+  expect(box).toContain('const call = useUI((u) => u.call)')
+  expect(box).toContain('const dictating = useDictating()')
+  expect(box).toContain('const sending = useStore((s) => s.outbox.some((o) => o.chat === key))')
+  expect(box).toContain('repliesHidden({ text, files: files?.length ?? 0, dictating, call, working: busy, sending, spent: spent.has(sg.id) })')
+  // above the box, not in it; the chat keeps its bottom in view when they come
+  expect(chat).toMatch(/\{sug && <Replies texts=\{sug\.texts\} onSend=\{sendSug\} onEdit=\{editSug\} \/>\}\s*<div\s+className="cbox"/)
+  expect(chat).toContain('ro.observe(sc)')
 })
 
 test('the voice call button is gone from the header and the phone bottom bar; it is the box\'s round button', () => {
@@ -130,22 +138,14 @@ test('the voice call button is gone from the header and the phone bottom bar; it
   expect(app).not.toMatch(/barEnd|barAbove|Talk to Shepherdr/)
 })
 
-test("the Tab chip is one of the box's icon buttons: centred over the round button and on the text line", () => {
+test('the bubbles are one line of pills that scroll sideways, a long one truncating in its pill', () => {
   const css = read('../../src/ds.css')
-  const kbd = css.match(/\.crow>\.kbd\{([^}]*)\}/)![1]
-  // the icon-button size and radius (.ib), no outline of its own
-  expect(chat).toContain('className="ib kbd"')
-  expect(css).not.toMatch(/\.kbd\{[^}]*(width|height|box-shadow|border)/)
-  // the same right inset as the round button (the bar's 6px padding plus half the size difference): one centre line
-  expect(css).toMatch(/\.cbar\{[^}]*padding:0 6px 6px/)
-  expect(kbd).toContain('margin-right:calc(6px + (var(--send) - var(--ib))/2)')
-  // centred on the first text line: the textarea's 10px top padding plus half its 24px line
-  expect(css).toMatch(/textarea\.cin\{[^}]*padding:10px 16px/)
-  expect(css).toMatch(/\.cin\{[^}]*line-height:24px/)
-  expect(kbd).toContain('align-self:flex-start')
-  expect(kbd).toContain('margin-top:calc(22px - var(--ib)/2)')
-  // a long suggestion truncates before the chip
-  expect(css).toContain('.crow .cin{flex:1;min-width:0;text-overflow:ellipsis}')
+  expect(css).toMatch(/\.sugs\{display:flex;gap:8px;overflow-x:auto/)
+  const sug = css.match(/\.sug\{([^}]*)\}/)![1]
+  for (const x of ['flex:none', 'white-space:nowrap', 'overflow:hidden', 'text-overflow:ellipsis', 'user-select:none', '-webkit-touch-callout:none'])
+    expect(sug).toContain(x)
+  expect(css).toContain('.sug.pri{')
+  expect(css).not.toContain('.kbd')
 })
 
 // 3.2.3's broken dictation: the row ran out of the box, the wave read nothing, Done and Cancel were loud filled discs

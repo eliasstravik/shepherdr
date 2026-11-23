@@ -3,7 +3,7 @@
 // message box. The same parts draw a space's chat and a task's thread.
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { copyText } from '@client/copy.ts'
-import { TEXT_IN_CALL } from '@client/dictate.tsx'
+import { TEXT_IN_CALL, useDictating } from '@client/dictate.tsx'
 import { act, definePlugin, getState, has, notice, registry, setUI, tryAct, useChat, useDraft, useSnap, useStore, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
 import { partsOf, placeOutgoing, placesOf, keyOf, readNow, showsAs, type Outgoing } from '@client/outbox.ts'
 import { confirm, openMenu } from '@client/overlay.tsx'
@@ -25,7 +25,7 @@ import { dropped, pasted } from './paste.ts'
 import { touch } from './clip.ts'
 import { landLaunchShare, putAway, useLanded, watchLastChat } from './share.ts'
 import { openSendTo } from './sendto.tsx'
-import { suggestionOf, suggestionsOn } from './suggest.ts'
+import { ReplyPress, repliesHidden, suggestionOf, suggestionsOn } from './suggest.ts'
 import { BoxThumb, openPreview, SentThumb, sourcesOf } from './thumbs.tsx'
 import { signOf } from './typing.ts'
 import { newsRow, type NewsRow } from './news.ts'
@@ -560,6 +560,8 @@ function Messages({ thread }: { thread: Thread }) {
       if (stuck.current) sc.scrollTop = sc.scrollHeight
     })
     ro.observe(box)
+    // the box or the suggested replies above it grew: the chat's window got shorter, its bottom stays in view
+    ro.observe(sc)
     return () => ro.disconnect()
   }, [thread.chat])
   useEffect(() => {
@@ -737,8 +739,45 @@ function StoppedChat({ chat, thread }: { chat: Chat | undefined; thread: Thread 
 
 /* ---------- the message box ---------- */
 
-/** suggested replies already used or typed over: gone once you send something */
+/** suggested replies already used: gone once you send something */
 const spent = new Set<string>()
+
+/** The agent's suggested replies as bubbles above the box (SHEP-186), in its order, the first the primary: a tap sends
+ *  one as it is, a press held (or a right-click) puts it in the box to edit instead (ReplyPress). One line each; the
+ *  row scrolls sideways when they don't fit. */
+export function Replies({ texts, onSend, onEdit }: { texts: string[]; onSend: (t: string) => void; onEdit: (t: string) => void }) {
+  return (
+    <div className="sugs" role="group" aria-label="Suggested replies">
+      {texts.map((t, i) => <Reply key={`${i}:${t}`} text={t} primary={i === 0} onSend={onSend} onEdit={onEdit} />)}
+    </div>
+  )
+}
+
+function Reply({ text, primary, onSend, onEdit }: { text: string; primary: boolean; onSend: (t: string) => void; onEdit: (t: string) => void }) {
+  const edit = useRef(onEdit)
+  edit.current = onEdit
+  const press = useMemo(() => new ReplyPress(() => edit.current(text)), [text])
+  useEffect(() => () => press.stop(), [press])
+  return (
+    <button
+      type="button"
+      className={cx('sug', primary && 'pri')}
+      onMouseDown={keepFocus}
+      onPointerDown={(e) => press.down(e.clientX, e.clientY)}
+      onPointerMove={(e) => press.move(e.clientX, e.clientY)}
+      onPointerUp={() => press.stop()}
+      onPointerCancel={() => press.stop()}
+      onPointerLeave={() => press.stop()}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        press.menu()
+      }}
+      onClick={() => press.click() && onSend(text)}
+    >
+      {text}
+    </button>
+  )
+}
 
 /** what a chat runs on now: its agent's own report; before its chat came, its space's (an Assistant's chat: what its
  *  Assistant runs, else what its first message starts it on, SHEP-298); else what is set for its kind */
@@ -772,34 +811,48 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   const shared = useLanded() === key
   useGrow(ref, text)
   const sg = suggestionOf(chat, suggestionsOn(snap.settings))
-  const sug = sg && !spent.has(sg.id) ? sg : null
   const busy = !!chat?.working && !chat.finished
+  const call = useUI((u) => u.call)
+  const dictating = useDictating()
+  const sending = useStore((s) => s.outbox.some((o) => o.chat === key))
+  const sug = sg && !repliesHidden({ text, files: files?.length ?? 0, dictating, call, working: busy, sending, spent: spent.has(sg.id) }) ? sg : null
   const machine = snap.places.find((p) => p.id === thread.place)?.machine ?? snap.host
   const pick = pickOf(snap, chat, thread)
-  // a message sent while the agent works goes in at once (it steers); only Ctrl/Cmd+Enter asks it to wait its turn
-  // a suggested reply is never sent as it is: Tab (or its chip) writes it into the box first (SHEP-363). In a voice
-  // call the box takes no text (TEXT_IN_CALL).
+  // a message sent while the agent works goes in at once (it steers); only Ctrl/Cmd+Enter asks it to wait its turn.
+  // The round button and Enter send only what is in the box, never a suggested reply (those are their own bubbles).
+  // In a voice call the box takes no text (TEXT_IN_CALL).
   const go = (wait = false) => {
     if (getState().ui.call && !TEXT_IN_CALL) return
     const t = text.trim()
     if (!t && !files?.length) return
-    if (sug) spent.add(sug.id)
+    if (sg) spent.add(sg.id)
     send(key, key, t, wait && busy)
     setText('')
     if (shared) putAway()
   }
 
-  /** the suggested reply written into the box. From the Tab key the box keeps the focus; from the chip (a tap) the
-   *  focus stays where it was, so a phone's keyboard doesn't come up just to send it (the chip takes no focus) */
-  const useSug = (key = false) => {
-    if (!sug) return
-    setText(sug.text)
-    if (key) ref.current?.focus()
+  /** a suggested reply tapped: sent at once as your message, as if typed (no keyboard comes up: its bubble takes no
+   *  focus) */
+  const sendSug = (t: string) => {
+    if (!sug || (getState().ui.call && !TEXT_IN_CALL)) return
+    spent.add(sug.id)
+    send(key, key, t, false)
+    if (shared) putAway()
+  }
+  /** a suggested reply held: written into the box to edit, the box focused at its end */
+  const editSug = (t: string) => {
+    setText(t)
+    const box = ref.current
+    if (!box) return
+    box.focus()
+    requestAnimationFrame(() => box.setSelectionRange(t.length, t.length))
   }
   const filled = !!text.trim() || !!files?.length
   const BoxEnd = has('voice') ? registry.views.boxEnd : undefined
   const stop = busy && !text.trim() && !files?.length
   return (
+    <>
+    {sug && <Replies texts={sug.texts} onSend={sendSug} onEdit={editSug} />}
     <div
       className="cbox"
       onDragOver={(e) => e.preventDefault()}
@@ -841,7 +894,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
           name="message"
           data-box={key}
           aria-label={placeholder}
-          placeholder={sug?.text ?? placeholder}
+          placeholder={placeholder}
           enterKeyHint="send"
           autoComplete="off"
           value={text}
@@ -853,11 +906,6 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
             attach(key, key, f)
           }}
           onKeyDown={(e) => {
-            // Tab writes the suggested reply into the box, so you can keep typing
-            if (e.key === 'Tab' && !e.shiftKey && sug && !text) {
-              e.preventDefault()
-              return useSug(true)
-            }
             // Enter sends and Shift+Enter makes a new line, the same on phone and desktop
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
               e.preventDefault()
@@ -865,11 +913,6 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
             }
           }}
         />
-        {sug && !text && (
-          <button type="button" className="ib kbd" aria-label="Use suggestion" aria-keyshortcuts="Tab" onPointerDown={keepFocus} onMouseDown={keepFocus} onClick={() => useSug()}>
-            <I n="tab" c="s16" />
-          </button>
-        )}
       </div>
       <div className="cbar">
         <AddButtons finger={finger} onFiles={(f) => attach(key, key, f)} />
@@ -893,6 +936,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
         )}
       </div>
     </div>
+    </>
   )
 }
 

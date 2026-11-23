@@ -166,7 +166,10 @@ DELTA_RULE = ("Its prompt gives it the brief, the diff, the Must fix level and ~
 MUST_OLD = "Fix every finding at or above Must fix, commit, and review again; stop once a round finds none at or above it, or after Review rounds."
 MUST_RULE = (MUST_OLD + " Only those cost a round: leave a finding below Must fix as a follow-up in your summary, unfixed "
              "(a fix is a change that needs a round of its own).")
-WORKER_MD = WORKER_MD_BEFORE_DELTA.replace(DELTA_OLD, DELTA_RULE).replace(MUST_OLD, MUST_RULE)
+WORKER_MD_BEFORE_REPLIES = WORKER_MD_BEFORE_DELTA.replace(DELTA_OLD, DELTA_RULE).replace(MUST_OLD, MUST_RULE)
+# Since a reply ends with one to three suggested replies, bubbles above the box sent with a tap (SHEP-186).
+REPLIES_RULE = ('- Suggested replies, when your Settings block says "Suggested replies: on": end each reply with one to three lines of their own, last in the reply, each holding `<hc suggest="…"/>`: the messages the person is most likely to send next, best first, in their own words, like the options of a multiple-choice question. Judge them from the whole chat, not only your last message: a question or decision still open, the natural next step, and the person\'s habits (a "status?" they often send after a while). Each short (under about 40 characters, so three fit on a phone), a complete message that makes sense sent as it is, and different in substance from the others. Always at least one, except when you ask a multiple-choice question that already has its own cards, or the reply is a no-reply. Never write them when the Settings block says off. The chat shows them as bubbles above the box, sent with one tap; the lines never show as text. Example, three lines: `<hc suggest="Yes, merge it"/>`, `<hc suggest="Show me the diff first"/>`, `<hc suggest="status?"/>`.\n')
+WORKER_MD = WORKER_MD_BEFORE_REPLIES.replace(SUGGEST_RULE, REPLIES_RULE)
 
 REVIEWER_MD_BEFORE_SUBAGENT = """You review one Herdr task's work before it can merge. Read only: never edit files, commit or push.
 - Read the task, then the diff of its branch against its base, and run the project's checks.
@@ -212,7 +215,7 @@ OLD_WORKER_READY = """You work on one Herdr task. Stay within the task's scope a
 - When the work is finished, run the `herdr-task ready` command given at the end of your brief, with a short summary. That puts the task in Ready for the person, who accepts it. Never mark a task done yourself.
 """
 OLD_WORKER_MD = OLD_WORKER_READY.split("- When the work is finished")[0]
-OLD_WORKERS = (WORKER_MD_BEFORE_DELTA, WORKER_MD_BEFORE_TESTS, WORKER_MD_BEFORE_ROW, WORKER_MD_BEFORE_CLOCK, WORKER_MD_BEFORE_LIVE, WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
+OLD_WORKERS = (WORKER_MD_BEFORE_REPLIES, WORKER_MD_BEFORE_DELTA, WORKER_MD_BEFORE_TESTS, WORKER_MD_BEFORE_ROW, WORKER_MD_BEFORE_CLOCK, WORKER_MD_BEFORE_LIVE, WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
 
 
 TEMPLATE_HEADS = {
