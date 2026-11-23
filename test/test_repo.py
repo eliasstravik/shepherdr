@@ -142,6 +142,17 @@ class Repo(unittest.TestCase):
         self.assertIn(".cbox:focus-within{", css)
         self.assertIn(".inp:focus{", css)
 
+    def test_task_ring_colours(self):
+        """A working task's ring is the app's own yellow, not blue (SHEP-351); Needs you moved to red so the two never
+        share a colour, and a status word coloured c-red has a rule behind it."""
+        with open(J("web/src/ds.css"), encoding="utf-8") as fh:
+            css = fh.read()
+        self.assertRegex(css, r"\.tring\{[^}]*color:var\(--amber\)")
+        self.assertIn(".tring.t-ask{color:var(--red)}", css)
+        self.assertIn(".c-working{color:var(--amber)}", css)
+        self.assertIn(".c-red{color:var(--red)}", css)
+        self.assertNotRegex(css, r"\.tring[^{]*\{[^}]*var\(--blue\)")
+
     def test_no_tap_flash(self):
         """No browser box on a press (SHEP-303: Android Chrome flashed blue over every button). The page root turns
         the tap highlight off for everything under it, keyboard focus rings stay, and nothing turns it back on."""

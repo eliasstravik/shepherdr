@@ -374,7 +374,7 @@ function TaskTop({ task: t }: { task: Task }) {
   const strong = w.tone === 'ask' || w.tone === 'ready' || w.tone === 'red'
   return (
     <div className="status">
-      {strong ? <b className={w.tone === 'red' ? 'c-red' : `c-${w.tone}`}>{w.word}</b> : w.word}
+      {strong ? <b className={w.tone === 'ask' ? 'c-red' : `c-${w.tone}`}>{w.word}</b> : w.word}
       {left && <span>· {left}</span>}
       {t.work ? <span>· <WorkTag snap={snap} t={t} /></span> : <span>· {machineLabel(snap, t.on)}</span>}
     </div>
