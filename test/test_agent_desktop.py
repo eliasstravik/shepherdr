@@ -242,6 +242,19 @@ class HerdrDesktop(unittest.TestCase):
         self.assertFalse(st["ok"])
         self.assertIn("could not say which Mac permissions", st["problem"])
 
+    def test_linux_without_a_virtual_display_says_what_to_install(self):
+        self.assertEqual(self.hd("--install").returncode, 0)
+        # the system's programs without any display server
+        nox = os.path.join(self.tmp, "nox")
+        os.makedirs(nox)
+        for d in ("/usr/bin", "/bin"):
+            for n in os.listdir(d):
+                if n not in ("Xvnc", "Xvfb", "x11vnc") and not os.path.lexists(os.path.join(nox, n)):
+                    os.symlink(os.path.join(d, n), os.path.join(nox, n))
+        st = self.status(HERDR_DESKTOP_DRIVER="own", PATH=nox)
+        self.assertFalse(st["ok"])
+        self.assertIn("agent-desktop is here, but this machine still needs a virtual display with a screen server: Xvnc", st["problem"])
+
     def test_linux_needs_no_mac_permissions(self):
         self.assertEqual(self.hd("--install").returncode, 0)
         st = self.status(HERDR_DESKTOP_DRIVER="own", FAKE_AD_PERMS="denied denied denied")
@@ -261,7 +274,13 @@ class InstallAndDoctor(unittest.TestCase):
                            {"agent-desktop": fake("1.3.1", "mine"), HELPER: "#!/bin/sh\n"})
         self.root = os.path.join(self.tmp, "root")
         os.makedirs(os.path.join(self.root, ".config/herdr-app"))
-        path = ":".join(d for d in os.environ["PATH"].split(":") if not os.path.exists(os.path.join(d, "agent-desktop")))
+        # a virtual display here (GitHub's runner has none): a stand-in Xvnc first on the PATH
+        xbin = os.path.join(self.tmp, "xbin")
+        os.makedirs(xbin)
+        with open(os.path.join(xbin, "Xvnc"), "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(os.path.join(xbin, "Xvnc"), 0o755)
+        path = ":".join([xbin] + [d for d in os.environ["PATH"].split(":") if not os.path.exists(os.path.join(d, "agent-desktop"))])
         self.env = {**os.environ, "PATH": path, "HERDR_DESKTOP_URL": "file://" + self.rel, "HERDR_DESKTOP_SHA256": self.sha,
                     "HERDR_DESKTOP_DRIVER": "own"}
         for k in ("SHEPHERDR_AGENT_DESKTOP", "SHEPHERDR_AGENT_BROWSER", "HERDR_DESKTOP_BIN"):

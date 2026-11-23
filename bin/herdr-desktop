@@ -262,7 +262,7 @@ EOF
     if ! usable; then msg=$(problem); fx=$fix
     else
       mac_needs
-      if [ -n "$m" ]; then msg="herdr-desktop: this machine has no $m. Install it with the system's package manager"
+      if [ -n "$m" ]; then msg="herdr-desktop: agent-desktop is here, but this machine still needs $m. Install it with the system's package manager"
       elif [ -n "$blocking" ]; then msg="herdr-desktop: $blocking"; fx="herdr-desktop permissions --guide"; fi
     fi
     ok=false; [ -z "$msg" ] && ok=true
