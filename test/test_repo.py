@@ -324,6 +324,36 @@ console.log(JSON.stringify(out));"""
                             bad.append(f"{rel}: {call.group(1)}( without env")
         self.assertEqual(bad, [])
 
+    def test_every_chrome_skips_the_keychain(self):
+        """Every Chrome Shepherdr (or its tests, or a note telling an agent how) starts itself gets --use-mock-keychain
+        and --password-store=basic: without them a Mac asks for 'Chromium Safe Storage' in the keychain, again on every
+        Deny. A launch line is one naming --user-data-dir, --headless=new or --remote-debugging-port; the flags (or
+        herdr-browser's $NO_KEYCHAIN) must be in it or the lines around it (one argument list)."""
+        launch = re.compile(r"--user-data-dir|--headless=new|--remote-debugging-port")
+        files = list(text_files()) + [J("AGENTS.md")]
+        for top in ("test", "docs", "web/demo"):
+            for d, dirs, fs in os.walk(J(top)):
+                dirs[:] = [x for x in dirs if x not in ("__pycache__", "node_modules")]
+                files += [os.path.join(d, f) for f in fs if f.endswith((".py", ".ts", ".md", ".sh"))]
+        found = 0
+        for f in files:
+            if os.path.abspath(f) == os.path.abspath(__file__):
+                continue
+            try:
+                lines = open(f, encoding="utf-8").read().split("\n")
+            except (UnicodeDecodeError, OSError):
+                continue
+            for i, line in enumerate(lines):
+                if not launch.search(line):
+                    continue
+                found += 1
+                near = "\n".join(lines[max(0, i - 3):i + 4])
+                ok = "$NO_KEYCHAIN" in near or ("--use-mock-keychain" in near and "--password-store=basic" in near)
+                self.assertTrue(ok, f"{os.path.relpath(f, ROOT)}:{i + 1} starts Chrome without the keychain flags")
+        self.assertGreaterEqual(found, 5, "the launch lines were found")
+        browser = open(J("bin", "herdr-browser"), encoding="utf-8").read()
+        self.assertIn('NO_KEYCHAIN="--use-mock-keychain --password-store=basic"', browser)
+
     def test_version_everywhere(self):
         v = re.search(r'^VERSION = "([^"]+)"', open(J("bin", "shepherdr")).read(), re.M).group(1)
         self.assertEqual(v, "3.2.4")
