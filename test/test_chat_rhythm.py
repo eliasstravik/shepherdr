@@ -4,7 +4,8 @@ that row started its icon and words at another edge than "Ran a command", and it
 The layout check lays out the app's own stylesheets in a real headless Chrome (the one agent-browser keeps, or
 $SHEPHERDR_TEST_CHROME) with every row type in a row, on a desktop and on touch, and measures: every row's icon at the
 chat's edge and its words in one column; 12 px between any two things that differ (from a bubble or card to a row's
-words, and back); 12 px from the last one to the end of the list. It skips where no Chrome is found.
+words, and back), and on touch, where a row is 44 px tall, 20 px from a row's words and 28 between two rows; 12 px
+from the last one to the end of the list. It skips where no Chrome is found.
 """
 import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import json
@@ -82,7 +83,12 @@ class ChatRhythm(unittest.TestCase):
                 m = re.search(r"RESULT(.*?)END", out)
                 self.assertTrue(m, out[-500:])
                 r = json.loads(m.group(1).replace("&quot;", '"').replace("&gt;", ">"))
-                self.assertEqual([g for g in r["gaps"] if g[1] != 12], [], r["gaps"])
+                # on touch a row is itself 44 px tall (a finger's target), so its words sit further from what's
+                # around it: 20 px to a bubble, card or sign, 28 px to the next row; on a desktop 12 everywhere
+                def want(pair):
+                    rows = sum(bool(re.match(r"(fold|ref|donerow)\b", x.strip())) for x in pair.split(" > "))
+                    return (12, 20, 28)[rows] if "tap" in mode else 12
+                self.assertEqual([g for g in r["gaps"] if g[1] != want(g[0])], [], r["gaps"])
                 self.assertLessEqual(set(r["icons"]), {r["col"]})
                 self.assertLessEqual(set(r["words"]), {r["col"] + 24})
                 self.assertEqual(r["end"], 12)
