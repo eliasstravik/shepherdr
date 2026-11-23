@@ -1,5 +1,26 @@
 # Changelog
 
+## 3.2.7
+
+Reply bubbles that are easier to tap and never cover the chat, and schedules that no longer miss a merge.
+
+### The web app
+
+- Suggested replies get their own row: the chat ends just above them and fades softly instead of being cut, and a new
+  set starts at its first bubble.
+- All reply bubbles look the same, and a short one is round and at least a fingertip big.
+- The bubbles stay while you type. A tap sends just that bubble's text; your draft, files and quoted reply stay in the
+  box.
+- Bubbles only react to hover with a mouse, not after a tap on a phone.
+
+### Tasks
+
+- A task merged and then reopened (like a release coming back to be tagged) stays merged when it's done again,
+  instead of "Done, not merged".
+- A schedule that listens for merges on another machine catches one that happened between its rounds, once, and one
+  folder's error no longer stops it for the others.
+- A schedule that listens to another machine says when it last heard from it, or that it can't hear it.
+
 ## 3.2.6
 
 Replies you tap to send, replying to a task from the chat, question cards where they were asked, and fewer hangs and
