@@ -161,3 +161,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Never pkill -f a pattern that appears in your own command line (e.g. a unittest name): it kills your shell; use TaskStop or kill by pid. (from SHEP-288)
 
 - A real carry-over try: `env -i` with `SHEPHERDR_FROM_SESSION=<old> SHEPHERDR_SESSION=<new>` throwaway sessions and a fake `claude` script first on PATH as the agent; `hc server stop` both and rm their `~/.local/state/herdr-core/<name>` after. (from SHEP-295)
+
+- Service children: spawn only via `service/spawn.ts` (Bun.spawn without env drops runtime process.env changes); `test/test_repo.py` enforces it. (from SHEP-294)
