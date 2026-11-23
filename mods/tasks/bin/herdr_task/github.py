@@ -843,6 +843,88 @@ def own_work(s, task):
     return task.get("own")
 
 
+# ---- a branch that collides with its base (SHEP-320) ----------------------------------------
+# Tasks run in parallel by default, also on the same files: a collision at merge is the price, so its fix
+# round must be quick. Whoever tells the agent names the files and the base's commits (and the tasks that
+# merged them) that collided, and the card says it in one line.
+
+TASK_REF = re.compile(r"^([A-Z][A-Z0-9]*-\d+)\b")
+
+
+def base_tip_ref(s, task, fetch=False):
+    """The ref its base branch is newest at: the remote's (fetched first when fetch), else the local one;
+    the local one when it is ahead (a repo merging here). None when neither is there."""
+    main, base = s.loc["folder"], task.get("base") or "main"
+    remote = remote_of(main)
+    if fetch and git(main, "remote")[1].split():
+        with released(s):
+            git(main, "fetch", "-q", remote, base)
+    there, here = f"refs/remotes/{remote}/{base}", f"refs/heads/{base}"
+    has = [r for r in (there, here) if git(main, "rev-parse", "--verify", "--quiet", r)[0]]
+    if there in has and here in has and git(main, "merge-base", "--is-ancestor", there, here)[0]:
+        return here
+    return has[0] if has else None
+
+
+def collision(s, task, fetch=False):
+    """Its branch's committed work against its base's newest: None when it merges cleanly (or can't be
+    told: no branch, an old git), else {base, ref, files, commits: [[sha, subject]], by: [task refs]}."""
+    main, br = s.loc["folder"], task.get("branch")
+    ref = base_tip_ref(s, task, fetch) if br else None
+    if not ref:
+        return None
+    ok, tip, _ = git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")
+    if not (ok and tip) or git(main, "merge-base", "--is-ancestor", ref, tip)[0]:
+        return None
+    r = run(["git", "-C", main, "merge-tree", "--write-tree", "--name-only", "--no-messages", ref, tip])
+    if r.returncode != 1:  # 0: merges cleanly; anything else: this git can't say (merge-tree --write-tree is 2.38+)
+        return None
+    files = list(dict.fromkeys(f for f in r.stdout.splitlines()[1:] if f.strip()))
+    if not files:
+        return None
+    mb = git(main, "merge-base", ref, tip)[1]
+    log = git(main, "log", "--format=%h%x09%s", f"{mb}..{ref}", "--", *files[:50])[1] if mb else ""
+    commits = [line.split("\t", 1) for line in log.splitlines() if "\t" in line][:10]
+    by = list(dict.fromkeys(m.group(1) for _, subject in commits if (m := TASK_REF.match(subject))))
+    short = ref.replace("refs/remotes/", "").replace("refs/heads/", "")
+    return {"base": task.get("base") or "main", "ref": short, "sha": git(main, "rev-parse", ref)[1], "files": files,
+            "commits": commits, "by": by}
+
+
+def collision_words(c):
+    """What its agent is told: the files and the base's commits there, and how to fix it."""
+    files = ", ".join(c["files"][:12]) + (f" and {len(c['files']) - 12} more" if len(c["files"]) > 12 else "")
+    words = f"Files that collide with {c['ref']}: {files}."
+    if c["commits"]:
+        words += f" {c['base']}'s commits there since your branch started: " + "; ".join(f"{sha} {subject}" for sha, subject in c["commits"][:6]) + "."
+    return words + (f" Fetch, rebase onto {c['ref']} (git fetch, then git rebase {c['ref']}), keep both sides' intent, run the "
+                    "checks; your own branch may be force-pushed with lease, never the base.")
+
+
+def collision_reason(c):
+    """The card's one line (merge_failed, in red)."""
+    if c and c["by"]:
+        return f"Conflicts with {c['base']} after {', '.join(c['by'][:3])} merged: its agent is rebasing"
+    if c:
+        return f"Conflicts with {c['base']} in {c['files'][0]}" + (f" and {len(c['files']) - 1} more" if len(c["files"]) > 1 else "") + \
+            ": its agent is rebasing"
+    return None
+
+
+def base_moved(s, task):
+    """SHEP-320: it merged into its base: the others on that base look at once whether they now collide with it,
+    rather than at their own merge. A Ready one's pull request is read at the next tick (GitHub says whether it
+    conflicts, and pr_news tells its agent); a Working one is checked here (tick.heads_up)."""
+    base = task.get("base") or "main"
+    for o in (getattr(s, "data", None) or {}).get("tasks") or []:
+        if o is task or o.get("mode") != "worktree" or (o.get("base") or "main") != base:
+            continue
+        if o["state"] == "ready" and o.get("pr"):
+            o["pr"]["checked"] = 0
+        elif o["state"] == "running" and o.get("branch"):
+            o["base_moved"] = now()
+
+
 def mid_turn(s, task):
     """Its agent, or a helper of its own, is mid-turn (working, or asking): its folder stays until the
     turn ends (SHEP-188). Even when the merge came from Herdr itself (even_if_busy)."""
@@ -856,10 +938,12 @@ def finish(s, task, even_if_busy=False, quiet=False):
     from Herdr) none running at all. Else tidy_done() removes them once its agents ended."""
     task["state"], task["done_at"] = "done", now()
     for k in ("attention", "merge_requested", "queue", "queued_at", "merge_queued", "kept_open", "base_hold", "queue_fail",
-              "queue_out", "queue_refused", "dequeued", "merge_failed", "merge_failed_at", "stopped_by", "stopped_why", "stopped_at",
+              "queue_out", "queue_refused", "dequeued", "merge_failed", "merge_failed_at", "merge_asked", "stopped_by", "stopped_why", "stopped_at",
               "stopped_turns"):
         task.pop(k, None)
     s.dirty = True
+    if task.get("merged"):
+        base_moved(s, task)
     # The space's "When a task is accepted" command, in the background (after_accept.py): never waited on.
     # quiet: a schedule's run that ended with nothing to review (ready --nothing / --told): nothing was accepted.
     if not quiet:

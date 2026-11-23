@@ -17,7 +17,7 @@ from .agents import (
 )
 from .provider import provider_cut, provider_error
 from .sessions import find_lost_logs, refresh_sessions
-from .github import (already_merged, BEHIND, CHECKS_NEVER, checks_missing, checks_since, drop_branch, merge_checks, expected_checks, finish, github, merged_here, needs_approval, note_checks, pr_for_branch, pr_merged, pr_pending, pr_problem,
+from .github import (already_merged, BEHIND, collision, collision_reason, collision_words, CHECKS_NEVER, checks_missing, checks_since, drop_branch, merge_checks, expected_checks, finish, github, merged_here, needs_approval, note_checks, pr_for_branch, pr_merged, pr_pending, pr_problem,
                      pr_view, pr_wait, queue_dropped_why, queue_entry, queue_merge, queue_refusal, unqueue, tidy_done, tidy_due, update_main, watch_main)
 from .launch import default_space
 from .store import locate, read_list, Store, store_files
@@ -25,7 +25,7 @@ from .queues import machine_hold, refresh_ext, set_hold, waiting_ext, waiting_fo
 from .archive import archive_pass
 from .browsers import browser_pass
 from .output import progress_clock, say
-from .commands import back_to_work, begin, merge_failed, merge_now, merge_waits, MERGE_FAILED
+from .commands import back_to_work, begin, merge_failed, merge_now, merge_waits, MERGE_FAILED, workers
 from .news import news_pass
 from .ghnews import held_by_base, main_pass, pr_deliver, pr_news
 from .systemic import dropped, systemic_pass
@@ -222,10 +222,14 @@ def facts(s, t, report):
                 else:
                     t.pop("attention_head", None)
                 t.pop("merge_queued", None)
-                if t.get("auto_merge"):
+                # SHEP-320: a conflict says on its card what it collided with, whatever the merge setting (pr_news
+                # hands its agent the files)
+                why = (collision_reason(collision(s, t, fetch=True)) or
+                       f"Conflicts with {t.get('base') or 'main'}: its agent is rebasing") if problem.startswith("It conflicts") else None
+                if why or t.get("auto_merge"):
                     # it was to merge by itself (or the person marked it as done): a failed merge, its agent's to
                     # fix (pr_news hands it the conflict or the failed check)
-                    t["merge_failed"], t["merge_failed_at"] = problem, now()
+                    t["merge_failed"], t["merge_failed_at"] = why or problem, now()
                 report["attention"].append(t["id"])
             elif t.get("attention", "").startswith(("Checks failing", "It conflicts", "The pull request was closed", MERGE_FAILED, BEHIND)) \
                     or (t.get("attention") == CHECKS_NEVER and missing != "never"):
@@ -366,6 +370,31 @@ def due_pass(s, report):
             report.setdefault("due", []).append(s.ref(t))
 
 
+def heads_up(s, t, report):
+    """SHEP-320: a task merged into its base (finish() marked the others base_moved): a Working task whose committed
+    work now conflicts with the base's newest hears at once, with the files, rather than at its own ready or merge.
+    Once per base commit and set of files; only to an agent that is there (none is started for it)."""
+    if not t.pop("base_moved", None):
+        return
+    s.dirty = True
+    if t["state"] != "running" or t.get("mode") != "worktree":
+        return
+    c = collision(s, t, fetch=True)
+    mark = f"{c['sha']}:{','.join(c['files'])}" if c else None
+    if not c or t.get("collides") == mark:
+        return
+    live = workers(s, t)
+    if not live:
+        return
+    from .news import send_or_hold
+    msg = (f"Heads-up from Herdr: {c['base']} moved on" + (f" ({', '.join(c['by'][:3])} merged)" if c["by"] else "") +
+           f" and now conflicts with your branch {t.get('branch')}. {collision_words(c)} No need to stop what you're doing: "
+           "rebase at a good point, before you say ready (ready refuses a branch that conflicts with its base).")
+    if send_or_hold(live[-1]["address"], msg):
+        t["collides"] = mark
+        report.setdefault("collides", []).append(s.ref(t))
+
+
 def tick_store(s, report):
     """One folder's turn: Ready tasks back at work are Working again, merged tasks become done,
     auto-merges go when they can, and queued tasks start once what they wait for is done."""
@@ -374,6 +403,11 @@ def tick_store(s, report):
             back_pass(s, t, report)
         elif t["state"] == "running" and (t.get("back") or {}).get("auto"):
             settle_back(s, t, report)
+        if t.get("base_moved"):
+            try:
+                heads_up(s, t, report)
+            except Exception as e:  # never stops the tick
+                report.setdefault("github_error", []).append(f"{s.ref(t)}: {e}")
         if t.get("worktree") and t["state"] in ("running", "ready"):
             facts(s, t, report)
             if t["state"] == "ready" and (t.get("pr") or {}).get("news"):
