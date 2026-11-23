@@ -14,7 +14,7 @@ import * as AGa from "../core/agents.js";
 import { answerCodex } from "./codex-ask.ts";
 const { CHOICE_KEY, choiceOf, withChoice, speedOf } = AGa as any;
 import * as SP from "../core/spaces.js";
-const { READ, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, withOrder, withMachineOrder, DELETED, deletedSection, withRestoredSection } = SP as any;
+const { READ, assistantOf, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, withOrder, withMachineOrder, DELETED, deletedSection, withRestoredSection } = SP as any;
 import type { Compat } from "./compat.ts";
 import { noteFailed, once } from "./send-once.ts";
 import { execTemplate, ownId, withoutSpace } from "./spaces.ts";
@@ -194,6 +194,95 @@ function taskOf(b: any) {
   const ref = str(b.ref, 40), folder = str(b.folder, 4096), machine = b.machine == null ? null : str(b.machine, 80);
   if (!REF.test(ref) || !folder.startsWith("/") || (machine && !MACHINE.test(machine))) throw new Error("bad task");
   return { ref, folder, machine };
+}
+
+/** A space's Assistant chat with no Assistant yet: the first message starts it (the assistant template) with the
+ *  message as its task, labelled for its space. -> { ok, started, at, addr }, or { waiting } for an offline machine. */
+async function startFresh(hub: Hub, b: any, compat: Compat): Promise<any> {
+  // a space's Assistant chat with no Assistant yet: the first message starts it (the assistant template) with the
+  // message as its task, labelled for its space
+  const space = b.chat.slice(2).replace(":", "/"), sp = compat.spaceOf(space);
+  if (!sp) throw new Error("That space isn't here any more.");
+  const bare = String(sp.id).split("/").pop()!;
+  const text = str(b.text ?? "").trim();
+  if (!text) throw new Error("nothing to send");
+  const files = Array.isArray(b.attachments) && !sp.machine ? b.attachments.filter((p: unknown) => typeof p === "string" && p.startsWith(attachDir() + "/") && !p.includes("/../")) : [];
+  const task = [text, ...files].join("\n\n");
+  // its machine offline: it waits (the web shows it waiting to be reached) and starts once the machine is back
+  if (sp.machine && !(await addedMachines()).some((m: any) => m.name === sp.machine && m.state === "connected")) {
+    const was = starts.get(space)?.b.text;
+    starts.set(space, { b: { ...b, text: was ? `${was}\n\n${text}` : text }, hub, compat, at: Date.now() });
+    startWhenBack();
+    return { ok: true, waiting: true };
+  }
+  const labels = ["--label", "herdr.role=coordinator", "--label", `herdr.coordinator.space=${bare}`, "--label", `herdr.space=${bare}`];
+  const tpl = await execTemplate(hub, "assistant", sp.machine ?? null, compat.assistantPick?.(sp.id) ?? null);
+  // when it began to go in, by this clock: the page knows its message again in the chat by it, as any send's
+  const at = Date.now();
+  const r = await hc(["run", "--bg", "--json", "--no-parent", "--keep", ...(sp.machine ? ["--on", sp.machine] : []), ...(sp.folder ? ["--cwd", sp.folder] : []), ...labels, tpl.name, task]);
+  tpl.done();
+  let out: any = {};
+  try { out = JSON.parse(r.stdout || "{}"); } catch {}
+  if (r.code !== 0 || !out.address) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || "The Assistant didn't start.");
+  // what the person asked, for its chat to show apart from the template (data/chat-first)
+  const first = join(appHome(), "data", "chat-first");
+  const addr = sp.machine && !String(out.address).includes("/") ? `${sp.machine}/${out.address}` : String(out.address);
+  if (out.first_message?.sent === false && tpl.words) firstWhenIdle(hub, addr, `${tpl.words}\n\n${task}`);
+  try { mkdirSync(first, { recursive: true }); writeFileSync(writable(join(first, `${String(addr).replace(/[^\w.-]/g, "_")}.txt`)), text); } catch {}
+  // it started on the choice made in its chat (assistantPick): that choice is spent, the next start is Settings' again
+  if (compat.shared && choiceOf(compat.shared.value(CHOICE_KEY), sp.id)) void compat.shared.set(CHOICE_KEY, withChoice(compat.shared.value(CHOICE_KEY), sp.id, null)).catch(() => null);
+  // the page's own id for it (SHEP-263): the chat gives its message back with that id, so the page's pending copy
+  // goes once the log has it (it stayed under the reply, said twice, until it gave up on it two minutes later)
+  if (typeof b.cid === "string") compat.noteSend?.(addr, { cid: b.cid.slice(0, 80), text, files, at });
+  return { ok: true, started: true, at, addr };
+}
+
+// A space's Assistant that ended, started again for its next message (SHEP-297): one start per space at a time, so
+// two messages sent meanwhile (two devices, a send and a voice call) reach the same new Assistant.
+const reviving = new Map<string, Promise<{ addr: string; mine?: symbol; result?: unknown }>>();
+/** how long a restarted Assistant may take to come up before its message is given up on (the page's Retry) */
+export const REVIVE_WAIT = { ms: 120_000, every: 500 };
+
+/** A message to a space whose Assistant ended: it starts again on its own conversation (Agents.revive, the Stopped
+ *  card's Restart), and the message goes to the new one once it is up, held for its turn if it is busy. One that can't
+ *  start again (its record gone, no log to resume) gives way to a fresh Assistant with the message as its task. */
+async function sendToEnded(hub: Hub, b: any, compat: Compat, old: string): Promise<unknown> {
+  const place = b.chat.slice(2).replace(":", "/"), sp = compat.spaceOf(place);
+  if (!sp) throw new Error("That space isn't here any more.");
+  const text = str(b.text ?? "").trim();
+  if (!text && !(Array.isArray(b.attachments) && b.attachments.length)) throw new Error("nothing to send");
+  // what it replies to and the tasks it mentions, from the chat as it shows (the old one's)
+  const r = compat.reader?.(old);
+  const quote = typeof b.reply === "string" ? r?.conv?.items?.find((x: any) => x.id === b.reply)?.text ?? null : null;
+  const tags = mentionedIn(String(b.text ?? ""), compat.tasksFor(b.chat)).map((x: any) => taskTag(x, x.ref ?? `#${x.id}`)).join("");
+  const me = Symbol("send");
+  let p = reviving.get(place);
+  if (!p) {
+    p = (async () => {
+      // one started meanwhile (another device's message, the Restart card): that one
+      const live = assistantOf(sp, [...hub.terminals.values()]);
+      if (live) return { addr: live.address as string };
+      try {
+        if (!compat.agents?.revive) throw new Error("no restart here");
+        return { addr: await compat.agents.revive(old, r ?? null) };
+      } catch {
+        // it couldn't start again: a fresh Assistant, this message its task
+        const result: any = await startFresh(hub, b, compat);
+        return { addr: result.addr, mine: me, result };
+      }
+    })().finally(() => reviving.delete(place));
+    reviving.set(place, p);
+  }
+  const got = await p;
+  if (got.mine === me) return got.result;
+  if (!got.addr) throw new Error("The Assistant didn't start.");
+  // up once it reports a status (Claude Code's or Codex's screen is drawn); a busy one gets it at its turn
+  const until = Date.now() + REVIVE_WAIT.ms;
+  while (!((hub.terminals.get(got.addr) as any)?.state === "live" && (hub.terminals.get(got.addr) as any)?.status?.state)) {
+    if (Date.now() > until) throw new Error("The Assistant started again but isn't ready yet. Send it again in a moment.");
+    await Bun.sleep(REVIVE_WAIT.every);
+  }
+  return sendNow(hub, { ...b, addr: got.addr, quote, tags, hold: true }, compat);
 }
 
 export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
@@ -458,43 +547,15 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const res = await hc(["keys", chat(b.chat), ...b.keys]);
     return { ok: res.code === 0 };
   }
-  if (b?.type === "send" && typeof b.chat === "string" && b.chat.startsWith("p:") && !compat.addrOf(b.chat)) {
-    // a space's Assistant chat with no Assistant yet: the first message starts it (the assistant template) with the
-    // message as its task, labelled for its space
-    const space = b.chat.slice(2).replace(":", "/"), sp = compat.spaceOf(space);
-    if (!sp) throw new Error("That space isn't here any more.");
-    const bare = String(sp.id).split("/").pop()!;
-    const text = str(b.text ?? "").trim();
-    if (!text) throw new Error("nothing to send");
-    const files = Array.isArray(b.attachments) && !sp.machine ? b.attachments.filter((p: unknown) => typeof p === "string" && p.startsWith(attachDir() + "/") && !p.includes("/../")) : [];
-    const task = [text, ...files].join("\n\n");
-    // its machine offline: it waits (the web shows it waiting to be reached) and starts once the machine is back
-    if (sp.machine && !(await addedMachines()).some((m: any) => m.name === sp.machine && m.state === "connected")) {
-      const was = starts.get(space)?.b.text;
-      starts.set(space, { b: { ...b, text: was ? `${was}\n\n${text}` : text }, hub, compat, at: Date.now() });
-      startWhenBack();
-      return { ok: true, waiting: true };
+  if (b?.type === "send" && typeof b.chat === "string" && b.chat.startsWith("p:") && !compat.addrOf(b.chat)) return startFresh(hub, b, compat);
+  if (b?.type === "send" && typeof b.chat === "string" && b.chat.startsWith("p:")) {
+    // a space's Assistant that ended (killed, crashed, exited: SHEP-297): the message starts it again and goes to it,
+    // once (the same id asked again gets the same answer: send-once.ts), never to the finished terminal
+    const old = compat.addrOf(b.chat)!;
+    if (!old.startsWith("log:") && hub.terminals.get(old)?.state !== "live") {
+      const cid = typeof b.cid === "string" && b.cid ? b.cid.slice(0, 80) : null;
+      return cid ? once(cid, () => sendToEnded(hub, b, compat, old)) : sendToEnded(hub, b, compat, old);
     }
-    const labels = ["--label", "herdr.role=coordinator", "--label", `herdr.coordinator.space=${bare}`, "--label", `herdr.space=${bare}`];
-    const tpl = await execTemplate(hub, "assistant", sp.machine ?? null, compat.assistantPick?.(sp.id) ?? null);
-    // when it began to go in, by this clock: the page knows its message again in the chat by it, as any send's
-    const at = Date.now();
-    const r = await hc(["run", "--bg", "--json", "--no-parent", "--keep", ...(sp.machine ? ["--on", sp.machine] : []), ...(sp.folder ? ["--cwd", sp.folder] : []), ...labels, tpl.name, task]);
-    tpl.done();
-    let out: any = {};
-    try { out = JSON.parse(r.stdout || "{}"); } catch {}
-    if (r.code !== 0 || !out.address) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || "The Assistant didn't start.");
-    // what the person asked, for its chat to show apart from the template (data/chat-first)
-    const first = join(appHome(), "data", "chat-first");
-    const addr = sp.machine && !String(out.address).includes("/") ? `${sp.machine}/${out.address}` : String(out.address);
-    if (out.first_message?.sent === false && tpl.words) firstWhenIdle(hub, addr, `${tpl.words}\n\n${task}`);
-    try { mkdirSync(first, { recursive: true }); writeFileSync(writable(join(first, `${String(addr).replace(/[^\w.-]/g, "_")}.txt`)), text); } catch {}
-    // it started on the choice made in its chat (assistantPick): that choice is spent, the next start is Settings' again
-    if (compat.shared && choiceOf(compat.shared.value(CHOICE_KEY), sp.id)) void compat.shared.set(CHOICE_KEY, withChoice(compat.shared.value(CHOICE_KEY), sp.id, null)).catch(() => null);
-    // the page's own id for it (SHEP-263): the chat gives its message back with that id, so the page's pending copy
-    // goes once the log has it (it stayed under the reply, said twice, until it gave up on it two minutes later)
-    if (typeof b.cid === "string") compat.noteSend?.(addr, { cid: b.cid.slice(0, 80), text, files, at });
-    return { ok: true, started: true, at };
   }
   if (b?.type === "send" && typeof b.chat === "string" && b.chat.endsWith("/worker")) {
     // a reply typed into a task whose agent is gone (Done, or stopped): herdr-task starts its agent again in the same

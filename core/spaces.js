@@ -24,12 +24,22 @@ export function chatPane(k) {
 }
 
 // A space's Assistant: the live coordinator terminal labelled for it, on the space's machine (labels hold that
-// machine's own ids, without the "<machine>/" an app id has).
+// machine's own ids, without the "<machine>/" an app id has). null when none runs: one that ended (killed, crashed,
+// exited) is never the agent a message goes to (SHEP-297: a send went to it and failed "That agent isn't running.").
 export function assistantOf(space, ts) {
+  return assistantsOf(space, ts).find((k) => k.state === "live") ?? null;
+}
+
+// The terminal a space's chat reads: its live Assistant, else the latest that ended (its chat's history and unread
+// mark stay until a new one starts; a message to it starts one again: service/actions.ts).
+export function lastAssistantOf(space, ts) {
+  return assistantOf(space, ts) ?? assistantsOf(space, ts).reduce((latest, k) => !latest || (Number(k.created_ms) || 0) >= (Number(latest.created_ms) || 0) ? k : latest, null);
+}
+
+function assistantsOf(space, ts) {
   const id = String(space.id).split("/").pop();
-  const matches = ts.filter((k) => k.labels?.["herdr.role"] === "coordinator"
+  return ts.filter((k) => k.labels?.["herdr.role"] === "coordinator"
     && k.labels?.["herdr.coordinator.space"] === id && machineOf(k.address) === (space.machine ?? null));
-  return matches.find((k) => k.state === "live") ?? matches.reduce((latest, k) => !latest || (Number(k.created_ms) || 0) >= (Number(latest.created_ms) || 0) ? k : latest, null);
 }
 
 // The turn last read. Before any mark: the turn the window last saw it done at (its "chat.seen").

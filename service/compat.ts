@@ -228,7 +228,7 @@ export class Compat {
     return { key, fresh: true, messages: [], cli: kind, working: false,
       agent: { kind, words: f.words, planned: { ...(f.sel.model ? { model: f.sel.model } : {}), ...(f.label ? { modelLabel: f.label } : {}), ...(f.effort ? { effort: f.effort } : {}) } } } as Chat;
   }
-  agents: { info(addr: string, reader: any): Promise<unknown>; restart(addr: string, reader: any, pick: any): Promise<string>; choices(machine: string | null): Promise<unknown>; ownDefaults(): Promise<{ claude: unknown; codex: unknown }> } | null = null;
+  agents: { info(addr: string, reader: any): Promise<unknown>; restart(addr: string, reader: any, pick: any): Promise<string>; revive?(addr: string, reader: any): Promise<string>; choices(machine: string | null): Promise<unknown>; ownDefaults(): Promise<{ claude: unknown; codex: unknown }> } | null = null;
 
   /** Agents' secret asks (service/secrets.ts), set by main. */
   secrets: { asks(): { address: string; name: string; why: string }[] } | null = null;

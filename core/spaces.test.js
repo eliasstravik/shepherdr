@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { assistantOf, spacesFromDoc, spaceName, tilde, sharedNames, gitTail, inOrder, withOrder, keptOrder, machinesInOrder, byMachineOrder, withMachineOrder, machineOrderOf } from "./spaces.js";
+import { assistantOf, lastAssistantOf, spacesFromDoc, spaceName, tilde, sharedNames, gitTail, inOrder, withOrder, keptOrder, machinesInOrder, byMachineOrder, withMachineOrder, machineOrderOf } from "./spaces.js";
 
 test("two spaces with one name on a machine each show their folder, from ~ (the sidebar's rows, both sides)", () => {
   // built, so the repo's no-home-paths rule has nothing to find
@@ -86,8 +86,22 @@ test("an ended assistant stays visible until a new one starts", () => {
   const space = { id: "sp1", machine: null };
   const old = { address: "t1", state: "ended", labels: { "herdr.role": "coordinator", "herdr.coordinator.space": "sp1" } };
   const live = { ...old, address: "t2", state: "live" };
-  expect(assistantOf(space, [old])).toEqual(old);
-  expect(assistantOf(space, [old, live])).toEqual(live);
+  expect(lastAssistantOf(space, [old])).toEqual(old);
+  expect(lastAssistantOf(space, [old, live])).toEqual(live);
   const newer = { ...old, address: "t3", created_ms: 200 };
-  expect(assistantOf(space, [newer, { ...old, created_ms: 100 }])).toEqual(newer);
+  expect(lastAssistantOf(space, [newer, { ...old, created_ms: 100 }])).toEqual(newer);
+});
+
+test("a space whose Assistants all finished has none to send to (SHEP-297)", () => {
+  const space = { id: "box/sp1", machine: "box" };
+  const gone = { address: "box/t1", state: "finished", created_ms: 100, labels: { "herdr.role": "coordinator", "herdr.coordinator.space": "sp1" } };
+  const later = { ...gone, address: "box/t2", created_ms: 200 };
+  expect(assistantOf(space, [gone, later])).toBeNull();
+  // its chat still reads the latest one
+  expect(lastAssistantOf(space, [gone, later])).toEqual(later);
+  // a live one is the one, older or not
+  const live = { ...gone, address: "box/t0", state: "live", created_ms: 50 };
+  expect(assistantOf(space, [gone, live, later])).toEqual(live);
+  // another machine's, or another space's, never
+  expect(assistantOf(space, [{ ...live, address: "t0" }, { ...live, labels: { ...live.labels, "herdr.coordinator.space": "sp2" } }])).toBeNull();
 });
