@@ -4557,6 +4557,151 @@ class AutomationFromAnotherMachine(unittest.TestCase):
         self.write_b()
         self.assertEqual([f["why"] for f in self.round()], ["ready: vmb:SHEP-1"])
 
+    def b_cmd(self, *argv):
+        """B's own herdr-task, as the person or an agent there runs it."""
+        b = ("import sys, runpy; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
+             "import herdr_task.base as base; base.not_real = lambda: None;"
+             "sys.argv = sys.argv[2:]; runpy.run_path(sys.argv[0], run_name='__main__')")
+        r = subprocess.run([sys.executable, "-c", b, BIN, os.path.join(BIN, "herdr-task"), *argv, "--folder", self.b_folder],
+                           env=self.b_env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with open(os.path.join(self.b_store, self.b_folder.strip("/").replace("/", "-") + ".json")) as f:
+            self.b_tasks = json.load(f)["tasks"]
+
+    def test_merged_then_reopened_between_rounds_fires_once(self):
+        """SHEP-423, the missed 3.2.6: its release task was accepted (merged), then reopened for its agent to tag it
+        and done again, all between two of A's rounds. Done again it read "not merged", so no round ever saw a merge."""
+        self.b_task("Release Shepherdr 3.2.6", state="ready")
+        self.auto("add", title="Update Shepherdr everywhere", prompt="Go.", on="merged", match="Release Shepherdr",
+                  from_=f"vmb:{self.b_folder}")
+        self.assertEqual(self.round(), [])
+        self.b_merge(1)
+        self.b_cmd("reopen", "SHEP-1")
+        self.b_cmd("done", "SHEP-1")
+        self.assertTrue(self.b_tasks[0]["merged"])  # done again, still merged
+        self.assertEqual([f["why"] for f in self.round()], ["merged: vmb:SHEP-1"])
+        # reopened and done again once more (seen this time): never a second run
+        self.b_cmd("reopen", "SHEP-1")
+        self.assertEqual(self.round(), [])
+        self.b_cmd("done", "SHEP-1")
+        self.assertEqual(self.round() + self.round(), [])
+        self.assertEqual(len(self.started), 1)
+
+    def test_merged_then_reopened_seen_while_reopened(self):
+        """A round that only sees it reopened (Working again after its merge) fires then, and once."""
+        self.b_task("Release one", state="ready")
+        self.auto("add", title="Update", prompt="Go.", on="merged", from_=f"vmb:{self.b_folder}")
+        self.round()
+        self.b_merge(1)
+        self.b_cmd("reopen", "SHEP-1")
+        self.assertEqual([f["why"] for f in self.round()], ["merged: vmb:SHEP-1"])
+        self.b_cmd("done", "SHEP-1")
+        self.assertEqual(self.round(), [])
+
+    def test_an_older_record_never_fires_a_seen_merge_again(self):
+        """A record kept before SHEP-423 (no "merged" in it) that saw a task done: done again merged is no news."""
+        self.b_task("Fix one")
+        self.auto("add", title="Update", prompt="Go.", on="merged", from_=f"vmb:{self.b_folder}")
+        self.b_merge(1)
+        self.assertEqual(len(self.round()), 1)
+        from herdr_task.store import locate, Store
+        with Store(locate(self.a_folder)) as s:
+            for rec in s.data["automations"][0]["from_seen"].values():
+                if isinstance(rec, dict):
+                    rec.pop("merged", None)
+            s.dirty = True
+        self.b_cmd("reopen", "SHEP-1")
+        self.assertEqual(self.round(), [])
+        self.b_cmd("done", "SHEP-1")
+        self.assertEqual(self.round(), [])
+
+    def test_a_merge_during_an_edit_runs_once(self):
+        self.b_task("Release one")
+        self.auto("add", title="Update", prompt="Go.", on="merged", from_=f"vmb:{self.b_folder}")
+        self.round()
+        self.b_merge(1)
+        # edited before A's next round: its prompt, and --from given again as it was
+        self.auto("edit", id="1", prompt="Update all.", from_=f"vmb:{self.b_folder}")
+        self.assertEqual([f["why"] for f in self.round()], ["merged: vmb:SHEP-1"])
+        self.assertEqual(self.round(), [])
+        self.assertEqual(len(self.started), 1)
+        self.assertTrue(self.started[0]["prompt"].startswith("Update all."))
+
+    def test_a_merge_during_a_scheduler_restart_runs_once(self):
+        """A's scheduler down (no rounds) while B merges: its first round back runs it, once."""
+        self.b_task("Release one")
+        self.auto("add", title="Update", prompt="Go.", on="merged", from_=f"vmb:{self.b_folder}")
+        self.round()
+        self.b_merge(1)
+        self.b_task("Release two", state="done", merged=True)  # added and merged while it was down
+        self.assertEqual(sorted(f["why"] for f in self.round()), ["merged: vmb:SHEP-1", "merged: vmb:SHEP-2"])
+        self.assertEqual(self.round() + self.round(), [])
+        self.assertEqual(len(self.started), 2)
+
+    def test_a_merge_while_no_agent_could_start_runs_once(self):
+        from unittest import mock
+        import herdr_task.base as base
+        self.b_task("Release one")
+        self.auto("add", title="Update", prompt="Go.", on="merged", from_=f"vmb:{self.b_folder}")
+        self.round()
+        self.b_merge(1)
+
+        def broken(*a, **k):
+            raise RuntimeError("hc: the session is down")
+        # a start that breaks outright: nothing of the round is saved, so the merge is still news next round
+        with mock.patch.object(self.au, "begin", broken):
+            self.round()
+        self.assertEqual(self.auto("show", id="1")["runs"], [])
+        self.assertEqual([f["why"] for f in self.round()], ["merged: vmb:SHEP-1"])
+        self.assertEqual(self.round(), [])
+        self.assertEqual(len(self.started), 1)
+        # a start refused (its agent can't start): one run, on record with why, never fired again
+        self.b_task("Release two")
+        self.round()
+        self.b_merge(2)
+
+        def refused(s, t, space):
+            raise base.Fail("claude is signed out")
+        with mock.patch.object(self.au, "worker_argv", refused):
+            self.assertEqual([f["why"] for f in self.round()], ["merged: vmb:SHEP-2"])
+        self.assertEqual(self.round() + self.round(), [])
+        runs = self.auto("show", id="1")["runs"]
+        self.assertEqual(len(runs), 2)
+        self.assertIn("signed out", runs[-1]["error"])
+
+    def test_show_says_when_it_last_heard(self):
+        """auto show: when it last heard the machine it listens to, and that it can't hear it."""
+        import datetime
+        self.b_task("Fix one")
+        self.auto("add", title="Update", prompt="Go.", on="merged", from_=f"vmb:{self.b_folder}")
+        t0 = 1_800_000_000_000
+        from unittest import mock
+        with mock.patch.object(self.au, "now", lambda: t0):
+            shown = self.auto("show", id="1")
+            self.assertIsNone(shown["heard"])
+            self.assertIn("hasn't heard from vmb yet", shown["heard_words"])
+            self.round()
+            shown = self.auto("show", id="1")
+            self.assertEqual(shown["heard"], t0)
+            self.assertTrue(shown["hearing"])
+            at = f"{datetime.datetime.fromtimestamp(t0 / 1000):%H:%M}"
+            self.assertEqual(shown["heard_words"], f"last heard from vmb {at}")
+            self.assertIn(f"; last heard from vmb {at}", self.au.auto_line(shown))
+        # the scheduler stopped asking: it says so
+        with mock.patch.object(self.au, "now", lambda: t0 + 10 * 60_000):
+            shown = self.auto("show", id="1")
+            self.assertFalse(shown["hearing"])
+            self.assertIn(f"can't hear vmb: last heard {at}", shown["heard_words"])
+        # B can't be reached
+        self.b_up = False
+        down = t0 + 15_000
+        self.round_at(down)
+        with mock.patch.object(self.au, "now", lambda: down):
+            shown = self.auto("show", id="1")
+        self.assertFalse(shown["hearing"])
+        self.assertEqual(shown["heard"], t0)
+        self.assertEqual(shown["heard_words"], f"can't hear vmb since {datetime.datetime.fromtimestamp(down / 1000):%H:%M}")
+
     def test_unknown_or_unreachable_machine(self):
         with self.assertRaises(self.au.Fail) as e:
             self.auto("add", title="Update", prompt="Go.", on="merged", from_="vm-nope:/home/x/app")

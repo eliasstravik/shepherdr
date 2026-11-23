@@ -1197,10 +1197,13 @@ def cmd_state(args, state):
             # pull request merged and close it again at once) until its agent says ready.
             if t["state"] == "done" and t.get("merged"):
                 t["kept_open"] = True
+                t["was_merged"] = True  # SHEP-423: its merge stays a fact (done again: merged, not "not merged")
             for k in ("reviews", "review", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "merge_asked", "merge_queued", "closed_unmerged",
                       "quiet", "told", "told_sent"):
                 t.pop(k, None)
-        if state == "done" and t.get("worktree") and merged_here(s, t):
+        if state == "done" and (t.get("was_merged") or (t.get("worktree") and merged_here(s, t))):
+            # SHEP-423: reopened after it merged (to tag a release, say), then done again: still merged. Squash-merged on
+            # GitHub, merged_here can't tell, and it was filed "Done · not merged": a schedule listening for "merged" missed it.
             t["merged"] = True
         elif state == "done" and t.get("mode") == "worktree" and (t.get("worktree") or t.get("pr")) and not t.get("merged"):
             # 3.2: Mark as done from its menu closes it without merging ("Done · not merged"): its branch and
@@ -1591,6 +1594,7 @@ def cmd_reply(args):
             # as reopen: Working again, kept open though its work merged (until its agent says ready)
             if t.get("merged"):
                 t["kept_open"] = True
+                t["was_merged"] = True  # SHEP-423, as reopen
             for k in ("reviews", "review", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "merge_asked", "merge_queued", "closed_unmerged",
                       "quiet", "told", "told_sent", "attention"):
                 t.pop(k, None)

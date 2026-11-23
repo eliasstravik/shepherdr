@@ -308,7 +308,40 @@ def auto_view(s, a):
     # machine: None here; herdr-task --on <machine> names it (cli.remote), so a list across machines says whose it is
     v.update(ref=auto_ref(s, a), **{"from": from_text(a["from"]) if a.get("from") else None}, folder=s.loc["folder"], machine=None, prefix=s.prefix, every=(a.get("every") or {}).get("text"),
              trigger=trigger_words(a), enabled=enabled, may_update=bool(a.get("may_update")), last_update=a.get("last_update"))
+    if a.get("from"):
+        v.update(heard_words(a))
     return v
+
+
+HEARD_STALE_MS = 3 * 60 * 1000  # a round asks every 15 s (an answer can take a minute): older than this, it isn't hearing
+
+
+def heard_at(src):
+    """When the scheduler last got an answer from this --from source (one_pass keeps it in .seen.json), or None."""
+    try:
+        with open(SEEN) as f:
+            return ((json.load(f) or {}).get("_heard") or {}).get(from_text(src))
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def heard_words(a):
+    """SHEP-423: auto show says when it last heard the folder it listens to, and when it can't hear it:
+    {heard: ms or None, hearing: bool, heard_words}."""
+    src, at, t = a["from"], heard_at(a["from"]), now()
+    who = src.get("machine") or os.path.basename(src["folder"].rstrip("/")) or src["folder"]
+    clock = lambda ms: f"{datetime.datetime.fromtimestamp(ms / 1000):%H:%M}" if t - ms < 20 * 3600 * 1000 else \
+        f"{datetime.datetime.fromtimestamp(ms / 1000):%a %H:%M}"
+    fe = a.get("from_error")
+    if fe:
+        words = f"can't hear {who} since {clock(fe.get('since') or fe.get('at') or t)}"
+    elif not at:
+        words = f"hasn't heard from {who} yet (is the scheduler running?)"
+    elif t - at > HEARD_STALE_MS:
+        words = f"can't hear {who}: last heard {clock(at)} (is the scheduler running?)"
+    else:
+        words = f"last heard from {who} {clock(at)}"
+    return {"heard": at, "hearing": bool(at and not fe and t - at <= HEARD_STALE_MS), "heard_words": words}
 
 
 def auto_line(v):
@@ -316,7 +349,8 @@ def auto_line(v):
                                           (f"next {datetime.datetime.fromtimestamp(v['next_run'] / 1000):%a %H:%M}" if v.get("next_run") else "on events"))
     err = (f"  ! {v['last_error']['message']}" if v.get("last_error") else
            f"  ~ {v['from_error']['message']} ({v['from_error']['misses']} round(s) so far)" if v.get("from_error") else "")
-    return f"{v['title']}  ({v['trigger']}; {state}{'; may update Shepherdr' if v.get('may_update') else ''}){err}  [key {v['ref']}]"
+    heard = f"; {v['heard_words']}" if v.get("heard_words") else ""
+    return f"{v['title']}  ({v['trigger']}; {state}{heard}{'; may update Shepherdr' if v.get('may_update') else ''}){err}  [key {v['ref']}]"
 
 
 def set_auto_fields(s, a, args, adding=False):
@@ -577,7 +611,9 @@ def task_facts(s, t):
     working_ones = [k for k in live if agent_running(k)]
     return {"id": t["id"], "ref": s.ref(t), "title": t["title"], "branch": t.get("branch"), "state": t["state"],
             "status": status_of(t, working_ones) if t["state"] == "running" else t["state"],
-            "needs": task_status(t, working_ones)[1], "attention": t.get("attention"), "merged": bool(t.get("merged")),
+            "needs": task_status(t, working_ones)[1], "attention": t.get("attention"),
+            # SHEP-423: merged once stays merged, also reopened after it (to tag a release) and done again
+            "merged": bool(t.get("merged") or t.get("was_merged")),
             "attention_head": t.get("attention_head") if t.get("attention") else None, "quiet": t.get("quiet"),
             "automation": t.get("automation"), "starting": bool(t["state"] == "running" and starting(t))}
 
@@ -604,6 +640,11 @@ def diff_events(facts, seen):
         status, needs = f["status"], f["needs"]
         cur = {"state": f["state"], "status": status, "needs": needs, "attention": f.get("attention"), "attention_head": f.get("attention_head"),
                "quiet": (prev or {}).get("quiet"), "stalled": (prev or {}).get("stalled")}
+        # SHEP-423: "merged" once per task, whenever its merge is first seen, whatever its state now: merged, then
+        # reopened between two looks (to tag a release) was never seen as "done and merged", so it never fired. An
+        # older record (no "merged" kept) counts a task it saw done as told already.
+        told = bool(prev.get("merged") if prev and "merged" in prev else prev and prev["state"] == "done")
+        cur["merged"] = told or bool(f.get("merged"))
         # A schedule's run that ended with nothing to review (ready --nothing / --told) is no "done" event: a
         # "look around every 30 minutes" would set off every schedule that hears "a task is done".
         ended = f["state"] == "done" and not f.get("quiet")
@@ -618,14 +659,14 @@ def diff_events(facts, seen):
                 out.append(("ready", f))
             if not first and ended:
                 out.append(("done", f))
-            if not first and f["state"] == "done" and f.get("merged"):
+            if not first and f.get("merged"):
                 out.append(("merged", f))
         else:
             if f["state"] == "ready" and prev["state"] != "ready":
                 out.append(("ready", f))
             if ended and prev["state"] != "done":
                 out.append(("done", f))
-            if f["state"] == "done" and prev["state"] != "done" and f.get("merged"):
+            if f.get("merged") and not told:
                 out.append(("merged", f))
             if f.get("attention") and not same_failure(prev, f):
                 out.append(("failed", f))
@@ -859,15 +900,27 @@ def one_pass(report):
         seen_all = read_list(SEEN) or {}
         lists = [d for d in map(read_list, store_files()) if d and os.path.isdir(d.get("folder") or "")]
         feeds = feeds_for(lists)
+        heard = seen_all.setdefault("_heard", {})
+        for k, d in feeds.items():
+            if not isinstance(d, Exception):
+                heard[k] = now()
         for d in lists:
             tasks = d.get("tasks") or []
             busy = any(t.get("state") in ("queued", "scheduled") or (t.get("worktree") and t.get("state") in ("running", "ready")) for t in tasks)
             if not busy and not d.get("automations"):
                 continue
-            with Store(locate(d["folder"])) as s:
-                seen = seen_all.setdefault(s.slug, {})
-                automations_pass(s, seen, report, feeds)
-                tick_store(s, report)
+            slug, kept = None, None
+            try:
+                with Store(locate(d["folder"])) as s:
+                    slug, kept = s.slug, json.dumps(seen_all.get(s.slug) or {})
+                    seen = seen_all.setdefault(s.slug, {})
+                    automations_pass(s, seen, report, feeds)
+                    tick_store(s, report)
+            except Exception as e:  # SHEP-423: one folder's error never stops the rest's schedules. Nothing of it is
+                # saved, and its record goes back as it was: its events stay news for the next round.
+                if slug:
+                    seen_all[slug] = json.loads(kept)
+                print(f"{time.strftime('%H:%M:%S')} {d.get('folder')}: {e}", flush=True)
         try:
             stopped_pass(report)
         except Exception as e:  # never stops the scheduler
