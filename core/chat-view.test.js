@@ -173,7 +173,7 @@ describe("agent to agent as a group chat (SHEP-27)", () => {
     expect(sentTo({ to: "t10s", how: "hc" }, sender)).toBe("SHEP-4");
     expect(sentTo({ to: "mac/t13", how: "assistant" }, sender)).toBe("Assistant on mac");
     expect(sentTo({ to: "Home", how: "assistant" }, sender)).toBe("#Home");
-    expect(sentTo({ to: "vm-stravik/root", how: "assistant" }, sender)).toBe("#root on vm-stravik");
+    expect(sentTo({ to: "vm-demo/root", how: "assistant" }, sender)).toBe("#root on vm-demo");
     // a reply or a fix goes to a task: by its title
     const task = (id) => ({ 4: "Fix login" }[id] ?? null);
     expect(sentTo({ to: "4", how: "reply" }, sender, task)).toBe("Fix login");

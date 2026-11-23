@@ -14,7 +14,7 @@ const AT = new Date(2026, 10, 23, 9, 14).getTime()
 const draw = (r: Relay, open = false, text = 'Can you check the disk?') => renderToStaticMarkup(<RelayRow r={r} text={text} at={AT} startOpen={open} />)
 
 test('each kind of row says whom it went to or who sent it, never as a bubble', () => {
-  expect(relayLabel({ dir: 'to', name: '#root on vm-stravik', how: 'assistant' })).toBe('Message to #root on vm-stravik')
+  expect(relayLabel({ dir: 'to', name: '#root on vm-demo', how: 'assistant' })).toBe('Message to #root on vm-demo')
   expect(relayLabel({ dir: 'to', name: 'Fix login', how: 'reply' })).toBe('Message to Fix login')
   expect(relayLabel({ dir: 'to', name: 'Fix login', how: 'fix' })).toBe('Message to Fix login')
   expect(relayLabel({ dir: 'to', name: 'Assistant', how: 'hc' })).toBe('Message to Assistant')

@@ -1,4 +1,4 @@
-// A message between agents (SHEP-368) in words for its quiet row: "Message to #root on vm-stravik", "Message from Fix
+// A message between agents (SHEP-368) in words for its quiet row: "Message to #root on vm-demo", "Message from Fix
 // login", and whether it got there. One row per message, in both chats: the sender's ("to") and the receiver's ("from").
 import type { Relay } from '@shared/types.ts'
 

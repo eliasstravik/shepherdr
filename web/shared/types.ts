@@ -631,7 +631,7 @@ export interface Message {
    *  to: whom, on a message this chat's own agent sent another (from is then itself: "Assistant" → "SHEP-4") */
   brief?: { label: string; bare?: boolean; from?: string; to?: string }
   /** a message between agents (SHEP-368), as one quiet row that opens to its words (text): to whom this chat's agent
-   *  sent it (dir "to": "Message to #root on vm-stravik", "Message to Fix login") or who sent it here (dir "from").
+   *  sent it (dir "to": "Message to #root on vm-demo", "Message to Fix login") or who sent it here (dir "from").
    *  how: what sent it (hc, assistant, reply, fix); state: whether it got there, once its sender's command said
    *  (delivered; waiting: held for later, as the person is writing to it or its agent stopped; failed: not delivered,
    *  why in words); files: the names of the files it came with */
