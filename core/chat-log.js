@@ -90,8 +90,10 @@ BEGIN { pos = base; first = base; msgs = 0 }
     # An agent launched to run on its own (#1101): its agentId, which its end note names by <task-id> alone.
     if (match(line, /"(backgroundTaskId|taskId|agentId)":"[^"]+"/)) { m = substr(line, RSTART, RLENGTH); sub(/^"[A-Za-z]*":"/, "", m); sub(/"$/, "", m); ids = ids " TASK=" m }
     print off "\tR\t" ids
-    # An answer to a question, or words that declined a request: read whole (answers()).
+    # An answer to a question, or words that declined a request: read whole (answers()). Else what a send to
+    # another agent came back with (delivered, held, not delivered): read whole too (delivery()).
     if (claude && length(line) <= 262144 && ((index(line, "\"answers\":{") && index(line, "\"questions\":[")) || index(line, "wrote in the chat instead: "))) print off "\tJ\t" line
+    else if (length(line) <= 65536 && (index(line, "elivered") || index(line, ": sent to ") || index(line, "\"is_error\":true") || (codex && match(line, /[Ee]xit[_ ]code[^0-9]?[^0-9]?[^0-9]?[^0-9]?[1-9]/)))) print off "\tJ\t" line
     next
   }
   # The queue of messages typed while Claude Code works: what goes in (the words of the person)
@@ -377,13 +379,19 @@ const clip = (s, n = 90) => { s = String(s ?? "").replace(/\s+/g, " ").trim(); r
 const ARTIFACT = /\bherdr-artifact\b[^\n|;&]*\b(publish|update)\b/;
 
 // The messages a shell command sends other agents: [{ to, text, how }], how "hc" (`hc send [flags] <terminal>
-// <text>`, to a terminal) or "assistant" (`herdr-task tell-assistant <address or space> <text>`). Read with a small
-// shell lexer: quotes, escapes, `;` `&&` `||` `|` and new lines between commands, heredoc bodies skipped, and a text
-// given as "$VAR" taken from a VAR=… set earlier in the same command. A text it can't know is left out.
+// <text>`, to a terminal), "assistant" (`herdr-task tell-assistant <address or space> <text>`), "reply" (`herdr-task
+// reply <task> <text>`, the text piped in from a heredoc too) or "fix" (`herdr-task fix <task> [--reason <text>]`). Read
+// with a small shell lexer: quotes, escapes, `;` `&&` `||` `|` and new lines between commands, heredoc bodies skipped
+// (a herdr-task reply's taken as its text), and a text given as "$VAR" taken from a VAR=… set earlier in the same
+// command. A text it can't know is left out.
 const VALUED = new Set(["--if", "--timeout", "--on"]);
+// herdr-task's options that take a value (cli.py), before or after its command
+const TASK_VALUED = new Set(["--on", "--folder", "--space", "--agent", "--model", "--effort", "--reason", "--parent", "--argv", "--flags", "--reviewer"]);
+// what a fix asks when it gives no reason (herdr-task fix's own help)
+export const FIX_WORDS = "Fix what keeps its pull request from merging.";
 export function sendsOf(command) {
   const s = String(command ?? "");
-  if (!/\b(hc|herdr-task)\b/.test(s) || !/\b(send|tell-assistant)\b/.test(s)) return [];
+  if (!/\b(hc|herdr-task)\b/.test(s) || !/\b(send|tell-assistant|reply|fix)\b/.test(s)) return [];
   const cmds = [], vars = new Map();
   let words = [], w = null, i = 0, heredocs = [];
   // w: { text, var? (the word was only $NAME) }
@@ -398,6 +406,9 @@ export function sendsOf(command) {
       for (const tag of heredocs) {
         const close = new RegExp(`^\\t*${tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*$`, "m");
         const m = close.exec(s.slice(i));
+        // the body is what the command before it reads (a reply's text piped in)
+        const last = cmds[cmds.length - 1];
+        if (last && last.stdin === undefined) last.stdin = m ? s.slice(i, i + m.index).replace(/\n$/, "") : s.slice(i);
         i = m ? i + m.index + m[0].length + 1 : s.length;
       }
       heredocs = [];
@@ -445,7 +456,33 @@ export function sendsOf(command) {
     const prog = String(a[0] ?? "").split("/").pop();
     let rest = null, how = null;
     if (prog === "hc" && a[1] === "send") { rest = a.slice(2); how = "hc"; }
-    else if (prog === "herdr-task" && a.includes("tell-assistant")) { rest = a.slice(a.indexOf("tell-assistant") + 1); how = "assistant"; }
+    else if (prog === "herdr-task") {
+      // its command: the first word that isn't an option (or an option's value)
+      const opts = new Map(), pos = [];
+      for (let j = 1; j < a.length; j++) {
+        const x = a[j];
+        if (x === null) { pos.push(null); continue; }
+        if (/^\d*>/.test(x)) { if (!/^\d*>&?\S/.test(x)) j++; continue; }
+        if (x.startsWith("--")) {
+          const eq = x.indexOf("=");
+          if (eq > 0) opts.set(x.slice(0, eq), x.slice(eq + 1));
+          else if (TASK_VALUED.has(x)) opts.set(x, a[++j]);
+          else opts.set(x, true);
+          continue;
+        }
+        pos.push(x);
+      }
+      const [sub, to, words] = pos;
+      if (sub === "tell-assistant") { if (to && typeof words === "string" && words.trim()) out.push({ to, text: words.trim(), how: "assistant" }); }
+      else if (sub === "reply") {
+        const text = typeof words === "string" ? words : pos.length < 3 && typeof cmd.stdin === "string" ? cmd.stdin : null;
+        if (to && typeof text === "string" && text.trim()) out.push({ to, text: text.trim(), how: "reply" });
+      } else if (sub === "fix" && to && !opts.has("--withdraw")) {
+        const reason = opts.get("--reason");
+        if (reason !== null) out.push({ to, text: typeof reason === "string" && reason.trim() ? reason.trim() : FIX_WORDS, how: "fix" });
+      }
+      continue;
+    }
     if (!rest) continue;
     const args = [];
     for (let j = 0; j < rest.length; j++) {
@@ -562,7 +599,8 @@ function codexStep(name, args) {
 //   replyTo: the start of the message it answers)
 //   { kind: "mark", id }  (a message of only reactions: ends the turn, shows nothing)
 //   { kind: "news", id, at, ref, event, text }  (one line of task news Herdr told an Assistant)
-//   { kind: "sent", id, at, to, text, how }  (a message the agent sent another agent: sendsOf())
+//   { kind: "sent", id, at, to, text, how, call?, state?, why? }  (a message the agent sent another agent: sendsOf();
+//   call: the call that sent it; state: delivered | waiting | failed once its result says, why: in words)
 //   a user item's from: who sent it (another agent's address); assistant: { machine, space, reply } when it is
 //   another Assistant's (<herdr-assistant>)
 //   { kind: "pilot", id, at, reason, steps, said, quiet }  (an older log's Autopilot wake: shown nowhere)
@@ -617,6 +655,8 @@ export class Conversation {
     // Claude Code's own helpers (Agent/Task calls) by call id: { desc, done }. One launched to
     // run on its own is done when its task-notification comes.
     this.helpers = new Map();
+    // The messages each call sent other agents (sent()), by its id, until its result says whether they got there.
+    this.sentBy = new Map();
     this.questions = new Map();
     // Claude Code's queue of what was typed while it works, in order: { id, raw, at, text?,
     // images? } (text only for the person's words; a job's end has a place too).
@@ -630,12 +670,47 @@ export class Conversation {
 
   // The messages a command sent other agents (sendsOf), each its own item after the call's row:
   // { kind: "sent", id, at, to, text, how }.
-  sent(command, off, at) {
+  // call: the call that ran it; its step is the message's own row now (relay: the tools row leaves it out, not said
+  // twice), and its result says whether it was delivered (delivery()).
+  sent(command, off, at, call = null) {
+    const sends = sendsOf(command);
+    if (!sends.length) return;
+    const step = call ? this.calls.get(call) : null;
+    if (step) step.relay = true;
     // A send tried again (`|| hc send …`, or `--force` after a refusal) shows once: one already sent this turn.
     const turn = this.items.slice(this.items.findLastIndex((x) => x.kind === "user" || x.kind === "mark") + 1);
-    sendsOf(command).forEach((m, i) => {
-      if (!turn.some((x) => x.kind === "sent" && x.to === m.to && x.text === m.text)) turn.push(this.push({ kind: "sent", id: `s${off}:${i}`, at, ...m }) ?? m);
+    const by = (x) => {
+      if (!call) return;
+      x.call = call;
+      this.sentBy.set(call, [...(this.sentBy.get(call) ?? []), x]);
+      if (this.sentBy.size > 200) this.sentBy.delete(this.sentBy.keys().next().value);
+    };
+    sends.forEach((m, i) => {
+      const again = turn.find((x) => x.kind === "sent" && x.to === m.to && x.text === m.text);
+      if (again) { delete again.state; delete again.why; by(again); return; }
+      by(turn[turn.push(this.push({ kind: "sent", id: `s${off}:${i}`, at, ...m })) - 1]);
     });
+  }
+
+  // What the call that sent messages printed (its result's words; failed: it exited with an error): whether they
+  // were delivered. Herdr's words: tell-assistant's "Delivered to …" / "Not delivered yet, held for …" (the person is
+  // writing to it, or its agent stopped and it waits for the next) / "Not delivered to …: why"; reply's "…: sent to t3";
+  // hc send's error. A send whose call has no result yet has no state; one answered with none of these words is
+  // delivered (feed()).
+  delivery(call, words, failed) {
+    const mine = this.sentBy.get(call);
+    if (!mine?.length) return;
+    const t = String(words ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").trim();
+    const no = /Not delivered to [^:\n]*: ?([^\n]*)/.exec(t);
+    let state = "delivered", why = "";
+    if (/Not delivered yet|\bheld for\b|\bkept for\b|"held":\s*true/.test(t)) {
+      state = "waiting";
+      why = /: (the person is writing[^\n.;]*|its agent[^\n.;]*)/.exec(t)?.[1] ?? "";
+    } else if (no || failed) {
+      state = "failed";
+      why = (no?.[1] ?? t.split("\n").map((l) => l.replace(/^(Error|error|herdr-task|hc):\s*/, "").trim()).find((l) => l && !/^Exit code/.test(l)) ?? "").replace(/\.$/, "");
+    }
+    for (const x of mine) { x.state = state; if (why) x.why = why.slice(0, 200); else delete x.why; }
   }
 
   // Tool calls in a row join the last item when it is a tools row.
@@ -778,6 +853,8 @@ export class Conversation {
     }
     for (const b of l.message.content) {
       if (b?.type !== "tool_result") continue;
+      const words = typeof b.content === "string" ? b.content : Array.isArray(b.content) ? b.content.map((x) => x?.text ?? "").join("\n") : "";
+      this.delivery(String(b.tool_use_id ?? ""), words, b.is_error === true);
       // Its question got an answer: picked, written, or words from the chat (not dismissed).
       const q = this.questions.get(String(b.tool_use_id ?? ""));
       if (q) q.closed = "answered";
@@ -855,6 +932,8 @@ export class Conversation {
           const h = this.helpers.get(id);
           if (h && !async) h.done = true;
           if (h && task) h.task = task;
+          // a send's call answered: delivered, unless its words (read whole next, delivery()) say otherwise
+          for (const x of this.sentBy.get(id) ?? []) if (!x.state) x.state = "delivered";
           this.done(id, r.off);
         }
         continue;
@@ -965,7 +1044,7 @@ export class Conversation {
             if (st) st.at = time(l.timestamp) || Date.now();
             this.step(String(b.id), off, st, b.name === "Agent" || b.name === "Task" ? String(b.id) : null);
             if (b.name === "Bash" && ARTIFACT.test(String(b.input?.command ?? ""))) this.push({ kind: "artifact", id: `art${off}`, at: time(l.timestamp) });
-            if (b.name === "Bash") this.sent(String(b.input?.command ?? ""), off, time(l.timestamp));
+            if (b.name === "Bash") this.sent(String(b.input?.command ?? ""), off, time(l.timestamp), String(b.id));
           }
         }
       }
@@ -1008,7 +1087,17 @@ export class Conversation {
         if (st?.spawn) this.helpers.set(cid, { desc: st.spawn, done: false, untilTurn: true });
         this.step(cid, off, st, st?.spawn ? cid : null);
         if (ARTIFACT.test(JSON.stringify(p.arguments ?? p.input ?? p.action ?? ""))) this.push({ kind: "artifact", id: `art${off}`, at: time(l.timestamp) });
-        this.sent(codexCommand(p.arguments ?? p.input ?? p.action), off, time(l.timestamp));
+        this.sent(codexCommand(p.arguments ?? p.input ?? p.action), off, time(l.timestamp), cid);
+      } else if (p.type === "function_call_output" || p.type === "custom_tool_call_output") {
+        // what a send's call printed: whether it was delivered
+        const o = p.output;
+        const words = typeof o === "string" ? o : String(o?.output ?? o?.content ?? "");
+        let code = null;
+        try { code = JSON.parse(words)?.metadata?.exit_code ?? null; } catch {}
+        code ??= Number(/(?:Exit code|Process exited with code):? (\d+)/.exec(words)?.[1] ?? 0);
+        let out = words;
+        try { out = JSON.parse(words)?.output ?? words; } catch {}
+        this.delivery(String(p.call_id ?? ""), out, code !== 0);
       }
     } else if (p.type === "thread_settings_applied" && p.thread_settings) {
       // its settings as applied: at start, and on a /model or /fast in place (SHEP-181)

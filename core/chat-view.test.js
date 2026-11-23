@@ -159,18 +159,25 @@ describe("ownWords", () => {
 });
 
 describe("agent to agent as a group chat (SHEP-27)", () => {
-  test("another Assistant is named by its machine and space; this machine's unsaid", () => {
+  test("another Assistant is named by its space and machine; this machine's unsaid", () => {
     const x = { from: "mac/t13", assistant: { machine: "mac", space: "Home" }, text: "hi" };
-    expect(fromName(x, () => "nope", { machineName: (m) => (m === "mac" ? "Mac mini" : null) })).toBe("Assistant on Mac mini · Home");
-    expect(fromName(x, () => "nope", { here: "mac" })).toBe("Assistant · Home");
+    expect(fromName(x, () => "nope", { machineName: (m) => (m === "mac" ? "Mac mini" : null) })).toBe("#Home on Mac mini");
+    expect(fromName(x, () => "nope", { here: "mac" })).toBe("#Home");
+    // the Assistant of every space is Everything, no #
+    expect(fromName({ ...x, assistant: { machine: "mac", space: "Everything" } }, () => "nope", { machineName: () => "Mac" })).toBe("Everything on Mac");
     expect(fromName({ from: "t3", text: "x" }, (f) => `name of ${f}`)).toBe("name of t3");
-    expect(briefLabel(x, 5, { machineName: () => "Mac mini" })).toBe("Message from Assistant on Mac mini · Home");
+    expect(briefLabel(x, 5, { machineName: () => "Mac mini" })).toBe("Message from #Home on Mac mini");
   });
   test("whom a sent message went to", () => {
     const sender = (a) => ({ t10s: "SHEP-4", "mac/t13": "Another agent on mac" }[a] ?? "Another agent");
     expect(sentTo({ to: "t10s", how: "hc" }, sender)).toBe("SHEP-4");
     expect(sentTo({ to: "mac/t13", how: "assistant" }, sender)).toBe("Assistant on mac");
-    expect(sentTo({ to: "Home", how: "assistant" }, sender)).toBe("Assistant · Home");
+    expect(sentTo({ to: "Home", how: "assistant" }, sender)).toBe("#Home");
+    expect(sentTo({ to: "vm-stravik/root", how: "assistant" }, sender)).toBe("#root on vm-stravik");
+    // a reply or a fix goes to a task: by its title
+    const task = (id) => ({ 4: "Fix login" }[id] ?? null);
+    expect(sentTo({ to: "4", how: "reply" }, sender, task)).toBe("Fix login");
+    expect(sentTo({ to: "SHOP-9", how: "fix" }, sender, task)).toBe("SHOP-9");
   });
   test("who the chat's own agent is, and initials", () => {
     expect(selfName({ assistant: true })).toBe("Assistant");

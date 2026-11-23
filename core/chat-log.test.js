@@ -390,3 +390,70 @@ test("every news event and Herdr tag, alone or several in one message, is news o
   // the only words anyone sees: the ones typed after the tag
   expect(c.items.filter((x) => x.kind !== "news" && x.text).map((x) => x.text)).toEqual(["And the button is too small."]);
 });
+
+// SHEP-368: every message between agents is its own row: a reply or a fix to a task (herdr-task reply/fix) as well
+// as hc send and tell-assistant; whether it got there comes from what its command printed; and the call that only
+// sent it is not a command row as well.
+const result = (id, content, is_error = false) => ({ parentUuid: null, isSidechain: false, type: "user",
+  message: { role: "user", content: [{ tool_use_id: id, type: "tool_result", content, ...(is_error ? { is_error: true } : {}) }] }, uuid: `r${n++}`, timestamp: at });
+
+test("sendsOf reads a reply or a fix to a task, its words given, piped from a heredoc, or a fix's own", () => {
+  expect(sendsOf('herdr-task reply 4 --folder ~/dev/shop "Keep the total above the fold"')).toEqual([{ to: "4", text: "Keep the total above the fold", how: "reply" }]);
+  expect(sendsOf("/home/me/.local/bin/herdr-task --on vm reply SHOP-4 <<'EOF'\nTwo lines\nof words\nEOF\necho ok")).toEqual([{ to: "SHOP-4", text: "Two lines\nof words", how: "reply" }]);
+  expect(sendsOf('herdr-task fix 4 --reason "the lint check fails"')).toEqual([{ to: "4", text: "the lint check fails", how: "fix" }]);
+  expect(sendsOf("herdr-task fix 4 --folder /w")).toEqual([{ to: "4", text: "Fix what keeps its pull request from merging.", how: "fix" }]);
+  // taking a fix back, a reply with no words, and other herdr-task commands send nothing
+  expect(sendsOf("herdr-task fix 4 --withdraw")).toEqual([]);
+  expect(sendsOf("herdr-task reply 4")).toEqual([]);
+  expect(sendsOf('herdr-task ready 4 --summary "fix the reply box"; herdr-task show 4')).toEqual([]);
+  expect(sendsOf("herdr-task tell-assistant vm/root 'Disk is full' --json")).toEqual([{ to: "vm/root", text: "Disk is full", how: "assistant" }]);
+});
+
+test("whether each send got there: delivered, waiting (held or kept), not delivered and why; none before its result", async () => {
+  const c = await read([person, reply("m1", [
+    bash("c1", "herdr-task tell-assistant vm/root 'Disk is full'"),
+    bash("c2", 'herdr-task tell-assistant mac/t13 "Are you there?"'),
+    bash("c3", "herdr-task tell-assistant studio/site 'Build green?'"),
+    bash("c4", 'herdr-task reply 4 "Keep the total above the fold"'),
+    bash("c5", 'hc send t9 "Rebase on main"'),
+    bash("c6", 'herdr-task fix 5 --reason "lint fails"'),
+  ]),
+  result("c1", "Delivered to vm/t3 (root)."),
+  result("c2", "Not delivered yet, held for mac/t13: the person is writing to it; it goes once they've sent or cleared that."),
+  result("c3", "herdr-task: Not delivered to studio/site: studio can't be reached.", true),
+  result("c4", "Bigger card: sent to t9."),
+  result("c5", "Error: no terminal t9", true),
+  ]);
+  const sent = Object.fromEntries(c.items.filter((x) => x.kind === "sent").map((x) => [x.to, [x.how, x.state ?? null, x.why ?? null]]));
+  expect(sent).toEqual({
+    "vm/root": ["assistant", "delivered", null],
+    "mac/t13": ["assistant", "waiting", "the person is writing to it"],
+    "studio/site": ["assistant", "failed", "studio can't be reached"],
+    4: ["reply", "delivered", null],
+    t9: ["hc", "failed", "no terminal t9"],
+    // its call has no result yet: nothing said
+    5: ["fix", null, null],
+  });
+});
+
+test("a call that only sent a message is marked as that message's row; the tools row keeps the other calls", async () => {
+  const c = await read([person, reply("m1", [bash("c1", "ls"), bash("c2", 'herdr-task reply 4 "Go on"')]), result("c1", "a b"), result("c2", "Card: sent to t9.")]);
+  const tools = c.items.find((x) => x.kind === "tools");
+  expect(tools.steps.map((s) => [s.id, !!s.relay])).toEqual([["c1", false], ["c2", true]]);
+  expect(c.items.filter((x) => x.kind === "sent").map((x) => [x.to, x.call, x.state])).toEqual([["4", "c2", "delivered"]]);
+});
+
+test("a Codex send's output says whether it got there", async () => {
+  const lines = [
+    { timestamp: at, type: "response_item", payload: { type: "function_call", name: "shell", arguments: JSON.stringify({ command: ["bash", "-lc", 'herdr-task tell-assistant vm/root "Disk is full"'] }), call_id: "k1" } },
+    { timestamp: at, type: "response_item", payload: { type: "function_call_output", call_id: "k1", output: JSON.stringify({ output: "herdr-task: Not delivered to vm/root: vm can't be reached\n", metadata: { exit_code: 1 } }) } },
+  ];
+  const dir = mkdtempSync(join(tmpdir(), "chat-log-"));
+  const f = join(dir, "log.jsonl");
+  writeFileSync(f, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const out = await new Response(Bun.spawn(["sh", "-c", LOG, "log", "tail", f, "0"], { stdout: "pipe", stderr: "ignore" }).stdout).text();
+  rmSync(dir, { recursive: true });
+  const c = new Conversation("codex");
+  c.feed(records(out).records);
+  expect(c.items.filter((x) => x.kind === "sent").map((x) => [x.to, x.state, x.why])).toEqual([["vm/root", "failed", "vm can't be reached"]]);
+});

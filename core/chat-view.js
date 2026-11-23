@@ -197,26 +197,33 @@ export function senderName(from, text = null, { find = () => null, machine = nul
   return `${name || signed || "Another agent"}${away}`;
 }
 
+// A space's Assistant by its space, as its chat's header names it: "#Home", "Everything" (the Assistant of every space).
+export const spaceWord = (space) => (/^everything$/i.test(String(space ?? "").trim()) ? "Everything" : `#${String(space ?? "").trim().replace(/^#/, "")}`);
+
 // Agent to agent, as a group chat (SHEP-27). Who sent a user item another agent sent: another Assistant's
-// (<herdr-assistant>, x.assistant: { machine, space }) by its machine and space ("Assistant on Mac mini · Home"; its
-// machine unsaid when it is this one), else senderName's ("SHEP-4", "Reviewer", "Assistant on m3").
+// (<herdr-assistant>, x.assistant: { machine, space }) by its space and machine ("#Home on Mac mini"; its machine
+// unsaid when it is this one), else senderName's ("Fix login", "Reviewer", "Assistant on m3").
 //   sender(from, text): senderName with the chat's lookups; machineName(key): the name people read for a machine
 //   key (null: unknown); here: this machine's key in herdr-core.
 export function fromName(x, sender = (f) => f, { machineName = (m) => m, here = null } = {}) {
   const a = x?.assistant;
   if (!a) return sender(x?.from, x?.text);
   const m = a.machine && a.machine !== here ? machineName(a.machine) || a.machine : null;
-  return `Assistant${m ? ` on ${m}` : ""}${a.space ? ` · ${a.space}` : ""}`;
+  return `${a.space ? spaceWord(a.space) : "Assistant"}${m ? ` on ${m}` : ""}`;
 }
 
-// Whom a message the chat's agent sent went to (a "sent" item: { to, how }): a terminal by senderName ("SHEP-4",
-// "Assistant on m3"); tell-assistant's target is an Assistant, by its address or its space's name ("Assistant ·
-// Home").
-export function sentTo(x, sender = (f) => f) {
+// Whom a message the chat's agent sent went to (a "sent" item: { to, how }): a terminal by senderName ("Fix login",
+// "Assistant on m3"); tell-assistant's target is an Assistant, by its address or its space ("#Home", "#Home on m3" for
+// "m3/Home"); a reply or a fix goes to a task (task(id): its title, else its id as given).
+export function sentTo(x, sender = (f) => f, task = (id) => null) {
   const to = String(x?.to ?? "");
   const address = /^([\w.>-]+\/)?t\d[0-9a-z]*$/.test(to);
+  if (x?.how === "reply" || x?.how === "fix") return task(to) || to;
   if (x?.how !== "assistant") return address ? sender(to.split(">").pop()) : to;
-  if (!address) return `Assistant · ${to}`;
+  if (!address) {
+    const at = to.lastIndexOf("/");
+    return at > 0 ? `${spaceWord(to.slice(at + 1))} on ${to.slice(0, at).split(">").pop()}` : spaceWord(to);
+  }
   return String(sender(to.split(">").pop())).replace(/^(Another agent|t\d[0-9a-z]*)\b/, "Assistant");
 }
 

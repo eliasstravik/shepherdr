@@ -9,12 +9,14 @@ import { confirm, openMenu } from '@client/overlay.tsx'
 import { AgentLine, openPicker, pickFor, pickWords, type Pick } from '@client/picker.tsx'
 import { attach, detach, dropOut, retry, reupload, send } from '@client/send.ts'
 import { Btn, cx, Empty, I, IB, useGrow } from '@client/ui.tsx'
+import type { IconName } from '@client/icons.ts'
 import { isImage, isVideo } from '@shared/files.ts'
-import type { Chat, Message, Snapshot, Task, TaskBrief, TurnActivity } from '@shared/types.ts'
+import type { Chat, Message, Relay, Snapshot, Task, TaskBrief, TurnActivity } from '@shared/types.ts'
 import { isEverything, placeOf, taskOf } from '@shared/view.ts'
 import { StatusIcon } from '@plugins/tasks/icon.tsx'
 import { DoneRow, QuestionCard, SecretCard } from './cards.tsx'
 import { briefFrom, deliveryWord, looksLong, startWords } from './brief.ts'
+import { relayLabel, relayState, relayWhy } from './relay.ts'
 import { Finger, HOLD_MS, quickFit, REPLY_AT, type QuickFit } from './press.ts'
 import { dayLabel } from './days.ts'
 import { Markdown, withLinks } from './markdown.tsx'
@@ -72,18 +74,52 @@ function Did({ a }: { a: TurnActivity }) {
   )
 }
 
-/** a task's news as one quiet row (news.ts newsRow); longer words wait behind its fold */
-function NewsLine({ row }: { row: NewsRow }) {
-  const [open, setOpen] = useState(false)
-  if (!row.body) return <div className="fold news"><I n="note" c="s16" /><span>{row.label}</span></div>
+/** one quiet row, as a turn's "Ran 4 commands", never a bubble: an icon, its words, then muted ones (its time, a
+ *  state); with a body, a tap opens it under the row (a long one scrolls in place) and a tap again folds it. Task news
+ *  (SHEP-365) and messages between agents (SHEP-368) are drawn with it, one style for both. */
+function QuietRow({ icon, label, meta = [], body, startOpen = false, kind }: { icon: IconName; label: string; meta?: { word: string; tone?: 'red' | 'amber' }[]; body?: ReactNode; startOpen?: boolean; kind: string }) {
+  const [open, setOpen] = useState(startOpen)
+  const words = (
+    <>
+      <I n={icon} c="s16" />
+      <span className="ql">{label}</span>
+      {meta.filter((x) => x.word).map((x, i) => <span key={i} className={cx('qm', x.tone === 'red' && 'c-red', x.tone === 'amber' && 'c-ask')}>{x.word}</span>)}
+    </>
+  )
+  if (!body) return <div className={cx('fold quiet', kind)}><span className="qc" />{words}</div>
   return (
     <>
-      <button type="button" className="fold news" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button type="button" className={cx('fold quiet', kind)} aria-expanded={open} onClick={() => setOpen(!open)}>
         <I n={open ? 'down' : 'right'} c="s16" />
-        <span>{row.label}</span>
+        {words}
       </button>
-      {open && <div className="newsb">{row.body}</div>}
+      {open && <div className={cx('quietb', `${kind}b`)}>{body}</div>}
     </>
+  )
+}
+
+/** a task's news as one quiet row (news.ts newsRow); longer words wait behind its fold */
+function NewsLine({ row, at }: { row: NewsRow; at?: number }) {
+  return <QuietRow kind="news" icon="note" label={row.label} meta={at ? [{ word: clock(at) }] : []} body={row.body ? <div className="qt">{row.body}</div> : undefined} />
+}
+
+/** a message between agents (SHEP-368), in the sender's chat and the receiver's: whom it went to or who sent it, when,
+ *  and whether it got there; it opens to its words (and the files it came with), and why it waits or didn't go */
+export function RelayRow({ r, text, at, startOpen = false }: { r: Relay; text: string; at?: number; startOpen?: boolean }) {
+  const why = relayWhy(r)
+  return (
+    <QuietRow kind="relay" icon={r.dir === 'to' ? 'send' : 'chat'} label={relayLabel(r)} startOpen={startOpen} meta={[{ word: at ? clock(at) : '' }, relayState(r)]}
+      body={
+        <>
+          {why && <p className={cx('qw', r.state === 'failed' ? 'c-red' : 'c-ask')}>{why}</p>}
+          <div className="qt">{text}</div>
+          {r.files?.length ? (
+            <ul role="list" className="qf">
+              {r.files.map((f, i) => <li key={i}><I n="doc" c="s16" />{f}</li>)}
+            </ul>
+          ) : null}
+        </>
+      } />
   )
 }
 
@@ -570,7 +606,7 @@ function Messages({ thread }: { thread: Thread }) {
       if (!row) continue
       if (t && !thread.task && t.id !== lastRef) out.push(<TaskRef key={`r:${k}`} id={t.id} title={t.name} t={t} />)
       if (t) lastRef = t.id
-      out.push(<NewsLine key={k} row={row} />)
+      out.push(<NewsLine key={k} row={row} at={m.at} />)
     } else if (m.card) {
       const t = taskOf(snap, m.card.task)
       if (t && !thread.task && t.id !== lastRef) out.push(<TaskRef key={`r:${k}`} id={t.id} title={t.name} t={t} />)
@@ -578,6 +614,8 @@ function Messages({ thread }: { thread: Thread }) {
       const text = m.card.text ?? m.text ?? ''
       if (text) out.push(<Bubble key={k} msg={{ ...m, text }} chat={stub} thread={thread} gap={false} />)
     }
+    // a message between agents, in the sender's chat and the receiver's: its own quiet row (SHEP-368)
+    else if (m.relay) out.push(<RelayRow key={k} r={m.relay} text={m.text ?? ''} at={m.at} />)
     // when its agent was started again, earlier messages stay, above a thin "New session" line
     else if (m.brief && thread.task && !/new session/i.test(m.brief.label)) continue
     else if (m.brief) out.push(/new session/i.test(m.brief.label) ? <div key={k} className="time" role="separator">New session</div> : <div key={k} className="ref"><I n="note" c="s16" /><span>{m.brief.label}</span></div>)
