@@ -341,3 +341,20 @@ test("an unknown status still steers while the screen shows it at work", async (
   const quiet = screens([QUEUED_2_1_330], () => null);
   expect(await steerNow(quiet.io, "t1")).toBe(false);
 });
+
+// SHEP-324: what is in front of an agent's terminal before anything is typed into it (herdr-task's agents.front too).
+test("inFront: a plain shell, a shell running the agent, the agent, another program, none", async () => {
+  const { inFront, NOT_TYPED } = await import("./send.js");
+  const live = (fg, labels = {}) => ({ state: "live", foreground: fg, labels });
+  expect(inFront(live({ name: "bash", argv: ["/bin/bash"] }))).toBe("shell");
+  expect(inFront(live({ name: "/usr/bin/zsh", argv: ["-zsh"] }))).toBe("shell");
+  expect(inFront(live({ name: "bash", argv: ["/bin/bash", "-ic", '"$@"; exec "$0" -i', "/bin/bash", "claude"] }))).toBe("agent");
+  expect(inFront(live({ name: "fish", argv: ["fish", "-ic", "claude; exec fish -i"] }))).toBe("agent");
+  expect(inFront(live({ name: "claude", argv: ["claude"] }, { "herdr.agent": "claude" }))).toBe("agent");
+  expect(inFront(live({ name: "node", argv: ["node", "codex"] }, { "herdr.agent": "codex" }))).toBe("agent");
+  expect(inFront(live({ name: "vim", argv: ["vim"] }, { "herdr.agent": "claude" }))).toBe("other");
+  expect(inFront({ state: "finished" })).toBe("gone");
+  expect(inFront(null)).toBe("gone");
+  expect(inFront({ state: "live" })).toBeNull();
+  expect(NOT_TYPED.shell).toContain("nothing was typed");
+});

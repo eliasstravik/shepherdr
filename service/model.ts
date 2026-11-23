@@ -19,17 +19,8 @@ const { place, refOf, taskKey, autoPrefix, reportOf, ownReport, secondLine, left
 import * as S from "../core/spaces.js";
 const { sidebarOf, lastAssistantOf, isUnread, inOrder, byMachineOrder, machineOrderOf } = S as any;
 
-const SHELL = /^(ba|z|fi|da|k|tc|c)?sh$|^nu$|^pwsh$/;
-/** A shell's argv that runs a command (-c, -ic, -lic, --command), not a plain shell (herdr-task's runs_command()). */
-export function runsCommand(argv: unknown): boolean {
-  if (!Array.isArray(argv)) return true; // unknown: as before, its status decides
-  for (const a of argv.slice(1).map(String)) {
-    if (a === "--command" || a.startsWith("--command=")) return true;
-    if (!a.startsWith("-") || a.startsWith("--")) break;
-    if (a.slice(1).includes("c")) return true;
-  }
-  return false;
-}
+import { SHELL, runsCommand, inFront } from "../core/send.js";
+export { runsCommand };
 
 /** Runs a command on a machine through herdr-core (null: here). Output comes back base64. */
 export async function exec(hub: Hub, argv: string[], on: string | null = null, timeout = 60) {
@@ -342,7 +333,7 @@ export class Model {
         // when its Assistant last changed state (its terminal's status time)
         changedAt: Number((k as any)?.status_ms) || 0,
         section: bar.sections.find((x: any) => (x.spaces ?? []).includes(s.id))?.id ?? null,
-        assistant: k?.address ?? null, turn: (k as any)?.turn ?? 0, assistantStatus: k && (k.state !== "live" || (k as any)?.status?.state === "error") ? "stopped" : (k as any)?.status?.state ?? null,
+        assistant: k?.address ?? null, turn: (k as any)?.turn ?? 0, assistantStatus: k && (k.state !== "live" || (k as any)?.status?.state === "error" || inFront(k) === "shell") ? "stopped" : (k as any)?.status?.state ?? null,
         git: this.gitOf(s),
         unread: isUnread(k),
         red: here.filter((r) => r.section === "needs").length + ((k as any)?.status?.state === "blocked" ? 1 : 0),

@@ -132,3 +132,17 @@ test("Agents.revive restarts a finished Assistant from its record: its CLI, flag
   expect(reader).toEqual({ kind: "codex", path: rec.log, argv: rec.argv });
   expect(pick).toMatchObject({ kind: "codex", model: "gpt-6.2-sol", effort: "high" });
 });
+
+// SHEP-324: herdr-core lost the Assistant's program and kept its terminal as a plain shell (still "live"): the message
+// was typed into that shell as a command. Now it counts as ended: it starts again and the message goes to the new one.
+test("an Assistant whose terminal is left a plain shell starts again; nothing is typed into the shell", async () => {
+  const { hub, compat, sent, revives } = world();
+  const shell = { address: "t1", state: "live", status: { state: "idle", app: "claude-code" }, labels: { ...SPACE, "herdr.agent": "claude" },
+    foreground: { name: "bash", argv: ["/bin/bash"], pid: 7 } };
+  hub.terminals.set("t1", shell);
+  hub.front = async (a: string) => (a === "t1" ? "shell" : "agent");
+  const r: any = await act(hub, { type: "send", chat: "p:sp1", text: "ls -la; hello", cid: "c9" }, compat);
+  expect(r).toMatchObject({ ok: true });
+  expect(revives()).toBe(1);
+  expect(sent).toEqual([{ addr: "t2", text: "ls -la; hello" }]);
+});

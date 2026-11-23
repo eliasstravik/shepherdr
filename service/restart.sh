@@ -160,7 +160,12 @@ else
   # Some agents (Codex's animated start) never settle for hc: send once it reports a status.
   if [ -n "$new" ] && [ "$(jq -r '.first_message.sent' <<<"$out")" = false ]; then
     hc wait "$new" --timeout 90 >/dev/null 2>&1
-    hc send "$new" "$msg" >/dev/null 2>&1
+    # SHEP-324: only into the agent itself, never a plain shell left where it was (it would run the words)
+    fg=$(hc get "$new" --json 2>/dev/null | jq -r '.foreground.name // empty')
+    case "${fg##*/}" in
+      bash|zsh|fish|sh|dash|ksh|tcsh|csh|nu|xonsh|pwsh|powershell|elvish|"") ;;
+      *) hc send "$new" "$msg" >/dev/null 2>&1 ;;
+    esac
   fi
 fi
 [ -n "$new" ] || exit 1
