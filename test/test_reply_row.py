@@ -93,7 +93,8 @@ class ReplyRow(unittest.TestCase):
     def test_rules(self):
         css = open(CSS[0], encoding="utf-8").read()
         # the row starts at the box's edge (its padding only makes room for a focus ring) and fades where more continues
-        self.assertRegex(css, r"\.sugs\{[^}]*margin:0 -4px 4px;padding:4px")
+        self.assertRegex(css, r"\.sugs\{[^}]*margin:0 -4px 4px[;}]")
+        self.assertRegex(css, r"\.sugs\{[^}]*padding:4px[;}]")
         self.assertRegex(css, r"\.sugs\{[^}]*mask-image:linear-gradient\(to right,transparent,#000 var\(--fl\)")
         # the chat's bottom edge fades instead of slicing, and never over a terminal
         self.assertIn(":is(.chat,.pane)>.foot:has(>.cbox)::before{", css)
