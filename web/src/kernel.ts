@@ -65,8 +65,11 @@ export interface Registry {
   views: {
     /** a chat's messages, with what plugins draw between and after them */
     messages?: FC<{ thread: Thread }>
-    /** the message box: the text, then +, the agent line, the mic and Send */
+    /** the message box: the text, then +, the agent line, the mic and the round button (Send; a voice call while empty) */
     box?: FC<{ thread: Thread; placeholder: string }>
+    /** the message box's right end (voice): the mic, and the round button where Send is, a voice call while the box
+     *  is empty (SHEP-363); without it the box ends with Send */
+    boxEnd?: FC<{ thread: Thread; setText: (value: string) => void; filled: boolean; send: () => void }>
     /** an open task's header: back, title, its menu (Terminal and Screen are in it), and Expand and Close in the pane */
     taskHead?: FC<{ task: Task; where: 'chat' | 'pane'; scrolled?: boolean }>
     /** an open task's status line, over its messages */
@@ -79,8 +82,9 @@ export interface Registry {
     search?: FC<{ close: () => void }>
     /** the picker row a dialog shows for an agent choice lives in picker.tsx; the settings window in settings.tsx */
   }
-  /** buttons at the right of a chat's header, in order: Tasks, Artifacts, voice. Terminal and Screen are rows of the
-   *  space's name menu instead. `phone`: also in a phone's header (none: the rest live in its bottom bar) */
+  /** buttons at the right of a chat's header, in order: Tasks, Artifacts. Terminal and Screen are rows of the space's
+   *  name menu instead; the voice call is the message box's round button. `phone`: also in a phone's header (none: the
+   *  rest live in its bottom bar) */
   header: { order: number; phone?: boolean; View: FC<{ thread: Thread }> }[]
   /** buttons in an open task's header, after its title (none today: Terminal and Screen are in its ⋯ menu) */
   taskHeader: { order: number; View: FC<{ thread: Thread }> }[]
@@ -88,10 +92,6 @@ export interface Registry {
   panes: Pane[]
   /** the phone's bottom pill, after Chat */
   bar: { order: number; pane: string; label: string; icon: IconName; count?: (snap: Snapshot, place: string) => number }[]
-  /** at the right of the phone's bottom bar (the voice button; Mute and End in a call) */
-  barEnd: FC[]
-  /** one line just above the phone's bottom bar (a call's wave) */
-  barAbove: FC[]
   /** rows of a space's menu, first, before Settings: Terminal and Screen (only from the header's name: `head`), then
    *  Switch to terminal */
   spaceMenu: { order: number; rows: (place: Space, head: boolean) => MenuRow[] }[]
@@ -115,7 +115,7 @@ export interface Registry {
   chatBody: { when: (ui: UI, thread: Thread) => boolean; View: FC<{ thread: Thread }> }[]
   /** above the message box (the warnings line) */
   aboveBox: { order: number; View: FC<{ thread: Thread }> }[]
-  /** in the message box's bar, before Send (the mic) */
+  /** in the message box's bar, before its right end (none today: the voice plugin fills views.boxEnd) */
   boxButtons: { order: number; View: FC<{ thread: Thread; setText: (value: string) => void }> }[]
   /** under a column, below its message box (your own terminal) */
   drawer: { when: (ui: UI, thread: Thread) => boolean; View: FC<{ thread: Thread }> }[]
@@ -137,7 +137,7 @@ export interface Registry {
 
 export const registry: Registry = {
   views: {},
-  header: [], taskHeader: [], panes: [], bar: [], barEnd: [], barAbove: [], spaceMenu: [], taskMenu: [], messageParts: [], messageEdge: [], messageQuick: [],
+  header: [], taskHeader: [], panes: [], bar: [], spaceMenu: [], taskMenu: [], messageParts: [], messageEdge: [], messageQuick: [],
   messageMenu: [], chatCards: [], chatTail: [], chatBody: [], aboveBox: [], boxButtons: [], drawer: [], sideHead: [], overlays: [], topBars: [], settings: [],
   keys: [], voiceWake: null, middle: [],
 }

@@ -88,3 +88,13 @@ test('reduced motion: no bounce, a calm fade in turn, and the bubble fades in wi
   expect(styles).toContain(':root[data-motion="reduced"] .wdots i{animation:calm')
   expect(styles).toContain(':root[data-motion="reduced"] .wsign{animation-name:fade}')
 })
+
+test('Stop sits by the dots while it works (the box\'s round button is the voice call when empty, SHEP-363)', async () => {
+  const { installPlugins } = await import('@client/kernel.ts')
+  installPlugins([], ['voice'])
+  const html = draw(chat({ working: true }))
+  installPlugins([], [])
+  expect(html).toContain('aria-label="Stop"')
+  expect(html).toContain('wstop')
+  expect(draw(chat({ working: false }, msgs({ who: 'you', text: 'go' }, { text: 'Done.' })))).toBe('')
+})

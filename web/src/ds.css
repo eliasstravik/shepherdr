@@ -12,7 +12,7 @@ input:focus-visible,textarea:focus-visible{outline:0}
 /* a press on a touch screen: no browser box and no text picked up by a long press; the app's own states show it */
 button,[role="tab"],summary,.lk{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 @media(pointer:coarse){
-  .tab:active,.seg button:active,.pt:active,.vbtn:active,.send:active,.grp:active,.fold:active,.keys button:active,.fchip button:active,.hpath:active,.tg:active,.banner>button.n:active,.thumb:active,button.ref:active,.lk:active,a.pic:active,a.fchip:active,.atb:active,.arm:active{opacity:.6}
+  .tab:active,.seg button:active,.pt:active,.send:active,.grp:active,.fold:active,.keys button:active,.fchip button:active,.hpath:active,.tg:active,.banner>button.n:active,.thumb:active,button.ref:active,.lk:active,a.pic:active,a.fchip:active,.atb:active,.arm:active{opacity:.6}
 }
 p,h2,h3{margin:0}small{font-size:inherit}
 
@@ -105,8 +105,7 @@ button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"])
 .tbtn{display:inline-flex;align-items:center;gap:4px;max-width:100%;height:var(--btn);padding:0 8px;margin-left:-4px;border-radius:8px;font-weight:600;min-width:0}
 .tbtn:hover,.tbtn[aria-expanded="true"]{background:var(--control)}.tbtn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* SHEP-326: the call's mark, no words: a live wave of whoever talks, still dots that breathe while it connects */
-.vmark{display:inline-flex;align-items:center;flex:none;width:56px;height:20px;margin:0 6px;color:var(--fg)}
-.vmark.ph{width:120px;margin:0}
+.vmark{display:inline-flex;align-items:center;flex:none;width:100%;max-width:120px;height:20px;color:var(--fg)}
 .vmark.wait{animation:calm 1.6s ease-in-out infinite}
 .vwave{width:100%;height:100%}
 .vwave.off{color:var(--muted)}
@@ -263,10 +262,6 @@ h3+.srow,.hint+.srow,.banner+.srow{border-top:0}
 .pt{display:grid;justify-items:center;align-content:center;gap:2px;border-radius:27px;color:var(--muted);font-size:11px;line-height:14px;font-weight:500}
 .pt[aria-pressed="true"]{background:var(--control);color:var(--fg)}
 .pt .w{position:relative;display:grid}.pt .cnt{box-shadow:0 0 0 2px var(--raised)}
-.vbtn{display:grid;place-items:center;width:60px;height:60px;border-radius:50%;background:var(--raised);flex:none}
-.vbtn[aria-pressed="true"]{background:var(--fg);color:var(--canvas)}
-.vbtn.end,.ib.end,.ib.end:hover{background:#dc2626;color:#fff}
-.vcap{display:flex;justify-content:center;align-items:center;height:20px;padding:0 16px}
 
 /* resizable edges */
 .rz{display:none;position:absolute;top:0;bottom:0;width:var(--rz);cursor:col-resize;touch-action:none;z-index:15}
@@ -291,9 +286,10 @@ button.fake .n span,button.fake>.i{color:var(--muted)}
 .crow{display:flex;align-items:center;min-width:0}
 .crow .cin{flex:1;min-width:0;text-overflow:ellipsis}
 .cin::placeholder{text-overflow:ellipsis}
-.kbd{flex:none;display:grid;place-items:center;min-width:var(--key);height:var(--key);margin-right:12px;padding:0 6px;border-radius:6px;color:var(--muted);font-size:12px;line-height:16px;font-weight:500;box-shadow:inset 0 0 0 1px var(--line2)}
+/* the suggested reply's chip (SHEP-363): the tab icon, one square size at every width, a finger's target around it */
+.kbd{position:relative;flex:none;display:grid;place-items:center;width:32px;height:32px;margin-right:8px;border-radius:8px;color:var(--muted);box-shadow:inset 0 0 0 1px var(--line2)}
 .kbd:hover{background:var(--control);color:var(--fg)}
-.app.tap .kbd{margin-right:8px;border-radius:8px}
+@media(pointer:coarse){.kbd::after{content:"";position:absolute;inset:-6px}}
 
 /* screens */
 .scr{position:relative;border-radius:12px;overflow:hidden;background:var(--well);box-shadow:inset 0 0 0 1px var(--line2)}
@@ -400,6 +396,9 @@ html,body{height:100%}body{padding:0;overflow:hidden}
    `.wsign .wbub` outranks styles.css's `.b{display:block}`, which had left the dots at the bubble's top edge */
 .wsign{display:flex;align-items:center;gap:8px;max-width:min(82%,560px);min-width:0;margin-top:12px;color:var(--muted);font-size:14px;line-height:20px;transform-origin:left center;animation:wsin .24s ease-out .35s both}
 .pane .wsign{max-width:92%}
+/* SHEP-363: Stop by the dots (the box's round button is the voice call while it is empty), outside the sign's grow-in */
+.wrow{display:flex;align-items:center;gap:4px;min-width:0;margin-top:12px}.wrow>.wsign{margin-top:0}
+.wrow>.wstop{animation:fade .24s ease-out .35s both}
 .wsign .wbub{display:flex;align-items:center;justify-content:center;flex:none;max-width:none;padding:6px 14px;line-height:24px}
 .wdots{display:flex;align-items:center;gap:5px;height:24px;color:var(--sub)}
 .wdots i{flex:none;width:7px;height:7px;border-radius:50%;background:currentColor;animation:rise 1.2s ease-in-out infinite}

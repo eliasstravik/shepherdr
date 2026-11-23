@@ -131,7 +131,7 @@ export function PaneFrame({ head, children, foot, drawer, scrollKey, flush }: { 
   )
 }
 
-/** the phone's bottom bar: the pill Chat / Tasks / Artifacts, then the voice button (Mute and End in a call) */
+/** the phone's bottom bar: the pill Chat / Tasks / Artifacts (the voice call's button is in the message box) */
 function Bar({ snap }: { snap: Snapshot }) {
   const pane = useUI((u) => u.pane)
   const at = useUI((u) => u.at)
@@ -140,7 +140,6 @@ function Bar({ snap }: { snap: Snapshot }) {
   const on = pane === 'tasks' || pane === 'artifacts' ? pane : pane ? '' : 'chat'
   return (
     <>
-      {registry.barAbove.map((V, i) => <V key={i} />)}
       <nav className="bar" aria-label="Views">
         <div className="pill" style={{ gridTemplateColumns: `repeat(${registry.bar.length + 1},minmax(0,1fr))` }}>
           <button type="button" className="pt" aria-pressed={on === 'chat'} onClick={() => togglePane(null)}>
@@ -160,7 +159,6 @@ function Bar({ snap }: { snap: Snapshot }) {
             )
           })}
         </div>
-        {registry.barEnd.map((V, i) => <V key={i} />)}
       </nav>
     </>
   )

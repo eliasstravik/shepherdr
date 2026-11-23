@@ -40,7 +40,7 @@ Settings › Plugins has the switches. They are kept as `everywhere.plugins_off`
 | `views` | The parts of a thread: `messages`, `box`, `taskHead`, `taskTop`, `scheduled`, `tile`, `search` |
 | `header`, `taskHeader` | Buttons in a chat's or a task's header (Tasks, Artifacts, voice; Terminal and Screen are menu rows) |
 | `panes` | What the right-hand pane can show |
-| `bar`, `barEnd`, `barAbove` | The phone's bottom bar, its right end, and one line above it |
+| `bar` | The phone's bottom bar |
 | `spaceMenu`, `taskMenu`, `messageMenu` | Rows of a space's, a task's and a message's menu |
 | `messageParts`, `messageEdge` | Drawn under a message, and the reaction chips on its bubble's lower edge |
 | `messageQuick` | First in the quick bar a tap or a mouse over a message shows (add a reaction) |
