@@ -19,6 +19,9 @@ import { Finger, HOLD_MS, quickFit, REPLY_AT, type QuickFit } from './press.ts'
 import { dayLabel } from './days.ts'
 import { Markdown, withLinks } from './markdown.tsx'
 import { dropped, pasted } from './paste.ts'
+import { pasteImages, touch, useCopiedPicture } from './clip.ts'
+import { landLaunchShare, putAway, useLanded, watchLastChat } from './share.ts'
+import { openSendTo } from './sendto.tsx'
 import { suggestionOf, suggestionsOn } from './suggest.ts'
 import { BoxThumb, openPreview, SentThumb, sourcesOf } from './thumbs.tsx'
 import { signOf } from './typing.ts'
@@ -669,7 +672,10 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   const reply = useUI((u) => u.reply[key])
   const phone = useUI((u) => u.phone)
   const ref = useRef<HTMLTextAreaElement>(null)
-  const pickFile = useRef<HTMLInputElement>(null)
+  // a finger (a phone, a tablet): a photo button beside +, and + opens a menu with Paste image (SHEP-345)
+  const finger = useMemo(touch, [])
+  const [copied, copiedDone] = useCopiedPicture(finger)
+  const shared = useLanded() === key
   useGrow(ref, text)
   const sg = suggestionOf(chat, suggestionsOn(snap.settings))
   const sug = sg && !spent.has(sg.id) ? sg : null
@@ -683,7 +689,16 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
     if (sug) spent.add(sug.id)
     send(key, key, t, wait && busy)
     setText('')
+    if (shared) putAway()
   }
+  const pasteNow = async () => {
+    const r = await pasteImages()
+    if ('files' in r) {
+      attach(key, key, r.files)
+      copiedDone()
+    } else notice(r.why, 4000)
+  }
+
   const useSug = () => {
     if (!sug) return
     setText(sug.text)
@@ -701,6 +716,20 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
         attach(key, key, f)
       }}
     >
+      {(shared || copied) && (
+        <div className="fchips">
+          {shared && <SharedChip chat={key} thread={thread} />}
+          {copied && (
+            <span className="fchip">
+              <button type="button" className="clipgo" onClick={() => { attach(key, key, [copied.file]); copiedDone() }}>
+                <I n="paste" c="s16" />
+                <span>Paste copied picture</span>
+              </button>
+              <button type="button" aria-label="Not now" onClick={copiedDone}><I n="x" c="s16" /></button>
+            </span>
+          )}
+        </div>
+      )}
       {reply && (
         <div className="fchips">
           <span className="fchip">
@@ -737,6 +766,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
             if (!f.length) return
             e.preventDefault()
             attach(key, key, f)
+            copiedDone()
           }}
           onKeyDown={(e) => {
             // Tab writes the suggested reply into the box, so you can keep typing
@@ -758,17 +788,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
         )}
       </div>
       <div className="cbar">
-        <IB icon="plus" label="Add files" onClick={() => pickFile.current?.click()} />
-        <input
-          ref={pickFile}
-          type="file"
-          multiple
-          hidden
-          onChange={(e) => {
-            attach(key, key, [...(e.target.files ?? [])])
-            e.target.value = ''
-          }}
-        />
+        <AddButtons finger={finger} onFiles={(f) => attach(key, key, f)} paste={() => void pasteNow()} />
         <AgentLine
           pick={pick}
           machine={machine}
@@ -790,9 +810,61 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   )
 }
 
+/** + and, for a finger, the photo button (SHEP-345): photos open Android's photo picker straight away, newest first
+ *  (accept image/*); + opens files (on a phone or tablet a menu first: Paste image, Files) */
+export function AddButtons({ finger, onFiles, paste }: { finger: boolean; onFiles: (f: File[]) => void; paste: () => void }) {
+  const pickFile = useRef<HTMLInputElement>(null)
+  const pickPhoto = useRef<HTMLInputElement>(null)
+  const take = (e: { target: HTMLInputElement }) => {
+    onFiles([...(e.target.files ?? [])])
+    e.target.value = ''
+  }
+  const plus = (e: { currentTarget: Element }) =>
+    finger
+      ? openMenu(
+          e.currentTarget,
+          [
+            { icon: 'paste', label: 'Paste image', run: paste },
+            { icon: 'doc', label: 'Files', run: () => pickFile.current?.click() },
+          ],
+          { label: 'Add' },
+        )
+      : pickFile.current?.click()
+  return (
+    <>
+      <IB icon="plus" label={finger ? 'Add' : 'Add files'} onClick={plus} />
+      <input ref={pickFile} type="file" multiple hidden onChange={take} />
+      {finger && (
+        <>
+          <IB icon="image" label="Add photos" onClick={() => pickPhoto.current?.click()} />
+          <input ref={pickPhoto} type="file" accept="image/*" multiple hidden data-photos="" onChange={take} />
+        </>
+      )}
+    </>
+  )
+}
+
+/** what Android's Share sheet put in this box: where it goes, and Change to send it to another space or task */
+function SharedChip({ chat, thread }: { chat: string; thread: Thread }) {
+  const snap = useSnap()!
+  const t = thread.task
+  const where = t ? t.name : isEverything(snap, thread.place) ? 'Everything' : `#${placeOf(snap, thread.place)?.name ?? ''}`
+  return (
+    <span className="fchip shared">
+      <I n="share" c="s16" />
+      <span className="where">Shared to {where}</span>
+      <button type="button" className="chg" onClick={() => openSendTo(chat)}>Change</button>
+      <button type="button" aria-label="Keep it here" onClick={putAway}><I n="x" c="s16" /></button>
+    </span>
+  )
+}
+
 export default definePlugin({
   name: 'chat',
   setup(reg) {
+    // Share into Shepherdr (SHEP-345): a share lands in the chat open last
+    watchLastChat()
+    void landLaunchShare()
     reg.views.messages = Messages
     reg.views.box = Box
     reg.chatTail.push({ order: 15, View: StoppedChat }, { order: 95, View: WorkingSign })
