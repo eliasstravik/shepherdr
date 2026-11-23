@@ -39,7 +39,7 @@ export function StatusIcon({ t, dim, time = 'under' }: { t: Task; dim?: boolean;
   const spoken = `${r.label}${left ? `, ${leftWords(etaOf(t))}` : ''}`
   const alive = r.kind === 'ring' && r.tone === 'working' && r.pct === null && !dim
   return (
-    <span className={cx('tring', `t-${dim ? 'mute' : r.tone}`, time === 'side' && 'side')} role="img" aria-label={spoken} data-pct={r.pct ?? undefined}>
+    <span className={cx('tring', `t-${dim ? 'mute' : r.tone}`, time === 'side' && 'tside')} role="img" aria-label={spoken} data-pct={r.pct ?? undefined}>
       {/* c-own: its colour is the ring's own, never a row's grey icon colour (ds.css .row .i) */}
       {alive ? <I n="working" c="c-own" /> : <svg className="i c-own" viewBox="0 0 20 20" aria-hidden="true" dangerouslySetInnerHTML={{ __html: ringSvg(r) }} />}
       {left && <span className="tl" aria-hidden="true">{left}</span>}

@@ -322,7 +322,7 @@ html,body{height:100%}body{padding:0;overflow:hidden}
 .tring .mk{fill:currentColor;stroke:var(--canvas);stroke-width:1.5;paint-order:stroke}
 .tring .tk{stroke:var(--canvas);stroke-width:1.75}
 .tring .tl{margin-top:calc((var(--uil) - var(--ic))/2);font-size:calc(var(--sec) - 2px);line-height:var(--secl);font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
-.tring.side{flex-direction:row;width:auto;gap:4px}.tring.side .tl{margin-top:0}
+.tring.tside{flex-direction:row;width:auto;gap:4px}.tring.tside .tl{margin-top:0}
 .card .t.tw{display:flex;align-items:center;gap:8px}
 /* the Working ring: the whole icon turns about its centre; reduced motion: a slow, calm pulse instead */
 .i.turn{animation:turn 1s linear infinite}
