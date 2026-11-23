@@ -866,9 +866,20 @@ def base_tip_ref(s, task, fetch=False):
     return has[0] if has else None
 
 
+def merged_by(s, subject):
+    """The task a base commit merged, by its title in quotes (SHEP-322: never its key): its subject's key in front (an
+    older merge's "SHEP-4: ..."), else its pull request's number at the end ("Fix login (#945)"); None: no task's."""
+    from .store import quoted
+    m, pr = TASK_REF.match(subject), re.search(r"\(#(\d+)\)\s*$", subject)
+    for t in s.data.get("tasks") or []:
+        if (m and s.ref(t) == m.group(1)) or (pr and str((t.get("pr") or {}).get("number")) == pr.group(1)):
+            return quoted(t.get("title"))
+    return None
+
+
 def collision(s, task, fetch=False):
     """Its branch's committed work against its base's newest: None when it merges cleanly (or can't be
-    told: no branch, an old git), else {base, ref, files, commits: [[sha, subject]], by: [task refs]}."""
+    told: no branch, an old git), else {base, ref, files, commits: [[sha, subject]], by: [the merged tasks' titles, quoted]}."""
     main, br = s.loc["folder"], task.get("branch")
     ref = base_tip_ref(s, task, fetch) if br else None
     if not ref:
@@ -885,7 +896,7 @@ def collision(s, task, fetch=False):
     mb = git(main, "merge-base", ref, tip)[1]
     log = git(main, "log", "--format=%h%x09%s", f"{mb}..{ref}", "--", *files[:50])[1] if mb else ""
     commits = [line.split("\t", 1) for line in log.splitlines() if "\t" in line][:10]
-    by = list(dict.fromkeys(m.group(1) for _, subject in commits if (m := TASK_REF.match(subject))))
+    by = list(dict.fromkeys(x for _, subject in commits if (x := merged_by(s, subject))))
     short = ref.replace("refs/remotes/", "").replace("refs/heads/", "")
     return {"base": task.get("base") or "main", "ref": short, "sha": git(main, "rev-parse", ref)[1], "files": files,
             "commits": commits, "by": by}

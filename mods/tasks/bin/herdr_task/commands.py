@@ -651,7 +651,7 @@ def cmd_ready(args):
             # SHEP-320: other tasks run in parallel and may have merged meanwhile: a branch that conflicts with its
             # base's newest is refused here, with what collided, rather than at its merge. Behind but clean passes.
             c = collision(s, t, fetch=True) if t.get("start") and not (t.get("pr") or {}).get("from_base") else None
-            collides = (f"{s.ref(t)}'s branch conflicts with {c['ref']}, which moved on since it started"
+            collides = (f"{s.name(t)}'s branch conflicts with {c['ref']}, which moved on since it started"
                         + (f" ({', '.join(c['by'][:3])} merged)" if c["by"] else "") + f". {collision_words(c)} "
                         "Then commit and run ready again.") if c else None
         elif getattr(args, "pr", None):

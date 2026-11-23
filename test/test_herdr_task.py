@@ -9231,8 +9231,13 @@ class ParallelCollisions(unittest.TestCase):
         self.assertIsNone(self.github.collision(self.store, b, fetch=True))  # nothing merged yet
         self.merge_first(a)
         hit = self.github.collision(self.store, b, fetch=True)
-        self.assertEqual((hit["files"], hit["by"], hit["ref"]), (["app.txt"], ["SHEP-1"], "origin/main"))
-        self.assertEqual(self.github.collision_reason(hit), "Conflicts with main after SHEP-1 merged: its agent is rebasing")
+        self.assertEqual((hit["files"], hit["by"], hit["ref"]), (["app.txt"], ['"Task 1"'], "origin/main"))
+        self.assertEqual(self.github.collision_reason(hit), "Conflicts with main after \"Task 1\" merged: its agent is rebasing")
+        # SHEP-322: a merge titled the new way ("Task 1 (#11)", no key) is found by its pull request's number
+        self.assertEqual(self.github.merged_by(self.store, "Task 1 (#11)"), None)
+        a["pr"] = {"number": 11}
+        self.assertEqual(self.github.merged_by(self.store, "Task 1 (#11)"), '"Task 1"')
+        self.assertEqual(self.github.merged_by(self.store, "Someone else's (#12)"), None)
         words = self.github.collision_words(hit)
         self.assertIn("Files that collide with origin/main: app.txt.", words)
         self.assertIn("SHEP-1: Task 1 (#11)", words)
@@ -9265,7 +9270,7 @@ class ParallelCollisions(unittest.TestCase):
         self.patch(self.commands, "task_settings", lambda s, t: [])
         with self.assertRaises(self.commands.Fail) as e:
             self.commands.cmd_ready(self.ready_args())
-        self.assertIn("SHEP-2's branch conflicts with origin/main, which moved on since it started (SHEP-1 merged)", str(e.exception))
+        self.assertIn("\"Task 2\"'s branch conflicts with origin/main, which moved on since it started (\"Task 1\" merged)", str(e.exception))
         self.assertIn("app.txt", str(e.exception))
         self.assertEqual(b["state"], "running")
         # behind but clean: ready
@@ -9284,7 +9289,7 @@ class ParallelCollisions(unittest.TestCase):
         with self.assertRaises(SystemExit):
             self.commands.cmd_accept(argparse.Namespace(id="SHEP-2", json=False, folder=None))  # the person's Mark as done
         self.assertEqual(b["state"], "running")
-        self.assertEqual(b["merge_failed"], "Conflicts with main after SHEP-1 merged: its agent is rebasing")
+        self.assertEqual(b["merge_failed"], "Conflicts with main after \"Task 1\" merged: its agent is rebasing")
         self.assertIn("Files that collide with origin/main: app.txt.", self.told[-1])
         self.assertIn("rebase task/2 onto origin/main", self.told[-1])
         self.assertIn("the merge already asked for then goes through by itself", self.told[-1])
@@ -9317,7 +9322,7 @@ class ParallelCollisions(unittest.TestCase):
         report = {"attention": [], "done": []}
         self.tick.facts(self.store, b, report)  # no auto_merge: the person hasn't asked to merge it
         self.assertEqual(b["attention"], "It conflicts with the base branch.")
-        self.assertEqual(b["merge_failed"], "Conflicts with main after SHEP-1 merged: its agent is rebasing")
+        self.assertEqual(b["merge_failed"], "Conflicts with main after \"Task 1\" merged: its agent is rebasing")
         news = b["pr"]["news"]["text"]
         self.assertIn("It conflicts with main: rebase onto main", news)
         self.assertIn("Files that collide with origin/main: app.txt.", news)
@@ -9343,7 +9348,7 @@ class ParallelCollisions(unittest.TestCase):
             self.tick.heads_up(self.store, t, report)
         self.assertEqual(report["collides"], ["SHEP-2"])  # the clean one hears nothing
         self.assertEqual(sent[0][0], "t2")
-        self.assertIn("main moved on (SHEP-1 merged) and now conflicts with your branch task/2", sent[0][1])
+        self.assertIn("main moved on (\"Task 1\" merged) and now conflicts with your branch task/2", sent[0][1])
         self.assertIn("app.txt", sent[0][1])
         self.assertNotIn("base_moved", b)
         b["base_moved"] = 1  # another merge elsewhere, the same collision: not told twice
