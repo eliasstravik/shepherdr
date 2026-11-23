@@ -1,9 +1,10 @@
-// SHEP-336: which side the chat is on, beside a pane (Tasks, a task, Artifacts, a terminal or a screen). One tap on the
-// divider's button, a double tap on the divider, or Settings › General flips it. It is kept on this device, one choice
+// SHEP-336: which side the chat is on, beside a pane (Tasks, a task, Artifacts, a terminal or a screen). The chat
+// header's menu (Move the chat to the right / left), a double tap on the divider, or Settings › General flips it. There
+// is no button on the divider: it floated over the content and drew the eye (SHEP-352). It is kept on this device, one choice
 // per layout: a phone has no split (the chat is always its own screen); an unfolded fold or a tablet (a touch screen,
 // or a window under 1024 px) and a desktop each keep their own, so flipping one never moves the other.
 import { useSyncExternalStore } from 'react'
-import { getState, subscribe as subscribeUI } from './kernel.ts'
+import { getState, subscribe as subscribeUI, type MenuRow } from './kernel.ts'
 
 export type Layout = 'phone' | 'tablet' | 'desktop'
 export type Side = 'left' | 'right'
@@ -65,6 +66,12 @@ export function setChatSide(layout: Layout, side: Side) {
 export const swapSides = () => {
   const l = layoutNow()
   setChatSide(l, chatSide(l) === 'left' ? 'right' : 'left')
+}
+
+/** the chat header menu's row that swaps the sides: only beside a pane, never on a phone (it has no split) */
+export function swapRow(ui: { phone: boolean; pane: string | null }, side: Side = chatSide(layoutNow())): MenuRow[] {
+  if (ui.phone || !ui.pane) return []
+  return [{ icon: 'swap', label: side === 'left' ? 'Move the chat to the right' : 'Move the chat to the left', run: swapSides }]
 }
 
 /** what goes where in the shell after the list, in reading (and so focus) order */
