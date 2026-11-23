@@ -79,7 +79,7 @@ class ReactionChip(unittest.TestCase):
                 page = os.path.join(d, "p.html")
                 with open(page, "w", encoding="utf-8") as f:
                     f.write(PAGE.format(css=css, w=w, cls=cls, rows="".join(ROWS)))
-                out = subprocess.run([exe, "--headless=new", "--no-sandbox", "--disable-gpu", f"--user-data-dir={d}/u",
+                out = subprocess.run([exe, "--headless=new", "--use-mock-keychain", "--password-store=basic", "--no-sandbox", "--disable-gpu", f"--user-data-dir={d}/u",
                                       "--window-size=1300,4000", "--virtual-time-budget=2000", "--dump-dom", "file://" + page],
                                      capture_output=True, text=True, timeout=60).stdout
                 m = re.search(r"RESULT(.*?)END", out)

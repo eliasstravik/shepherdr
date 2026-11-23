@@ -195,6 +195,10 @@ json_str() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sy
 # Chrome's shared libraries (SHEP-200). agent-browser's doctor only checks that Chrome's file is there, so a Chrome
 # missing a library passes and then exits 127 with the loader's one line. Say which library is missing, and how to
 # install it, before anything starts.
+# Every Chrome Shepherdr starts gets these: no macOS keychain (a Mac otherwise asks "Google Chrome for Testing wants to
+# use your confidential information stored in 'Chromium Safe Storage'", again on every Deny), cookies kept in the
+# profile. agent-browser passes them too; the desktop Chrome on the same profile needs them to read its cookies.
+NO_KEYCHAIN="--use-mock-keychain --password-store=basic"
 # Chrome: $AGENT_BROWSER_EXECUTABLE_PATH, else the newest one agent-browser installed.
 chrome_bin() {
   if [ -n "${AGENT_BROWSER_EXECUTABLE_PATH:-}" ]; then echo "$AGENT_BROWSER_EXECUTABLE_PATH"; return; fi
@@ -432,7 +436,9 @@ sandbox_check >&2 || exit 127
 
 # Pages see prefers-reduced-motion (Chrome draws them in software, so an animation costs a core);
 # an agent whose page must move turns it off with: set media no-preference.
-export AGENT_BROWSER_ARGS="${AGENT_BROWSER_ARGS:---force-prefers-reduced-motion}"
+# And the keychain flags, whatever else is set (newline-separated, as agent-browser reads them).
+export AGENT_BROWSER_ARGS="${AGENT_BROWSER_ARGS:---force-prefers-reduced-motion}
+$(echo $NO_KEYCHAIN | tr ' ' '\n')"
 
 # ---- the space's browser, and this agent's own tab in it ----
 live=
@@ -604,7 +610,7 @@ case "$admin" in
     if [ -z "$(desk_pid)" ]; then
       space_down "the person opened this space's browser on the desktop to sign in"
       mkdir -p "$profile" 2>/dev/null
-      nohup "$_c" --user-data-dir="$profile" --no-first-run --no-default-browser-check --new-window "$deskurl" >/dev/null 2>&1 &
+      nohup "$_c" $NO_KEYCHAIN --user-data-dir="$profile" --no-first-run --no-default-browser-check --new-window "$deskurl" >/dev/null 2>&1 &
       echo $! > "$root/spaces/$sp.desk"
     fi
     printf '{"pid":%s}\n' "$(cat "$root/spaces/$sp.desk")"

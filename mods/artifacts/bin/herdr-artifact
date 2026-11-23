@@ -501,7 +501,7 @@ def shoot(folder):
     out = {"dir": tmp}
 
     def start(name, dark, sandbox=True):
-        args = [chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check",
+        args = [chrome, "--headless=new", "--use-mock-keychain", "--password-store=basic", "--disable-gpu", "--hide-scrollbars", "--no-first-run", "--no-default-browser-check",
                 "--disable-extensions", "--mute-audio", f"--user-data-dir={os.path.join(tmp, 'profile-' + name)}",
                 f"--window-size={SHOT[0]},{SHOT[1]}", "--virtual-time-budget=4000", f"--screenshot={os.path.join(tmp, name)}"]
         if dark:

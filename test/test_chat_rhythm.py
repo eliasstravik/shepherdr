@@ -77,7 +77,7 @@ class ChatRhythm(unittest.TestCase):
                 page = os.path.join(d, "p.html")
                 with open(page, "w", encoding="utf-8") as f:
                     f.write(PAGE.format(css=css, w=w, mode=mode, rows="".join(seq)))
-                out = subprocess.run([exe, "--headless=new", "--no-sandbox", "--disable-gpu", f"--user-data-dir={d}/u",
+                out = subprocess.run([exe, "--headless=new", "--use-mock-keychain", "--password-store=basic", "--no-sandbox", "--disable-gpu", f"--user-data-dir={d}/u",
                                       "--window-size=1200,1600", "--virtual-time-budget=3000", "--dump-dom", "file://" + page],
                                      capture_output=True, text=True, timeout=60).stdout
                 m = re.search(r"RESULT(.*?)END", out)
