@@ -154,7 +154,19 @@ TESTS_OLD = LIVE_ANCHOR
 TESTS_RULE = ("- Before you say you're done, run only the tests for what you touched (the test files for its area, plus a "
               "type check or build if your change could break one), not the whole suite: the full suite belongs to main "
               "and the release.\n")
-WORKER_MD = WORKER_MD_BEFORE_TESTS.replace(TESTS_OLD, TESTS_RULE)
+WORKER_MD_BEFORE_DELTA = WORKER_MD_BEFORE_TESTS.replace(TESTS_OLD, TESTS_RULE)
+# Since a later review round looks only at what changed since the last reviewed commit, and only must-fix findings
+# cost a round (#1116: re-reviews found fresh nits in code a round had passed, and tasks ran past their rounds).
+DELTA_OLD = ("Its prompt gives it the brief, the diff against the base branch and ~/.config/herdr-core/templates/reviewer.md, "
+             "and asks for its findings as its last message.")
+DELTA_RULE = ("Its prompt gives it the brief, the diff, the Must fix level and ~/.config/herdr-core/templates/reviewer.md, and "
+              "asks for its findings as its last message, must-fix apart from follow-up. The first round's diff is against the "
+              "base branch; a later round's is only what changed since the last reviewed commit (`git diff <it>..HEAD`, with "
+              "any merge's conflict resolutions) and that round's findings: code a round passed isn't reviewed again.")
+MUST_OLD = "Fix every finding at or above Must fix, commit, and review again; stop once a round finds none at or above it, or after Review rounds."
+MUST_RULE = (MUST_OLD + " Only those cost a round: leave a finding below Must fix as a follow-up in your summary, unfixed "
+             "(a fix is a change that needs a round of its own).")
+WORKER_MD = WORKER_MD_BEFORE_DELTA.replace(DELTA_OLD, DELTA_RULE).replace(MUST_OLD, MUST_RULE)
 
 REVIEWER_MD_BEFORE_SUBAGENT = """You review one Herdr task's work before it can merge. Read only: never edit files, commit or push.
 - Read the task, then the diff of its branch against its base, and run the project's checks.
@@ -178,7 +190,16 @@ REVIEWER_MD_BEFORE_CLAUDE = REVIEWER_MD_BEFORE_SANDBOX + REVIEWER_SANDBOX
 # Since a Claude reviewer runs in don't-ask mode, which refuses any command that isn't read-only (#1181).
 REVIEWER_MD_BEFORE_PAGES = REVIEWER_MD_BEFORE_CLAUDE.replace("- A check that can't run in a read-only sandbox (Codex's):", "- A check that can't run in a read-only sandbox (Codex's, or Claude's don't-ask mode, which refuses any command that isn't read-only, tests too):")
 # Since 3.2 has no Herdr window (no `herdr-app check`): the example is a page that can't be published there.
-REVIEWER_MD = REVIEWER_MD_BEFORE_PAGES.replace("`herdr-app check` hangs there on the window's services", "`herdr-artifact publish` can't write its page there")
+REVIEWER_MD_BEFORE_DELTA = REVIEWER_MD_BEFORE_PAGES.replace("`herdr-app check` hangs there on the window's services", "`herdr-artifact publish` can't write its page there")
+# Since a later round reviews only the new change, its findings split into must-fix and follow-up (#1116).
+REVIEWER_DELTA_OLD = "- Read the task, then the diff of its branch against its base, and run the project's checks.\n"
+REVIEWER_DELTA_RULE = ("- Read the task, then the diff your worker gives you, and run the project's checks. A later round's diff is "
+                       "only what changed since the last reviewed commit: review that and what it touches, never again code an "
+                       "earlier round passed.\n")
+REVIEWER_MUST_OLD = "minor (a nit or a later improvement).\n"
+REVIEWER_MUST_RULE = ("minor (a nit or a later improvement). Give them in two lists: \"Must fix:\" those at or above the Must fix "
+                      "level your worker names, then \"Follow-up:\" the rest.\n")
+REVIEWER_MD = REVIEWER_MD_BEFORE_DELTA.replace(REVIEWER_DELTA_OLD, REVIEWER_DELTA_RULE).replace(REVIEWER_MUST_OLD, REVIEWER_MUST_RULE)
 
 
 # Earlier worker defaults: a file still saying one, unedited, gets today's.
@@ -191,7 +212,7 @@ OLD_WORKER_READY = """You work on one Herdr task. Stay within the task's scope a
 - When the work is finished, run the `herdr-task ready` command given at the end of your brief, with a short summary. That puts the task in Ready for the person, who accepts it. Never mark a task done yourself.
 """
 OLD_WORKER_MD = OLD_WORKER_READY.split("- When the work is finished")[0]
-OLD_WORKERS = (WORKER_MD_BEFORE_TESTS, WORKER_MD_BEFORE_ROW, WORKER_MD_BEFORE_CLOCK, WORKER_MD_BEFORE_LIVE, WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
+OLD_WORKERS = (WORKER_MD_BEFORE_DELTA, WORKER_MD_BEFORE_TESTS, WORKER_MD_BEFORE_ROW, WORKER_MD_BEFORE_CLOCK, WORKER_MD_BEFORE_LIVE, WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
 
 
 TEMPLATE_HEADS = {
@@ -226,7 +247,7 @@ def instructions(role):
     if body is None or (role == "worker" and body.strip() in [x.strip() for x in OLD_WORKERS]) \
             or (role == "reviewer" and body.strip() in (REVIEWER_MD_BEFORE_SUBAGENT.strip(), REVIEWER_MD_BEFORE_FEEDBACK.strip(),
                                                     REVIEWER_MD_BEFORE_SANDBOX.strip(), REVIEWER_MD_BEFORE_CLAUDE.strip(),
-                                                    REVIEWER_MD_BEFORE_PAGES.strip())):
+                                                    REVIEWER_MD_BEFORE_PAGES.strip(), REVIEWER_MD_BEFORE_DELTA.strip())):
         body = WORKER_MD if role == "worker" else REVIEWER_MD
     new = head + body.strip() + "\n"
     if text is None or new.strip() != text.strip():
