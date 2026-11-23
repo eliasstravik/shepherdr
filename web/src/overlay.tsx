@@ -16,6 +16,8 @@ interface Layer {
   /** a picture or file shown on its own, over the whole screen (chat/preview.tsx) */
   view?: boolean
   label?: string
+  /** a small menu that floats at its button on a phone too, above it where it fits (a message's emoji strip) */
+  float?: boolean
   render: (close: () => void) => ReactNode
   onClose?: () => void
 }
@@ -56,7 +58,7 @@ export const anyOpen = () => layers.length > 0
 export const layersNow = (): readonly Layer[] => layers
 
 /** Open a menu at its button. Its rows, or anything drawn (`render`); `cap`: a quiet line on top; `top`: above the rows. */
-export function openMenu(anchor: Element | null, rows: MenuRow[] | ((close: () => void) => ReactNode), opts: { cap?: string; top?: (close: () => void) => ReactNode; label?: string } = {}) {
+export function openMenu(anchor: Element | null, rows: MenuRow[] | ((close: () => void) => ReactNode), opts: { cap?: string; top?: (close: () => void) => ReactNode; label?: string; float?: boolean } = {}) {
   // the same button again closes it
   const was = anchor && layers.find((l) => l.kind === 'menu' && l.anchor === anchor)
   if (was) return close(was.id)
@@ -64,7 +66,7 @@ export function openMenu(anchor: Element | null, rows: MenuRow[] | ((close: () =
   const id = seq++
   // the space's name and the filter show they are open; a row's ⋯ stays as it is
   if (anchor?.matches('.tbtn, .fchip, [data-marks]')) anchor.setAttribute('aria-expanded', 'true')
-  layers = [...layers, { id, kind: 'menu', anchor, label: opts.label, render: (done) => (typeof rows === 'function' ? rows(done) : <MenuRows rows={rows} close={done} cap={opts.cap} top={opts.top?.(done)} />) }]
+  layers = [...layers, { id, kind: 'menu', anchor, label: opts.label, float: opts.float, render: (done) => (typeof rows === 'function' ? rows(done) : <MenuRows rows={rows} close={done} cap={opts.cap} top={opts.top?.(done)} />) }]
   emit()
 }
 
@@ -169,9 +171,10 @@ function Popover({ layer }: { layer: Layer }) {
       const w = pop.offsetWidth
       const h = pop.offsetHeight
       if (!t) return setAt({ left: 16, top: 16 })
-      const left = Math.min(Math.max(8, t.left), innerWidth - w - 8)
+      const left = Math.min(Math.max(8, layer.float ? t.left + t.width / 2 - w / 2 : t.left), innerWidth - w - 8)
       let top = t.bottom + 4
-      if (top + h > innerHeight - 8) top = Math.max(8, t.top - h - 4)
+      if (layer.float && t.top - h - 4 >= 8) top = t.top - h - 4
+      else if (top + h > innerHeight - 8) top = Math.max(8, t.top - h - 4)
       setAt({ left, top })
     }
     place()
@@ -211,8 +214,8 @@ export function Layers() {
         if (l.kind === 'menu')
           return (
             <div key={l.id} style={{ display: 'contents' }}>
-              <div className={cx('scrim', !phone && 'clear')} onClick={done} />
-              {phone ? (
+              <div className={cx('scrim', (!phone || l.float) && 'clear')} onClick={done} />
+              {phone && !l.float ? (
                 <div className="pop sheet in" role="menu" aria-label={l.label}>
                   {l.render(done)}
                 </div>

@@ -1,7 +1,7 @@
 // The chat: an agent's messages (formatted text, code, tables, pictures), one quiet line while it works saying what
 // it is doing, one small folded row per turn ("Ran 4 commands · edited 2 files"), cards where it needs you, and the
 // message box. The same parts draw a space's chat and a task's thread.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { copyText } from '@client/copy.ts'
 import { act, definePlugin, getState, notice, registry, setUI, tryAct, useChat, useDraft, useSnap, useStore, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
 import { partsOf, placesOf, keyOf, readNow, showsAs, type Outgoing } from '@client/outbox.ts'
@@ -15,6 +15,7 @@ import { isEverything, placeOf, taskOf } from '@shared/view.ts'
 import { StatusIcon } from '@plugins/tasks/icon.tsx'
 import { DoneRow, QuestionCard, SecretCard } from './cards.tsx'
 import { briefFrom, deliveryWord, looksLong, startWords } from './brief.ts'
+import { Finger, HOLD_MS, quickFit, REPLY_AT, type QuickFit } from './press.ts'
 import { dayLabel } from './days.ts'
 import { Markdown } from './markdown.tsx'
 import { dropped, pasted } from './paste.ts'
@@ -77,12 +78,19 @@ function TaskRef({ id, title, t }: { id: string; title: string; t?: Task }) {
   )
 }
 
+/** reply to a message: a quote of it goes in the box, and the box takes the keyboard */
+export function replyTo(msg: Message, key: string) {
+  const text = msg.text ?? msg.file?.name ?? ''
+  setUI((ui) => ({ reply: { ...ui.reply, [key]: { id: msg.id, who: msg.who, text: text.slice(0, 200) } } }))
+  document.querySelector<HTMLTextAreaElement>(`textarea[data-box="${CSS.escape(key)}"]`)?.focus()
+}
+
 function msgMenu(anchor: Element, msg: Message, chat: Chat, thread: Thread, select: () => void) {
   const key = thread.chat
   const text = msg.text ?? msg.file?.name ?? ''
   const rows: MenuRow[] = [
     // Reply puts a quote of the message in the box
-    { icon: 'reply', label: 'Reply', run: () => { setUI((ui) => ({ reply: { ...ui.reply, [key]: { id: msg.id, who: msg.who, text: text.slice(0, 200) } } })); document.querySelector<HTMLTextAreaElement>(`textarea[data-box="${CSS.escape(key)}"]`)?.focus() } },
+    { icon: 'reply', label: 'Reply', run: () => replyTo(msg, key) },
     { icon: 'copy', label: 'Copy', run: () => void copyText(text).then((ok) => ok && notice('Copied')) },
     // Select text makes that message's text selectable
     { icon: 'select', label: 'Select text', run: select },
@@ -94,29 +102,229 @@ function msgMenu(anchor: Element, msg: Message, chat: Chat, thread: Thread, sele
   openMenu(anchor, rows, { label: 'Message', top: tops.length ? (close) => tops.map((m, i) => (m.Top ? <m.Top key={i} msg={msg} chat={chat} close={close} /> : null)) : undefined })
 }
 
+/* ---------- acting on a message (SHEP-332) ---------- */
+
+/** the one message whose quick bar a tap opened: `y`, where on it the tap was (px from its top) */
+let quickNow: { id: string; y: number | null } | null = null
+const quickSubs = new Set<() => void>()
+function setQuick(q: typeof quickNow) {
+  quickNow = q
+  quickSubs.forEach((f) => f())
+}
+const quickSub = (f: () => void) => {
+  quickSubs.add(f)
+  return () => void quickSubs.delete(f)
+}
+const useQuick = (id: string) => useSyncExternalStore(quickSub, () => (quickNow?.id === id ? quickNow : null))
+
+/** The click a finger's lift makes after a hold would land on the menu's backdrop the hold just opened, and close it:
+ *  the next click (within a moment of the lift) is swallowed. */
+function swallowClick() {
+  const eat = (e: Event) => {
+    e.preventDefault()
+    e.stopPropagation()
+    off()
+  }
+  const lifted = () => setTimeout(off, 400)
+  const off = () => {
+    removeEventListener('click', eat, true)
+    removeEventListener('pointerup', lifted, true)
+  }
+  addEventListener('click', eat, true)
+  addEventListener('pointerup', lifted, true)
+}
+
+/** a light tick, where the device has one (Android; iPhones have no web haptics) */
+const tick = (ms = 8) => {
+  try {
+    navigator.vibrate?.(ms)
+  } catch {
+    /* not allowed here */
+  }
+}
+
+/** The quick bar beside a message, on its open side: add a reaction, reply, more (the whole menu); on a narrow screen
+ *  only the first. `y`: where to centre it, for a message taller than the screen. */
+function QuickBar({ msg, chat, thread, mine, wrap, y, done, more }: { msg: Message; chat: Chat; thread: Thread; mine: boolean; wrap: HTMLElement; y: number | null; done: () => void; more: (el: Element) => void }) {
+  const phone = useUI((u) => u.phone)
+  const [fit, setFit] = useState<QuickFit | null>(null)
+  useLayoutEffect(() => {
+    const w = wrap.getBoundingClientRect()
+    const m = (wrap.parentElement ?? wrap).getBoundingClientRect()
+    setFit(quickFit(mine ? w.left - m.left : m.right - w.right, !phone))
+  }, [wrap, mine, phone])
+  const quick = registry.messageQuick
+  const reply = (
+    <button key="reply" type="button" className="qbtn" aria-label="Reply" onClick={() => { done(); replyTo(msg, thread.chat) }}>
+      <I n="reply" />
+    </button>
+  )
+  const buttons = [
+    ...quick.map((q, i) => <q.View key={`q${i}`} msg={msg} chat={chat} />),
+    reply,
+    <button key="more" type="button" className="qbtn" aria-label="More" aria-haspopup="menu" onClick={(e) => more(e.currentTarget)}>
+      <I n="dots" />
+    </button>,
+  ]
+  // centred on the bubble (not its reactions); on one taller than a phone's thumb reach, where it was touched
+  const b = wrap.querySelector<HTMLElement>('.b')
+  const h = b?.offsetHeight ?? wrap.offsetHeight
+  const top = y === null || h <= 120 ? `${(b?.offsetTop ?? 0) + h / 2}px` : `${Math.min(Math.max(y, 24), h - 24)}px`
+  return (
+    <div
+      className={cx('qb', mine ? 'l' : 'r', fit?.over && 'over')}
+      role="toolbar"
+      aria-label="Message actions"
+      style={{ top, visibility: fit ? undefined : 'hidden' }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="qbx">{fit?.actions === 'react' ? buttons[0] : buttons}</div>
+      {fit?.time && msg.at ? <span className="qt">{clock(msg.at)}</span> : null}
+    </div>
+  )
+}
+
 function Bubble({ msg, chat, thread, gap, pending, failed, mark }: { msg: Message; chat: Chat; thread: Thread; gap: boolean; pending?: boolean; failed?: string; mark?: Shown['mark'] }) {
   const [sel, setSel] = useState(false)
   const jump = useUI((u) => u.jump === msg.id)
   const mine = msg.who === 'you'
-  const open = (el: Element) => {
-    if (sel || getSelection()?.toString()) return
+  const qid = `${chat.key}\n${msg.id}`
+  const quick = useQuick(qid)
+  const [hover, setHover] = useState<number | null | false>(false)
+  const wrap = useRef<HTMLDivElement>(null)
+  const finger = useRef<Finger | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  /** the click that follows a hold or a slide is not a tap */
+  const skip = useRef(false)
+  const [slide, setSlide] = useState(0)
+  const [armed, setArmed] = useState(false)
+  const [settling, setSettling] = useState(false)
+  const full = (el: Element) => {
+    if (sel) return
+    setQuick(null)
     msgMenu(el, msg, chat, thread, () => setSel(true))
   }
+  // a tap anywhere else (or Escape) puts the quick bar away
+  useEffect(() => {
+    if (!quick) return
+    const away = (e: Event) => {
+      const t = e.target as Element | null
+      if (t && (wrap.current?.contains(t) || t.closest('.pop'))) return
+      setQuick(null)
+    }
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setQuick(null)
+    addEventListener('pointerdown', away, true)
+    addEventListener('keydown', esc)
+    return () => {
+      removeEventListener('pointerdown', away, true)
+      removeEventListener('keydown', esc)
+    }
+  }, [quick])
+  useEffect(() => () => clearTimeout(timer.current), [])
+  const letGo = (replying: boolean) => {
+    skip.current = true
+    setSettling(true)
+    setSlide(0)
+    setArmed(false)
+    if (replying) {
+      setQuick(null)
+      replyTo(msg, thread.chat)
+    }
+  }
+  const yIn = (clientY: number) => clientY - (wrap.current?.getBoundingClientRect().top ?? 0)
+  const bar = quick ?? (hover !== false && !quickNow ? { y: hover } : null)
   return (
     <>
       <div
-        className={cx('b', mine && 'mine', gap && 'gap', sel && 'sel', pending && 'pending', jump && 'jump')}
-        role="button"
-        tabIndex={0}
-        aria-haspopup="menu"
-        data-msg={msg.id}
-        data-chat={chat.key}
-        data-menu
-        onClick={(e) => open(e.currentTarget)}
-        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget && (e.preventDefault(), open(e.currentTarget))}
+        ref={wrap}
+        className={cx('bw', mine && 'mine', gap && 'gap', !!bar && 'qon')}
+        onPointerEnter={(e) => e.pointerType === 'mouse' && setHover(yIn(e.clientY))}
+        onPointerLeave={(e) => e.pointerType === 'mouse' && setHover(false)}
       >
-        {msg.reply && <span className="quote">{msg.reply.text}</span>}
-        {mine ? <div className="md" style={{ whiteSpace: 'pre-wrap' }}>{msg.text}</div> : <Markdown text={msg.text ?? ''} mentions={msg.mentions} />}
+        {slide > 0 && (
+          <div className={cx('rpl', armed && 'on')} aria-hidden="true" style={{ width: Math.max(0, slide - 8), opacity: Math.min(1, slide / REPLY_AT) }}>
+            <I n="reply" />
+            <span>Reply</span>
+          </div>
+        )}
+        <div
+          className={cx('bmv', settling && 'settle')}
+          style={slide ? { transform: `translateX(${slide}px)` } : undefined}
+          onTransitionEnd={() => setSettling(false)}
+        >
+          <div
+            className={cx('b', mine && 'mine', sel && 'sel', pending && 'pending', jump && 'jump')}
+            role="button"
+            tabIndex={0}
+            aria-haspopup="menu"
+            data-msg={msg.id}
+            data-chat={chat.key}
+            data-menu
+            onPointerDown={(e) => {
+              if (e.button !== 0 || sel || e.pointerType === 'mouse') return
+              const f = new Finger(e.clientX, e.clientY, performance.now())
+              finger.current = f
+              const el = e.currentTarget
+              clearTimeout(timer.current)
+              timer.current = setTimeout(() => {
+                if (finger.current !== f || !f.hold(performance.now())) return
+                tick(10)
+                skip.current = true
+                swallowClick()
+                full(el)
+              }, HOLD_MS)
+            }}
+            onPointerMove={(e) => {
+              const f = finger.current
+              if (!f || f.held) return
+              const r = f.move(e.clientX, e.clientY)
+              if (f.way === 'scroll') {
+                finger.current = null
+                clearTimeout(timer.current)
+                return
+              }
+              if (f.way !== 'slide') return
+              clearTimeout(timer.current)
+              if (!e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.setPointerCapture(e.pointerId)
+              setSettling(false)
+              setSlide(r.slide)
+              setArmed(f.armed)
+              if (r.crossed) tick()
+            }}
+            onPointerUp={() => {
+              const f = finger.current
+              finger.current = null
+              clearTimeout(timer.current)
+              const o = f?.up()
+              if (o === 'reply' || o === 'back') letGo(o === 'reply')
+            }}
+            onPointerCancel={() => {
+              const f = finger.current
+              finger.current = null
+              clearTimeout(timer.current)
+              if (f?.way === 'slide') letGo(false)
+            }}
+            onContextMenu={(e) => {
+              // a finger's hold is ours (above); a right click opens the whole menu
+              e.preventDefault()
+              if (finger.current || skip.current) return
+              full(e.currentTarget)
+            }}
+            onClick={(e) => {
+              if (skip.current) return void (skip.current = false)
+              if (sel || getSelection()?.toString()) return
+              setQuick(quick ? null : { id: qid, y: yIn(e.clientY) })
+            }}
+            onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget && (e.preventDefault(), full(e.currentTarget))}
+          >
+            {msg.reply && <span className="quote">{msg.reply.text}</span>}
+            {mine ? <div className="md" style={{ whiteSpace: 'pre-wrap' }}>{msg.text}</div> : <Markdown text={msg.text ?? ''} mentions={msg.mentions} />}
+          </div>
+          {registry.messageEdge.map((x, i) => <x.View key={i} msg={msg} chat={chat} />)}
+        </div>
+        {bar && wrap.current && !slide && (
+          <QuickBar msg={msg} chat={chat} thread={thread} mine={mine} wrap={wrap.current} y={bar.y} done={() => { setQuick(null); setHover(false) }} more={full} />
+        )}
       </div>
       {mark && <div className="seen" role="status">{mark === 'read' ? 'Read' : 'Sent'}</div>}
       {failed !== undefined && msg.cid && (
@@ -126,7 +334,6 @@ function Bubble({ msg, chat, thread, gap, pending, failed, mark }: { msg: Messag
           <span className="lk" role="button" tabIndex={0} onClick={() => dropOut(msg.cid!)}>Remove</span>
         </div>
       )}
-      {registry.messageEdge.map((e, i) => <e.View key={i} msg={msg} chat={chat} />)}
     </>
   )
 }
