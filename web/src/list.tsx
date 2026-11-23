@@ -8,7 +8,7 @@ import { everything, folderName, folderOf, groupOf, isEverything, listOf, machin
 import { act, getState, go, notice, openSettings, registry, setUI, shownOn, tryAct, useUI, type Filter, type MenuRow } from './kernel.ts'
 import { confirm, openDialog, openForm, openMenu } from './overlay.tsx'
 import { AgentField, MachineField, pickFor, type Pick } from './picker.tsx'
-import { Btn, Cnt, I, IB, Row } from './ui.tsx'
+import { Btn, Cnt, I, IB, MenuGroup, Row } from './ui.tsx'
 import { copyText } from './copy.ts'
 import { DictateButton } from './dictate.tsx'
 import { press } from './drag.ts'
@@ -22,8 +22,7 @@ export function filterMenu(anchor: Element, machine: string, name: string, archi
   openMenu(
     anchor,
     (close) => (
-      <>
-        <div className="cap">Show</div>
+      <MenuGroup cap="Show">
         {FILTERS.map((f) => {
           const on = shownOn(getState().ui, machine) === f
           return (
@@ -45,7 +44,7 @@ export function filterMenu(anchor: Element, machine: string, name: string, archi
             />
           )
         })}
-      </>
+      </MenuGroup>
     ),
     { label: `Show which spaces on ${name}` },
   )

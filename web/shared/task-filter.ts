@@ -81,8 +81,18 @@ export const filterCount = (snap: Snapshot, f: TaskFilter, at: string) => filter
 /** a filter is on: anything picked, or a quick choice that applies here */
 export const filterOn = (snap: Snapshot, f: TaskFilter, at: string) => hereOn(snap, f, at) || f.hideDone || GROUPS.some((g) => f[g.key].length > 0)
 
-/** the choices of a group, from the tasks there are (a choice picked before stays, so it can be taken off) */
-export function choices(snap: Snapshot, key: GroupKey, f: TaskFilter): { id: string; label: string; n: number; machine?: string }[] {
+/** the choices of a group, from the tasks there are (a choice picked before stays, so it can be taken off). Never a
+ *  blank one: a task whose space was removed has no space (the service gives it ''), and it made a row with no name. */
+export function choices(snap: Snapshot, key: GroupKey, f: TaskFilter): Choice[] {
+  return allChoices(snap, key, f).filter((c) => c.id.trim() && c.label.trim())
+}
+export interface Choice {
+  id: string
+  label: string
+  n: number
+  machine?: string
+}
+function allChoices(snap: Snapshot, key: GroupKey, f: TaskFilter): Choice[] {
   const g = GROUPS.find((x) => x.key === key)!
   const n = (id: string) => snap.tasks.filter((t) => g.of(snap, t) === id).length
   if (key === 'state') return STATES.map((s) => ({ id: s, label: STATE_WORDS[s], n: n(s) })).filter((c) => c.n || f.state.includes(c.id))
@@ -127,7 +137,7 @@ export function chipsOf(snap: Snapshot, f: TaskFilter, at: string): Chip[] {
   if (f.hideDone) out.push({ key: 'hideDone', label: 'Done hidden', icon: 'check', off: (x) => ({ ...x, hideDone: false }) })
   for (const id of f.state) out.push({ key: `state:${id}`, label: STATE_WORDS[id as FState] ?? id, icon: STATE_ICON[id as FState] ?? 'check', off: (x) => toggle(x, 'state', id) })
   for (const id of f.machine) out.push({ key: `machine:${id}`, label: machineLabel(snap, id), icon: 'server', off: (x) => toggle(x, 'machine', id) })
-  for (const id of f.space) out.push({ key: `space:${id}`, label: (spaceLabel(snap, id) || id).replace(/^#/, ''), icon: isEverything(snap, id) ? 'layers' : 'hash', off: (x) => toggle(x, 'space', id) })
+  for (const id of f.space.filter((x) => x.trim())) out.push({ key: `space:${id}`, label: (spaceLabel(snap, id) || id).replace(/^#/, ''), icon: isEverything(snap, id) ? 'layers' : 'hash', off: (x) => toggle(x, 'space', id) })
   for (const id of f.repo) out.push({ key: `repo:${id}`, label: reposOf(snap).find((r) => r.key === id)?.name ?? (id.replace(/^.*\//, '') || id), icon: 'folder', off: (x) => toggle(x, 'repo', id) })
   return out
 }

@@ -71,6 +71,17 @@ export function Row({
   )
 }
 
+/** one group of a menu's choices, under its quiet name: the one rhythm of the filter menus (the Tasks panel's and each
+ *  machine's in the list). A group after another gets a hairline above it. */
+export function MenuGroup({ cap, children }: { cap?: string; children: ReactNode }) {
+  return (
+    <div className="mg" role="group" aria-label={cap}>
+      {cap && <div className="cap">{cap}</div>}
+      {children}
+    </div>
+  )
+}
+
 /** a count on a row, or over a button */
 export const Cnt = ({ n }: { n: number }) => (n ? <span className="cnt">{n}</span> : null)
 

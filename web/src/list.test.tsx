@@ -125,8 +125,10 @@ test("picking in a machine's filter menu changes that machine only, Active puts 
     filterMenu(null as unknown as Element, 'mini', 'mini', 1)
     const [menu] = layersNow()
     expect(menu?.label).toBe('Show which spaces on mini')
-    const tree = menu!.render(() => closeAll()) as ReactElement<{ children: ReactNode[] }>
-    const rows = (tree.props.children[1] as ReactElement<{ label: string; value?: string; onClick: () => void }>[])
+    // one MenuGroup ("Show"), its rows its children: the Tasks filter's rhythm (SHEP-354)
+    const tree = menu!.render(() => closeAll()) as ReactElement<{ cap: string; children: ReactNode }>
+    expect(tree.props.cap).toBe('Show')
+    const rows = tree.props.children as ReactElement<{ label: string; value?: string; onClick: () => void }>[]
     if (label === 'Archived') expect(rows.find((r) => r.props.label === 'Archived')!.props.value).toBe('1')
     rows.find((r) => r.props.label === label)!.props.onClick()
   }
