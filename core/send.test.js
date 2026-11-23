@@ -143,7 +143,7 @@ function screens(list, status = () => "working") {
 }
 
 test("a message sent to a working Claude Code 2.1.330 steers at once (its real screen)", async () => {
-  const s = screens([QUEUED_2_1_330]);
+  const s = screens([QUEUED_2_1_330, DRAFT.replace("half a thought", "")]);
   expect(await steerNow(s.io, "t1")).toBe(true);
   expect(s.calls.filter((c) => c.startsWith("keys"))).toEqual(["keys t1 ctrl+enter"]);
   // sendBody presses it after the send, once
@@ -286,3 +286,58 @@ test("a file alone (no words, not a picture) still in the box is not taken as se
   expect(holds("❯ ", "/var/files/t1/report.txt")).toBe(false);
 });
 
+
+// SHEP-329: the person's message must be in within seconds, always. Claude Code 2.1.330 after Esc with a message queued
+// behind a running build (hc read): the build cut off, the message sent at once.
+const AFTER_ESC = `● Running project build with python3 build.py
+  ⎿  $ python3 build.py
+  ⎿  Interrupted · What should Claude do instead?
+❯ Quick: what is 9+9?
+✽ Cultivating… (1s · ↓ 38 tokens · thinking)
+─────────────────────────────────────────────
+❯ 
+─────────────────────────────────────────────
+  ⏵⏵ bypass permissions on · esc to interrupt`;
+
+test("a message still queued after Ctrl+Enter's grace goes in by Esc, once", async () => {
+  const stuck = screens([...Array(1 + STEER.grace).fill(QUEUED_2_1_330), AFTER_ESC]);
+  expect(await steerNow(stuck.io, "t1")).toBe(true);
+  expect(stuck.calls.filter((c) => c.startsWith("keys"))).toEqual(["keys t1 ctrl+enter", "keys t1 esc"]);
+  // its grace: the screen is looked at that many times between the two keys
+  const keys = stuck.calls.map((c, i) => [c, i]).filter(([c]) => c.startsWith("keys")).map(([, i]) => i);
+  expect(keys[1] - keys[0] - 1).toBe(STEER.grace);
+  // in before the grace ends: no Esc
+  const took = screens([QUEUED_2_1_330, QUEUED_2_1_330, AFTER_ESC]);
+  await steerNow(took.io, "t1");
+  expect(took.calls.filter((c) => c.startsWith("keys"))).toEqual(["keys t1 ctrl+enter"]);
+});
+
+test("Esc never lands on a dialog or an agent that stopped working meanwhile", async () => {
+  let n = 0;
+  const asking = screens([QUEUED_2_1_330], () => (n++ < 2 ? "working" : "blocked"));
+  await steerNow(asking.io, "t1");
+  expect(asking.calls.filter((c) => c.startsWith("keys"))).toEqual(["keys t1 ctrl+enter"]);
+  let m = 0;
+  const done = screens([QUEUED_2_1_330], () => (m++ < 2 ? "working" : "idle"));
+  await steerNow(done.io, "t1");
+  expect(done.calls.filter((c) => c.startsWith("keys"))).toEqual(["keys t1 ctrl+enter"]);
+});
+
+test("a Claude Code that puts the message back in its box on Esc gets its Enter", async () => {
+  const back = AFTER_ESC.replace(/❯ \n/, "❯ Quick: what is 9+9?\n");
+  const s = screens([...Array(1 + STEER.grace).fill(QUEUED_2_1_330), back]);
+  await steerNow(s.io, "t1", STEER, "Quick: what is 9+9?");
+  expect(s.calls.filter((c) => c.startsWith("keys"))).toEqual(["keys t1 ctrl+enter", "keys t1 esc", "keys t1 enter"]);
+  // a draft of the person's own in it is never sent
+  const draft = screens([...Array(1 + STEER.grace).fill(QUEUED_2_1_330), AFTER_ESC.replace(/❯ \n/, "❯ something else\n")]);
+  await steerNow(draft.io, "t1", STEER, "Quick: what is 9+9?");
+  expect(draft.calls.filter((c) => c.startsWith("keys"))).toEqual(["keys t1 ctrl+enter", "keys t1 esc"]);
+});
+
+test("an unknown status still steers while the screen shows it at work", async () => {
+  const wide = QUEUED_2_1_330.replace("es…", "esc to interrupt");
+  const s = screens([wide, DRAFT.replace("half a thought", "")], () => null);
+  expect(await steerNow(s.io, "t1")).toBe(true);
+  const quiet = screens([QUEUED_2_1_330], () => null);
+  expect(await steerNow(quiet.io, "t1")).toBe(false);
+});

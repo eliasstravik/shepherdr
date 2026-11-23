@@ -1495,9 +1495,9 @@ def workers(s, t):
             if agent_running(k) and (k.get("labels") or {}).get("herdr.role") != "reviewer"]
 
 
-def tell(s, t, msg, args):
-    """Sends the task's worker a message, or starts one with it when none is left.
-    Returns (terminal, started)."""
+def tell(s, t, msg, args, person=False):
+    """Sends the task's worker a message, or starts one with it when none is left. person: the person's own words
+    (herdr-task reply), in at once even while it works (news.person_send). Returns (terminal, started)."""
     unarchive(s, t)
     live = workers(s, t)
     fresh = None if live else just_started(t)
@@ -1506,8 +1506,8 @@ def tell(s, t, msg, args):
         raise Fail(f"{s.ref(t)} started its agent moments ago ({fresh['address']}); send this again once it is up.")
     if live:
         # While the person writes to it, the message waits for them (news.py's held_pass).
-        from .news import send_or_hold
-        if not send_or_hold(live[-1]["address"], msg):
+        from .news import person_send, send_or_hold
+        if not (person_send if person else send_or_hold)(live[-1]["address"], msg):
             raise Fail(f"hc send to {live[-1]['address']} failed")
         if clear_stopped(t):  # a message to it carries on
             s.dirty = True
@@ -1569,7 +1569,7 @@ def cmd_reply(args):
                 t.pop(k, None)
             t["state"], t["reopened_at"] = "running", now()
             s.dirty = True
-        sent, started = tell(s, t, str(text), args)
+        sent, started = tell(s, t, str(text), args, person=True)
         if clear_stopped(t):
             s.dirty = True
         v = view(s, t)
