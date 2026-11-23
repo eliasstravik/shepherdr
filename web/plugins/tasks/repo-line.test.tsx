@@ -9,7 +9,7 @@ import { snapshot } from '../../demo/data.ts'
 // checks; the task's page has a strip under its title with the rest; a tap on the line opens the task at that strip.
 
 // the formatted words need a browser (DOMPurify): here they are drawn as they are
-mock.module('@plugins/chat/markdown.tsx', () => ({ Markdown: ({ text }: { text: string }) => <div className="md">{text}</div>, toHtml: (t: string) => t, linked: (t: string) => t }))
+mock.module('@plugins/chat/markdown.tsx', () => ({ Markdown: ({ text }: { text: string }) => <div className="md">{text}</div>, toHtml: (t: string) => t, linked: (t: string) => t, withLinks: (t: string) => [t] }))
 const { getState, setUI } = await import('@client/kernel.ts')
 const { GitStrip, RepoLine, openAtStrip, prState } = await import('./client.tsx')
 const { IC } = await import('@client/icons.ts')
