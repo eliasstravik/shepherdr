@@ -228,7 +228,7 @@ function taskCards(snap: Snapshot, thread: Thread): { key: string; at?: number; 
       at: t.needsAt,
       node: (
         <>
-          <button type="button" className="ref" onClick={() => open(t)}><I n="chat" c="s16" />{t.name}</button>
+          <button type="button" className="ref" onClick={() => open(t)}><StatusIcon t={t} time="side" />{t.name}</button>
           <StoppedCard t={t} />
         </>
       ),
