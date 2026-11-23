@@ -367,7 +367,7 @@ function Stuck({ chat: own, thread }: { chat: Chat | undefined; thread: Thread }
 export default definePlugin({
   name: 'terminal',
   setup(reg) {
-    reg.header.push({ order: 10, phone: true, View: TermButton })
+    reg.header.push({ order: 60, phone: true, View: TermButton })
     reg.taskHeader.push({ order: 10, View: TaskTermButton })
     reg.panes.push({ id: 'terminal', View: TerminalPane })
     reg.drawer.push({ when: (ui, thread) => !ui.phone && (thread.task ? ui.tterm : ui.term), View: Drawer })

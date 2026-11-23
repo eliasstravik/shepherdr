@@ -38,7 +38,7 @@ Settings › Plugins has the switches. They are kept as `everywhere.plugins_off`
 | Place | What goes there |
 |---|---|
 | `views` | The parts of a thread: `messages`, `box`, `taskHead`, `taskTop`, `scheduled`, `tile`, `search` |
-| `header`, `taskHeader` | Buttons in a chat's or a task's header (Terminal, Screen, Tasks, Artifacts, voice) |
+| `header`, `taskHeader` | Buttons in a chat's or a task's header (Tasks, Artifacts, voice, Terminal, Screen) |
 | `panes` | What the right-hand pane can show |
 | `bar`, `barEnd`, `barAbove` | The phone's bottom bar, its right end, and one line above it |
 | `spaceMenu`, `taskMenu`, `messageMenu` | Rows of a space's, a task's and a message's menu |
