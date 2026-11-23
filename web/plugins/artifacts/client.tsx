@@ -5,10 +5,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { PaneFrame } from '@client/App.tsx'
 import { renameDialog } from '@client/list.tsx'
-import { definePlugin, getState, notice, openArtifact, setUI, togglePane, tryAct, useSnap, useUI } from '@client/kernel.ts'
+import { definePlugin, getState, notice, openArtifact, openLink, setUI, togglePane, tryAct, useSnap, useUI } from '@client/kernel.ts'
 import { confirm, openDialog, openMenu } from '@client/overlay.tsx'
 import { Btn, cx, Empty, Hd, I, IB, Row } from '@client/ui.tsx'
 import { copyText } from '@client/copy.ts'
+import { appLink } from '@client/applink.ts'
 import { useDark } from '@client/prefs.ts'
 import type { Artifact, Chat, Message } from '@shared/types.ts'
 import { agoShort, artifactsIn, isEverything, spaceLabel } from '@shared/view.ts'
@@ -145,22 +146,72 @@ function menu(anchor: Element, a: Artifact, v: number) {
   )
 }
 
-/** The page, in a frame that cannot reach the app. Marking up: tap the page to drop a pin, then write. */
+/** What the page's frame says (the link catcher the service puts first in every artifact page): a link to open, and
+ *  whether it shows a page of the artifact. "link": another site in a new tab, this app's own (an artifact, a task, a
+ *  space) in place; "inside": the next load is the artifact's own file (a picture or a PDF says nothing). */
+export function onFrameSaid(d: unknown, here: string, open: (href: string) => void, newTab: (href: string) => void): 'page' | 'inside' | null {
+  const m = d as { shepherdr?: unknown; href?: unknown } | null
+  if (!m || typeof m !== 'object') return null
+  if (m.shepherdr === 'link' && typeof m.href === 'string') {
+    if (appLink(m.href, here)) open(m.href)
+    else if (/^https?:\/\//i.test(m.href)) newTab(m.href)
+    return null
+  }
+  return m.shepherdr === 'page' || m.shepherdr === 'inside' ? m.shepherdr : null
+}
+
+/** The page, in a frame that cannot reach the app. Marking up: tap the page to drop a pin, then write. A frame that
+ *  ends on a page it can't show (another site that refuses frames, sent there by the page's own script) gets a calm
+ *  notice with Back to the artifact, never a dead grey panel. */
 function Page({ a, v, markup, pin, setPin }: { a: Artifact; v: number; markup: boolean; pin: { x: number; y: number } | null; setPin: (p: { x: number; y: number } | null) => void }) {
   const frame = useRef<HTMLIFrameElement>(null)
+  const [load, setLoad] = useState(0)
+  const [lost, setLost] = useState(false)
+  // when the frame last said it shows a page of the artifact (its catcher says so as the page starts and on its load),
+  // whether a tap sent it to the artifact's own file, and the timer that looks after a load
+  const said = useRef(0)
+  const inside = useRef(false)
+  const look = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    inside.current = false
+    setLost(false)
+    return () => { if (look.current) clearTimeout(look.current) }
+  }, [a.id, v, load])
   // a page can send the person's answer back to its agent: parent.postMessage({ shepherdr: 'answer', text }, '*')
   useEffect(() => {
     const on = (e: MessageEvent) => {
+      if (e.source !== frame.current?.contentWindow) return
       const d = e.data as { shepherdr?: string; text?: unknown } | null
-      if (e.source !== frame.current?.contentWindow || d?.shepherdr !== 'answer' || typeof d.text !== 'string' || !d.text.trim()) return
+      const what = onFrameSaid(d, location.href, (href) => openLink(href, true), (href) => void window.open(href, '_blank', 'noopener,noreferrer'))
+      if (what === 'page') { said.current = Date.now(); setLost(false) }
+      else if (what === 'inside') inside.current = true
+      if (d?.shepherdr !== 'answer' || typeof d.text !== 'string' || !d.text.trim()) return
       void tryAct({ type: 'artifact-say', place: a.place, artifact: a.id, v, text: d.text.slice(0, 4000) }, 'Sent to the agent that made it')
     }
     addEventListener('message', on)
     return () => removeEventListener('message', on)
   }, [a.id, a.place, v])
+  // after each load, a moment for the page's word (it comes just before or just after the load; a message sent as the
+  // frame leaves a page can't be told from another's, so there's none): no word near the load, and no tap to the
+  // artifact's own file, is a page that can't be shown here
+  const loaded = () => {
+    const at = Date.now()
+    if (look.current) clearTimeout(look.current)
+    look.current = setTimeout(() => {
+      setLost(Math.abs(said.current - at) > 1000 && !inside.current)
+      inside.current = false
+    }, 1200)
+  }
   return (
     <div className="pagebox">
-      <iframe ref={frame} className="page" title={a.title} src={pageUrl(a, v)} sandbox="allow-scripts allow-forms allow-popups" referrerPolicy="no-referrer" />
+      <iframe key={`${a.id}|${v}|${load}`} ref={frame} className="page" title={a.title} src={pageUrl(a, v)} sandbox="allow-scripts allow-forms allow-popups" referrerPolicy="no-referrer" onLoad={loaded} />
+      {lost && (
+        <div className="page-lost empty" role="status">
+          <b>Couldn't show this page</b>
+          <span>It doesn't open inside Shepherdr.</span>
+          <div className="acts"><Btn kind="pri" onClick={() => setLoad(load + 1)}>Back to the artifact</Btn></div>
+        </div>
+      )}
       {markup && (
         <div
           role="button"

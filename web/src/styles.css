@@ -95,6 +95,9 @@ div.b[data-menu]{cursor:pointer}
 .pagebox{position:relative;flex:1;display:flex;min-width:0;min-height:0}
 .page{display:block;flex:1;width:100%;min-height:320px;border:0;background:#fff}
 .scroll:has(>.pagebox){padding:0;display:flex}
+/* a frame that ended on a page it can't show: a calm word over it, and the way back */
+.page-lost{position:absolute;inset:0;align-content:center;background:var(--canvas)}
+.page-lost .acts{justify-content:center;margin-top:12px}
 .prev{position:relative;display:block;aspect-ratio:16/10;border-radius:8px;background:var(--raised);overflow:hidden}
 .prev::after{content:"";position:absolute;inset:0;border-radius:8px;box-shadow:inset 0 0 0 1px var(--line)}
 .prev img{display:block;width:100%;height:100%;object-fit:cover;object-position:top}

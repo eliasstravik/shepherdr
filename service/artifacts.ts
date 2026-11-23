@@ -14,6 +14,8 @@ import { SH } from "../core/paths.js";
 import type { Hub } from "./hub.ts";
 import { served } from "./media.ts";
 import { spawn } from "./spawn.ts";
+import { withLinks } from "./artifact-links.ts";
+export { LINKS_JS, withLinks } from "./artifact-links.ts";
 
 // Every registry on a machine, each followed by a record separator.
 const READ_ARTS = SH + 'cd "$SHEP_ARTIFACTS" 2>/dev/null || exit 0; for f in *.json .*.json; do [ -f "$f" ] && cat "$f" && printf "\\n\\036\\n"; done; true';
@@ -225,6 +227,7 @@ export class Artifacts {
 
 const strip = (path: string) => path.replace(/^\/shepherdr(?=\/)/, "");
 
+
 /**
  * An artifact's page and its picture:
  *   GET /api/artifacts/<id>/page/[<path>]?v=N[&on=machine]   the link the app frames: answers with a redirect to the
@@ -250,7 +253,13 @@ export async function artifactRoute(req: Request, url: URL): Promise<Response | 
     const parts = pageParts(rest === "" || rest.endsWith("/") ? rest + "index.html" : rest);
     if (!parts) return none("no such file");
     // a page's own requests come from its sandbox (no origin): its scripts may read its own files
-    return arts.file(id, Number(n), parts, machine, range, { ...sandboxed, "access-control-allow-origin": "*" });
+    const r = await arts.file(id, Number(n), parts, machine, range, { ...sandboxed, "access-control-allow-origin": "*" });
+    // a page (whole, never a part of one): with its link catcher first
+    if (!/^text\/html/.test(r.headers.get("content-type") ?? "") || (r.status !== 200 && r.status !== 206)) return r;
+    const headers = new Headers(r.headers);
+    for (const h of ["content-length", "content-range", "accept-ranges"]) headers.delete(h);
+    const whole = r.status === 206 ? await arts.file(id, Number(n), parts, machine, null, {}) : r;
+    return new Response(req.method === "HEAD" ? null : withLinks(await whole.text()), { status: 200, headers });
   }
 
   const on = url.searchParams.get("on") || null;
