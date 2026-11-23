@@ -3,13 +3,13 @@
 // places; the layout itself is the design system's (ds.css).
 import { useEffect, useRef, type ReactNode } from 'react'
 import type { Snapshot } from '@shared/types.ts'
-import { downWords, folderOf, isEverything, needsCount, placeDown, placeOf, taskOf, type Space } from '@shared/view.ts'
+import { downWords, folderName, folderOf, isEverything, needsCount, placeDown, placeOf, taskOf, type Space } from '@shared/view.ts'
 import { getState, openSettings, registry, setUI, sideHidden, togglePane, useNotice, useSnap, useUI, type Thread } from './kernel.ts'
-import { List, spaceMenu } from './list.tsx'
+import { folderMenu, List, spaceMenu } from './list.tsx'
 import { closeTop, Layers } from './overlay.tsx'
 import { edge } from './resize.ts'
 import { SettingsWindow } from './settings.tsx'
-import { cx, Empty, Folder, I, IB, useScrolled } from './ui.tsx'
+import { cx, Empty, I, IB, useScrolled } from './ui.tsx'
 
 /** the thread the middle column shows: the open task when it has the middle, else the space's chat */
 export function middleThread(snap: Snapshot, ui: { at: string; task: string | null; wide: boolean }): Thread | null {
@@ -25,6 +25,21 @@ export function placeholderOf(snap: Snapshot, thread: Thread): string {
   return isEverything(snap, thread.place) ? 'Message Shepherdr' : `Message #${placeOf(snap, thread.place)?.name ?? ''}`
 }
 
+/** The open space's folder beside its name (SHEP-316): a quiet chip, Home folder / Root folder in words, its machine
+ *  when it is another; a long path gives way from its start. A tap shows the whole path with Copy. */
+function FolderChip({ snap, place }: { snap: Snapshot; place: Space }) {
+  const f = folderOf(snap, place)
+  if (!f.short) return null
+  const name = folderName(f.short)
+  return (
+    <button type="button" className="fchip" aria-haspopup="menu" aria-label={`Folder: ${f.full}${f.machine ? ` on ${f.machine}` : ''}`} onClick={(e) => folderMenu(e.currentTarget, place.id)}>
+      <I n="folder" c="s16" />
+      <span className={cx('fct', name === f.short && 'cut')}><bdi>{name}</bdi></span>
+      {f.machine && <span className="fcm">{f.machine}</span>}
+    </button>
+  )
+}
+
 function ChatHeader({ snap, thread, place, scrolled }: { snap: Snapshot; thread: Thread; place: Space; scrolled: boolean }) {
   const phone = useUI((u) => u.phone)
   const hidden = useUI(sideHidden)
@@ -35,15 +50,12 @@ function ChatHeader({ snap, thread, place, scrolled }: { snap: Snapshot; thread:
     <header className={cx('hd', scrolled && 'sc')}>
       {phone ? <IB icon="burger" label="Spaces" onClick={() => setUI({ drawer: true })} /> : hidden ? <IB icon="panel" label="Show the list" onClick={showList} /> : null}
       <div className="ttl">
-        <button type="button" className="tbtn two" aria-haspopup="menu" onClick={(e) => spaceMenu(e.currentTarget, place.id)}>
-          <span className="tn">
-            {!every && <I n="hash" c="s16" />}
-            <span>{every ? 'Everything' : place.name}</span>
-            <I n="down" c="s16 c-mute" />
-          </span>
-          {/* its folder, under its name (SHEP-302): the whole path is at the top of its menu */}
-          <Folder f={folderOf(snap, place)} />
+        <button type="button" className="tbtn" aria-haspopup="menu" onClick={(e) => spaceMenu(e.currentTarget, place.id)}>
+          {!every && <I n="hash" c="s16" />}
+          <span>{every ? 'Everything' : place.name}</span>
+          <I n="down" c="s16 c-mute" />
         </button>
+        {!every && <FolderChip snap={snap} place={place} />}
       </div>
       {registry.header.filter((h) => !phone || h.phone).map((h, i) => <h.View key={i} thread={thread} />)}
     </header>

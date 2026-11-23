@@ -33,20 +33,15 @@ export function spaceLabel(snap: Snapshot, id: string): string {
 
 export const machineOf = (snap: Snapshot, key: string): Machine | undefined => snap.machines.find((m) => m.machine === key)
 
-/** A space's folder as it shows (SHEP-302): its own machine's home as ~ (the service gives it so), split so the end, the
- *  folder's own name, stays whole while the rest gives way ("~/dev/clients" + "/shop"), and the machine named when it
- *  is not the one Shepherdr runs on. `full` is the whole path on that machine. */
-export function folderOf(snap: Snapshot, p: Pick<Place, 'machine' | 'where' | 'folder'>): { head: string; tail: string; full: string; machine: string | null } {
+/** A space's folder (SHEP-302): `short` as it shows, its own machine's home as ~ (the service gives it so); `full` the
+ *  whole path on its machine; `machine` named when it is not the one Shepherdr runs on. */
+export function folderOf(snap: Snapshot, p: Pick<Place, 'machine' | 'where' | 'folder'>): { short: string; full: string; machine: string | null } {
   const short = (p.where || p.folder || '').replace(/(.)\/+$/, '$1')
-  // the slash goes with the end, so a cut start reads "…/shop"
-  const cut = Math.max(0, short.lastIndexOf('/'))
-  return {
-    head: short.slice(0, cut),
-    tail: short.slice(cut),
-    full: p.folder || short,
-    machine: p.machine && p.machine !== snap.host ? machineLabel(snap, p.machine) : null,
-  }
+  return { short, full: p.folder || short, machine: p.machine && p.machine !== snap.host ? machineLabel(snap, p.machine) : null }
 }
+
+/** a folder as it shows, in words where it would be a lone symbol (SHEP-316): ~ is Home folder, / is Root folder */
+export const folderName = (path: string) => (path === '~' ? 'Home folder' : path === '/' || path === '' ? 'Root folder' : path)
 export const machineLabel = (snap: Snapshot, key: string) => machineOf(snap, key)?.name ?? key
 
 /** a machine the serving one can't reach now */
