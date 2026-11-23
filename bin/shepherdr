@@ -1343,8 +1343,21 @@ STALE_RECORDS = {"shepherdr.secrets": ("Shepherdr's record of which machine keep
                                     "on the machine that should serve it, run `shepherdr web serve-from here`")}
 
 
+def link_words(x):
+    """SHEP-310: a link in Shepherdr's session that another herdr-core answers on (herdr-task carry-over's "links" row),
+    in plain words with what to run."""
+    fix = " && ".join(f"`{c}`" for c in x.get("fix") or [])
+    head = (f"the link to {x['name']} is broken: a different herdr-core answers there now (it was set up again since it was linked), "
+            f"so nothing reaches {x['name']}")
+    if x.get("state") == "relinked":
+        return f"the link to {x['name']} was broken (a different herdr-core answered there): linked again"
+    if x.get("state") == "would-relink":
+        return f"{head}: `herdr-task carry-over` links it again" + (f" (by hand: {fix})" if fix else "")
+    return f"{head}; it wasn't linked again ({x.get('why') or 'it failed'})" + (f": run {fix}" if fix else "")
+
+
 def records_naming_nobody(root, run=subprocess.run):
-    """doctor's lines for a record (who keeps the secrets, Serve from) in Shepherdr's session that names a machine by an
+    """doctor's lines for a link another herdr-core answers on (SHEP-310), and for a record (who keeps the secrets, Serve from) in Shepherdr's session that names a machine by an
     id no machine has: the installed herdr-task's `carry-over --records --dry-run`, read-only. [] when none does, or it
     can't be asked (no hc, an older herdr-task)."""
     helper = os.path.join(root, SHARE, "mods", "tasks", "bin", "herdr-task")
@@ -1356,7 +1369,7 @@ def records_naming_nobody(root, run=subprocess.run):
         out = json.loads(p.stdout.strip().splitlines()[-1])
     except (OSError, subprocess.SubprocessError, ValueError, IndexError):
         return []
-    lines = []
+    lines = [link_words(x) for x in (out.get("links") if isinstance(out, dict) else None) or [] if isinstance(x, dict) and x.get("name")]
     for x in (out.get("records") if isinstance(out, dict) else None) or []:
         if not isinstance(x, dict) or x.get("name") not in STALE_RECORDS or x.get("state") not in ("would-repair", "unknown"):
             continue
@@ -1370,21 +1383,31 @@ def records_naming_nobody(root, run=subprocess.run):
     return lines
 
 
-def carry_over_session(r, rec, home, run=subprocess.run):
+def carry_over_session(r, rec, home, run=subprocess.run, links_only=False):
     """At the switch, once the files are in place and before the service starts: what 3.1 kept in herdr-core's
     default session (the shared document with the spaces, who keeps the secrets, Serve from, the window's spaces,
     the machines) goes into Shepherdr's own session, and 3.1's scheduler there is removed: the new herdr-task's own
     `carry-over`, which replaces nothing and is safe to run again. Only on the real home: a scratch root has no
     herdr-core of its own. Never stops the install: what didn't go is a note, and the record says so (rec
-    "carry_over": "done" | "waiting"), so the next update tries again."""
+    "carry_over": "done" | "waiting"), so the next update tries again. links_only (SHEP-310, every other update): only
+    the links another herdr-core answers on, linked again where safe (`carry-over --links`), else a note with the fix."""
     if not home:
         return
     if r.dry:
-        say("  session: would carry Shepherdr's documents and machines over from herdr-core's default session (herdr-task carry-over)")
+        say("  session: would " + ("link again any machine another herdr-core answers on (herdr-task carry-over --links)" if links_only else
+                                   "carry Shepherdr's documents and machines over from herdr-core's default session (herdr-task carry-over)"))
         return
     helper = r.p(f"{SHARE}/mods/tasks/bin/herdr-task")
     env = carry_env()
     out, err = None, ""
+    if links_only:
+        try:
+            p = run([sys.executable, helper, "carry-over", "--links", "--json"], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=300)
+            out = json.loads(p.stdout.strip().splitlines()[-1]) if p.stdout.strip() else None
+        except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+            out = None   # an older herdr-task has no --links: nothing to say
+        say_links(r, out if isinstance(out, dict) else {})
+        return
     try:
         p = run([sys.executable, helper, "carry-over", "--json"], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=300)
         err = p.stderr.strip()
@@ -1396,6 +1419,7 @@ def carry_over_session(r, rec, home, run=subprocess.run):
         r.notes.append(f"Shepherdr's data in herdr-core's default session wasn't carried over ({(err.splitlines() or ['herdr-task carry-over failed'])[-1]}): "
                        "`herdr-task carry-over` tries again")
         return
+    say_links(r, out)
     rows = (out.get("machines") or []) + (out.get("documents") or [])
     agents = out.get("agents") or []
     label = lambda x: x.get("name", "?") + (f" on {x['machine']}" if x.get("machine") else "")
@@ -1430,6 +1454,22 @@ def carry_over_session(r, rec, home, run=subprocess.run):
     rec["carry_over"] = "waiting" if left or not out.get("ok", True) else "done"
     # an older herdr-task says no records: it doesn't look at them, and the next update asks again
     rec["carry_over_records"] = "done" if "records" in out and not any(x.get("state") in ("waiting", "failed") for x in records) else "waiting"
+
+
+def say_links(r, out):
+    """carry-over's "links" rows (SHEP-310): one linked again is said; one that wasn't is a note with the commands. Its
+    records that followed are said too."""
+    for x in out.get("links") or []:
+        if not isinstance(x, dict) or not x.get("name"):
+            continue
+        if x.get("state") == "relinked":
+            say(f"  session: {link_words(x)}")
+        else:
+            r.notes.append(link_words(x))
+    if "machines" not in out:  # --links alone: the records that followed a machine linked again
+        fixed = [x.get("name", "?") + (f" on {x['machine']}" if x.get("machine") else "") for x in out.get("records") or [] if x.get("state") == "repaired"]
+        if fixed:
+            say("  session: changed to the id of the machine linked again: " + ", ".join(fixed))
 
 
 def convert_artifacts(r):
@@ -1584,6 +1624,8 @@ def finish_install(a, r, rec, old, src, home, root, actions, old_files, gone, bu
     # SHEP-305: an install switched by 3.2.0 has no carry_over_records yet: its records may name old ids, so once more
     if switching or rec.get("carry_over") == "waiting" or rec.get("carry_over_agents") != "done" or rec.get("carry_over_records") != "done":
         carry_over_session(r, rec, home)   # and its documents and machines in Shepherdr's own herdr-core session
+    else:
+        carry_over_session(r, rec, home, links_only=True)   # SHEP-310: a link another herdr-core answers on, linked again
     set_port(a, rec)
     set_https_port(a, root)
     started = time.time()

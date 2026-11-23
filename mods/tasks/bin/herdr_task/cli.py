@@ -465,6 +465,8 @@ def main():
     c.add_argument("--agents", action="store_true", help="only Shepherdr's agents still in the default session (with --dry-run: which are left, as doctor asks)")
     c.add_argument("--records", action="store_true", help="only the records naming a machine by id (who keeps the secrets, Serve from): one naming an id "
                                                           "from the default session is changed to that machine's id now (with --dry-run: which, as doctor asks)")
+    c.add_argument("--links", action="store_true", help="only the links another herdr-core answers on now (\"a different core answers there\"): each "
+                                                        "linked again where that is safe, and the records naming it follow (with --dry-run: which)")
     c.add_argument("--json", action="store_true")
     c.set_defaults(fn=lambda a: __import__("herdr_task.carry_over", fromlist=["cmd_carry_over"]).cmd_carry_over(a))
     c = ma.add_parser("reach", help="the reach map: the machines this one links to over herdr-core, and through each, what that one links to (contacts nothing else)")

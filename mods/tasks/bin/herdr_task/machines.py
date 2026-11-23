@@ -415,7 +415,8 @@ def sync(names=None, op="install", force=False):
             out[name] = {"machine": name, "state": "held", "details": [f"{held} (shepherdr doctor lets it go)"], "version": m["version"]}
             return
         out[name] = sync_machine(name, m, op, force) if links[name].get("state") == "connected" else \
-            {"machine": name, "state": "unreachable", "details": [f"herdr-core link {links[name].get('state')}"], "version": m["version"]}
+            {"machine": name, "state": "unreachable", "version": m["version"], "details": [f"herdr-core link {links[name].get('state')}" + (
+                f": {STALE_WORDS} (`herdr-task carry-over` links it again)" if stale_why(links[name].get("why")) else "")]}
     threads = [threading.Thread(target=one, args=(n,)) for n in targets]
     for t in threads:
         t.start()
@@ -466,6 +467,103 @@ def adopt(dry=False):
         out.append({"name": name, "state": "added"} if r.returncode == 0 else
                    {"name": name, "state": "failed", "error": (r.stderr or r.stdout).strip()[-300:]})
     return out
+
+
+# ---- a link that holds another core's id (SHEP-310) ---------------------------------------
+# herdr-core keeps, with each link, the id of the core that answered when it was added, and refuses a core with any
+# other id there ("unreachable: a different core answers there (\"<id>\")"): the far side's core for that session was
+# made anew (its core.json), or the link was added while the far side answered from another session (its default one:
+# an hc there that didn't know sessions yet). The link then stays down for good, though the machine is up.
+# stale_links finds them; relink_stale links each again where that is safe: the same target, name and session, and the
+# far side answers there from the same (Shepherdr's, never the default) session and host, with the very id herdr-core saw. Nothing else is
+# contacted: only the address the link already holds.
+
+DIFFERENT_CORE = re.compile(r'a different core answers there \("?([0-9A-Za-z_-]+)"?\)')
+# In plain words, for the person (home's health, doctor, sync's report; the web app says its own, web/shared/view.ts)
+STALE_WORDS = "a different herdr-core answers there now (it was set up again since it was linked), so nothing gets through"
+RELINK_S = 90
+
+
+def stale_why(why):
+    """The id that answers instead, when a link's why says another core answers there; else None."""
+    mt = DIFFERENT_CORE.search(str(why or ""))
+    return mt.group(1) if mt else None
+
+
+def stale_links(ms=None):
+    """This session's links whose far side answers with another core than the one they hold (module note above):
+    [{name, id (held), answers, target, via, session, host}]."""
+    out = []
+    for m in connected_machines() if ms is None else ms:
+        answers = stale_why(m.get("why"))
+        if not m.get("name") or m.get("temporary") or m.get("state") == "connected" or not answers:
+            continue
+        out.append({"name": m["name"], "id": m.get("id"), "answers": answers, "target": m.get("target"), "via": bool(m.get("via")),
+                    "session": m.get("session") or "default", "host": m.get("host")})
+    return out
+
+
+def relink_commands(x):
+    """What the person runs to link it again by hand, exactly (in Shepherdr's session), then the records put right."""
+    pre = f"HC_SESSION={SESSION} " if SESSION != "default" else ""
+    how = f"--via {shlex.quote(x['target'])}" if x.get("via") else shlex.quote(str(x.get("target") or "<its address>"))
+    sess = f" --session {shlex.quote(x['session'])}" if x.get("session") and x["session"] != "default" else ""
+    return [f"{pre}hc machine rm {shlex.quote(x['name'])}", f"{pre}hc machine add {how} --name {shlex.quote(x['name'])}{sess}",
+            "herdr-task carry-over"]
+
+
+def _hc_quiet(args, timeout=RELINK_S):
+    """hc in Shepherdr's session with no terminal to ask on (no install offered, no password typed): (code, json, error)."""
+    guard(["hc"])
+    try:
+        r = subprocess.run(["hc", *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           universal_newlines=True, timeout=timeout, start_new_session=True)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 255, None, str(e)
+    try:
+        got = json.loads(r.stdout) if r.stdout.strip() else None
+    except ValueError:
+        got = None
+    return r.returncode, got, (r.stderr or r.stdout or "").strip()[-300:]
+
+
+def relink_one(x):
+    """Links x (a stale_links row) again: added anew under a spare name, checked, then put in the old one's place.
+    {state: relinked | refused | failed, to?, why?}."""
+    if x["session"] == "default" and SESSION != "default":
+        return {"state": "refused", "why": f"it leads to herdr-core's default session there, not Shepherdr's ({SESSION})"}
+    if not x.get("target"):
+        return {"state": "refused", "why": "herdr-core doesn't say its address"}
+    spare = f"{x['name'][:24]}-relink"
+    how = ["--via", x["target"]] if x["via"] else [x["target"]]
+    code, got, err = _hc_quiet(["machine", "add", *how, "--name", spare, "--session", x["session"], "--json"])
+    if code != 0 or not isinstance(got, dict):
+        return {"state": "failed", "why": f"adding it again didn't work: {err or 'no answer'}"}
+    unsafe = ("it answers from another session there" if (got.get("session") or "default") != x["session"] else
+              f"another host answers there ({got.get('host')}, not {x['host']})" if x.get("host") and got.get("host") != x["host"] else
+              "the core that answers there changed again" if got.get("id") != x["answers"] else None)
+    if unsafe:
+        _hc_quiet(["machine", "rm", spare])
+        return {"state": "refused", "why": f"not linked again: {unsafe}"}
+    code, _, err = _hc_quiet(["machine", "rm", x["name"]])
+    if code != 0:
+        _hc_quiet(["machine", "rm", spare])
+        return {"state": "failed", "why": f"the old link couldn't be removed: {err}"}
+    code, _, err = _hc_quiet(["machine", "rename", spare, x["name"]])
+    if code != 0:
+        return {"state": "failed", "why": f"linked again as {spare}, but it couldn't take its name back ({err}): "
+                                         f"HC_SESSION={SESSION} hc machine rename {spare} {x['name']}"}
+    return {"state": "relinked", "to": got.get("id")}
+
+
+def relink_stale(dry=False):
+    """Each stale link (stale_links), linked again (relink_one) or, dry, only found. [{name, id, answers, state:
+    relinked | would-relink | refused | failed, to?, why?, fix: [commands]}]."""
+    rows = []
+    for x in stale_links():
+        row = {"name": x["name"], "id": x["id"], "answers": x["answers"], "fix": relink_commands(x)}
+        rows.append({**row, "state": "would-relink"} if dry else {**row, **relink_one(x)})
+    return rows
 
 
 def cmd_machines(args):

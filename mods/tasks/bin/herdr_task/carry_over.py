@@ -24,6 +24,12 @@ The default session is only read, but for that one terminal and the agents moved
 left alone, and nothing in Shepherdr's session is replaced.
 shepherdr.node is not carried: each service writes its own every minute.
 
+SHEP-310: a link in Shepherdr's session can hold an id that isn't its machine's there (the far side's core for that
+session was made anew, or answered from its default session when the link was added): herdr-core then refuses it,
+"a different core answers there". Each run (and doctor, dry) looks for those first and links each again where that is
+safe (machines.relink_stale: same address, name and session, the far side answers as Shepherdr's session from the same
+host); the records naming its old id follow it (records_pass). One that isn't safe is said, with the commands.
+
 SHEP-305: a record can still name a machine by its default-session id after the switch (3.2.0 left some so: the Mac
 then didn't know it keeps the secrets, and voice lost its key). Each run also looks at the records in Shepherdr's
 session, here and on each machine it links now (records_pass): one naming an id no machine has there, but that a
@@ -384,14 +390,33 @@ def move_one(k, dry, have, me, kids, agent_running, status_word, read_record, re
     return {**base, "state": "moved", **({"to": to} if to else {})}
 
 
-def carry_over(dry=False, wait=WAIT_S, agents_only=False, records_only=False):
-    """Does it (module doc). {from, to, machines, documents, records, scheduler, agents, ok}. agents_only: only the
-    agents, records_only: only the records (doctor's looks, with dry)."""
-    out = {"from": OLD_SESSION, "to": SESSION, "dry_run": bool(dry), "machines": [], "documents": [], "records": [], "scheduler": "none", "agents": [], "ok": True}
+def links_pass(out, dry):
+    """SHEP-310: each link in Shepherdr's session that another core answers on is linked again where that is safe
+    (machines.relink_stale), first, so the records below can follow it. {old id: new id} of those linked again."""
+    from .machines import relink_stale
+    out["links"] = relink_stale(dry)
+    return {x["id"]: x["to"] for x in out["links"] if x["state"] == "relinked" and x.get("id") and x.get("to")}
+
+
+def ok_of(out):
+    rows = out["machines"] + out["documents"] + out["records"] + out["agents"] + out["links"]
+    return not any(x.get("state") in ("failed", "refused") for x in rows) and out["scheduler"] != "failed"
+
+
+def carry_over(dry=False, wait=WAIT_S, agents_only=False, records_only=False, links_only=False):
+    """Does it (module doc). {from, to, machines, links, documents, records, scheduler, agents, ok}. agents_only: only
+    the agents, records_only: only the links and records (doctor's looks, with dry), links_only: only the links (and
+    the records naming a machine linked again: an update's run when there's nothing else to carry)."""
+    out = {"from": OLD_SESSION, "to": SESSION, "dry_run": bool(dry), "machines": [], "links": [], "documents": [], "records": [], "scheduler": "none", "agents": [], "ok": True}
     if FOREIGN_SESSION:
         raise Fail(f"carry-over runs in Shepherdr's own session ({SESSION}); this is another (HC_SESSION).")
-    if OLD_SESSION == SESSION:
-        out["note"] = "Shepherdr's session is the default one here: nothing to carry over."
+    moved = {} if agents_only else links_pass(out, dry)
+    if links_only or OLD_SESSION == SESSION:
+        if OLD_SESSION == SESSION and not links_only:
+            out["note"] = "Shepherdr's session is the default one here: nothing to carry over."
+        if moved:
+            out["records"] = records_pass(who(SESSION), moved, dry)
+        out["ok"] = ok_of(out)
         return out
     has_old = os.path.isfile(os.path.join(core_dir(OLD_SESSION), "core.json"))
     if records_only:
@@ -401,11 +426,14 @@ def carry_over(dry=False, wait=WAIT_S, agents_only=False, records_only=False):
             ids = id_map(who(OLD_SESSION), new) if has_old else {}
         except Fail:
             ids = {}   # the default session doesn't answer: an old id then reads as unknown
-        out["records"] = records_pass(new, ids, dry)
-        out["ok"] = not any(x["state"] == "failed" for x in out["records"])
+        out["records"] = records_pass(new, {**ids, **moved}, dry)
+        out["ok"] = ok_of(out)
         return out
     if not has_old:
         out["note"] = f"herdr-core has no {OLD_SESSION} session here: nothing to carry over."
+        if moved:
+            out["records"] = records_pass(who(SESSION), moved, dry)
+        out["ok"] = ok_of(out)
         return out
     if agents_only:
         out["agents"] = agents_pass(dry)
@@ -416,13 +444,15 @@ def carry_over(dry=False, wait=WAIT_S, agents_only=False, records_only=False):
     old = who(OLD_SESSION)
     new = who(SESSION)
     # Links just added need a moment: wait (a little) for each machine the old session reaches to answer in Shepherdr's.
+    # (not one whose link another core answers on and wasn't linked again: that one won't come up by waiting)
+    broken = {x["name"] for x in out["links"] if x["state"] != "relinked"}
     up = lambda: all((new["machines"].get(n) or {}).get("state") == "connected" for n, m in old["machines"].items()
-                     if m.get("state") == "connected" and n in new["machines"])
+                     if m.get("state") == "connected" and n in new["machines"] and n not in broken)
     end = time.monotonic() + (0 if dry else max(0, wait))
     while not up() and time.monotonic() < end:
         time.sleep(1)
         new = who(SESSION)
-    ids = id_map(old, new)
+    ids = {**id_map(old, new), **moved}
     name_of = {m["id"]: n for n, m in old["machines"].items() if m.get("id")}
 
     def copy(name, on=None):
@@ -465,7 +495,7 @@ def carry_over(dry=False, wait=WAIT_S, agents_only=False, records_only=False):
     out["records"] = records_pass(new, ids, dry)
     out["scheduler"] = old_scheduler(dry)
     out["agents"] = agents_pass(dry)
-    out["ok"] = not any(x.get("state") == "failed" for x in out["machines"] + out["documents"] + out["records"] + out["agents"]) and out["scheduler"] != "failed"
+    out["ok"] = ok_of(out)
     return out
 
 
@@ -477,16 +507,31 @@ WORDS = {"moved": "moved into Shepherdr's session", "would-move": "would move in
          }
 
 
+def link_line(x):
+    """One stale link's line (links_pass), in plain words, with the commands when it's still to do."""
+    from .machines import STALE_WORDS
+    if x["state"] == "relinked":
+        return f"machine {x['name']}: a different herdr-core answered there (it was set up again since it was linked): linked again"
+    head = f"machine {x['name']}: {STALE_WORDS}"
+    fix = "; by hand: " + " && ".join(f"`{c}`" for c in x.get("fix") or [])
+    return head + {"relinked": ": linked again",
+                   "would-relink": ": `herdr-task carry-over` links it again" + fix,
+                   "refused": f": not linked again ({x.get('why')})" + fix,
+                   "failed": f": linking it again failed ({x.get('why')})" + fix}.get(x["state"], "")
+
+
 def cmd_carry_over(args):
-    out = carry_over(getattr(args, "dry_run", False), getattr(args, "wait", WAIT_S), getattr(args, "agents", False), getattr(args, "records", False))
+    out = carry_over(getattr(args, "dry_run", False), getattr(args, "wait", WAIT_S), getattr(args, "agents", False), getattr(args, "records", False),
+                     getattr(args, "links", False))
     lines = [out["note"]] if out.get("note") else []
     lines += [f"machine {m['name']}: {WORDS.get(m['state'], m['state'])}" + (f" ({m['error']})" if m.get("error") else "") for m in out["machines"]]
+    lines += [link_line(x) for x in out["links"]]
     lines += [f"{d['name']}{' on ' + d['machine'] if d.get('machine') else ''}: {WORDS.get(d['state'], d['state'])}" + (f" ({d['why']})" if d.get("why") else "")
               for d in out["documents"]]
     for x in out["records"]:
         where = f" on {x['machine']}" if x.get("machine") else ""
         lines.append(f"{x['name']}{where} ({ABOUT[x['name']]}) " + {
-            "repaired": "named a machine by its id from before 3.2: changed to its id now",
+            "repaired": "named a machine by an old id (from before 3.2, or before it was linked again): changed to its id now",
             "would-repair": "names a machine by its id from before 3.2: would be changed to its id now",
             "unknown": "names a machine no machine here knows: " + FIX[x["name"]],
             "waiting": "was written meanwhile: a later run looks again"}.get(x["state"], "couldn't be changed") + (f" ({x['why']})" if x["state"] == "failed" else ""))

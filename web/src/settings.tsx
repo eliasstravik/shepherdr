@@ -242,7 +242,7 @@ function Machines({ snap }: { snap: Snapshot }) {
       {warns.map((m) => (
         <div className="banner" key={m.id}>
           <I n="warn" c="c-ask" />
-          <span className="n">{unreachable(m) ? `Can't reach ${m.name}${m.unreachableSince ? ` · last seen ${m.unreachableSince}` : ''}` : `${m.name}: ${machineWarn(m).toLowerCase()}`}</span>
+          <span className="n">{unreachable(m) ? `Can't reach ${m.name}${m.unreachableSince ? ` · last seen ${m.unreachableSince}` : ''}${m.linkWhy ? `: its link is broken. ${m.linkWhy}` : ''}` : `${m.name}: ${machineWarn(m).toLowerCase()}`}</span>
         </div>
       ))}
       {snap.machines.map((m) => {
@@ -253,7 +253,7 @@ function Machines({ snap }: { snap: Snapshot }) {
           <div className="mcard" key={m.id}>
             <div>
               <div className="nm">{m.name}</div>
-              <div className="hint">{m.machine === snap.host ? 'Serves this app' : 'Linked'} · {off ? `can't reach it${m.unreachableSince ? ` since ${m.unreachableSince}` : ''}` : `${agents} ${agents === 1 ? 'agent' : 'agents'} running`}</div>
+              <div className="hint">{m.machine === snap.host ? 'Serves this app' : 'Linked'} · {off ? `can't reach it${m.unreachableSince ? ` since ${m.unreachableSince}` : ''}${m.linkWhy ? ': its link is broken' : ''}` : `${agents} ${agents === 1 ? 'agent' : 'agents'} running`}</div>
             </div>
             {!off && (
               <div className="tri">

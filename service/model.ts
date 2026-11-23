@@ -46,12 +46,12 @@ const missingDoc = (e: unknown) => ["not_found", "document_not_found", "doc_not_
 export class Model {
   private lists = new Map<string | null, List[]>();   // machine (null: here) -> its task lists
   private machines: string[] = [];                    // connected other machines
-  private known: { name: string; state: string }[] = []; // every other machine, with its state (the sidebar's headers)
+  private known: { name: string; state: string; why?: string }[] = []; // every other machine, with its state (the sidebar's headers) and herdr-core's why when down
   private timer: ReturnType<typeof setTimeout> | null = null;
   private settleTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Told each build: what the screen's snapshot is made from (compat.ts). */
-  onBuild: ((b: { spaces: any[]; sections: any[]; rows: any[]; machines: string[]; known: { name: string; state: string }[]; automations: any[] }) => void) | null = null;
+  onBuild: ((b: { spaces: any[]; sections: any[]; rows: any[]; machines: string[]; known: { name: string; state: string; why?: string }[]; automations: any[] }) => void) | null = null;
 
   /** The service's shared document (the spaces, the person's pins and the sidebar's groups and order). */
   doc: () => Record<string, any> = () => ({});
@@ -121,7 +121,7 @@ export class Model {
       const r = await this.hub.call<{ machines: any[] }>("machine.list", {});
       this.machines = r.machines.filter((m) => m.state === "connected").map((m) => m.name);
       // every machine the window's sidebar lists, connected or not (a temporary one aside): an offline one reads "Offline"
-      this.known = r.machines.filter((m) => !m.temporary).map((m) => ({ name: m.name, state: String(m.state ?? "") }));
+      this.known = r.machines.filter((m) => !m.temporary).map((m) => ({ name: m.name, state: String(m.state ?? ""), ...(typeof m.why === "string" && m.why ? { why: m.why } : {}) }));
     } catch {}
     await Promise.all([this.carry(), this.readLists(null), ...this.machines.map((m) => this.readLists(m))]);
     this.build();
