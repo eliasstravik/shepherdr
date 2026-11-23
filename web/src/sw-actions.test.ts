@@ -10,7 +10,7 @@ const SRC = readFileSync(join(import.meta.dir, '../public/sw.js'), 'utf8')
 const SCOPE = 'https://box.example.test/shepherdr/'
 
 type Shown = { title: string; options: any }
-function worker(answer: (body: any) => { status: number; body: unknown }, opts: { max?: number; reply?: boolean } = {}) {
+function worker(answer: (body: any) => { status: number; body: unknown }, opts: { max?: number; reply?: boolean; windows?: any[] } = {}) {
   const listeners: Record<string, (e: any) => void> = {}
   const shown: Shown[] = []
   const posted: any[] = []
@@ -36,7 +36,7 @@ function worker(answer: (body: any) => { status: number; body: unknown }, opts: 
   const self: any = {
     registration: reg,
     navigator: {},
-    clients: { matchAll: async () => [], openWindow: async (u: string) => { opened.push(u) }, claim: async () => undefined },
+    clients: { matchAll: async () => opts.windows ?? [], openWindow: async (u: string) => { opened.push(u) }, claim: async () => undefined },
     addEventListener: (k: string, fn: (e: any) => void) => { listeners[k] = fn },
     skipWaiting: () => undefined,
   }
@@ -129,4 +129,31 @@ test('one button at most, whatever the server sends (Chrome on Android sends eve
   const none = worker(() => ({ status: 200, body: {} }), { max: 0 })
   await none.push(ready)
   expect(none.shown[0].options.actions).toBeUndefined()
+})
+
+// SHEP-338: with the app on screen on this device, an alert shows nothing here (the app's own quiet sign is enough)
+const needs = { title: 'HERD-5 · Needs you', body: 'Rerun CI on main?', tag: 'HERD-5', waits: true }
+const win = (visibilityState: string, focused: boolean, url = `${SCOPE}?place=sp1`) => ({ url, visibilityState, focused })
+
+test('the app on screen, focused or not (the fold split beside another app), shows no alert; hidden, it shows', async () => {
+  for (const w of [worker(() => ({ status: 200, body: {} }), { windows: [win('visible', true)] }), worker(() => ({ status: 200, body: {} }), { windows: [win('visible', false)] }),
+    worker(() => ({ status: 200, body: {} }), { windows: [win('hidden', false), win('visible', false)] })]) {
+    await w.push(needs)
+    expect(w.shown).toEqual([])
+  }
+  const hidden = worker(() => ({ status: 200, body: {} }), { windows: [win('hidden', false)] })
+  await hidden.push(needs)
+  expect(hidden.shown.map((s) => s.title)).toEqual(['HERD-5 · Needs you'])
+  const none = worker(() => ({ status: 200, body: {} }))
+  await none.push(needs)
+  expect(none.shown.length).toBe(1)
+})
+
+test("another app's window on the same host doesn't quiet it; a test alert shows though the app is on screen", async () => {
+  const other = worker(() => ({ status: 200, body: {} }), { windows: [win('visible', true, 'https://box.example.test/other/')] })
+  await other.push(needs)
+  expect(other.shown.length).toBe(1)
+  const t = worker(() => ({ status: 200, body: {} }), { windows: [win('visible', true)] })
+  await t.push({ title: 'Shepherdr · Test', body: 'Alerts reach this device.', tag: 'test', test: true })
+  expect(t.shown.length).toBe(1)
 })

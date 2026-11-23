@@ -21,6 +21,9 @@ export const FRESH_AFTER_MS = 5000;
 /** how long a wake word (or an open, SHEP-246) waits for a page of its device to show up */
 export const WAKE_HELD_MS = 15_000;
 
+/** a page on screen whose socket dropped (a phone's network blinking) still counts as on screen this long (SHEP-338) */
+export const LOOK_GRACE_MS = 15_000;
+
 export class Live {
   private pages = new Set<WS>();
   private views = new Map<string, string>();   // name -> its JSON, as last sent
@@ -36,6 +39,8 @@ export class Live {
   private snap: string | null = null;
   /** a wake word or an open no page of its device had on screen yet (voiceWake, go): the next one that shows up takes it */
   private wake: { from: string; at: number; msg: string } | null = null;
+  /** device -> when its last page on screen went away without saying it was hidden */
+  private lookedAt = new Map<string, number>();
 
   constructor(private hub: Hub, private store: Store, private me: () => Me | null, private version: string, private link: () => string | null = () => null) {
     hub.on((e) => {
@@ -64,8 +69,19 @@ export class Live {
     this.onVisible?.(new Set([...this.pages].filter((w) => w.data.visible && w.data.push).map((w) => w.data.push!)));
   }
 
+  /** Is the app on screen on tailnet device D now (SHEP-338): a page of it says it is visible, or one that was dropped
+   *  while visible less than 15 s ago. That device then shows no system notification: no web push, and its phone app's
+   *  own (Shepherdr Wake) hears the new alert as seen (glance.ts). */
+  looking(device: string | null | undefined) {
+    if (!device) return false;
+    for (const w of this.pages) if (w.data.from === device && w.data.visible && w.readyState === 1) return true;
+    const at = this.lookedAt.get(device);
+    return at !== undefined && Date.now() - at < LOOK_GRACE_MS;
+  }
+
   leave(ws: WS) {
     this.pages.delete(ws);
+    if (ws.data.visible && ws.data.from) this.lookedAt.set(ws.data.from, Date.now());
     this.visibleNow();
     for (const w of ws.data.chats?.values() ?? []) this.chats?.unwatch(w.addr, w.watcher);
     for (const w of ws.data.history?.values() ?? []) this.chats?.unwatch(w.addr, w.watcher);
@@ -171,6 +187,8 @@ export class Live {
       this.watch(ws, m.chats.filter((k: unknown) => typeof k === "string" && k.length < 200));
       ws.data.push = typeof m.push === "string" ? m.push : null;
       ws.data.visible = m.visible !== false;
+      // hidden on purpose: no grace for its device
+      if (!ws.data.visible && ws.data.from) this.lookedAt.delete(ws.data.from);
       this.visibleNow();
       if (ws.data.push && ws.data.from) this.onPushDevice?.(ws.data.push, ws.data.from);
       if (this.wake && ws.data.from === this.wake.from && ws.data.visible && Date.now() - this.wake.at < WAKE_HELD_MS) {

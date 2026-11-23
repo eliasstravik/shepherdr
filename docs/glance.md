@@ -35,6 +35,12 @@ after it closes (a reconnect), Shepherdr sends no web push to that device's brow
 buzzes twice. If the native link stays down longer, web push takes over again. The device is the tailnet node the
 request comes from (the same id the wake word uses).
 
+The app on screen (SHEP-338): while a Shepherdr page is visible on a device (focused or not, or dropped less than 15 s
+ago), that device shows no system notification for a new alert. Its web push skips all its subscriptions, and its
+native stream (and `GET /api/glance?native=1`) carries each alert that came then with `"alert": false` (and an
+`urgent` to match) for as long as it lasts, so the phone app lists it but never notifies, then or after it leaves the
+app. Alerts that came before, and new ones after it leaves, notify as before; other devices are unaffected.
+
 ## `POST /api/open {"url": "…"}`
 
 Opens an item in the Shepherdr page already open on the asking device, in place, as a tap on that alert would, without

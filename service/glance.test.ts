@@ -321,3 +321,115 @@ test("the glance feed is checked as a write: origin and x-shepherdr from the tai
   expect(gate(req({ origin: `https://${g.dns}`, "x-shepherdr": "1" }), g, false, true, true)).toMatchObject({ ok: true, via: "tailnet" });
   expect(gate(req({ origin: `https://${g.dns}`, "x-shepherdr": "1", "tailscale-user-login": "other@example.test" }), g, false, true, true)).toMatchObject({ ok: false });
 });
+
+/* ---------- the app on screen (SHEP-338) ---------- */
+
+// a new card for HERD-3 (and later one for HERD-2): a new alert key in the doc
+const withNeed = (...ids: string[]) => {
+  const base = snapOf();
+  const extra = ids.map((id, n) => ({ id: `q${id}`, chat: `${id}/worker`, place: "sp1", task: id, at: NOW - 1000 + n, question: q({ id: `q${id}` }) }));
+  return { ...base, tasks: base.tasks.map((t: any) => (ids.includes(t.id) ? { ...t, status: "need" } : t)), needs: [...base.needs, ...extra] };
+};
+const alertOf = (g: any, key: string) => g.items.find((i: any) => i.key === key)?.alert;
+const K3 = "need:HERD-3/worker:qHERD-3", K2 = "need:HERD-2/worker:qHERD-2", K5 = "need:HERD-5/worker:q1";
+
+test("an alert that comes while the phone's page is on screen notifies nothing in its phone app, then or after; the Mac's still does", async () => {
+  let now = NOW;
+  const looking = new Set<string>();
+  const f = new GlanceFeed(() => now, 0);
+  f.looking = (d) => looking.has(d);
+  f.set(doc(snapOf()));
+  const phone = await reader(f.stream(PHONE, true)), mac = await reader(f.stream(MAC, true)), plain = await reader(f.stream(null, false));
+  await tick();
+  // on screen on the phone: HERD-3's new card is seen there
+  looking.add(PHONE);
+  f.set(doc(withNeed("HERD-3")));
+  await tick();
+  const p = phone.frames().at(-1), m = mac.frames().at(-1);
+  expect(alertOf(p, K3)).toBe(false);
+  // what was there before keeps notifying as it did; the item still lists under Needs you, the counts unchanged
+  expect(alertOf(p, K5)).toBe(true);
+  expect(p.items.find((i: any) => i.key === K3).kind).toBe("needs");
+  expect(p.counts).toEqual(m.counts);
+  expect(p.urgent).not.toBe(m.urgent);
+  expect(alertOf(m, K3)).toBe(true);
+  expect(alertOf(plain.frames().at(-1), K3)).toBe(true);
+  // the phone leaves the app: HERD-3 never buzzes late, the next new one (HERD-2) does
+  looking.delete(PHONE);
+  now += CALM_MS;
+  f.set(doc(withNeed("HERD-3", "HERD-2")));
+  await tick();
+  expect(alertOf(phone.frames().at(-1), K3)).toBe(false);
+  expect(alertOf(phone.frames().at(-1), K2)).toBe(true);
+  // a phone app that connects again, or reads the doc, hears the same
+  expect(alertOf(f.docFor(PHONE), K3)).toBe(false);
+  expect(alertOf(f.docFor(MAC), K3)).toBe(true);
+  const again = await reader(f.stream(PHONE, true));
+  await tick();
+  expect(alertOf(again.frames()[0], K3)).toBe(false);
+  // answered: gone, and a new card of the same key later notifies as any new one
+  now += CALM_MS;
+  f.set(doc(snapOf()));
+  f.set(doc(withNeed("HERD-3")));
+  expect(alertOf(f.docFor(PHONE), K3)).toBe(true);
+  for (const s of [phone, mac, plain, again]) await s.cancel();
+});
+
+test("the first doc after a start marks nothing seen: what it lists was there before", () => {
+  const f = new GlanceFeed(() => NOW, 0);
+  f.looking = () => true;
+  f.stream(PHONE, true);
+  f.set(doc(withNeed("HERD-3")));
+  expect(alertOf(f.docFor(PHONE), K3)).toBe(true);
+});
+
+test("web push skips every subscription of a device with the app on screen, though its page never named its subscription", async () => {
+  const p = new Push(() => "https://example.test", join(dir, `push-${Math.random()}.json`));
+  const looking = new Set<string>();
+  p.looking = (n) => !!n && looking.has(n);
+  const phone = await fakeSub(1), mac = await fakeSub(2);
+  p.subscribe(phone, "Android", undefined, PHONE);
+  p.subscribe(mac, "Mac", undefined, MAC);
+  const alert = { title: "HERD-5 · Needs you", body: "x", topic: "needs" };
+  looking.add(PHONE);
+  await p.send(alert);
+  expect(hits).toEqual(["dev2"]);
+  hits = [];
+  looking.delete(PHONE);
+  await p.send(alert);
+  expect(hits.sort()).toEqual(["dev1", "dev2"]);
+});
+
+test("looking: a page on screen, visible but not focused, counts; hidden doesn't; a dropped visible page counts 15 s", () => {
+  setSystemTime(NOW);
+  const l = new Live({ on() {} } as any, { on() {} } as any, () => null, "0");
+  const phone = page(PHONE, NOW), mac = page(MAC, NOW, false);
+  (l as any).pages.add(phone.ws); (l as any).pages.add(mac.ws);
+  expect(l.looking(PHONE)).toBe(true);
+  expect(l.looking(MAC)).toBe(false);
+  expect(l.looking(null)).toBe(false);
+  // the page says it went hidden: no longer
+  l.message(phone.ws, JSON.stringify({ type: "watch", chats: [], visible: false }));
+  expect(l.looking(PHONE)).toBe(false);
+  l.message(phone.ws, JSON.stringify({ type: "watch", chats: [], visible: true }));
+  expect(l.looking(PHONE)).toBe(true);
+  // its socket drops while on screen (the network blinked): still on screen for a moment
+  l.leave(phone.ws);
+  setSystemTime(NOW + 14_000);
+  expect(l.looking(PHONE)).toBe(true);
+  setSystemTime(NOW + 16_000);
+  expect(l.looking(PHONE)).toBe(false);
+  // hidden, then gone: at once
+  const again = page(PHONE, NOW);
+  (l as any).pages.add(again.ws);
+  l.message(again.ws, JSON.stringify({ type: "watch", chats: [], visible: false }));
+  l.leave(again.ws);
+  expect(l.looking(PHONE)).toBe(false);
+  // an old page (from before 3.2.2) says visible as it always did: the same signal
+  const old = page(MAC, NOW, undefined);
+  delete old.ws.data.visible;
+  (l as any).pages.add(old.ws);
+  expect(l.looking(MAC)).toBe(false);
+  l.message(old.ws, JSON.stringify({ type: "watch", chats: [], term: null, visible: true, push: "https://push.example.test/old" }));
+  expect(l.looking(MAC)).toBe(true);
+});

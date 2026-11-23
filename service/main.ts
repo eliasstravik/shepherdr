@@ -148,6 +148,9 @@ live.onVisible = (v) => { push.visible = v; };
 // that device gets no web push, never two notifications of one alert
 const glance = new GlanceFeed();
 push.quiet = (node) => glance.quiet(node);
+// the app on screen on a device (SHEP-338): no system notification there, web push nor its phone app's own
+push.looking = (node) => live.looking(node);
+glance.looking = (device) => live.looking(device);
 live.onPushDevice = (endpoint, device) => push.nodeOf(endpoint, device);
 // an agent's herdr-artifact open (service/show.ts): the serving machine's screen the person is on opens the artifact
 const shows = new Shows();
@@ -1027,7 +1030,10 @@ const server = Bun.serve<{ who: string }>({
     if (path === "/api/action" && req.method === "POST") return doAction(await req.json().catch(() => null));
     if (path === "/api/glance" && req.method === "GET") {
       // the phone's and watch's small live feed (SHEP-246, docs/glance.md): the doc, or its stream (one frame per change)
-      if (url.searchParams.get("stream") !== "1") return glance.doc ? json(glance.doc) : json({ error: "not ready yet" }, 503);
+      if (url.searchParams.get("stream") !== "1") {
+        const doc = native ? glance.docFor(await deviceFrom(req, pass.via)) : glance.doc;
+        return doc ? json(doc) : json({ error: "not ready yet" }, 503);
+      }
       // a stream stays open all day: no idle cut (Bun's 180 s here; the ping comes every 240 s)
       srv.timeout(req, 0);
       return glance.stream(native ? await deviceFrom(req, pass.via) : null, native, req.signal);
