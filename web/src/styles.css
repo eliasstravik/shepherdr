@@ -79,9 +79,11 @@ div.b[data-menu]{cursor:pointer}
 .app.phone .scr.idle{aspect-ratio:4/3}
 
 /* an artifact is a real page, in a frame that cannot reach the app */
-.page{display:block;width:100%;height:100%;min-height:320px;border:0;background:#fff}
-.pane .scroll:has(>.page){padding:0;display:flex}
-.chat .scroll:has(>.page){padding:0;display:flex}
+/* The frame fills the whole panel (or the middle, expanded) and the page scrolls inside it to its end: the box around
+   it (it holds the mark-up layer) takes the panel's height, and the frame takes the box's (SHEP-340) */
+.pagebox{position:relative;flex:1;display:flex;min-width:0;min-height:0}
+.page{display:block;flex:1;width:100%;min-height:320px;border:0;background:#fff}
+.scroll:has(>.pagebox){padding:0;display:flex}
 .prev{position:relative;display:block;aspect-ratio:16/10;border-radius:8px;background:var(--raised);overflow:hidden}
 .prev::after{content:"";position:absolute;inset:0;border-radius:8px;box-shadow:inset 0 0 0 1px var(--line)}
 .prev img{display:block;width:100%;height:100%;object-fit:cover;object-position:top}
