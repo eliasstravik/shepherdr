@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { canDictate, clock, dictate, dictSample, SAY, warmMic, type Dictation } from './dictation.ts'
 import { IDLE, insertAt, step, type DictEvent, type DictState } from './dictstate.ts'
-import { getState, has } from './kernel.ts'
+import { getState, has, holdReload } from './kernel.ts'
 import { escapeFirst } from './overlay.tsx'
 import { I, IB } from './ui.tsx'
 import { Wave } from './wave.tsx'
@@ -62,6 +62,8 @@ export function DictateButton({ setText, scope }: { setText: (value: string) => 
   const live = useRef<Dictation | null>(null)
   const [, tick] = useState(0)
   const active = s.k !== 'idle'
+  // dictating: a newer web app waits (SHEP-337)
+  useEffect(() => (active ? holdReload() : undefined), [active])
 
   const cancel = () => {
     const d = live.current

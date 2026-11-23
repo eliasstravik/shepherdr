@@ -9,6 +9,7 @@ import { App } from './App.tsx'
 import { pluginFailed } from './guard.tsx'
 import { connect, installPlugins, registry, setUI, useStore, useUI, type ClientPlugin } from './kernel.ts'
 import { applySizes } from './resize.ts'
+import { UpdateChip } from './update-chip.tsx'
 import { watchViewport } from './viewport.ts'
 
 /** Your phone can't reach Shepherdr: a thin line. What you typed stays in the box and sends when it is back. */
@@ -22,7 +23,7 @@ function Offline() {
     </div>
   )
 }
-registry.topBars.push(Offline)
+registry.topBars.push(Offline, UpdateChip)
 
 async function start() {
   const loaded: ClientPlugin[] = []
