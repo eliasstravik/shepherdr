@@ -65,7 +65,7 @@ export class Store {
       // the host's words: only the keys this change touched, with what only the host can name kept
       let value = next;
       if (on && raw) {
-        const to = this.host!.toHost(), back = this.host!.fromHost();
+        const to = this.host!.toHost(true), back = this.host!.fromHost();
         value = structuredClone(raw.value);
         for (const k of new Set([...Object.keys(base.value), ...Object.keys(next)])) {
           if (JSON.stringify(base.value[k]) === JSON.stringify(next[k])) continue;

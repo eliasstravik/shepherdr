@@ -128,3 +128,22 @@ test("3.2: the service's own spaces and the carry-over's marker move with Serve 
   expect(keepForeign("spaces", there, [{ id: "sp7", machine: "lonely" }, { id: "sp2", machine: null }], toLaptop)).toEqual([...there, { id: "sp7", machine: "lonely" }]);
   expect(keepForeign("spaces.imported", ["m3", ""], ["lonely", ""], toLaptop)).toEqual(["m3", "", "lonely"]);
 });
+
+test("a host with no link back keeps the writer's sections, icons, pins and order", () => {
+  // the Linux host (id H) links no machine; the Mac (id L) links it as "linux"
+  const mac = { id: "L", links: { linux: "H", vm: "V" } }, linux = { id: "H", links: {} };
+  const toHost = renamer(mac, linux, true), back = renamer(linux, mac);
+  expect(toHost(null)).toBe("@L");
+  expect(toHost("linux")).toBe(null);
+  expect(renamer(mac, linux)(null)).toBe(undefined); // without keep, as before
+  const mine = { sections: [{ id: "a", machine: null, name: "Work", spaces: ["sp1"] }, { id: "b", machine: "vm", spaces: ["vm/sp3"] }],
+    icons: { sp1: "🐑" }, pinned: ["sp1"], order: { "": ["sp2", "sp1"] }, machineOrder: ["", "vm"] };
+  const stored = relocate("spaces-chat", mine, toHost);
+  expect(stored.sections.map((s) => [s.machine, s.spaces])).toEqual([["@L", ["@L/sp1"]], ["@V", ["@V/sp3"]]]);
+  expect(stored.icons).toEqual({ "@L/sp1": "🐑" });
+  // reading it back on the Mac gives the same sidebar
+  expect(relocate("spaces-chat", stored, back)).toEqual(mine);
+  // and the Mac's next change replaces its own, not doubling them
+  const next = relocate("spaces-chat", { ...mine, sections: [mine.sections[0]] }, toHost);
+  expect(keepForeign("spaces-chat", next, stored, back).sections.map((s) => s.id)).toEqual(["a"]);
+});
