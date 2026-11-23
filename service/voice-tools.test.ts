@@ -42,8 +42,8 @@ const snap: any = {
   alerts: [{ id: "al", at: now - 30_000, title: "SHOP-45 · Memory at 91%", body: "The machine is low on memory", notify: true }],
   warnings: [{ id: "u:Claude:Weekly", kind: "usage", text: "You've used 81% of this week's Claude plan" }],
   config: {
-    all: { agents: { Chats: pick, Tasks: pick, Reviews: { agent: "codex", model: "gpt", effort: null, fast: false, perm: null } }, review: false, merge: "done", proof: true, instructions: "Write small commits." },
-    spaces: { sp1: { agents: { Chats: pick, Tasks: pick, Reviews: pick }, review: true, merge: "done", proof: true, instructions: "", own: ["review"] } },
+    all: { agents: { Chats: pick, Tasks: pick, Reviews: { agent: "codex", model: "gpt", effort: null, fast: false, perm: null } }, review: false, merge: "done", proof: true },
+    spaces: { sp1: { agents: { Chats: pick, Tasks: pick, Reviews: pick }, review: true, merge: "done", proof: true, own: ["review"] } },
     secrets: [{ name: "ELEVENLABS_API_KEY", scope: "all" }, { name: "GH_TOKEN", scope: "sp1" }],
     plugins: [{ id: "tasks", name: "Tasks", on: true, always: true }, { id: "screens", name: "Screens", on: true }, { id: "voice", name: "Voice", on: true }, { id: "schedules", name: "Schedules", on: false }],
     plans: [{ name: "Claude Max", windows: [{ name: "Weekly", used: 81, resets: "Resets Friday" }] }],
@@ -214,7 +214,7 @@ test("look settings (snapshot.config), secrets (names only), artifacts", async (
   expect(st).toContain("Tasks › Review by a second agent: off");
   expect(st).toContain("Tasks › Merge: When I mark it as done");
   expect(st).toContain("Tasks › Proof: on");
-  expect(st).toContain("Instructions: Write small commits.");
+  expect(st).not.toContain("Instructions");  // gone (SHEP-319): AGENTS.md / CLAUDE.md instruct agents
   expect(st).toContain("Plugins: Tasks always on, Screens on, Voice on, Schedules off");
   expect(st).toContain("Usage: Claude Max: Weekly 81% used, resets Friday");
   const own = await look({ what: "settings", id: "here", query: "review" });
@@ -270,7 +270,7 @@ test("open: what it shows, as the page's voiceNav takes it", async () => {
   expect(await nav({ what: "settings", id: "the voice plugin" })).toEqual({ kind: "settings", section: "Plugins" });
   const bad = await voiceTool("open", { what: "settings", id: "banana" }, web, io());
   expect(bad.error).toBe(true);
-  expect(bad.result).toContain("General, Agents, Tasks, Instructions, Secrets, Machines, Usage, Plugins");
+  expect(bad.result).toContain("General, Agents, Tasks, Secrets, Machines, Usage, Plugins");
   // what 3.2 has no place for
   for (const what of ["files", "changes", "call"]) expect((await voiceTool("open", { what }, web, io())).error).toBe(true);
 });

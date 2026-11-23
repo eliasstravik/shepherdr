@@ -13,7 +13,7 @@ import os
 import sys
 
 from .base import hc_json, now, run, STORE
-from .settings import DEFAULTS, LOCAL_MACHINE, MUST_WORDS, SETTINGS, agent_key, bare, instructions_text, read_settings
+from .settings import DEFAULTS, LOCAL_MACHINE, MUST_WORDS, SETTINGS, agent_key, bare, read_settings
 from .launch import coordinators, is_coordinator
 from . import reactions
 
@@ -29,6 +29,10 @@ MERGE_SHORT = {"ask": "ask the person first (they mark it as done on its card, w
                "auto": "on its own (Herdr merges a ready task)"}
 BY = {"space": "set for this space", "machine": "this machine's setting", "everywhere": "your setting everywhere"}
 NOTICE_END = "Nothing to answer: reply only <hc no-reply/>."
+# Settings › Instructions is gone (SHEP-319): an Assistant told some before is told once that they no longer apply.
+INSTRUCTIONS_GONE = ("Shepherdr's Instructions setting is gone: the instructions you were told from it no longer apply. "
+                     "How to work comes from the repo's or folder's AGENTS.md / CLAUDE.md and your own global file.")
+NO_INSTRUCTIONS = hashlib.sha1(b"none").hexdigest()[:6]  # what the old "instructions" line's hash was with none set
 
 
 def space_of(k):
@@ -115,12 +119,9 @@ def rows(space, d=None):
             ("feedback", "Feedback offers", f"on (offer once to file a Shepherdr problem as an issue on {repo}, only on the person's yes)"
              if offering else "off (never offer feedback for Shepherdr; file nothing)", "on" if offering else "off",
              [("agents", "feedback"), ("agents", "feedback_repo")]),
-            # 3.2: the person's own words for every agent (everything's, then this space's), as written (block())
-            ("instructions", "Instructions", told or "none", "on" if told else "off", [("instructions", None)]),
         ]
-    told = instructions_text(ls[0][1], ls[2][1])
     have = lines(resolve(ls))
-    default = {**{x[0]: x[2] for x in lines(resolve([]))}, "instructions": "none"}
+    default = {x[0]: x[2] for x in lines(resolve([]))}
     out = []
     for key, label, text, value, parts in have:
         def sets(layer):
@@ -134,10 +135,8 @@ def rows(space, d=None):
 
 
 def block(rs):
-    """The "Your settings" lines, then the person's Instructions as written (when there are any)."""
-    words = next((r["text"] for r in rs if r["key"] == "instructions" and r["value"] == "on"), "")
-    return "\n".join([HEAD] + [f"- {r['label']}: {r['text']}" + (f"; {BY[r['by']]}" if r["by"] else "") for r in rs if r["key"] != "instructions"]
-                     + ([words] if words else []))
+    """The "Your settings" lines."""
+    return "\n".join([HEAD] + [f"- {r['label']}: {r['text']}" + (f"; {BY[r['by']]}" if r["by"] else "") for r in rs])
 
 
 def digest(rs):
@@ -159,8 +158,7 @@ def notice(changed):
     out = []
     for i, r in enumerate(changed):
         words = (reactions.TURNED_ON if r["value"] == "on" else reactions.TURNED_OFF) if r["key"] == "reactions" else \
-            (f"The person changed their instructions. From now on:\n{r['text']}" if r["value"] == "on" else
-             "The person removed their instructions: none apply now.") if r["key"] == "instructions" else \
+            INSTRUCTIONS_GONE if r["key"] == "instructions" else \
             f"{r['label']} is now {r['text']}" + (f"; {BY[r['by']]}" if r["by"] else "; Herdr's default") + \
             ("." if r["key"] == "feedback" else ". Tasks you add from now on get it; running ones keep their brief.")
         end = f" {NOTICE_END}" if i == len(changed) - 1 else ""
@@ -237,6 +235,8 @@ def settings_pass(report, quiet):
             changed = [{"key": "all"}]
         else:
             changed = [r for r in rs if had.get(r["key"]) != now_digest[r["key"]]]
+            if had.get("instructions") not in (None, NO_INSTRUCTIONS):  # it was told some: once, that they're gone
+                changed.append({"key": "instructions", "value": "off", "scope": "everywhere"})
             if not changed:  # a line no longer said: just note it
                 run(["hc", "label", addr, f"{LABEL}={digest(rs)}"])
                 continue

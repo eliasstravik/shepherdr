@@ -40,7 +40,7 @@ Each space's chat is in the middle and its tasks on the right, by what they need
 
 ### 🧩 Make it yours: every feature is a plugin
 
-Tasks, chat, artifacts, voice, reactions, Screens, schedules, the terminal, search, alerts: every feature of Shepherdr is a plugin, listed in one file. Switch Screens, Voice, Schedules, Reactions or Terminal off in Settings › Plugins; the rest is always on in 3.2.2. Every space starts with Everything's settings and can set its own agents, tasks, instructions and secrets. An update replaces only Shepherdr's own folder, and keeps a copy of anything of yours it replaces. The Herdr app stays yours: it only gets one "Open Shepherdr" button. [Plugins](docs/plugins.md) lists each one and its switch.
+Tasks, chat, artifacts, voice, reactions, Screens, schedules, the terminal, search, alerts: every feature of Shepherdr is a plugin, listed in one file. Switch Screens, Voice, Schedules, Reactions or Terminal off in Settings › Plugins; the rest is always on in 3.2.2. Every space starts with Everything's settings and can set its own agents, tasks and secrets. An update replaces only Shepherdr's own folder, and keeps a copy of anything of yours it replaces. The Herdr app stays yours: it only gets one "Open Shepherdr" button. [Plugins](docs/plugins.md) lists each one and its switch.
 
 ### ⚡ Stop briefing every agent yourself
 
@@ -66,7 +66,7 @@ An agent that asks you something, wants a permission or a plan approved shows un
 
 <table align="center">
 <tr>
-<td align="center" valign="top"><sub>For developers who run coding agents with herdr-core on macOS or Linux</sub><br /><h2>Free</h2><div align="left">&nbsp;&nbsp;&nbsp;✓&nbsp; A chat for every space that turns what you write into tasks<br />&nbsp;&nbsp;&nbsp;✓&nbsp; Every task on its own worktree and branch, with its own agent<br />&nbsp;&nbsp;&nbsp;✓&nbsp; A review by fresh eyes before it merges, through a pull request on GitHub<br />&nbsp;&nbsp;&nbsp;✓&nbsp; Cards, alerts, dictation and voice over the whole app<br />&nbsp;&nbsp;&nbsp;✓&nbsp; Every machine you added to herdr-core, from one browser tab<br />&nbsp;&nbsp;&nbsp;✓&nbsp; Your own settings and instructions, for everything or per space<br />&nbsp;&nbsp;&nbsp;✓&nbsp; Schedules, artifacts, secrets, and each agent's browser and desktop</div></td>
+<td align="center" valign="top"><sub>For developers who run coding agents with herdr-core on macOS or Linux</sub><br /><h2>Free</h2><div align="left">&nbsp;&nbsp;&nbsp;✓&nbsp; A chat for every space that turns what you write into tasks<br />&nbsp;&nbsp;&nbsp;✓&nbsp; Every task on its own worktree and branch, with its own agent<br />&nbsp;&nbsp;&nbsp;✓&nbsp; A review by fresh eyes before it merges, through a pull request on GitHub<br />&nbsp;&nbsp;&nbsp;✓&nbsp; Cards, alerts, dictation and voice over the whole app<br />&nbsp;&nbsp;&nbsp;✓&nbsp; Every machine you added to herdr-core, from one browser tab<br />&nbsp;&nbsp;&nbsp;✓&nbsp; Your own settings, for everything or per space<br />&nbsp;&nbsp;&nbsp;✓&nbsp; Schedules, artifacts, secrets, and each agent's browser and desktop</div></td>
 </tr>
 <tr>
 <td align="center"><a href="https://github.com/eliasstravik/shepherdr/blob/main/docs/install.md"><img src="assets/buttons/install-shepherdr.svg" alt="Install Shepherdr" /></a></td>

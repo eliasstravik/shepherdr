@@ -62,8 +62,8 @@ export const artifacts = [
 
 const cc = (model: string, effort: string) => ({ agent: 'claude', model, effort, fast: false as const, perm: null })
 export const config: Config = {
-  all: { agents: { Chats: cc('sonnet', 'medium'), Tasks: cc('opus', 'high'), Reviews: { agent: 'codex', model: 'gpt-5.5-codex', effort: 'high', fast: false, perm: null } }, review: false, merge: 'done', proof: true, instructions: 'Keep answers short. Never push to main without asking.' },
-  spaces: { [P.shop]: { agents: { Chats: cc('sonnet', 'medium'), Tasks: cc('opus', 'high'), Reviews: { agent: 'codex', model: 'gpt-5.5-codex', effort: 'high', fast: false, perm: null } }, review: false, merge: 'done', proof: true, instructions: 'Use bun. Ask before touching the payments folder.', own: ['agents.Tasks', 'instructions'] } },
+  all: { agents: { Chats: cc('sonnet', 'medium'), Tasks: cc('opus', 'high'), Reviews: { agent: 'codex', model: 'gpt-5.5-codex', effort: 'high', fast: false, perm: null } }, review: false, merge: 'done', proof: true },
+  spaces: { [P.shop]: { agents: { Chats: cc('sonnet', 'medium'), Tasks: cc('opus', 'high'), Reviews: { agent: 'codex', model: 'gpt-5.5-codex', effort: 'high', fast: false, perm: null } }, review: false, merge: 'done', proof: true, own: ['agents.Tasks'] } },
   secrets: [{ name: 'GITHUB_TOKEN', scope: 'all' }, { name: 'STRIPE_KEY', scope: P.shop }],
   plugins: [['tasks', 'Tasks', true], ['artifacts', 'Artifacts', true], ['terminal', 'Terminal', false], ['screens', 'Screens', false], ['voice', 'Voice', false], ['schedules', 'Schedules', false], ['reactions', 'Reactions', false], ['search', 'Search', true], ['alerts', 'Alerts', true]].map(([id, name, always]) => ({ id: id as string, name: name as string, on: true, ...(always ? { always: true } : {}) })),
   plans: [{ name: 'Claude Max', windows: [{ name: 'This week', used: 76, resets: 'Resets Monday 9:00' }, { name: 'These 5 hours', used: 40, resets: 'Resets in 2 h' }] }, { name: 'Codex Pro', windows: [{ name: 'This week', used: 12, resets: 'Resets Thursday' }] }],

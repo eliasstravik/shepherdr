@@ -230,7 +230,7 @@ test("3.2: the app's own words: Everything, spaces, tasks by title, Ready for re
   expect(LOOKS).toEqual(["here", "chat", "spaces", "machines", "tasks", "task", "needs", "news", "schedules", "settings", "secrets", "artifacts", "data"]);
   expect(OPENS).toEqual(["space", "chat", "task", "screen", "terminal", "tasks", "needs", "artifacts", "artifact", "settings"]);
   expect(TOOLS.find((t) => t.name === "open").parameters.properties.view.enum).toEqual(["browser", "desktop"]);
-  expect(SETTINGS).toEqual(["General", "Agents", "Tasks", "Instructions", "Secrets", "Machines", "Usage", "Plugins"]);
+  expect(SETTINGS).toEqual(["General", "Agents", "Tasks", "Secrets", "Machines", "Usage", "Plugins"]);
   for (const s of SETTINGS) expect(p).toContain(s);
   const act = TOOLS.find((t) => t.name === "act");
   expect(act.parameters.properties.action.enum).toEqual(ACTS);

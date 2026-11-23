@@ -46,8 +46,6 @@ function levelOf(layer: any, base: LevelConfig): { lv: LevelConfig; own: string[
   if (has("review_rounds")) own.push("review");
   if (has("merge")) own.push("merge");
   if (has("proof")) own.push("proof");
-  const instructions = typeof layer?.instructions === "string" ? layer.instructions : null;
-  if (instructions !== null) own.push("instructions");
   return {
     own,
     lv: {
@@ -55,22 +53,20 @@ function levelOf(layer: any, base: LevelConfig): { lv: LevelConfig; own: string[
       review: has("review_rounds") ? Number(t.review_rounds) > 0 : base.review,
       merge: has("merge") ? MERGE[t.merge] ?? base.merge : base.merge,
       proof: has("proof") ? !!t.proof : base.proof,
-      instructions: instructions ?? base.instructions,
     },
   };
 }
 
 export function configOf(input: { defaults: Defaults; spaces: string[]; secrets: { name: string; space: string | null }[]; plans: Config["plans"]; addMachine?: string; desktops?: string[] }): Config {
   const f = file();
-  const start: LevelConfig = { agents: input.defaults, review: false, merge: "done", proof: true, instructions: "" };
+  const start: LevelConfig = { agents: input.defaults, review: false, merge: "done", proof: true };
   const all = levelOf(f.everywhere, start).lv;
   const spaces: Config["spaces"] = {};
   for (const id of input.spaces) {
     const layer = f.spaces?.[id];
     if (!layer) continue;
     const { lv, own } = levelOf(layer, all);
-    // a space's instructions are its own words, added to everything's: never everything's shown again as its own
-    if (own.length) spaces[id] = { ...lv, instructions: own.includes("instructions") ? lv.instructions : "", own };
+    if (own.length) spaces[id] = { ...lv, own };
   }
   const off = offPlugins();
   return {
@@ -124,10 +120,7 @@ export function setConfig(place: string, key: string, value: unknown, scope?: { 
     if (value !== null && !(String(value) in MERGE_BACK)) throw new Error("Not one of its choices.");
     task("merge", value === null ? null : MERGE_BACK[value as LevelConfig["merge"]]);
   } else if (key === "proof") task("proof", value === null ? null : !!value);
-  else if (key === "instructions") {
-    const text = value === null ? "" : String(value).slice(0, 20_000);
-    if (text.trim()) layer.instructions = text; else delete layer.instructions;
-  } else throw new Error("That setting can't be changed here.");
+  else throw new Error("That setting can't be changed here.");
   writeSettings(next);
 }
 

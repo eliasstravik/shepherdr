@@ -5,7 +5,8 @@
 // Levels: Everywhere ("everywhere"), a space ("spaces"[its id], with its repo folder, which is how herdr-task finds
 // it), and for the Machines page each machine ("machines"[its name, "local" here]).
 // Gone with 3.2 and ignored where a file still has them: Autopilot ("autopilot"), "Tasks at once"
-// (tasks.max_running), the add-ons' "off" and Notify.
+// (tasks.max_running), the add-ons' "off" and Notify; with SHEP-319, Instructions ("instructions", everywhere and per
+// space: the update keeps the words in a plain file beside this one).
 import { existsSync, readFileSync, renameSync, statSync, watch, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { HOME, settingsFile, where, writableSettings } from "./paths.ts";

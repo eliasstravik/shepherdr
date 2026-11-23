@@ -9,7 +9,6 @@ Settings is one window. Open it from the foot of the list. On a phone it is a li
 | General | Theme, Chat width, Motion, and "Alerts on this device": Needs me, Everything or Off. Kept in that browser |
 | Agents | What Chats, Tasks and Reviews run on. Each row opens the picker: Agent, Model, Permissions, Effort, Speed |
 | Tasks | Review by a second agent, Merge ("When I mark it as done", "When checks pass", "Right away"), Proof |
-| Instructions | How every agent should work, in your own words |
 | Secrets | Add or replace a secret. Agents use it by name and never see it |
 | Machines | Each machine's agents, processor, memory and disk. Add a machine. Open desktop, where a machine has one |
 | Usage | How much of each plan your agents have used, with reset times |
@@ -17,11 +16,14 @@ Settings is one window. Open it from the foot of the list. On a phone it is a li
 
 ## A space's own settings
 
-A space's menu › Settings opens the window for that space. It shows Agents, Tasks, Instructions and Secrets only.
+A space's menu › Settings opens the window for that space. It shows Agents, Tasks and Secrets only.
 
 A space starts with Everything's settings. Under each row it says "Same as Everything", or "Set here" with Reset,
-which puts the row back. A space's Instructions are added to the ones for every space. A secret added there is for
-that space only.
+which puts the row back. A secret added there is for that space only.
+
+How agents should work is not a setting: they read the repo's or folder's `AGENTS.md` (or `CLAUDE.md`) and their own
+global file, as they do anywhere. The Instructions setting older versions had is gone; the update kept what you wrote
+there in `~/.config/shepherdr/old-instructions.md`, to move into an `AGENTS.md` yourself.
 
 The picker in a message box changes that one chat or task. What new chats and tasks start with is set in Agents.
 

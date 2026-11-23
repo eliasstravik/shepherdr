@@ -88,7 +88,7 @@ div.b[data-menu]{cursor:pointer}
 .emolist button{height:40px;border-radius:8px;font-size:20px;line-height:1;text-align:center}
 .emolist button:hover{background:var(--control)}
 
-/* text fields that hold more than a line (Instructions, a schedule's What to do) */
+/* text fields that hold more than a line (a schedule's What to do) */
 textarea.inp{height:auto;min-height:104px;padding:8px 12px;resize:vertical;font-family:inherit;line-height:var(--uil)}
 .red{color:var(--red)}
 .c-red{color:var(--red)}

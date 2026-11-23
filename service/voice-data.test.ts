@@ -73,7 +73,7 @@ const snap: any = {
   places: [{ id: "sp1", name: "demo", machine: "vm", chat: "p:sp1", level: 2, status: "idle" }],
   tasks: [{ id: "DEMO-7", name: "Make the widget blue", status: "ready", place: "sp1", summary: "The widget is blue", at: now, age: "", state: "", on: "", created: "" }],
   needs: [], automations: {}, artifacts: [{ id: "a9", title: "Widget · Proof", place: "sp1", v: 1, at: now }], asks: {},
-  config: { all: { agents: {}, review: false, merge: "checks", proof: true, instructions: "" }, spaces: {}, secrets: [{ name: "DEMO_API_KEY", scope: "all" }], plugins: [], plans: [] },
+  config: { all: { agents: {}, review: false, merge: "checks", proof: true }, spaces: {}, secrets: [{ name: "DEMO_API_KEY", scope: "all" }], plugins: [], plans: [] },
   settings: [
     { name: "Voice", level: "all", rows: [{ label: "Token", key: "voice.token", value: "sk-demo0000000000000000fake", token: "abc123fake" }] },
   ],

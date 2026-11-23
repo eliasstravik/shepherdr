@@ -181,6 +181,67 @@ def move_data(r, a, home):
         say(f"  {line}")
     for n in res["notes"]:
         r.notes.append(n)
+# SHEP-319: Settings › Instructions is gone (agents read the repo's AGENTS.md / CLAUDE.md and their own global file).
+# What someone wrote there (everywhere and each space's) is kept in a plain file beside the settings, once.
+OLD_INSTRUCTIONS = "old-instructions.md"
+
+
+def instructions_out(d):
+    """The settings file's Instructions as a plain page, and the file without them: (text or "", cleaned dict)."""
+    d = json.loads(json.dumps(d)) if isinstance(d, dict) else {}
+    parts = []
+    every = d.get("everywhere") if isinstance(d.get("everywhere"), dict) else {}
+    if "instructions" in every:
+        words = every.pop("instructions")
+        if isinstance(words, str) and words.strip():
+            parts.append(("Every space", words.strip()))
+    for sid, layer in (d.get("spaces") if isinstance(d.get("spaces"), dict) else {}).items():
+        if isinstance(layer, dict) and "instructions" in layer:
+            words = layer.pop("instructions")
+            if isinstance(words, str) and words.strip():
+                name = str(layer.get("name") or sid)
+                parts.append((f"{name} ({layer['folder']})" if layer.get("folder") else name, words.strip()))
+    if not parts:
+        return "", d
+    text = ("# Your Shepherdr Instructions\n\n"
+            "Shepherdr no longer has an Instructions setting: agents follow the repo's or folder's AGENTS.md (or CLAUDE.md)\n"
+            "and their own global file. This is what you had written, so you can move it there. Nothing reads this file.\n")
+    return text + "".join(f"\n## {head}\n\n{words}\n" for head, words in parts), d
+
+
+def keep_instructions(r, a, root):
+    """Moves Instructions out of the settings file into OLD_INSTRUCTIONS beside it (added to one already there), and
+    says where once. Settings without any are left as they are. Never stops the install."""
+    path = where_for(root).path("settings")
+    raw = read(path)
+    if raw is None:
+        return
+    try:
+        d = json.loads(raw)
+    except ValueError:
+        return
+    text, cleaned = instructions_out(d)
+    if cleaned == d:
+        return
+    real = os.path.realpath(path)
+    out = os.path.join(os.path.dirname(real), OLD_INSTRUCTIONS)
+    if a.dry_run:
+        if text:
+            say(f"  instructions: would keep the ones in Settings in {short(out)}")
+        return
+    try:
+        if text:
+            had = (read(out) or b"").decode("utf-8", "replace")
+            if text not in had:  # never lose a copy kept before (another machine's settings, an earlier update)
+                atomic_write(out, ((had.rstrip("\n") + "\n\n---\n\n") if had.strip() else "").encode() + text.encode(), 0o600)
+        atomic_write(real, (json.dumps(cleaned, indent=2, ensure_ascii=False) + "\n").encode(), os.stat(real).st_mode & 0o777)
+    except OSError as e:
+        r.notes.append(f"Settings › Instructions couldn't be moved out of the settings file ({e.strerror}); they no longer apply")
+        return
+    if text:
+        r.notes.append(f"Settings › Instructions is gone: agents follow AGENTS.md / CLAUDE.md. What you wrote there is in {short(out)}")
+
+
 # Helpers on the PATH: their name, and where the link leads (under Shepherdr's own folder). herdr-task and
 # herdr-artifact keep their 3.1 paths, so machines on 3.1 and 3.2 find each other's copies.
 LINKS = {"herdr-task": "mods/tasks/bin/herdr-task", "herdr-artifact": "mods/artifacts/bin/herdr-artifact",
@@ -1621,6 +1682,7 @@ def finish_install(a, r, rec, old, src, home, root, actions, old_files, gone, bu
     rec["button"] = bool(button)
     rec["hooks"] = set_hooks(r, rec, None if a.no_hooks else True)
     move_data(r, a, home)   # before the service starts again: it then finds the data where it now is
+    keep_instructions(r, a, root)   # SHEP-319: written Instructions into a plain file, said once
     # SHEP-305: an install switched by 3.2.0 has no carry_over_records yet: its records may name old ids, so once more
     if switching or rec.get("carry_over") == "waiting" or rec.get("carry_over_agents") != "done" or rec.get("carry_over_records") != "done":
         carry_over_session(r, rec, home)   # and its documents and machines in Shepherdr's own herdr-core session

@@ -1440,8 +1440,6 @@ export interface LevelConfig {
   merge: 'done' | 'checks' | 'now'
   /** the agent attaches proof whenever there is something to show */
   proof: boolean
-  /** how agents should work: added to every agent's prompt as written */
-  instructions: string
 }
 
 export interface Config {

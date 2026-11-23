@@ -547,7 +547,6 @@ function lookSettings(snap: Snapshot, where: Where, id: unknown, query: string) 
     `Tasks › Review by a second agent: ${onOff(lv.review)}${mark("review")}`,
     `Tasks › Merge: ${MERGE_WORDS[lv.merge] ?? lv.merge}${mark("merge")}`,
     `Tasks › Proof: ${onOff(lv.proof)}${mark("proof")}`,
-    `Instructions: ${space ? (own?.own.includes("instructions") && own.instructions ? cut(own.instructions, 300) : "none of its own") : c.all.instructions ? cut(c.all.instructions, 300) : "none"}`,
     ...(space ? [] : [
       `Plugins: ${c.plugins.map((x) => `${x.name} ${x.always ? "always on" : onOff(x.on)}`).join(", ")}`,
       `Usage: ${c.plans.length ? c.plans.map((pl) => `${pl.name}: ${pl.windows.map((w) => `${w.name} ${w.used}% used${w.resets ? `, ${w.resets[0].toLowerCase()}${w.resets.slice(1)}` : ""}`).join("; ")}`).join(". ") : "no plan usage read yet"}`,
