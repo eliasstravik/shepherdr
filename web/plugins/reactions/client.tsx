@@ -1,6 +1,6 @@
 // Reactions, both ways: the agent reacts to some of your messages with one emoji by itself; you react from the quick
 // bar a tap on a message shows (its smiley), or from its menu (a row of your most used emoji, then + for every emoji,
-// with search). Each reaction is a chip on the bubble's lower edge, overlapping it as in WhatsApp and iMessage: the
+// with search). Each reaction is a small chip just under the bubble, on its inner edge, as in Slack and Telegram: the
 // emoji at about the text's size, a count when you both picked it, yours tinted; a tap on yours takes it back, a tap on
 // the agent's adds the same. You keep one reaction per message: picking another changes it. Your reaction reaches the
 // agent at once as a small message. Switched off: the row is gone (an agent's own reactions still show).
@@ -20,7 +20,7 @@ export function react(chat: string, msg: Message, emoji: string) {
   })()
 }
 
-/** the chips on a message's lower edge; one added while it is on screen pops in */
+/** the chips just under a message; one added while it is on screen pops in */
 export function Chips({ msg, chat }: { msg: Message; chat: Chat }) {
   const chips = chipsOf(msg.reactions)
   const first = useRef<Set<string> | null>(null)
