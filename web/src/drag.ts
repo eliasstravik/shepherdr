@@ -4,6 +4,7 @@
 // beside it, or out onto another section (its heading, or a row in it: before that one) where it may go, which lights up.
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { flushSync } from 'react-dom'
+import { attr } from './attr.ts'
 import { still } from './motion.ts'
 
 /** how long a finger holds a row before it can be dragged */
@@ -95,7 +96,7 @@ export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
     const group = row?.dataset.drop
     if (!row || !group || group === o.into.group || !o.into.may(group)) return null
     const before = row.dataset.heading ? undefined : row.dataset.project
-    const heading = document.querySelector<HTMLElement>(`[data-heading="${CSS.escape(group)}"]`)
+    const heading = document.querySelector<HTMLElement>(`[data-heading="${attr(group)}"]`)
     return { group, before, lit: [heading, before ? row : null].filter((e): e is HTMLElement => !!e) }
   }
   const light = (next: typeof over) => {

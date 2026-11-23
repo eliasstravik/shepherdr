@@ -4,6 +4,7 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { copyText } from '@client/copy.ts'
 import { TEXT_IN_CALL, useDictating } from '@client/dictate.tsx'
+import { attr } from '@client/attr.ts'
 import { act, definePlugin, getState, has, notice, registry, setUI, tryAct, useChat, useDraft, useSnap, useStore, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
 import { partsOf, placeOutgoing, placesOf, keyOf, readNow, showsAs, type Outgoing } from '@client/outbox.ts'
 import { confirm, openMenu } from '@client/overlay.tsx'
@@ -177,7 +178,7 @@ function TaskQuote({ id, title }: { id: string; title: string }) {
 export function replyTo(msg: Message, key: string) {
   const text = msg.text ?? msg.file?.name ?? ''
   setUI((ui) => ({ reply: { ...ui.reply, [key]: { id: msg.id, who: msg.who, text: text.slice(0, 200) } } }))
-  document.querySelector<HTMLTextAreaElement>(`textarea[data-box="${CSS.escape(key)}"]`)?.focus()
+  document.querySelector<HTMLTextAreaElement>(`textarea[data-box="${attr(key)}"]`)?.focus()
 }
 
 function msgMenu(anchor: Element, msg: Message, chat: Chat, thread: Thread, select: () => void, reply?: () => void) {
@@ -505,7 +506,7 @@ function Messages({ thread }: { thread: Thread }) {
   }, [thread.chat])
   useEffect(() => {
     if (!jump) return
-    const el = document.querySelector(`[data-msg="${CSS.escape(jump)}"], [data-card="${CSS.escape(jump)}"]`)
+    const el = document.querySelector(`[data-msg="${attr(jump)}"], [data-card="${attr(jump)}"]`)
     if (!el) return
     stuck.current = false
     el.scrollIntoView({ block: 'center' })
