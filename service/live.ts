@@ -43,7 +43,7 @@ export class Live {
   private lookedAt = new Map<string, number>();
   /** the web app's build this service serves (webbuild.ts): each page hears it, and again when it changes */
   private build = "";
-  web: (() => string) | null = null;
+  web: (() => { id: string; version: string }) | null = null;
 
   constructor(private hub: Hub, private store: Store, private me: () => Me | null, private version: string, private link: () => string | null = () => null) {
     hub.on((e) => {
@@ -57,8 +57,10 @@ export class Live {
   }
 
   private buildText() {
-    this.build = this.web?.() ?? "";
-    return this.build ? JSON.stringify({ type: "build", id: this.build, version: this.version }) : "";
+    const b = this.web?.();
+    this.build = b?.id ?? "";
+    // a web app from before it said its version: the service's own
+    return this.build ? JSON.stringify({ type: "build", id: this.build, version: b?.version || this.version }) : "";
   }
 
   /** a new web app put in place while the service runs: every page hears of it */

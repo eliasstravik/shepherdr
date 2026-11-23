@@ -4,10 +4,8 @@
 // their own (kept on the device, the URL); a mark left before the reload says "Updated to …" once after it, and stops a
 // reload that brought the same old page back from trying again and again.
 
-declare const __SHEPHERDR_VERSION__: string | undefined
-
-/** the version this page was built as (vite's define; none under test) */
-export const OWN_VERSION = typeof __SHEPHERDR_VERSION__ === 'string' ? __SHEPHERDR_VERSION__ : ''
+/** the version this page was built as: its index.html says (vite.config.ts; none under test) */
+export const OWN_VERSION = typeof document === 'undefined' ? '' : (document.querySelector<HTMLMetaElement>('meta[name="shepherdr-version"]')?.content ?? '')
 
 /** on screen and untouched this long counts as idle */
 export const IDLE_AFTER = 60_000
