@@ -147,6 +147,8 @@ export function PaneFrame({ head, children, foot, drawer, scrollKey, flush }: { 
 function Bar({ snap }: { snap: Snapshot }) {
   const pane = useUI((u) => u.pane)
   const at = useUI((u) => u.at)
+  // the Tasks count follows the Tasks filter (SHEP-331): redraw when it changes
+  useUI((u) => u.tf)
   const on = pane === 'tasks' || pane === 'artifacts' ? pane : pane ? '' : 'chat'
   return (
     <>

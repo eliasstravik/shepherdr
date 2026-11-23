@@ -393,3 +393,12 @@ textarea.cin{overflow-y:auto}
 .rhead .n{flex:1;min-width:0}.rhead .l1{font-weight:600}
 .rhead .btn{flex:none}
 .asked{display:block;margin:-4px 8px 8px;color:var(--muted);font-size:var(--sec);line-height:var(--secl);text-align:left}
+/* the Tasks filter (SHEP-331): a multi-select menu that scrolls inside the screen, its ticks, the dot on its button,
+   the chips of what is on */
+.tfm{display:grid;max-height:min(70vh,560px);overflow-y:auto;overscroll-behavior:contain}.pop:has(>.tfm){min-width:248px}
+.tfm>hr:first-of-type:first-child{display:none}.tfq{margin:2px 0 4px;height:var(--btns)}
+.cbx{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--line2);flex:none}
+.cbx.on{background:var(--fg);color:var(--canvas);box-shadow:none}.cbx .i{width:12px;height:12px;stroke-width:2;color:inherit!important}
+.app.phone .cbx{width:20px;height:20px;border-radius:5px}.app.phone .cbx .i{width:14px;height:14px}
+.ib .fdot{position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:3px;background:var(--fg);box-shadow:0 0 0 2px var(--canvas)}
+.fchips.tfc{padding:0 8px 8px}.fchips.tfc .fchip{max-width:100%}.tfl{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
