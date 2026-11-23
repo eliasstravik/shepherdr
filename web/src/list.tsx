@@ -360,6 +360,87 @@ function SpaceRow({ snap, p, sub, under, siblings, section }: { snap: Snapshot; 
   )
 }
 
+/** a machine's menu (long-press or right click on its heading): Rename, and back to its own name once renamed, then
+ *  Settings › Machines. Its first line shows the real name beside the given one: links, commands and "machine/…"
+ *  addresses keep the real one, the name is only what the list shows. */
+export function machineMenu(anchor: Element | null, key: string, snap = getState().snap) {
+  const m = snap?.machines.find((x) => x.machine === key)
+  if (!snap || !m) return
+  const own = m.ownName ?? m.machine
+  const renamed = m.name !== own
+  const rename = (name: string) => tryAct({ type: 'rename', id: m.id, name })
+  const rows: MenuRow[] = [
+    { icon: 'pen', label: 'Rename', run: () => renameDialog(m.name, rename) },
+    ...(renamed ? [{ icon: 'reload' as const, label: `Use its own name (${own})`, run: () => void rename('') }] : []),
+    { icon: 'gear', label: 'Machine settings', line: true, run: () => openSettings('all', 'Machines') },
+  ]
+  openMenu(anchor, rows, { label: m.name, top: () => <MachineTop name={m.name} real={m.here ? `${key} · this computer` : key} /> })
+}
+
+function MachineTop({ name, real }: { name: string; real: string }) {
+  return (
+    <div className="fwhere">
+      <I n="server" />
+      <span className="n">
+        <span className="l1">{name}</span>
+        {real !== name && <span className="l2">{real}</span>}
+      </span>
+    </div>
+  )
+}
+
+/** a finger held on a machine's heading: its menu. A right click opens it too (Android's long-press sends one as well,
+ *  so whichever comes first wins and the other is skipped); the filter and plus buttons keep their own taps. */
+const HOLD_MS = 450
+let holding: { t: ReturnType<typeof setTimeout>; x: number; y: number } | null = null
+let heldAt = 0
+const stopHold = () => {
+  if (holding) clearTimeout(holding.t)
+  holding = null
+}
+const justHeld = () => Date.now() - heldAt < 800
+const onButton = (e: { target: EventTarget }) => !!(e.target as HTMLElement).closest?.('.ib')
+const anchorOf = (el: Element) => el.querySelector('.mn') ?? el
+export function headHold(key: string) {
+  const open = (el: Element) => {
+    stopHold()
+    heldAt = Date.now()
+    machineMenu(anchorOf(el), key)
+  }
+  return {
+    onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
+      if (e.pointerType === 'mouse' || onButton(e)) return
+      stopHold()
+      const el = e.currentTarget
+      holding = {
+        x: e.clientX,
+        y: e.clientY,
+        t: setTimeout(() => {
+          navigator.vibrate?.(10)
+          open(el)
+        }, HOLD_MS),
+      }
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
+      if (holding && Math.hypot(e.clientX - holding.x, e.clientY - holding.y) > 8) stopHold()
+    },
+    onPointerUp: stopHold,
+    onPointerCancel: stopHold,
+    onContextMenu: (e: React.MouseEvent<HTMLElement>) => {
+      if (onButton(e)) return
+      e.preventDefault()
+      if (!justHeld()) open(e.currentTarget)
+    },
+    // the tap that ends a hold doesn't also press the name (Machines, when it carries a warning mark)
+    onClickCapture: (e: React.MouseEvent<HTMLElement>) => {
+      if (justHeld() && !onButton(e)) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    },
+  }
+}
+
 /** a machine's heading (SHEP-342): its name (a button to Settings › Machines when it carries a warning mark), what its
  *  filter shows when that is not Active, then its own filter and New space on it */
 function MachineHead({ snap, m }: { snap: Snapshot; m: ListMachine }) {
@@ -373,7 +454,7 @@ function MachineHead({ snap, m }: { snap: Snapshot; m: ListMachine }) {
     </>
   )
   return (
-    <div className="lab mh" data-machine={key} data-heading={`m:${key}`} data-drop={`m:${key}`}>
+    <div className="lab mh" data-machine={key} data-heading={`m:${key}`} data-drop={`m:${key}`} {...headHold(key)}>
       {warn ? (
         <button type="button" className="mn" aria-label={`${machine.name}: ${warn}. Open Machines`} onClick={() => openSettings('all', 'Machines')}>
           {label}

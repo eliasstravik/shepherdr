@@ -138,3 +138,61 @@ test("picking in a machine's filter menu changes that machine only, Active puts 
   pick('Active')
   expect(getState().ui.shown).toEqual({ vm: 'All' })
 })
+
+// Rename a machine: long-press (right click on a desktop) on its heading opens its menu: Rename, back to its own name
+// once renamed, Machine settings. The first line shows the real name; the rename goes to the service as "m:<machine>".
+const renamed: Snapshot = { ...snap, machines: [{ id: 'm:mini', machine: 'mini', name: 'Studio', ownName: 'This computer', status: 'idle', here: true }, { id: 'm:vm', machine: 'vm', name: 'Dev box', ownName: 'vm', status: 'idle' }, { id: 'm:pi', machine: 'pi', name: 'pi', ownName: 'pi', status: 'idle' }] }
+const menuOf = async (key: string, s: Snapshot) => {
+  const { machineMenu } = await import('./list.tsx')
+  machineMenu(null, key, s)
+  const [menu] = layersNow()
+  const tree = menu!.render(() => closeAll()) as ReactElement<{ rows: { label: string; run: () => void }[]; top?: ReactNode }>
+  return { menu: menu!, rows: tree.props.rows, top: renderToStaticMarkup(<>{tree.props.top}</>) }
+}
+
+test("a machine's menu: Rename and Machine settings, its real name on the first line", async () => {
+  const { menu, rows, top } = await menuOf('pi', renamed)
+  expect(menu.label).toBe('pi')
+  expect(rows.map((r) => r.label)).toEqual(['Rename', 'Machine settings'])
+  expect(top).toContain('>pi<')
+})
+
+test('a renamed machine shows both names, and can go back to its own', async () => {
+  const sent: unknown[] = []
+  const was = globalThis.fetch
+  globalThis.fetch = (async (_u: string, o: { body: string }) => (sent.push(JSON.parse(o.body)), new Response('{"ok":true}'))) as unknown as typeof fetch
+  try {
+    const vm = await menuOf('vm', renamed)
+    expect(vm.menu.label).toBe('Dev box')
+    expect(vm.top).toContain('>Dev box<')
+    expect(vm.top).toContain('>vm<')
+    expect(vm.rows.map((r) => r.label)).toEqual(['Rename', 'Use its own name (vm)', 'Machine settings'])
+    vm.rows[1]!.run()
+    // this computer: its host name beside the given one
+    const here = await menuOf('mini', renamed)
+    expect(here.top).toContain('mini · this computer')
+    // Rename opens the small dialog; Save sends the machine's real key
+    here.rows[0]!.run()
+    const [form] = layersNow()
+    expect(form?.label).toBe('Rename')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(sent).toEqual([{ type: 'rename', id: 'm:vm', name: '' }])
+  } finally {
+    globalThis.fetch = was
+  }
+})
+
+test("the heading opens the menu on a right click, never from its filter or plus; links keep the real name", async () => {
+  const { headHold } = await import('./list.tsx')
+  const h = headHold('vm')
+  let stopped = false
+  const ev = (inButton: boolean) => ({ target: { closest: (q: string) => (inButton && q === '.ib' ? {} : null) }, currentTarget: { querySelector: () => null }, preventDefault: () => (stopped = true) })
+  h.onContextMenu(ev(true) as never)
+  expect(stopped).toBe(false)
+  expect(layersNow()).toEqual([])
+  // the heading carries the real key whatever it is called
+  const html = renderToStaticMarkup(<List snap={renamed} />)
+  expect(html).toContain('data-machine="vm"')
+  expect(html).toContain('data-heading="m:vm"')
+  expect(html).toContain('>Dev box<')
+})
