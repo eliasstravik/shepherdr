@@ -362,3 +362,31 @@ test("FIND: the same through ps -E, as on macOS (#1120)", async () => {
   expect(out).toBe(f.log.replace("app claude", "app_claude"));
   rmSync(f.root, { recursive: true });
 });
+
+// A task agent's feedback report reaches its Assistant as a news line with a key= (herdr_task/feedback.py): it is
+// news like every other event, never the person's words. Every event, alone or several in one message, with typed
+// words after them; Herdr's other tags (settings, overview, health, GitHub, the hc tags) never show either.
+test("every news event and Herdr tag, alone or several in one message, is news or nothing, never words", async () => {
+  const EVENTS = ["started", "working-again", "needs-you", "failed", "ready", "done", "told", "accept-failed", "stalled", "feedback"];
+  const line = (e, i) => `<herdr-news task="SHOP-${i}" event="${e}"${e === "feedback" ? ` key="fb-${i}"` : ""}>"Fix login" ${e}: Goal: publish a proof. Tried: ran it. Fix: use the task's folder.</herdr-news>`;
+  const u = (id, content) => ({ ...person, uuid: id, message: { role: "user", content } });
+  const alone = EVENTS.map((e, i) => u(`a${i}`, line(e, i)));
+  const many = u("m1", EVENTS.map(line).join("\n"));
+  const after = u("m2", `${line("feedback", 1)}\nAnd the button is too small.`);
+  const tags = [
+    '<herdr-setting key="review" value="on">Review is on</herdr-setting>',
+    '<herdr-overview machine="mac" space="Home" task="SHOP-2" event="feedback">Mac · Home: "Fix login" feedback: x</herdr-overview>',
+    '<herdr-health machine="" event="stuck">2 processes look stuck</herdr-health>',
+    '<herdr-github pr="7">Check failed</herdr-github>',
+    '<herdr-news event="main-red" branch="main">main is red</herdr-news>', '<herdr-news event="systemic" branch="main">3 tasks fail the same check</herdr-news>',
+    '<hc from="person" reaction="👍" to="Fix it"/>', '<hc from="person" reaction-removed="👍" to="Fix it"/>',
+  ].map((t, i) => u(`t${i}`, t));
+  // the agent's own tag lines (a reaction, no reply, a suggestion) are never its words either
+  const quiet = reply("q1", [text('<hc react="👀" to="Fix it"/>\n<hc no-reply/>\n<hc suggest="yes"/>')]);
+  const c = await read([...alone, many, after, ...tags, u("t9", tags.map((x) => x.message.content).join("\n")), quiet]);
+  const news = c.items.filter((x) => x.kind === "news");
+  expect(news.map((x) => x.event)).toEqual([...EVENTS, ...EVENTS, "feedback"]);
+  expect(news.filter((x) => x.event === "feedback").every((x) => x.text.startsWith('"Fix login" feedback: Goal:'))).toBe(true);
+  // the only words anyone sees: the ones typed after the tag
+  expect(c.items.filter((x) => x.kind !== "news" && x.text).map((x) => x.text)).toEqual(["And the button is too small."]);
+});
