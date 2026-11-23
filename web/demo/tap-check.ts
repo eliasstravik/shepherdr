@@ -178,15 +178,17 @@ export async function rhythm(page: Page): Promise<string[]> {
     if (hs.length < 2) return ['fewer than two machine headings']
     const r = (e: HTMLElement) => e.getBoundingClientRect()
     const name = (e: HTMLElement) => e.textContent?.trim() || '?'
+    // the words of a heading, where the eye reads the gaps from (a heading's box may be taller than its words)
+    const words = (e: HTMLElement) => { const g = document.createRange(); g.selectNodeContents(e); return g.getBoundingClientRect() }
     const h0 = r(hs[0]!.e).height
-    const above = hs.filter(({ i }) => i > 0).map(({ e, i }) => ({ e, gap: r(e).top - r(vis[i - 1]!).bottom }))
+    const above = hs.filter(({ i }) => i > 0).map(({ e, i }) => ({ e, gap: Math.round(words(e).top - r(vis[i - 1]!).bottom) }))
     const a0 = above[0]!.gap
     for (const { e } of hs) if (Math.abs(r(e).height - h0) > 1) off.push(`${name(e)}: ${r(e).height}px tall, not ${h0}`)
     for (const { e, gap } of above) if (Math.abs(gap - a0) > 1) off.push(`${name(e)}: ${gap}px above it, not ${a0}`)
     for (const { e, i } of hs) {
       const next = vis[i + 1]
       if (!next || head(next) || next.classList.contains('foot')) continue
-      const below = r(next).top - r(e).bottom
+      const below = Math.round(r(next).top - words(e).bottom)
       if (below >= a0) off.push(`${name(e)}: ${below}px down to its spaces, not less than the ${a0}px above it`)
     }
     return off

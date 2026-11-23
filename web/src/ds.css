@@ -21,10 +21,10 @@ p,h2,h3{margin:0}small{font-size:inherit}
    thing on .tap is at least --hit across, either itself or through its ::before pad, with no neighbour's pad over it
    (web/demo/tap-check.ts measures it). Text: 16 px body and 14 px second lines on touch, never smaller to tap. */
 .app{--ui:14px;--uil:20px;--sec:13px;--secl:18px;--hd:48px;--row:32px;--row2:52px;--btn:32px;--btns:28px;--ib:28px;--tab:28px;--ic:16px;--gut:16px;--h1:16px;--chip:32px;
-  --hit:44px;--field:32px;--side:240px;--tgw:36px;--tgh:20px;--key:24px;--send:32px;--rz:12px;--ath:72px;
+  --hit:44px;--field:32px;--mh:30px;--side:240px;--tgw:36px;--tgh:20px;--key:24px;--send:32px;--rz:12px;--ath:72px;
   width:100%;font-size:var(--ui);line-height:var(--uil)}
 .app.tap{--ui:16px;--uil:24px;--sec:14px;--secl:20px;--hd:56px;--row:44px;--row2:56px;--btn:40px;--btns:36px;--ib:44px;--tab:44px;--ic:20px;--h1:18px;--chip:40px;
-  --field:44px;--side:288px;--tgw:44px;--tgh:24px;--key:36px;--send:40px;--rz:16px;--ath:80px}
+  --field:44px;--mh:44px;--side:288px;--tgw:44px;--tgh:24px;--key:36px;--send:40px;--rz:16px;--ath:80px}
 .app.phone{--hd:52px;--row:48px}
 
 /* atoms */
