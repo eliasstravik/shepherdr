@@ -22,7 +22,7 @@ import { Finger, HOLD_MS, quickFit, REPLY_AT, type QuickFit } from './press.ts'
 import { dayLabel } from './days.ts'
 import { Markdown, withLinks } from './markdown.tsx'
 import { dropped, pasted } from './paste.ts'
-import { pasteImages, touch, useCopiedPicture } from './clip.ts'
+import { touch } from './clip.ts'
 import { landLaunchShare, putAway, useLanded, watchLastChat } from './share.ts'
 import { openSendTo } from './sendto.tsx'
 import { suggestionOf, suggestionsOn } from './suggest.ts'
@@ -751,9 +751,8 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   const reply = useUI((u) => u.reply[key])
   const phone = useUI((u) => u.phone)
   const ref = useRef<HTMLTextAreaElement>(null)
-  // a finger (a phone, a tablet): + opens a menu with Photos, Paste image and Files
+  // a finger (a phone, a tablet): + opens a menu with Photos and Files
   const finger = useMemo(touch, [])
-  const [copied, copiedDone] = useCopiedPicture(finger)
   const shared = useLanded() === key
   useGrow(ref, text)
   const sg = suggestionOf(chat, suggestionsOn(snap.settings))
@@ -772,13 +771,6 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
     send(key, key, t, wait && busy)
     setText('')
     if (shared) putAway()
-  }
-  const pasteNow = async () => {
-    const r = await pasteImages()
-    if ('files' in r) {
-      attach(key, key, r.files)
-      copiedDone()
-    } else notice(r.why, 4000)
   }
 
   /** the suggested reply written into the box. From the Tab key the box keeps the focus; from the chip (a tap) the
@@ -802,18 +794,9 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
         attach(key, key, f)
       }}
     >
-      {(shared || copied) && (
+      {shared && (
         <div className="fchips">
-          {shared && <SharedChip chat={key} thread={thread} />}
-          {copied && (
-            <span className="fchip">
-              <button type="button" className="clipgo" onClick={() => { attach(key, key, [copied.file]); copiedDone() }}>
-                <img className="pic" src={copied.url} alt="" />
-                <span>Paste copied picture</span>
-              </button>
-              <button type="button" aria-label="Not now" onClick={copiedDone}><I n="x" c="s16" /></button>
-            </span>
-          )}
+          <SharedChip chat={key} thread={thread} />
         </div>
       )}
       {reply && (
@@ -852,7 +835,6 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
             if (!f.length) return
             e.preventDefault()
             attach(key, key, f)
-            copiedDone()
           }}
           onKeyDown={(e) => {
             // Tab writes the suggested reply into the box, so you can keep typing
@@ -874,7 +856,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
         )}
       </div>
       <div className="cbar">
-        <AddButtons finger={finger} onFiles={(f) => attach(key, key, f)} paste={() => void pasteNow()} />
+        <AddButtons finger={finger} onFiles={(f) => attach(key, key, f)} />
         <AgentLine
           pick={pick}
           machine={machine}
@@ -898,10 +880,10 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   )
 }
 
-/** +: on a desktop it opens files; on a phone or tablet a menu first: Photos, Paste image, Files. Photos opens Android's
+/** +: on a desktop it opens files; on a phone or tablet a menu first: Photos, Files. Photos opens Android's
  *  photo picker straight away, newest first, and one tap on a picture attaches it (one at a time: picking several needs an
  *  Add tap more, measured on Android 15); Files takes several pictures at once */
-export function AddButtons({ finger, onFiles, paste }: { finger: boolean; onFiles: (f: File[]) => void; paste: () => void }) {
+export function AddButtons({ finger, onFiles }: { finger: boolean; onFiles: (f: File[]) => void }) {
   const pickFile = useRef<HTMLInputElement>(null)
   const pickPhoto = useRef<HTMLInputElement>(null)
   const take = (e: { target: HTMLInputElement }) => {
@@ -914,7 +896,6 @@ export function AddButtons({ finger, onFiles, paste }: { finger: boolean; onFile
           e.currentTarget,
           [
             { icon: 'image', label: 'Photos', run: () => pickPhoto.current?.click() },
-            { icon: 'paste', label: 'Paste image', run: paste },
             { icon: 'doc', label: 'Files', run: () => pickFile.current?.click() },
           ],
           { label: 'Add' },
