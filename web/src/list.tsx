@@ -2,16 +2,19 @@
 // groups that fold, spaces with a "needs you" count, and at the foot Feedback and Settings. Left on a desktop, behind
 // the menu button on a phone. With it, a space's menu and the small dialogs it opens (New space, New group, Rename,
 // Archive, Remove, Feedback).
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { flushSync } from 'react-dom'
 import type { Snapshot } from '@shared/types.ts'
 import { everything, folderOf, groupOf, isEverything, isHomeSpace, isTilde, listOf, machineLabel, needsCount, placeDown, placeOf, spaceLabel, tasksIn, tstate, unreachable, type ListMachine, type Space } from '@shared/view.ts'
 import { act, getState, go, notice, openSettings, registry, setUI, shownOn, tryAct, useUI, type Filter, type MenuRow } from './kernel.ts'
 import { confirm, openDialog, openForm, openMenu } from './overlay.tsx'
 import { AgentField, MachineField, pickFor, type Pick } from './picker.tsx'
 import { Btn, Cnt, I, IB, MenuGroup, Row } from './ui.tsx'
+import { attr } from './attr.ts'
 import { copyText } from './copy.ts'
 import { DictateButton } from './dictate.tsx'
-import { press } from './drag.ts'
+import { press, pressing } from './drag.ts'
+import { buzz, IOS, still } from './motion.ts'
 import { swapRow } from './sides.ts'
 import { NameWithIcon, SpaceIcon } from './space-icon.tsx'
 
@@ -390,7 +393,7 @@ function SpaceRow({ snap, p, sub, under, siblings, section }: { snap: Snapshot; 
   const dim = !!placeDown(snap, p.id) || p.archived
   const tilde = isTilde(snap, p)
   return (
-    <div className="rowx" data-project={p.id} data-section={section} data-drop={under} onPointerDown={dragSpace(snap, p, under, siblings)}>
+    <div className="rowx" data-project={p.id} data-section={section} data-machine={p.machine} data-drop={under} onPointerDown={dragSpace(snap, p, under, siblings)}>
       <Row lead={<SpaceIcon snap={snap} id={p.id} />} label={tilde ? '~' : p.name} {...(tilde ? { 'aria-label': spaceLabel(snap, p.id) } : {})} className={[sub ? 'sub' : '', dim ? 'dim' : ''].join(' ')} current={at === p.id} end={<Cnt n={n} />} onClick={() => go(p.id)} />
       <IB
         icon="dots"
@@ -435,49 +438,25 @@ function MachineTop({ name, real }: { name: string; real: string }) {
   )
 }
 
-/** a finger held on a machine's heading: its menu. A right click opens it too (Android's long-press sends one as well,
- *  so whichever comes first wins and the other is skipped); the filter and plus buttons keep their own taps. */
-const HOLD_MS = 450
-let holding: { t: ReturnType<typeof setTimeout>; x: number; y: number } | null = null
+/** a machine's menu from its heading: a finger held on it and let go without moving it (moved, it drags the machine),
+ *  or a right click. Android's long-press sends a right click as well, while the finger is still down: that one waits
+ *  for the finger. The filter and plus buttons keep their own taps, and the tap that ends a hold folds nothing. */
 let heldAt = 0
-const stopHold = () => {
-  if (holding) clearTimeout(holding.t)
-  holding = null
-}
 const justHeld = () => Date.now() - heldAt < 800
 const onButton = (e: { target: EventTarget }) => !!(e.target as HTMLElement).closest?.('.ib')
 const anchorOf = (el: Element) => el.querySelector('.mn') ?? el
 export function headHold(key: string) {
   const open = (el: Element) => {
-    stopHold()
     heldAt = Date.now()
     machineMenu(anchorOf(el), key)
   }
   return {
-    onPointerDown: (e: React.PointerEvent<HTMLElement>) => {
-      if (e.pointerType === 'mouse' || onButton(e)) return
-      stopHold()
-      const el = e.currentTarget
-      holding = {
-        x: e.clientX,
-        y: e.clientY,
-        t: setTimeout(() => {
-          navigator.vibrate?.(10)
-          open(el)
-        }, HOLD_MS),
-      }
-    },
-    onPointerMove: (e: React.PointerEvent<HTMLElement>) => {
-      if (holding && Math.hypot(e.clientX - holding.x, e.clientY - holding.y) > 8) stopHold()
-    },
-    onPointerUp: stopHold,
-    onPointerCancel: stopHold,
+    open,
     onContextMenu: (e: React.MouseEvent<HTMLElement>) => {
       if (onButton(e)) return
       e.preventDefault()
-      if (!justHeld()) open(e.currentTarget)
+      if (!justHeld() && !pressing()) open(e.currentTarget)
     },
-    // the tap that ends a hold doesn't also press the name (Machines, when it carries a warning mark)
     onClickCapture: (e: React.MouseEvent<HTMLElement>) => {
       if (justHeld() && !onButton(e)) {
         e.preventDefault()
@@ -487,27 +466,99 @@ export function headHold(key: string) {
   }
 }
 
-/** a machine's heading (SHEP-342): its name (a button to Settings › Machines when it carries a warning mark), what its
- *  filter shows when that is not Active, then its own filter and New space on it */
-function MachineHead({ snap, m }: { snap: Snapshot; m: ListMachine }) {
+/** reduced motion, the device's or Settings' */
+const calm = () => still() || document.documentElement.dataset.motion === 'reduced'
+
+/** Fold or unfold a machine: its rows go or come, and the rows under them glide to their new place (short; none with
+ *  reduced motion). Kept on this device (ui.shut, beside the groups'). */
+export function fold(id: string, el?: Element | null) {
+  const shut = { ...getState().ui.shut }
+  if (shut[id]) delete shut[id]
+  else shut[id] = true
+  const list = el?.closest('nav')
+  if (!list || calm()) return setUI({ shut })
+  const rows = () => [...list.children].filter((x): x is HTMLElement => x instanceof HTMLElement)
+  const was = new Map(rows().map((x) => [x, x.getBoundingClientRect().top]))
+  flushSync(() => setUI({ shut }))
+  for (const x of rows()) {
+    const top = was.get(x)
+    if (top === undefined) {
+      x.animate([{ opacity: 0, transform: 'translateY(-6px)' }, { opacity: 1, transform: 'none' }], { duration: 180, easing: 'ease-out' })
+      continue
+    }
+    const dy = top - x.getBoundingClientRect().top
+    if (Math.abs(dy) > 1) x.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 220, easing: IOS })
+  }
+}
+
+/** the machines in a new order (their keys), said to a screen reader */
+type Reorder = (keys: string[], said?: string) => void
+
+/** a machine's heading (SHEP-342): its name, which folds its spaces, with a chevron and, folded, how many of its
+ *  spaces need you; what its filter shows when that is not Active; then a warning mark (to Settings › Machines), its
+ *  own filter and New space. Held and moved (a mouse: just moved), it drags the machine with its rows; Alt with up or
+ *  down moves it from the keyboard. */
+function MachineHead({ snap, m, keys, shut, needs, reorder }: { snap: Snapshot; m: ListMachine; keys: string[]; shut: boolean; needs: number; reorder: Reorder }) {
   const { machine, warn, filter, archived } = m
   const key = machine.machine
   const name = machineLabel(snap, key)
-  const label = (
-    <>
-      <span className="n">{name}</span>
-      {filter !== 'Active' && <span className="mf">{filter}</span>}
-    </>
-  )
+  const hold = headHold(key)
+  const at = keys.indexOf(key)
+  const step = (by: number) => {
+    const to = at + by
+    if (at < 0 || to < 0 || to >= keys.length) return
+    const next = [...keys]
+    next.splice(at, 1)
+    next.splice(to, 0, key)
+    reorder(next, `${name} moved to ${to + 1} of ${keys.length}`)
+    document.querySelector<HTMLElement>(`[data-heading="m:${attr(key)}"] .mn`)?.focus()
+  }
   return (
-    <div className="lab mh" data-machine={key} data-heading={`m:${key}`} data-drop={`m:${key}`} {...headHold(key)}>
-      {warn ? (
-        <button type="button" className="mn" aria-label={`${machine.name}: ${warn}. Open Machines`} onClick={() => openSettings('all', 'Machines')}>
-          {label}
+    <div
+      className="lab mh"
+      data-machine={key}
+      data-heading={`m:${key}`}
+      data-drop={`m:${key}`}
+      onContextMenu={hold.onContextMenu}
+      onClickCapture={hold.onClickCapture}
+      onPointerDown={(e) => {
+        if (onButton(e)) return
+        const row = e.currentTarget
+        press(e, {
+          id: key,
+          siblings: keys,
+          level: 'machine',
+          drop: (ids) => reorder(ids),
+          hold: (el) => {
+            el.dataset.held = ''
+            buzz()
+          },
+          release: () => delete row.dataset.held,
+          heldUp: (el) => hold.open(el),
+        })
+      }}
+    >
+      <button
+        type="button"
+        className="mn"
+        aria-expanded={!shut}
+        aria-keyshortcuts={keys.length > 1 ? 'Alt+ArrowUp Alt+ArrowDown' : undefined}
+        onClick={(e) => fold(machine.id, e.currentTarget)}
+        onKeyDown={(e) => {
+          if (!e.altKey || e.ctrlKey || e.metaKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return
+          e.preventDefault()
+          step(e.key === 'ArrowUp' ? -1 : 1)
+        }}
+      >
+        <span className="n">{name}</span>
+        {filter !== 'Active' && <span className="mf">{filter}</span>}
+        <I n="down" c="chev s16" />
+        {shut && <Cnt n={needs} />}
+      </button>
+      {warn && (
+        <button type="button" className="ib" aria-label={`${machine.name}: ${warn}. Open Machines`} onClick={() => openSettings('all', 'Machines')}>
           <I n="warn" c="c-ask s16" />
         </button>
-      ) : (
-        <span className="mn">{label}</span>
       )}
       {/* the Tasks panel's filter button: a dot while it is on */}
       <IB icon="filter" label={`Show which spaces on ${machine.name}${filter !== 'Active' ? ' (on)' : ''}`} aria-haspopup="menu" data-marks="" onClick={(e) => filterMenu(e.currentTarget, key, machine.name, archived)}>
@@ -525,11 +576,39 @@ function MachineHead({ snap, m }: { snap: Snapshot; m: ListMachine }) {
   )
 }
 
+/** a folded machine's count: what its spaces as its filter shows them need from you, the open one aside (it shows) */
+export function foldedNeeds(snap: Snapshot, m: ListMachine, open?: string | null) {
+  return [...m.groups.flatMap((g) => g.spaces), ...m.spaces].reduce((n, p) => n + (p.id === open ? 0 : needsCount(snap, p.id)), 0)
+}
+
+/** keys (the machines as they show) in the order `want` names; any it doesn't name keep their place after */
+export function inMachineOrder<T>(list: T[], keyOf: (x: T) => string, want: string[] | null): T[] {
+  if (!want) return list
+  const at = (x: T) => {
+    const i = want.indexOf(keyOf(x))
+    return i < 0 ? want.length : i
+  }
+  return list.map((x, i) => [x, i] as const).sort((a, b) => at(a[0]) - at(b[0]) || a[1] - b[1]).map(([x]) => x)
+}
+
 export function List({ snap }: { snap: Snapshot }) {
   const ui = useUI()
   const ph = ui.phone
   const ev = everything(snap)
-  const machines = listOf(snap, (m) => shownOn(ui, m))
+  // the order just dragged shows at once, until the snapshot says the same (or the move failed)
+  const [moved, setMoved] = useState<string[] | null>(null)
+  const [said, setSaid] = useState('')
+  const machines = inMachineOrder(listOf(snap, (m) => shownOn(ui, m)), (m) => m.machine.machine, moved)
+  const keys = machines.map((m) => m.machine.machine)
+  const now = snap.machines.map((m) => m.machine).join('\n')
+  useEffect(() => {
+    if (moved && moved.join('\n') === now) setMoved(null)
+  }, [now])
+  const reorder: Reorder = (next, words) => {
+    flushSync(() => setMoved(next))
+    if (words) setSaid(words)
+    void tryAct({ type: 'order', under: 'all', ids: next.map((k) => `m:${k}`) }).then((ok) => !ok && setMoved(null))
+  }
   return (
     <>
       <div className="brand">
@@ -543,34 +622,42 @@ export function List({ snap }: { snap: Snapshot }) {
           <Row lead={<SpaceIcon snap={snap} id={ev.id} />} label="Everything" current={ui.at === ev.id} onClick={() => go(ev.id)} />
         </div>
       )}
-      {machines.map((m) => {
+      {machines.flatMap((m) => {
         const { machine, groups, spaces, filter } = m
-        return (
-          <div key={machine.id} style={{ display: 'contents' }}>
-            <MachineHead snap={snap} m={m} />
-            {filter === 'Archived' && !spaces.length && <p className="hint mempty">No archived spaces.</p>}
-            {groups.flatMap((g) => [
-              // a group is dragged by its heading, among the groups of its machine; its spaces go with it
-              <div
-                className="rowx"
-                key={g.id}
-                data-section={g.id}
-                data-heading={g.id}
-                data-drop={g.id}
-                onPointerDown={(e) => {
-                  if ((e.target as HTMLElement).closest('.ib')) return
-                  press(e, { id: g.id, siblings: groups.map((x) => x.id), level: 'section', drop: (ids) => void tryAct({ type: 'order', under: `sections:m:${machine.machine}`, ids }) })
-                }}
-              >
-                <Row icon={ui.shut[g.id] ? 'right' : 'down'} label={g.name} expanded={!ui.shut[g.id]} onClick={() => setUI({ shut: { ...ui.shut, [g.id]: !ui.shut[g.id] } })} />
-                <IB icon="dots" label={`More for ${g.name}`} aria-haspopup="menu" onClick={(e) => groupMenu(e.currentTarget, g.id, g.name)} />
-              </div>,
-              ...(ui.shut[g.id] ? [] : g.spaces.map((p) => <SpaceRow key={p.id} snap={snap} p={p} sub under={g.id} siblings={g.spaces.map((x) => x.id)} section={g.id} />)),
-            ])}
-            {spaces.map((p) => <SpaceRow key={p.id} snap={snap} p={p} under={`m:${machine.machine}`} siblings={spaces.map((x) => x.id)} />)}
-          </div>
-        )
+        const key = machine.machine
+        const shut = !!ui.shut[machine.id]
+        const head = <MachineHead key={machine.id} snap={snap} m={m} keys={keys} shut={shut} needs={shut ? foldedNeeds(snap, m, ui.at) : 0} reorder={reorder} />
+        if (shut) {
+          // folded: the open space stays in sight under its machine
+          const open = [...groups.flatMap((g) => g.spaces.map((p) => [p, g.id] as const)), ...spaces.map((p) => [p, `m:${key}`] as const)].find(([p]) => p.id === ui.at)
+          return [head, ...(open ? [<SpaceRow key={open[0].id} snap={snap} p={open[0]} under={open[1]} siblings={[open[0].id]} />] : [])]
+        }
+        return [
+          head,
+          ...(filter === 'Archived' && !spaces.length ? [<p key={`${machine.id}:empty`} className="hint mempty" data-machine={key}>No archived spaces.</p>] : []),
+          ...groups.flatMap((g) => [
+            // a group is dragged by its heading, among the groups of its machine; its spaces go with it
+            <div
+              className="rowx"
+              key={g.id}
+              data-section={g.id}
+              data-machine={key}
+              data-heading={g.id}
+              data-drop={g.id}
+              onPointerDown={(e) => {
+                if ((e.target as HTMLElement).closest('.ib')) return
+                press(e, { id: g.id, siblings: groups.map((x) => x.id), level: 'section', drop: (ids) => void tryAct({ type: 'order', under: `sections:m:${key}`, ids }) })
+              }}
+            >
+              <Row icon={ui.shut[g.id] ? 'right' : 'down'} label={g.name} expanded={!ui.shut[g.id]} onClick={() => setUI({ shut: { ...ui.shut, [g.id]: !ui.shut[g.id] } })} />
+              <IB icon="dots" label={`More for ${g.name}`} aria-haspopup="menu" onClick={(e) => groupMenu(e.currentTarget, g.id, g.name)} />
+            </div>,
+            ...(ui.shut[g.id] ? [] : g.spaces.map((p) => <SpaceRow key={p.id} snap={snap} p={p} sub under={g.id} siblings={g.spaces.map((x) => x.id)} section={g.id} />)),
+          ]),
+          ...spaces.map((p) => <SpaceRow key={p.id} snap={snap} p={p} under={`m:${key}`} siblings={spaces.map((x) => x.id)} />),
+        ]
       })}
+      <span className="vh" role="status">{said}</span>
       <div className="foot">
         <Row icon="feedback" label="Feedback" onClick={() => { setUI({ drawer: false }); feedbackDialog() }} />
         <Row icon="gear" label="Settings" onClick={() => openSettings('all')} />
