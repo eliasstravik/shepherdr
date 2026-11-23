@@ -6,10 +6,15 @@
     <title>Shepherdr</title>
     <meta name="description" content="Your agents, tasks and chats from a phone, tablet or desktop." />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#ffffff" />
+    <!-- the browser's bar and, in a tab, the phone's: the device's light or dark with no script; the script below
+         sets both to the theme picked -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#121212" />
     <!-- relative: under any path (/shepherdr/); with the login cookie: a browser fetches a manifest without one unless
          told, and a login gate in front (Cloudflare Access, Authelia…) then answers with its sign-in page, so the app
-         can't be added to the home screen (GitHub #494). Dark: manifest-dark.webmanifest (the script below) -->
+         can't be added to the home screen (GitHub #494). Its colours are dark, the app's own: an installed Android app keeps
+         the manifest it was installed with (no script swap reaches it) and paints the window under the gesture bar in
+         its background_color. Light: manifest-light.webmanifest (the script below) -->
     <link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials" />
     <style>
       /* the canvas from the first paint, in the theme picked (ds.css's --canvas): what the phone shows where the page
@@ -25,9 +30,10 @@
         try { t = (JSON.parse(localStorage.getItem('shepherdr.prefs') || '{}') || {}).theme || 'System' } catch (e) {}
         if (t !== 'System') document.documentElement.dataset.theme = t.toLowerCase()
         var dark = t === 'Dark' || (t === 'System' && matchMedia('(prefers-color-scheme: dark)').matches)
-        document.querySelector('meta[name=theme-color]').content = dark ? '#121212' : '#ffffff'
-        /* the installed app's window and the phone's navigation bar take the manifest's colours */
-        if (dark) document.querySelector('link[rel=manifest]').setAttribute('href', 'manifest-dark.webmanifest')
+        var bars = document.querySelectorAll('meta[name=theme-color]')
+        for (var i = 0; i < bars.length; i++) bars[i].content = dark ? '#121212' : '#ffffff'
+        /* the app installed from here: its window and the phone's navigation bar take the manifest's colours */
+        if (!dark) document.querySelector('link[rel=manifest]').setAttribute('href', 'manifest-light.webmanifest')
       })()
       /* a link's #part (#accept=SHEP-7), kept before the app's own address takes the bar */
       window.shepherdrLink = location.hash
