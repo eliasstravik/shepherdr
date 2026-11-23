@@ -927,13 +927,13 @@ def collision_words(c):
                     "checks; your own branch may be force-pushed with lease, never the base.")
 
 
-def collision_reason(c):
-    """The card's one line (merge_failed, in red)."""
+def collision_reason(c, told=True):
+    """The card's one line (merge_failed, in red). told: its agent was asked to rebase (#1357: only then said)."""
+    tail = ": its agent is rebasing" if told else ""
     if c and c["by"]:
-        return f"Conflicts with {c['base']} after {', '.join(c['by'][:3])} merged: its agent is rebasing"
+        return f"Conflicts with {c['base']} after {', '.join(c['by'][:3])} merged" + tail
     if c:
-        return f"Conflicts with {c['base']} in {c['files'][0]}" + (f" and {len(c['files']) - 1} more" if len(c["files"]) > 1 else "") + \
-            ": its agent is rebasing"
+        return f"Conflicts with {c['base']} in {c['files'][0]}" + (f" and {len(c['files']) - 1} more" if len(c["files"]) > 1 else "") + tail
     return None
 
 
