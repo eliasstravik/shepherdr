@@ -11,7 +11,7 @@ import time
 
 from . import link
 from .base import bundle, ENTRY, Fail, guard, run, STORE, sync_held, VERSION
-from .agents import LINE_MAX, SUMMARY_MAX
+from .agents import LINE_MAX, ROW_MAX, SUMMARY_MAX
 from .launch import cmd_allow, name_tabs
 from .commands import (
     cmd_accept, cmd_add, cmd_alert, cmd_archive, cmd_config, cmd_edit, cmd_fix, cmd_list, cmd_merge, cmd_ready, cmd_reply,
@@ -26,6 +26,10 @@ from .home import cmd_home
 from .assistant_settings import cmd_session_note
 from .feedback import cmd_feedback
 from .sandbox import cmd_sandbox
+
+# SHEP-370: a title a phone's task row shows uncut (only asked, never refused)
+TITLE_HELP = (f"at most {ROW_MAX} characters, so a phone's task row shows it uncut: the thing and the change in a few plain "
+              f"words, no colon-and-list, no \"and\" (\"Call button in the message box\"); details go in the prompt")
 
 
 # ---- another machine ------------------------------------------------------------------------
@@ -261,7 +265,7 @@ def main():
     c.add_argument("--all", action="store_true", help="every folder's tasks on this machine")
     c.add_argument("--archived", action="store_true", help="the archived tasks instead (Done ones archive themselves after a week), latest first")
     c = cmd("add", cmd_add, "add a task; prints its id", id=False)
-    c.add_argument("title")
+    c.add_argument("title", help=TITLE_HELP)
     c.add_argument("--prompt")
     c.add_argument("--prompt-file")
     task_opts(c)
@@ -319,7 +323,8 @@ def main():
     c.add_argument("--commit", help="the commit the round reviewed, when fixes were committed since (default: HEAD)")
     cmd("review-more", cmd_review_more, "the Assistant gives a task one more review round, once all are used (never its own agent)")
     c = cmd("status", cmd_status, "a task's agent says what it's doing now, at the start, each natural step and at least every 5 minutes: status 4 \"Fixing the two failing tests\" --done 40 --left 5m")
-    c.add_argument("text", help=f"what it is doing, at most {LINE_MAX} characters (longer is cut at a word)")
+    c.add_argument("text", help=f"what it is doing, at most {ROW_MAX} characters to show uncut on a phone, a few plain words "
+                                    f"(longer than {LINE_MAX} is cut at a word)")
     c.add_argument("--done", type=int, help="how far through the whole task, 0-100 (%%)")
     c.add_argument("--left", help="your best guess of how long is left: 5m, 90s, 1h30m; on every status, the first too (a rough guess beats none)")
     c = cmd("alert", cmd_alert, "tell the person something that can't wait: a toast and a sound (an Assistant's follow its space's Notify): alert \"Deploy is down\" --body \"why\"", id=False)
@@ -362,7 +367,7 @@ def main():
     cmd("reopen", lambda a: cmd_state(a, "reopen"), "undo done or ready; a queued or scheduled task goes back to to do")
     cmd("unarchive", cmd_unarchive, "bring an archived task back into its list (only when the person asks; writing to it does too)")
     c = cmd("edit", cmd_edit, "change a task")
-    c.add_argument("--title")
+    c.add_argument("--title", help=TITLE_HELP)
     c.add_argument("--space", help="move it to another space, by its id (only before it has started)")
     c.add_argument("--move-to", metavar="FOLDER", help="with --space, when that space is another folder on this machine: the task "
                                                        "moves to that folder's list and gets a new id there (only before it has started)")
@@ -428,9 +433,9 @@ def main():
             g.add_argument("--worktree", action="store_true")
         return c
     c = auto_cmd("add", "add an automation", id=False, fields=True)
-    c.add_argument("title")
+    c.add_argument("title", help=TITLE_HELP)
     c = auto_cmd("edit", "change an automation", fields=True)
-    c.add_argument("--title")
+    c.add_argument("--title", help=TITLE_HELP)
     c = auto_cmd("list", "this folder's automations", id=False)
     c.add_argument("--all", action="store_true", help="every folder's on this machine")
     c.set_defaults(fn=auto_list)

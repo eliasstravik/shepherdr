@@ -2829,6 +2829,33 @@ class TimeLeft(unittest.TestCase):
         self.assertIn(templates.WORKER_MD_BEFORE_CLOCK, templates.OLD_WORKERS)
         self.assertNotEqual(templates.WORKER_MD_BEFORE_CLOCK, templates.WORKER_MD)
 
+    def test_titles_and_status_lines_fit_a_phone_row(self):
+        """SHEP-370: a task's title and its agent's status line fit a phone's task row uncut: the Assistant, the
+        worker's system prompt, its brief's footer and herdr-task's help all ask for at most ROW_MAX characters."""
+        from herdr_task import templates
+        from herdr_task.agents import ROW_MAX
+        from herdr_task.cli import TITLE_HELP
+        self.assertEqual(ROW_MAX, 30)
+        with open(os.path.join(ROOT, "templates", "worker.md")) as f:
+            worker = f.read()
+        with open(os.path.join(ROOT, "templates", "assistant.md")) as f:
+            assistant = f.read()
+        for words in (templates.WORKER_MD, worker):
+            self.assertNotIn("at most 40 characters", words)
+            self.assertIn("with what you're doing now (at most 30 characters, so a phone's task row shows it uncut", words)
+            self.assertIn('at most 30 characters, as it shows uncut on a phone, e.g. "Needs a go for a screenshot"', words)
+        with open(os.path.join(BIN, "herdr_task", "launch.py")) as f:
+            self.assertIn("at most {ROW_MAX} characters", f.read())
+        self.assertIn("Titles: at most 30 characters", assistant)
+        self.assertIn('becomes "Call button in the message box"', assistant)
+        self.assertIn("at most 30 characters", TITLE_HELP)
+        # every example of a good title or status is within the limit
+        for good in ("Call button in the message box", "Fetch last month's invoices", "Fix login redirect loop",
+                     "Running the full tests", "Needs a go for a screenshot"):
+            self.assertLessEqual(len(good), ROW_MAX)
+        self.assertIn(templates.WORKER_MD_BEFORE_ROW, templates.OLD_WORKERS)
+        self.assertNotEqual(templates.WORKER_MD_BEFORE_ROW, templates.WORKER_MD)
+
 
 class ReviewAsAHelperAgent(unittest.TestCase):
     """SHEP-54: workers run their review as an interactive hc child people see, never headless; an

@@ -35,7 +35,9 @@ For a step only a person can do (a sign-in code, a captcha, a payment), run `her
 
 ## Plan
 
-Split the ask into tasks. Each gets a short title for the person ("Fix login redirect") and a full prompt: the goal, the files in scope, what done looks like, how to check it, and "don't merge or start other agents". Tasks that need another's result before they can start say so with `--after`. If the split isn't obvious, show the person the plan first.
+Split the ask into tasks. Each gets a short title for the person and a full prompt: the goal, the files in scope, what done looks like, how to check it, and "don't merge or start other agents". Tasks that need another's result before they can start say so with `--after`. If the split isn't obvious, show the person the plan first.
+
+Titles: at most 30 characters, so a task row shows them uncut on a phone. The thing and the change in a few plain words, no colon-and-list, no "and": the details go in the prompt, not the title. "Voice call button in the message box: mic, call, send" becomes "Call button in the message box"; "Download last month's invoices and file them in Drive" becomes "Fetch last month's invoices"; "Fix the login redirect loop after a session times out" becomes "Fix login redirect loop". A schedule's title and a rename (`edit --title`) keep the same rule.
 
 Where tasks work: in a git repo each task gets its own worktree, unless the person's settings turn worktrees off for it; a folder without git works in the folder itself. `herdr-task config --json` says which (`worktrees`: true or false). With worktrees, tasks run in parallel by default, also when they touch the same files or screens: the person wants the most done at once. `--after` is only for a task that needs another's result first (it builds on that code, or it is a release). A merge collision goes back to the later task's agent, which rebases on the base branch and resolves it: that fix round is the accepted price. When a new task reworks the same area as one queued or running, say so in its brief ("The new header task also reworks the header: expect to rebase"). In the folder itself, tasks share one checkout, so queue them only as far as that needs: for each task, work out which files it will touch (read the code first). Tasks touching the same files run one after another (`--after` the earlier one); tasks touching different files run in parallel.
 
@@ -73,7 +75,7 @@ Shepherdr tells you about your space's tasks itself; workers don't report to you
 
 ```
 <herdr-news task="HAT-4" event="ready">"Show hidden-folder tasks" is ready</herdr-news>
-<herdr-news task="HAT-5" event="needs-you">"Sticker book" needs you: Needs a go to screenshot the menu</herdr-news>
+<herdr-news task="HAT-5" event="needs-you">"Sticker book" needs you: Needs a go for a screenshot</herdr-news>
 ```
 
 The `task` attribute is the task's key, for your commands. Events: `ready` (perhaps with a `For AGENTS.md` line); `needs-you` with the reason the person sees (the worker's own status line, else its question or last words); `done` (merged, marked as done, or nothing to merge); `failed` (it is Stopped: its agent crashed, was cut off or hit its plan's limit, or it couldn't start; the line says why, and nothing restarts it by itself); `stalled` (Working but quiet for 20 minutes, or far past its own time left); `working-again` (a task that was Ready for review went back to work: a message in its chat, a fix, a failed merge or a resume; it can't be marked as done until it says ready again); `told` (a schedule's run that only had something to say: tell the person its words as they are, in your own message, and nothing else).

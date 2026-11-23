@@ -423,6 +423,10 @@ def status_word(k):
 # A Needs-you reason or an agent's status line: at most this many characters (as Shepherdr's
 # STATUS_MAX), never the agent's message pasted, never a model's words.
 LINE_MAX = 40
+# What a task row shows uncut on a regular phone (360 px wide, SHEP-370: 231 px for the title at 16px Inter,
+# about 7.7 px a letter): a task's title and the status line agents are asked for are at most this long. Only asked,
+# never enforced: a longer status is cut at LINE_MAX.
+ROW_MAX = 30
 # A ready summary: at most this many characters of plain words on what the person now sees or can
 # do (as Shepherdr's SUMMARY_MAX); the rest goes in --details or the proof.
 SUMMARY_MAX = 160
