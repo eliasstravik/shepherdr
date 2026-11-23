@@ -180,7 +180,7 @@ test('held for the agent turn (Ctrl+Enter): it waits, then comes back with its i
 
 test('the text came back with the tag lines and wrapping a send adds: it goes', () => {
   const o = sent({ text: 'Let it finish   6.1,\nthen  go' })
-  const back = '<hc reply-to="Done: the seven"/>\n<hc task="TG-1" title="x" state="Working" folder="~/a">brief</hc>\nLet it finish 6.1, then go'
+  const back = '<hc reply-to="Done: the seven"/>\n<hc task="TG-1" state="Working" folder="~/a">brief</hc>\nLet it finish 6.1, then go'
   expect(settle([o], chat([{ id: 'u2', who: 'you', text: back, at: 10_800 }]))).toEqual([])
 })
 
