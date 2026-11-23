@@ -520,18 +520,25 @@ class TestsOnAThrowawayHome(unittest.TestCase):
         subprocess.run(["true"], check=True)
 
 
-class HeaderButtonOrder(unittest.TestCase):
-    """A chat's header: Tasks, Artifacts, voice, then Terminal and Screen last, at the far right."""
+class TerminalAndScreenInMenus(unittest.TestCase):
+    """Terminal and Screen are rows of the space's name menu and the task's ⋯ menu, never header buttons."""
 
-    def orders(self):
-        found = {}
-        for name in ('tasks', 'artifacts', 'voice', 'terminal', 'screens'):
-            with open(os.path.join(ROOT, 'web', 'plugins', name, 'client.tsx')) as f:
-                m = re.search(r'reg\.header\.push\(\{ order: (\d+)', f.read())
-            self.assertIsNotNone(m, name)
-            found[name] = int(m.group(1))
-        return found
+    def src(self, name):
+        with open(os.path.join(ROOT, 'web', 'plugins', name, 'client.tsx')) as f:
+            return f.read()
 
-    def test_terminal_and_screen_come_last(self):
-        o = self.orders()
-        self.assertEqual(sorted(o, key=o.get), ['tasks', 'artifacts', 'voice', 'terminal', 'screens'])
+    def test_no_header_buttons(self):
+        for name in ('terminal', 'screens'):
+            s = self.src(name)
+            self.assertNotIn('reg.header.push', s, name)
+            self.assertNotIn('reg.taskHeader.push', s, name)
+
+    def test_rows_in_both_menus(self):
+        t, sc = self.src('terminal'), self.src('screens')
+        self.assertIn('spaceTermRow', t)
+        self.assertIn('taskTermRow', t)
+        self.assertEqual(sc.count('screenRow(getState().ui'), 2)
+
+    def test_header_keeps_tasks_and_artifacts(self):
+        for name in ('tasks', 'artifacts'):
+            self.assertIn('reg.header.push', self.src(name), name)

@@ -1,5 +1,6 @@
 // Terminals. Your own: one per space, a real shell in the space's folder on its machine, in a dark drawer at the very
-// bottom, below the message box (the whole screen on a phone); Ctrl+` toggles it; a task has one too, in its folder.
+// bottom, below the message box (the whole screen on a phone), opened from the Terminal row of the space's name menu
+// or Ctrl+`; a task has one too, in its folder, from its ⋯ menu.
 // It keeps running when the drawer is closed. An agent's own terminal is tucked in a menu: "Switch to terminal" swaps
 // a chat for the same session's live terminal, with a bar on top to switch back. Every terminal is a real one you
 // type straight into, sized to its pane; on a phone or any touch screen a row of keys sits under it: esc, tab, ctrl
@@ -11,6 +12,7 @@ import { Btn, Hd, I, IB } from '@client/ui.tsx'
 import type { Chat, Task } from '@shared/types.ts'
 import { machineLabel, placeOf, taskChat, taskOf, tasksIn, tstate } from '@shared/view.ts'
 import { fitGrid, following, footTop, LINE, linesFor, shrinkTo, showKeys } from './fit.ts'
+import { spaceTermRow, taskTermRow, toggleSpaceTerm } from './menu.ts'
 import { connectTerminal, streamInput } from './stream.ts'
 
 const KEYMAP: Record<string, string> = { Enter: 'enter', Escape: 'esc', Tab: 'tab', Backspace: 'backspace', Delete: 'delete', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Home: 'home', End: 'end', PageUp: 'pageup', PageDown: 'pagedown' }
@@ -324,23 +326,6 @@ function switchTo(chat: string, on: boolean) {
   setUI((ui) => ({ aterm: { ...ui.aterm, [chat]: on } }))
 }
 
-/** the Terminal button of a chat's header */
-function TermButton({ thread }: { thread: Thread }) {
-  const ui = useUI()
-  return <IB icon="term" label="Terminal" pressed={ui.phone ? ui.pane === 'terminal' && !ui.termTask : ui.term} onClick={() => toggle()} />
-}
-function toggle() {
-  const { ui } = getState()
-  if (ui.phone) setUI({ pane: ui.pane === 'terminal' ? null : 'terminal', termTask: false })
-  else setUI({ term: !ui.term })
-}
-
-/** the Terminal button of an open task */
-function TaskTermButton({ thread }: { thread: Thread }) {
-  const ui = useUI()
-  return <IB icon="term" label="Terminal" pressed={ui.phone ? false : ui.tterm} onClick={() => (ui.phone ? setUI({ pane: 'terminal', termTask: true, task: thread.task!.id }) : setUI({ tterm: !ui.tterm }))} />
-}
-
 /** "Waiting at a prompt": an agent's session waits for input that is not one of the app's own cards. Never raised by
  *  reading the agent's screen: it is what a blocked report with no kind looks like. It opens the agent's terminal. */
 function Stuck({ chat: own, thread }: { chat: Chat | undefined; thread: Thread }) {
@@ -367,19 +352,20 @@ function Stuck({ chat: own, thread }: { chat: Chat | undefined; thread: Thread }
 export default definePlugin({
   name: 'terminal',
   setup(reg) {
-    reg.header.push({ order: 60, phone: true, View: TermButton })
-    reg.taskHeader.push({ order: 10, View: TaskTermButton })
     reg.panes.push({ id: 'terminal', View: TerminalPane })
     reg.drawer.push({ when: (ui, thread) => !ui.phone && (thread.task ? ui.tterm : ui.term), View: Drawer })
     reg.chatBody.push({ when: (ui, thread) => !!ui.aterm[thread.chat], View: AgentTerminal })
     reg.chatTail.push({ order: 25, View: Stuck })
+    // Terminal opens your own shell; Switch to terminal swaps the agent's chat for its live terminal
+    reg.spaceMenu.push({ order: 5, rows: (_p, head) => (head ? [spaceTermRow(getState().ui)] : []) })
+    reg.taskMenu.push({ order: 5, rows: (t, where) => (where === 'thread' ? [taskTermRow(getState().ui, t.id)] : []) })
     reg.spaceMenu.push({ order: 10, rows: (p) => [{ icon: 'term', label: getState().ui.aterm[p.chat] ? 'Switch to chat' : 'Switch to terminal', run: () => switchTo(p.chat, !getState().ui.aterm[p.chat]) }] })
     reg.taskMenu.push({ order: 10, rows: (t, where) => (where === 'thread' ? [{ icon: 'term', label: getState().ui.aterm[taskChat(t)] ? 'Switch to chat' : 'Switch to terminal', run: () => switchTo(taskChat(t), !getState().ui.aterm[taskChat(t)]) }] : []) })
     reg.keys.push({
       order: 20,
       handle: (e) => {
         if (!(e.ctrlKey && e.key === '`')) return false
-        toggle()
+        toggleSpaceTerm()
         return true
       },
     })

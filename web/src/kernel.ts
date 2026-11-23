@@ -37,6 +37,8 @@ export interface MenuRow {
   danger?: boolean
   /** a line above it */
   line?: boolean
+  /** a view it opens (Terminal, Screen): checked while that view is open */
+  on?: boolean
   /** rows it folds open to (Move to group) */
   sub?: MenuRow[]
   run?: () => void
@@ -65,7 +67,7 @@ export interface Registry {
     messages?: FC<{ thread: Thread }>
     /** the message box: the text, then +, the agent line, the mic and Send */
     box?: FC<{ thread: Thread; placeholder: string }>
-    /** an open task's header: back, title, Terminal, Screen, its menu (and Expand and Close in the pane) */
+    /** an open task's header: back, title, its menu (Terminal and Screen are in it), and Expand and Close in the pane */
     taskHead?: FC<{ task: Task; where: 'chat' | 'pane'; scrolled?: boolean }>
     /** an open task's status line, over its messages */
     taskTop?: FC<{ task: Task }>
@@ -77,10 +79,10 @@ export interface Registry {
     search?: FC<{ close: () => void }>
     /** the picker row a dialog shows for an agent choice lives in picker.tsx; the settings window in settings.tsx */
   }
-  /** buttons at the right of a chat's header, in order: Tasks, Artifacts, voice, Terminal, Screen. `phone`: also in a
-   *  phone's header (Terminal and Screen; the rest live in its bottom bar) */
+  /** buttons at the right of a chat's header, in order: Tasks, Artifacts, voice. Terminal and Screen are rows of the
+   *  space's name menu instead. `phone`: also in a phone's header (none: the rest live in its bottom bar) */
   header: { order: number; phone?: boolean; View: FC<{ thread: Thread }> }[]
-  /** buttons in an open task's header, after its title (Terminal, Screen) */
+  /** buttons in an open task's header, after its title (none today: Terminal and Screen are in its ⋯ menu) */
   taskHeader: { order: number; View: FC<{ thread: Thread }> }[]
   /** what the right-hand pane can show */
   panes: Pane[]
@@ -90,8 +92,9 @@ export interface Registry {
   barEnd: FC[]
   /** one line just above the phone's bottom bar (a call's wave) */
   barAbove: FC[]
-  /** rows of a space's menu, between Switch to terminal and Settings (none today) and its other parts */
-  spaceMenu: { order: number; rows: (place: Space) => MenuRow[] }[]
+  /** rows of a space's menu, first, before Settings: Terminal and Screen (only from the header's name: `head`), then
+   *  Switch to terminal */
+  spaceMenu: { order: number; rows: (place: Space, head: boolean) => MenuRow[] }[]
   /** rows of a task's menu (its row's and its thread's) */
   taskMenu: { order: number; rows: (task: Task, where: 'row' | 'thread') => MenuRow[] }[]
   /** drawn in a chat between its messages: under a message (cards, artifact tiles) */

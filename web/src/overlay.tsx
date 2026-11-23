@@ -149,7 +149,9 @@ export function MenuRows({ rows, close: done, cap, top }: { rows: MenuRow[]; clo
               label={r.label}
               value={r.value}
               danger={r.danger}
-              role="menuitem"
+              // a view it opens: a check at its end while that view is open
+              end={r.on && <I n="check" c="s16" />}
+              {...(r.on === undefined ? { role: 'menuitem' } : { role: 'menuitemcheckbox', 'aria-checked': r.on })}
               onClick={() => {
                 done()
                 r.run?.()

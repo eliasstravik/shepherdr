@@ -1,5 +1,5 @@
-// Screens: an agent's browser and desktop, to watch and to take over. Every chat and every open task has a Screen
-// button beside Terminal, so both are always one tap away, whether or not the agent is using them. The view opens in
+// Screens: an agent's browser and desktop, to watch and to take over. Every chat (its name's menu) and every open task
+// (its ⋯ menu) has a Screen row beside Terminal, whether or not the agent is using them. The view opens in
 // the pane (full screen on a phone): Browser and Desktop tabs, an address bar with reload on the Browser tab, the live
 // picture, the machine under the title. Where the agent is not using it, it is yours and there is no bar at the
 // bottom; where it is, one pinned line says who is driving with one button: Take over, then Hand back. A task whose
@@ -16,6 +16,7 @@ import { StatusIcon } from '@plugins/tasks/icon.tsx'
 import { shortUrl, toUrl, type BrowserDown, type BrowserUp } from '@shared/browser.ts'
 import type { Chat, ScreenInfo, Snapshot, Task } from '@shared/types.ts'
 import { isEverything, machineLabel, placeOf, taskOf, tasksIn, tstate } from '@shared/view.ts'
+import { screenKey, screenRow } from './menu.ts'
 import { fit, keyEvent, modifiers, toPage, type Size } from '@plugins/browser/input.ts'
 
 type State = Extract<BrowserDown, { type: 'state' }>
@@ -516,18 +517,11 @@ function InThread({ thread }: { chat: Chat | undefined; thread: Thread }) {
   )
 }
 
-function ScreenButton({ thread }: { thread: Thread }) {
-  const ui = useUI()
-  const k = thread.task ? `task:${thread.task.id}` : `chat:${thread.place}`
-  const on = ui.pane === 'screen' && ui.scr?.key === k
-  return <IB icon="screen" label="Screen" pressed={thread.task ? undefined : on} onClick={() => (on && !thread.task ? setUI({ pane: null }) : openScreen(k))} />
-}
-
 export default definePlugin({
   name: 'screens',
   setup(reg) {
-    reg.header.push({ order: 70, phone: true, View: ScreenButton })
-    reg.taskHeader.push({ order: 20, View: ScreenButton })
+    reg.spaceMenu.push({ order: 6, rows: (p, head) => (head ? [screenRow(getState().ui, screenKey(p.id), openScreen)] : []) })
+    reg.taskMenu.push({ order: 6, rows: (t, where) => (where === 'thread' ? [screenRow(getState().ui, screenKey(t.place, t.id), openScreen)] : []) })
     reg.panes.push({ id: 'screen', View: ScreenPane })
     reg.chatTail.push({ order: 30, View: InThread })
     reg.taskMenu.push({ order: 20, rows: (t, where) => (where === 'row' ? [{ icon: 'screen', label: 'Show screen', run: () => openScreen(`task:${t.id}`) }] : []) })

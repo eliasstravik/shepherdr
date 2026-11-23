@@ -67,3 +67,15 @@ test('a menu kept inside its panel: lined up with its button, inside the panel, 
     g.getComputedStyle = was.cs
   }
 })
+
+// Terminal and Screen in a menu: a view row is a checkbox item with a check while its view is open
+test("a menu's view row carries its open mark", async () => {
+  const { renderToStaticMarkup } = await import('react-dom/server')
+  const { MenuRows } = await import('./overlay.tsx')
+  const html = renderToStaticMarkup(
+    <MenuRows close={() => {}} rows={[{ icon: 'term', label: 'Terminal', on: true }, { icon: 'screen', label: 'Screen', on: false }, { icon: 'gear', label: 'Settings' }]} />,
+  )
+  expect(html).toMatch(/role="menuitemcheckbox" aria-checked="true"[^>]*>.*?Terminal.*?<svg/)
+  expect(html).toMatch(/role="menuitemcheckbox" aria-checked="false"[^>]*>.*?Screen<\/span><\/button>/)
+  expect(html).toMatch(/role="menuitem"[^>]*>.*?Settings/)
+})
