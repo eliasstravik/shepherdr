@@ -47,6 +47,22 @@ export function renamer(from, to) {
 }
 
 /** A space, tab or terminal id ("sp1" here, "vm/sp1" there) in other words; undefined: not nameable there. */
+// SHEP-335: a repo's key in the settings file's "repos": its folder on this machine, "<machine>:<folder>" on another
+// (herdr-task reads its own machine's by the bare folder; the push sends each machine its own, bare).
+export const repoKey = (machine, folder) => (machine ? `${machine}:${folder}` : folder);
+export function repoOf(key) {
+  const s = String(key);
+  if (s.startsWith("/")) return { machine: null, folder: s };
+  const cut = s.indexOf(":");
+  return cut < 0 ? { machine: null, folder: s } : { machine: s.slice(0, cut), folder: s.slice(cut + 1) };
+}
+/** A repo key in another machine's names (as moveId for a space id); undefined: that machine is gone. */
+export function moveRepo(key, rename) {
+  const { machine, folder } = repoOf(key);
+  const m = rename(machine);
+  return m === undefined ? undefined : repoKey(m, folder);
+}
+
 export function moveId(id, rename) {
   const s = String(id);
   const cut = s.indexOf("/");
@@ -161,7 +177,7 @@ export function relocateSettings(file, rename) {
     const m = isObj(v) && typeof v.machine === "string" ? rename(v.machine) : null;
     spaces[n] = isObj(v) && "machine" in v ? (m ? { ...v, machine: m } : (({ machine: _m, ...o }) => o)(v)) : v;
   }
-  return { ...rest, machines: mapKeys(f.machines, machineKey("local")(rename)), spaces };
+  return { ...rest, machines: mapKeys(f.machines, machineKey("local")(rename)), spaces, ...(isObj(f.repos) ? { repos: mapKeys(f.repos, (k) => moveRepo(k, rename)) } : {}) };
 }
 
 // Every leaf of a settings file as path -> JSON (a three-way merge compares these).

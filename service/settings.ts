@@ -30,8 +30,22 @@ export type Serve = { rows: { name: string; here: boolean; state: string; os: st
 const title = (id: string) => SECTIONS.find((s: any) => s.id === id).title as string;
 const readJson = (f: string) => { try { return JSON.parse(readFileSync(f, "utf8")) ?? {}; } catch { return {}; } };
 
-/** A space Settings can scope to: its id (machine/id for another machine's), name, machine, and repo folder. */
-export type Scope = { id: string; name: string; machine: string | null; folder?: string | null };
+/** A space Settings can scope to: its id (machine/id for another machine's), name, machine, and repo folder; repo: the
+ *  key its repo's task settings are kept under (SHEP-335: settings.json "repos", core/host.js repoKey). */
+export type Scope = { id: string; name: string; machine: string | null; folder?: string | null; repo?: string | null };
+// SHEP-335: the sections that shape a task, kept per repo, not per space
+export const REPO_SECTIONS = ["tasks", "worker", "reviewer"];
+/** The repo's own layer in a settings file being changed (made when new). A file not moved yet (the update moves them):
+ *  the task settings the space `from` still holds go along first, so a save never drops what its tasks had. */
+export function repoLayer(next: any, key: string, from?: string | null): any {
+  const repos = (next.repos ??= {});
+  if (!repos[key]) {
+    repos[key] = {};
+    const sp = from ? next.spaces?.[from] : null;
+    if (sp && typeof sp === "object") for (const sec of REPO_SECTIONS) if (sec in sp) { repos[key][sec] = sp[sec]; delete sp[sec]; }
+  }
+  return repos[key];
+}
 
 export const ROLES: { id: string; title: string; about: string; file: string; told: string }[] = CORE_ROLES;
 const NOTES: { id: string; field: string; mono?: boolean; title: string; about: string; example: string }[] = CORE_NOTES;
@@ -59,7 +73,9 @@ umask 077; printf '%s\\n' "$1" > "$f.tmp" && mv "$f.tmp" "$f"`;
 /** What one other machine is sent. */
 export function pushBody(file: any, m: string) {
   const spaces = Object.fromEntries(Object.entries(file.spaces ?? {}).filter(([id]) => id.startsWith(`${m}/`)).map(([id, v]) => [id.split("/").pop(), v]));
-  return JSON.stringify({ version: 1, pushed_from: "herdr-app", here: m, everywhere: file.everywhere ?? {}, machines: file.machines?.[m] ? { [m]: file.machines[m] } : {}, spaces }, null, 2);
+  // SHEP-335: its repos' task settings, by their folder there
+  const repos = Object.fromEntries(Object.entries(file.repos ?? {}).filter(([k]) => k.startsWith(`${m}:`)).map(([k, v]) => [k.slice(m.length + 1), v]));
+  return JSON.stringify({ version: 1, pushed_from: "herdr-app", here: m, everywhere: file.everywhere ?? {}, machines: file.machines?.[m] ? { [m]: file.machines[m] } : {}, spaces, ...(Object.keys(repos).length ? { repos } : {}) }, null, 2);
 }
 
 /** Writes the whole file as the window does (version 1), then tells whoever pushes it to other machines. */
@@ -120,13 +136,21 @@ export class Settings {
     for (const fn of this.listeners) fn();
   }
 
-  private layer(scope: string | null) { return scope ? this.file.spaces?.[scope] : this.file.everywhere; }
+  private layer(scope: string | null, section?: string) {
+    if (!scope) return this.file.everywhere;
+    // a task section: the repo the space sits on (a file not moved yet: the space's own, as herdr-task reads it)
+    if (section && REPO_SECTIONS.includes(section)) {
+      const key = this.scopes.find((s) => s.id === scope)?.repo;
+      if (key && this.file.repos?.[key]) return this.file.repos[key];
+    }
+    return this.file.spaces?.[scope];
+  }
   /** A field as a scope sees it, as the window's chain: its own, else what its machine set for its spaces before
    *  (the old machine scope), else Everywhere's, else the default; whether the scope sets it; and what it follows. */
   private pick(scope: string | null, section: string, field: string | null) {
     const at = (l: any) => { const v = field ? l?.[section]?.[field] : l?.[section]; return v === null ? undefined : v; };
     const m = scope ? (scope.includes("/") ? scope.split("/")[0] : LOCAL) : null;
-    const own = scope ? at(this.layer(scope)) : undefined, mach = m ? at(this.file.machines?.[m]) : undefined, every = at(this.file.everywhere);
+    const own = scope ? at(this.layer(scope, section)) : undefined, mach = m ? at(this.file.machines?.[m]) : undefined, every = at(this.file.everywhere);
     const dflt = field ? DEFAULTS[section]?.[field] ?? null : null;
     const parent = mach ?? every ?? dflt;
     return { value: scope ? own ?? parent : every ?? dflt, own: own !== undefined, parent, level: mach !== undefined ? "machine" : "everywhere", machine: m };
@@ -365,8 +389,13 @@ export class Settings {
     if (space && (!SAFE(space) || !scope)) throw new Error("That space isn't here any more.");
     if (space && !scope) throw new Error("That space isn't here any more.");
     // the object this level holds its values in
+    const [section, field] = key.split(".");
+    // SHEP-335: a task's setting set from a space goes to the repo it sits on
+    const toRepo = !!space && (section === "tasks" || (section === "role" && (field === "worker" || field === "reviewer")));
+    if (toRepo && !scope?.repo) throw new Error("This space isn't in a repo or folder tasks can use.");
     const target = () => {
       if (!space) return (next.everywhere ??= {});
+      if (toRepo) return repoLayer(next, scope!.repo!, space);
       const own = ((next.spaces ??= {})[space] ??= {});
       if (scope?.folder) own.folder = scope.folder;
       own.name = scope?.name ?? own.name;
@@ -380,7 +409,6 @@ export class Settings {
       t[section] = { ...(t[section] ?? {}), [field]: value };
     };
 
-    const [section, field] = key.split(".");
     const task = TASK_ROWS.find(([s, f]: any) => `${s}.${f}` === key);
     if (machine !== null || key.startsWith("machine.")) {
       if (!key.startsWith("machine.")) throw new Error("That setting can't be changed here.");
