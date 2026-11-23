@@ -476,3 +476,18 @@ test("a Codex send's output says whether it got there", async () => {
   c.feed(records(out).records);
   expect(c.items.filter((x) => x.kind === "sent").map((x) => [x.to, x.state, x.why])).toEqual([["vm/root", "failed", "vm can't be reached"]]);
 });
+
+// SHEP-430: a call too big to send whole (a long heredoc) still ends with its result, so the working line moves on
+// from it; and a new message from the person ends every step of the turn before
+test("a big call's step ends with its result, and none outlives the turn", async () => {
+  const big = { type: "tool_use", id: "toolu_big", name: "Bash", input: { command: `cat > page.html <<'EOF'\n${"x".repeat(40000)}\nEOF`, description: "Read what the redesign delivered" } };
+  const small = { type: "tool_use", id: "toolu_s", name: "Read", input: { file_path: "/w/app.ts" } };
+  const done = (id) => ({ parentUuid: null, isSidechain: false, type: "user", message: { role: "user", content: [{ tool_use_id: id, type: "tool_result", content: "ok" }] }, uuid: `r${n++}`, timestamp: at });
+  const c = await read([person, reply("b1", [big]), done("toolu_big"), reply("b2", [small]), done("toolu_s")]);
+  expect(c.open.size).toBe(0);
+  expect(c.doing).toBe(null);
+  // a call whose result never came (cut off): the person's next message ends it
+  const d = await read([person, reply("b3", [small]), { ...person, uuid: "p9", message: { role: "user", content: "Another thing" } }, reply("b4", [thinking("Hmm.")])]);
+  expect(d.open.size).toBe(0);
+  expect(d.doing).toBe("Thinking");
+});

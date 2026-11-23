@@ -93,3 +93,22 @@ test('heldStep keeps the last named step while the sign shows, Thinking before a
   expect(heldStep('p:h', null)).toBe('')
   expect(heldStep('p:h', { step: '' })).toBe('Thinking')
 })
+
+// SHEP-430: a step from an earlier turn never shows in the next, even when the sign was off screen as that turn ended
+// (its heldStep(null) never ran), in a space's chat and in a task's
+for (const key of ['p:sp1', 't:shop/SHOP-2']) {
+  test(`two turns with different steps: the second never shows the first's line (${key})`, () => {
+    const one = msgs({ who: 'you', text: 'first' })
+    const first = chat({ key, working: true, doing: 'Read what the redesign delivered' }, one)
+    expect(heldStep(key, signOf(first), first)).toBe('Read what the redesign delivered')
+    // between its tools the step it was on still reads true
+    expect(heldStep(key, signOf({ ...first, doing: '' }), first)).toBe('Read what the redesign delivered')
+    // the person's next message starts a new turn: nothing named yet reads Thinking, never the old step
+    const two = msgs({ who: 'you', text: 'first' }, { text: 'done' }, { who: 'you', text: 'another thing' })
+    const second = chat({ key, working: true }, two)
+    expect(heldStep(key, signOf(second), second)).toBe('Thinking')
+    expect(heldStep(key, signOf({ ...second, doing: 'Reading app.ts' }), second)).toBe('Reading app.ts')
+    expect(heldStep(key, signOf(second), second)).toBe('Reading app.ts')
+    heldStep(key, null)
+  })
+}

@@ -79,16 +79,22 @@ export function signOf(chat: Chat | undefined, said?: string): { step: string } 
 
 // SHEP-421: the step line stays for as long as the sign shows. A chat's last named step is held here until the next
 // one replaces it (between tools its agent thinks or writes, and the step it was on still reads true), and goes with
-// the sign. Before any step is known it reads "Thinking".
-const held = new Map<string, string>()
+// the sign. Before any step is known it reads "Thinking". SHEP-430: it is held for its turn only (the person's last
+// message starts one), so a step from an earlier turn never shows, even when the sign was not on screen as it ended.
+const held = new Map<string, { turn: string; step: string }>()
 
-/** the words beside the sign: this step, else the last one this chat named while the sign showed, else "Thinking";
- *  pass null when the sign doesn't show, which forgets it */
-export function heldStep(key: string, sign: { step: string } | null): string {
+/** the turn a chat is on: its newest message from the person */
+const turnOf = (chat: Chat | undefined) => chat?.messages.findLast((m) => m.who === 'you')?.id ?? ''
+
+/** the words beside the sign: this step, else the last one this chat named in this turn while the sign showed, else
+ *  "Thinking"; pass null when the sign doesn't show, which forgets it */
+export function heldStep(key: string, sign: { step: string } | null, chat?: Chat): string {
   if (!sign) {
     held.delete(key)
     return ''
   }
-  if (sign.step) held.set(key, sign.step)
-  return held.get(key) || 'Thinking'
+  const turn = turnOf(chat)
+  if (sign.step) held.set(key, { turn, step: sign.step })
+  const h = held.get(key)
+  return (h && h.turn === turn && h.step) || 'Thinking'
 }
