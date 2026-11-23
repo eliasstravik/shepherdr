@@ -297,7 +297,11 @@ html,body{height:100%}body{padding:0;overflow:hidden}
 @keyframes up{from{transform:translateY(24px);opacity:0}}
 @keyframes in{from{transform:translateX(-24px);opacity:0}}
 @keyframes fade{from{opacity:0}}
-@media(prefers-reduced-motion:reduce){.sheet.in,.drawer.in,.pop.in,.dlg.in,.win.in{animation:none}.tg i{transition:none}}
+/* the Working ring: the whole icon turns about its centre; reduced motion: a slow, calm pulse instead */
+.i.turn{animation:turn 1s linear infinite}
+@keyframes turn{to{transform:rotate(1turn)}}
+@keyframes calm{50%{opacity:.45}}
+@media(prefers-reduced-motion:reduce){.i.turn{animation:calm 2.4s ease-in-out infinite}.sheet.in,.drawer.in,.pop.in,.dlg.in,.win.in{animation:none}.tg i{transition:none}}
 
 textarea.cin{overflow-y:auto}
 .pane .scroll>.tdr .tw{flex:1;display:flex;flex-direction:column}
