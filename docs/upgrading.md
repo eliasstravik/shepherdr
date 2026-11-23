@@ -86,6 +86,9 @@ halfway. Shepherdr's own folder is replaced whole. An instructions file you chan
 new one beside it as `.new`. Agents keep running in herdr-core. Until `shepherdr doctor` passes, the sync to other
 machines waits.
 
+On Android, reinstall the app once to get the dark bottom bar, if you installed it before 3.2.3: remove it and add it to the home screen
+again. Chrome refreshes an installed app's colours only now and then, so it may keep the old white bar.
+
 ## Data from before 3.1.27
 
 A Shepherdr older than 3.1.27 kept its data in `~/.herdr`. The first install or update moves it into Shepherdr's own
