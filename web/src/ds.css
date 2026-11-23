@@ -94,8 +94,10 @@ button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"])
 .ttl{flex:1;min-width:0;padding:0 4px}
 /* where the chat is, beside its name (SHEP-360): dim secondary text, no pill; it gives way before the name, from its
    start, and a finger gets a taller hit area than it shows */
-.ttl:has(>.hpath){display:flex;align-items:center;gap:0}.ttl>.tbtn{flex:none;max-width:100%}
-.hpath{position:relative;display:flex;align-items:baseline;flex:0 1 auto;min-width:0;padding:10px 6px 10px 2px;margin:-10px 0;color:var(--muted);font-size:var(--sec);line-height:var(--secl);font-weight:400;white-space:nowrap}
+.ttl:has(>.hpath){display:flex;align-items:center;gap:0}.ttl>.tbtn{flex:none;max-width:100%}.ttl>.tbtn:has(+.hpath){max-width:calc(100% - 44px)}
+/* a header too narrow for both: the path goes, the name stays whole */
+.ttl:has(>.hpath){container-type:inline-size}@container (max-width:160px){.ttl>.hpath{display:none}.ttl>.tbtn:has(+.hpath){max-width:100%}}
+.hpath{position:relative;display:flex;align-items:baseline;flex:0 1 auto;min-width:44px;padding:10px 6px 10px 2px;margin:-10px 0;color:var(--muted);font-size:var(--sec);line-height:var(--secl);font-weight:400;white-space:nowrap}
 .hpath:hover,.hpath[aria-expanded="true"]{color:var(--sub)}
 .hp,.hm{min-width:0;overflow:hidden;text-overflow:ellipsis}.hp{flex:0 1 auto}.hp.cut{direction:rtl}.hp bdi{direction:ltr}.hm{flex:none;max-width:60%}.hp:not(.cut){flex:none}.hp:not(.cut)+.hm{flex:0 1 auto;max-width:none}.hm::before{content:"·";padding:0 4px}
 .t1{font-weight:600}.t1,.t2{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

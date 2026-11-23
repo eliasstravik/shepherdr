@@ -18,7 +18,7 @@ test("the chat header's space name has all the room its buttons leave: no cap be
   expect(css).not.toMatch(/\.ttl>\.tbtn\{[^}]*max-width:60%/)
   // it never shrinks for the folder beside it (SHEP-360), only to the header's own width; the folder gives way
   expect(rule('.ttl>.tbtn')).toContain('flex:none;max-width:100%')
-  expect(rule('.hpath')).toContain('min-width:0')
+  expect(rule('.hpath')).toContain('min-width:44px')
 })
 
 test("a task row's title and its line under it wrap to two lines before they are cut, in the panel, on cards and on a phone", () => {

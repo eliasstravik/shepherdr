@@ -40,7 +40,9 @@ test('quiet: no pill, border, fill or icon; it gives way before the name, from i
   // the name never shrinks for it (only to the header's width); the path gives way before its machine, and a cut path
   // keeps its end
   expect(css).toContain('.ttl>.tbtn{flex:none;max-width:100%}')
-  expect(hp).toContain('min-width:0')
+  expect(hp).toContain('min-width:44px')
   expect(css).toContain('.hm{flex:none;max-width:60%}')
   expect(css).toContain('.hp.cut{direction:rtl}')
+  // a tap target never under 44 px; too narrow a header drops the path, never the name
+  expect(css).toContain('@container (max-width:160px){.ttl>.hpath{display:none}')
 })
