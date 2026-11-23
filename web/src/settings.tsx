@@ -9,7 +9,7 @@ import { isEverything, machineWarn, placeOf, spaceLabel, unreachable } from '@sh
 import { copyText } from './copy.ts'
 import type { IconName } from './icons.ts'
 import { notice, registry, setUI, tryAct, useUI } from './kernel.ts'
-import { openDialog } from './overlay.tsx'
+import { openDialog, openForm } from './overlay.tsx'
 import { openPicker, pickFor, sayPick, useCatalog, type Role } from './picker.tsx'
 import { MOTIONS, setPref, THEMES, usePrefs, WIDTHS } from './prefs.ts'
 import { Btn, cx, I, IB, Meter, Row, Seg, Tgl } from './ui.tsx'
@@ -121,25 +121,22 @@ function Tasks({ snap, place }: { snap: Snapshot; place: string }) {
 
 /** a small dialog in the style of New space: one box to write in, and Save */
 function editText(o: { title: string; label: string; value: string; rows?: number; save: (v: string) => void }) {
-  openDialog(
-    (close) => {
-      const Form = () => {
-        const [v, setV] = useState(o.value)
-        return (
-          <>
-            <h2>{o.title}</h2>
-            <label className="fld">
-              <span>{o.label}</span>
-              <textarea className="inp" name="text" rows={o.rows ?? 6} value={v} onChange={(e) => setV(e.target.value)} />
-            </label>
-            <div className="acts">
-              <Btn onClick={close}>Cancel</Btn>
-              <Btn kind="pri" onClick={() => { close(); if (v !== o.value) o.save(v) }}>Save</Btn>
-            </div>
-          </>
-        )
-      }
-      return <Form />
+  openForm(
+    function Form({ close }) {
+      const [v, setV] = useState(o.value)
+      return (
+        <>
+          <h2>{o.title}</h2>
+          <label className="fld">
+            <span>{o.label}</span>
+            <textarea className="inp" name="text" rows={o.rows ?? 6} value={v} onChange={(e) => setV(e.target.value)} />
+          </label>
+          <div className="acts">
+            <Btn onClick={close}>Cancel</Btn>
+            <Btn kind="pri" onClick={() => { close(); if (v !== o.value) o.save(v) }}>Save</Btn>
+          </div>
+        </>
+      )
     },
     { label: o.title },
   )
@@ -163,40 +160,37 @@ function Instructions({ snap, place }: { snap: Snapshot; place: string }) {
 /** Add or replace a secret: its name, the value in a masked box, and who may use it. Agents use it by name and never
  *  see it. */
 function secretDialog(snap: Snapshot, place: string, name?: string, scope?: string) {
-  openDialog(
-    (close) => {
-      const Form = () => {
-        const [n, setN] = useState(name ?? '')
-        const [v, setV] = useState('')
-        const level = scope ?? place
-        const ok = async () => {
-          const key = n.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_')
-          if (!key || !v) return
-          close()
-          await tryAct({ type: 'secret', level, name: key, value: v }, 'Saved')
-        }
-        return (
-          <>
-            <h2>{name ? `Replace ${name}` : 'Add a secret'}</h2>
-            <p>{level === 'all' ? 'Every space can use it.' : `Only ${spaceLabel(snap, level)} can use it.`}</p>
-            {!name && (
-              <label className="fld">
-                <span>Name</span>
-                <input className="inp" name="secret-name" value={n} placeholder="GITHUB_TOKEN" autoComplete="off" autoCapitalize="characters" spellCheck={false} onChange={(e) => setN(e.target.value)} />
-              </label>
-            )}
-            <label className="fld">
-              <span>Value</span>
-              <input className="inp" type="password" name="secret-value" value={v} autoComplete="off" onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void ok()} />
-            </label>
-            <div className="acts">
-              <Btn onClick={close}>Cancel</Btn>
-              <Btn kind="pri" onClick={() => void ok()}>Save</Btn>
-            </div>
-          </>
-        )
+  openForm(
+    function Form({ close }) {
+      const [n, setN] = useState(name ?? '')
+      const [v, setV] = useState('')
+      const level = scope ?? place
+      const ok = async () => {
+        const key = n.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_')
+        if (!key || !v) return
+        close()
+        await tryAct({ type: 'secret', level, name: key, value: v }, 'Saved')
       }
-      return <Form />
+      return (
+        <>
+          <h2>{name ? `Replace ${name}` : 'Add a secret'}</h2>
+          <p>{level === 'all' ? 'Every space can use it.' : `Only ${spaceLabel(snap, level)} can use it.`}</p>
+          {!name && (
+            <label className="fld">
+              <span>Name</span>
+              <input className="inp" name="secret-name" value={n} placeholder="GITHUB_TOKEN" autoComplete="off" autoCapitalize="characters" spellCheck={false} onChange={(e) => setN(e.target.value)} />
+            </label>
+          )}
+          <label className="fld">
+            <span>Value</span>
+            <input className="inp" type="password" name="secret-value" value={v} autoComplete="off" onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void ok()} />
+          </label>
+          <div className="acts">
+            <Btn onClick={close}>Cancel</Btn>
+            <Btn kind="pri" onClick={() => void ok()}>Save</Btn>
+          </div>
+        </>
+      )
     },
     { label: name ? `Replace ${name}` : 'Add a secret' },
   )

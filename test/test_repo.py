@@ -162,6 +162,23 @@ class Repo(unittest.TestCase):
                             found.append(f"{os.path.relpath(os.path.join(root, f), J('.'))}: {m.group(0)}")
         self.assertFalse(found, "a tap highlight turned back on:\n" + "\n".join(found))
 
+    def test_no_component_made_inside_a_dialog(self):
+        """A dialog with fields is opened with openForm (SHEP-308): a component made inside openDialog's render is a
+        new one at each redraw of the app, so its fields are swapped for new ones and the one being typed in loses
+        its focus (on a phone the keyboard opening redraws the app, so it closed at once)."""
+        found = []
+        for top in ("web/src", "web/plugins"):
+            for d, _, files in os.walk(J(top)):
+                for f in files:
+                    if not f.endswith(".tsx"):
+                        continue
+                    p = os.path.join(d, f)
+                    with open(p, encoding="utf-8") as fh:
+                        src = fh.read()
+                    for m in re.finditer(r"openDialog\(\s*\(\w*\)\s*=>\s*\{(?:(?!\n  \S).)*?\b(?:const|function) [A-Z]\w*\s*(?:=|\()", src, re.S):
+                        found.append(f"{os.path.relpath(p, ROOT)}:{src.count(chr(10), 0, m.start()) + 1}")
+        self.assertFalse(found, "a component made inside openDialog's render (use openForm):\n" + "\n".join(found))
+
     def test_no_leftovers(self):
         for p in text_files():
             name = os.path.basename(p)

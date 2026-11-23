@@ -5,7 +5,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { PaneFrame, placeholderOf } from '@client/App.tsx'
 import { renameDialog } from '@client/list.tsx'
 import { definePlugin, getState, go, has, notice, openTask, registry, setUI, togglePane, tryAct, act, useSnap, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
-import { confirm, openDialog, openMenu } from '@client/overlay.tsx'
+import { confirm, openDialog, openForm, openMenu } from '@client/overlay.tsx'
 import { AgentField, pickFor, type Pick } from '@client/picker.tsx'
 import { edge } from '@client/resize.ts'
 import { Btn, Cnt, cx, Empty, Hd, I, IB } from '@client/ui.tsx'
@@ -76,45 +76,42 @@ export function taskMenu(anchor: Element, t: Task, where: 'row' | 'thread') {
 /* ---------- a task not started yet ---------- */
 
 function startDialog(t: Task) {
-  openDialog(
-    (close) => {
-      const Form = () => {
-        const snap = getState().snap!
-        const every = isEverything(snap, t.place)
-        const machine = snap.places.find((p) => p.id === t.place)?.machine ?? t.on
-        const [pick, setPick] = useState<Pick>(pickFor(snap, every ? 'all' : t.place, 'Tasks'))
-        const [busy, setBusy] = useState(false)
-        const start = async () => {
-          if (busy) return
-          setBusy(true)
-          // Start task starts it and opens its thread
-          if (await tryAct({ type: 'task-start', chat: taskChat(t), agent: pick })) {
-            close()
-            openTask(t.id)
-          } else setBusy(false)
-        }
-        return (
-          <>
-            <div className="hd" style={{ height: 'auto', padding: 0, gap: 8, alignItems: 'flex-start' }}>
-              <h2 style={{ flex: 1, minWidth: 0 }}>{t.name}</h2>
-              <IB icon="x" label="Close" onClick={close} />
-            </div>
-            <p>{t.desc ? `${t.desc.replace(/\s+$/, '')}${/[.!?]$/.test(t.desc.trim()) ? '' : '.'} ` : ''}{t.afterTitle ? `It waits for ${t.afterTitle}; nothing starts before that unless you say go.` : 'Nothing starts until you say go.'}</p>
-            <div className="fld">
-              <span>Space</span>
-              <span className="fake">
-                <I n={every ? 'layers' : 'hash'} />
-                <span style={{ marginLeft: 8 }}>
-                  <b style={{ fontWeight: 500 }}>{spaceLabel(snap, t.place).replace(/^#/, '')}</b> <span style={{ color: 'var(--muted)' }}>{machineLabel(snap, machine)}</span>
-                </span>
-              </span>
-            </div>
-            <AgentField title="This task runs on" machine={machine} pick={pick} onChange={setPick} />
-            <Btn kind="pri" style={{ width: '100%' }} disabled={busy} onClick={() => void start()}>Start task</Btn>
-          </>
-        )
+  openForm(
+    function Form({ close }) {
+      const snap = getState().snap!
+      const every = isEverything(snap, t.place)
+      const machine = snap.places.find((p) => p.id === t.place)?.machine ?? t.on
+      const [pick, setPick] = useState<Pick>(pickFor(snap, every ? 'all' : t.place, 'Tasks'))
+      const [busy, setBusy] = useState(false)
+      const start = async () => {
+        if (busy) return
+        setBusy(true)
+        // Start task starts it and opens its thread
+        if (await tryAct({ type: 'task-start', chat: taskChat(t), agent: pick })) {
+          close()
+          openTask(t.id)
+        } else setBusy(false)
       }
-      return <Form />
+      return (
+        <>
+          <div className="hd" style={{ height: 'auto', padding: 0, gap: 8, alignItems: 'flex-start' }}>
+            <h2 style={{ flex: 1, minWidth: 0 }}>{t.name}</h2>
+            <IB icon="x" label="Close" onClick={close} />
+          </div>
+          <p>{t.desc ? `${t.desc.replace(/\s+$/, '')}${/[.!?]$/.test(t.desc.trim()) ? '' : '.'} ` : ''}{t.afterTitle ? `It waits for ${t.afterTitle}; nothing starts before that unless you say go.` : 'Nothing starts until you say go.'}</p>
+          <div className="fld">
+            <span>Space</span>
+            <span className="fake">
+              <I n={every ? 'layers' : 'hash'} />
+              <span style={{ marginLeft: 8 }}>
+                <b style={{ fontWeight: 500 }}>{spaceLabel(snap, t.place).replace(/^#/, '')}</b> <span style={{ color: 'var(--muted)' }}>{machineLabel(snap, machine)}</span>
+              </span>
+            </span>
+          </div>
+          <AgentField title="This task runs on" machine={machine} pick={pick} onChange={setPick} />
+          <Btn kind="pri" style={{ width: '100%' }} disabled={busy} onClick={() => void start()}>Start task</Btn>
+        </>
+      )
     },
     { label: t.name },
   )
