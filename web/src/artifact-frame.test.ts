@@ -13,7 +13,7 @@ const rule = (sel: string) => {
 }
 
 test('the frame is the box\'s only child and the box is the panel\'s', () => {
-  expect(page).toMatch(/<div className="pagebox">\s*<iframe ref=\{frame\} className="page"/)
+  expect(page).toMatch(/<div className="pagebox">\s*<iframe (?:key=[^>]*? )?ref=\{frame\} className="page"/)
   expect(page).toMatch(/<PaneFrame[\s\S]*?flush[\s\S]*?<Page a=\{a\}/)
 })
 
