@@ -17,7 +17,7 @@ import { isHelper, subagentsOf } from "../core/chat-view.js";
 // The core is plain JavaScript; its defaults read as narrow types to TypeScript.
 const { place, refOf, taskKey, autoPrefix, reportOf, secondLine, leftOf, queueReason, machineOf } = T as any;
 import * as S from "../core/spaces.js";
-const { sidebarOf, assistantOf, isUnread, inOrder, byMachineOrder, machineOrderOf } = S as any;
+const { sidebarOf, lastAssistantOf, isUnread, inOrder, byMachineOrder, machineOrderOf } = S as any;
 
 const SHELL = /^(ba|z|fi|da|k|tc|c)?sh$|^nu$|^pwsh$/;
 /** A shell's argv that runs a command (-c, -ic, -lic, --command), not a plain shell (herdr-task's runs_command()). */
@@ -332,7 +332,8 @@ export class Model {
     // (core/spaces.js inOrder), and the machines in the order the person dragged them into (SHEP-153)
     const own = (Array.isArray(this.doc().spaces) ? this.doc().spaces : []).map((x: any) => ({ id: x.machine ? `${x.machine}/${x.id}` : x.id, machine: x.machine ?? null, name: x.name ?? "", folder: x.folder ?? "" }));
     const spaces = byMachineOrder(inOrder(own, this.value("spaces-chat")?.order), machineOrderOf(this.value("spaces-chat"))).map((s: any, at: number) => {
-      const k = assistantOf(s, terminals as any[]);
+      // the one its chat reads: live, else the latest that ended (a message to it starts it again: actions.ts)
+      const k = lastAssistantOf(s, terminals as any[]);
       // a task belongs to the space that started it, else to the space in its folder
       const here = rows.filter((r) => !r.archived && (r.space ? r.space === s.id : (r.machine ?? null) === (s.machine ?? null) && r.folder === s.folder));
       return {

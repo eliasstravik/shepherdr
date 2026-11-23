@@ -234,7 +234,8 @@ export class Agents {
     const t: any = this.hub.terminals.get(addr);
     if (!t) throw new Error("That agent isn't here any more.");
     const kind = kindOf(t) ?? reader?.kind ?? "claude";
-    const old = { agent: kind, argv: t.foreground?.argv ?? t.argv ?? [], session: sessionOf(kind, reader?.path ?? null) };
+    // (reader.argv: how an agent that ended ran, from its record: revive())
+    const old = { agent: kind, argv: t.foreground?.argv ?? reader?.argv ?? t.argv ?? [], session: sessionOf(kind, reader?.path ?? null) };
     const built = argvFor({ agent: pick.kind, model: pick.model, effort: pick.effort, fast: speedOf(pick.speed), perm: pick.perm ?? current(kind, old.argv, {}, {}).perm }, old);
     const pane = t.labels?.["herdr.chat"] ?? "";
     const task = t.labels?.["herdr.task"];
@@ -254,6 +255,27 @@ export class Agents {
     if ((await p.exited) !== 0 || !next) throw new Error(err.trim() || "The agent didn't restart.");
     this.used(pick);
     return next;
+  }
+
+  /** A space's Assistant that ended (killed, crashed, exited), started again for the person's next message
+   *  (SHEP-297), as the Stopped card's Restart does: on the same CLI, model, level, speed and permission mode, resuming
+   *  its own conversation when its log is known. A finished terminal has no foreground or status left, so its kind,
+   *  session and flags come from its chat's reader, else its herdr.resume record (herdr-task's revive.py), else its
+   *  argv. Resolves with the new agent's address. */
+  async revive(addr: string, reader: any) {
+    const t: any = this.hub.terminals.get(addr);
+    if (!t) throw new Error("That agent isn't here any more.");
+    let rec: any = null;
+    try { rec = JSON.parse(t.labels?.["herdr.resume"] || "null"); } catch {}
+    const known = (k: unknown) => (k === "claude" || k === "codex" ? k : null);
+    const argv: string[] = Array.isArray(rec?.argv) && rec.argv.length ? rec.argv : t.argv ?? [];
+    const named = (t.argv ?? []).join(" ").match(/(?:^|[\s/])(claude|codex)(?=\s|$)/)?.[1];
+    const kind = kindOf(t) ?? known(reader?.kind) ?? known(rec?.kind) ?? known(named) ?? "claude";
+    const path = reader?.kind === kind && reader?.path ? reader.path : known(rec?.kind) === kind && typeof rec?.log === "string" && rec.log.startsWith("/") ? rec.log : null;
+    const machine = addr.includes("/") ? addr.split("/")[0] : null;
+    const c = current(kind, argv, reader?.conv?.meta ?? {}, await this.defaults(kind, machine).catch(() => null));
+    const pick = { kind, model: rowFor(kind, c) ?? undefined, effort: c.effort ?? undefined, speed: speedWordOf(c.fast), perm: c.perm ?? undefined };
+    return this.restart(addr, { kind, path, argv }, pick);
   }
 
   /** restarted on a model: first among the recent ones */
