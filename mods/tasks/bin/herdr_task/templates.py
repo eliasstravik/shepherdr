@@ -140,7 +140,15 @@ CLOCK_RULE = ("Work it out from the clock, not a feeling: run `date +%s` once wh
               "you can name. Before a few minutes or about 10%, guess from the task's size: a rough guess beats none. Each time, "
               "compare with your last estimate and the clock, and revise it honestly by as much as you were off (slower than "
               "you thought: say more), never just count it down.")
-WORKER_MD = WORKER_MD_BEFORE_CLOCK.replace(CLOCK_OLD, CLOCK_RULE)
+WORKER_MD_BEFORE_ROW = WORKER_MD_BEFORE_CLOCK.replace(CLOCK_OLD, CLOCK_RULE)
+# Since a status line fits a phone's task row uncut, as a task's title does: at most ROW_MAX characters (SHEP-370).
+ROW_OLD = "with what you're doing now (at most 40 characters; a longer one is cut at a word), how far"
+ROW_RULE = ("with what you're doing now (at most 30 characters, so a phone's task row shows it uncut: a few plain words, "
+            "\"Running the full tests\", not \"Rebasing onto main, then running the whole test suite\"), how far")
+WAIT_ROW_OLD = 'at most 40 characters, e.g. "Needs a go to screenshot the menu")'
+WAIT_ROW_RULE = ('at most 30 characters, as it shows uncut on a phone, e.g. "Needs a go for a screenshot", not "Waiting for '
+                 'the person to say whether I can take the window")')
+WORKER_MD = WORKER_MD_BEFORE_ROW.replace(ROW_OLD, ROW_RULE).replace(WAIT_ROW_OLD, WAIT_ROW_RULE)
 
 REVIEWER_MD_BEFORE_SUBAGENT = """You review one Herdr task's work before it can merge. Read only: never edit files, commit or push.
 - Read the task, then the diff of its branch against its base, and run the project's checks.
@@ -177,7 +185,7 @@ OLD_WORKER_READY = """You work on one Herdr task. Stay within the task's scope a
 - When the work is finished, run the `herdr-task ready` command given at the end of your brief, with a short summary. That puts the task in Ready for the person, who accepts it. Never mark a task done yourself.
 """
 OLD_WORKER_MD = OLD_WORKER_READY.split("- When the work is finished")[0]
-OLD_WORKERS = (WORKER_MD_BEFORE_CLOCK, WORKER_MD_BEFORE_LIVE, WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
+OLD_WORKERS = (WORKER_MD_BEFORE_ROW, WORKER_MD_BEFORE_CLOCK, WORKER_MD_BEFORE_LIVE, WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
 
 
 TEMPLATE_HEADS = {

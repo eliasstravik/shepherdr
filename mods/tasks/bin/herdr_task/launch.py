@@ -18,7 +18,7 @@ import time
 from .base import ASK_HOME, ENTRY, Fail, git, hc_json, now, run, SHARE, WORKTREES
 from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, CLAUDE_PROFILE, REVIEW_TOOLS, codex_too_old, codex_update_words, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for
 from .templates import instructions
-from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
+from .agents import detail, LINE_MAX, live_agents, ROW_MAX, SUMMARY_MAX
 from .github import finish, remote_of
 from .guard import guard_argv
 from .browsers import browser_env, browser_line, browser_path, desktop_path
@@ -635,7 +635,7 @@ def closing_line(s, task, parent=None, argv=None):
                  f"--folder {shlex.quote(s.loc['folder'])} --report \"<its findings in a line>\"` (add `--commit <sha>` if you committed fixes since; at most {rounds} rounds); "
                  f"ready refuses a final commit no round was recorded on.")
     text += (f" At the start, at each natural step and at least every 5 minutes while you work, say how it's going: `{ht} status {s.ref(task)} --folder {shlex.quote(s.loc['folder'])} "
-             f"\"<what you're doing now, at most {LINE_MAX} characters>\" --done <% of the whole task> --left <your best guess of how long is left, like 20m>`: "
+             f"\"<what you're doing now, at most {ROW_MAX} characters, a few plain words>\" --done <% of the whole task> --left <your best guess of how long is left, like 20m>`: "
              f"always give `--left`, from your very first status on, from the clock, not a feeling: `date +%s` once at the start, again "
              f"at each status, then minutes worked x (100 - done) / done, in your own working minutes and hours, never a person's "
              f"days; revise it honestly each time by as much as you were off; a rough guess beats none.")
