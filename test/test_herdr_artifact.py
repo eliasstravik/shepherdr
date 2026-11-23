@@ -144,7 +144,9 @@ class Publish(Base):
     def test_a_tasks_agent_names_its_task(self):
         self.who["task"] = "SHOP-4"
         a = self.publish(title="Coverage")
-        self.assertEqual((a["title"], a["task"], a["proof"]), ("SHOP-4: Coverage", "SHOP-4", False))
+        # SHEP-322: the task rides in its own field, never in the title; an older "SHOP-4: " in front is dropped
+        self.assertEqual((a["title"], a["task"], a["proof"]), ("Coverage", "SHOP-4", False))
+        self.assertEqual(self.publish(title="SHOP-4: Plan")["title"], "Plan")
 
     def test_pictures_are_kept_with_the_version_when_a_browser_took_them(self):
         def fake(folder):
@@ -183,7 +185,7 @@ class ProofAndFlags(Base):
         with self.assertRaisesRegex(A.Fail, "--proof needs the task"):
             self.publish(title="Fix login · Proof", proof=True)
         a = self.publish(title="Fix login · Proof", task="SHOP-4", proof=True)
-        self.assertEqual((a["proof"], a["task"], a["title"]), (True, "SHOP-4", "SHOP-4: Fix login · Proof"))
+        self.assertEqual((a["proof"], a["task"], a["title"]), (True, "SHOP-4", "Fix login · Proof"))
         self.assertTrue(self.listed()[0]["proof"])
         self.assertTrue(self.publish(id=a["id"], folder=None)["proof"])  # an update is still its proof
         kept = self.run_cmd(A.cmd_keep, id=a["id"])

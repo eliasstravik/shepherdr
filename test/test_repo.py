@@ -282,6 +282,36 @@ def shell_scripts():
             yield f
 
 
+class NoTaskNumbers(unittest.TestCase):
+    """SHEP-322: the person never sees or types a task number. The agents' instructions name a task by its title;
+    its key (SHOP-2) is for commands only, and the prefix is nobody's to pick any more."""
+
+    def read(self, name):
+        with open(os.path.join(ROOT, "templates", name)) as f:
+            return f.read()
+
+    def test_the_assistant_names_tasks_by_title(self):
+        a = self.read("assistant.md")
+        for gone in ("PREFIX-n", "by its ID", "config --prefix", "The prefix is yours to pick", "by ID (", "PREFIX-An"):
+            self.assertNotIn(gone, a)
+        self.assertIn("name a task by its title, never by a key or a number", a)
+        self.assertIn("Every `herdr-task` command takes a task by its title", a)
+        self.assertIn("never write it in anything the person reads", a)
+        self.assertIn("which wait, by title.", a)
+        # the news it gets: the title in its words, the key only in the tag
+        for line in re.findall(r"<herdr-news task=\"[A-Z]+-\d+\" event=\"[a-z-]+\">([^<]*)</herdr-news>", a):
+            self.assertNotRegex(line, r"\b[A-Z]{2,}-\d+\b", line)
+        # what it says to the person, in its examples, never holds a key
+        for said in re.findall(r'\("([^"]+)"\)', a):
+            self.assertNotRegex(said, r"\b[A-Z]{2,}-\d+\b", said)
+
+    def test_the_worker_names_tasks_by_title(self):
+        w = self.read("worker.md")
+        self.assertIn("Name tasks by their titles in everything you write", w)
+        self.assertIn("is for commands only: never write it anywhere the person reads", w)
+        self.assertIn("[@Fix login](task:", w)
+
+
 class ShellScripts(unittest.TestCase):
     """#731: macOS /bin/sh is bash 3.2, which scans a here-doc inside $( ) for quotes, so one apostrophe in its
     text breaks the whole script ("unexpected EOF while looking for matching `''"). Shipped scripts keep

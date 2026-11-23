@@ -558,9 +558,12 @@ def cmd_publish(o):
     as_proof = bool(getattr(o, "proof", False))
 
     def named(art, title):
-        """(title, task): a task's agent names its task first, "HAT-2: Coverage by package"."""
+        """(title, task): the title as given (SHEP-322: no task key in front; the task rides in its own field), an
+        older one's "HAT-2: " dropped."""
         task = o.task or art.get("task") or who["task"]
-        return (f"{task}: {title}" if task and not title.upper().startswith(task.upper()) else title), task
+        if task and title.upper().startswith(task.upper() + ":"):
+            title = title[len(task) + 1:].strip() or title
+        return title, task
     title, task = named(art or {}, o.title or (art or {}).get("title"))
     if as_proof and not task:
         raise Fail("--proof needs the task it proves: --task SHOP-4.")

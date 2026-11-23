@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 from .base import beside_store, ENTRY, Fail, guard, HOME, now, STORE
-from .store import parse_ref, prefixes_in_use, read_list, store_path
+from .store import parse_ref, prefixes_in_use, quoted, read_list, store_path
 
 
 # ---- queues ---------------------------------------------------------------------------------
@@ -18,24 +18,27 @@ EXT_EVERY = 60000  # how often a queue asks another machine about a task it wait
 
 
 def parse_after(s, text):
-    """--after "HAT-3, HAT-5" (or 3,5): (this folder's task numbers, other tasks). Another task is
-    another folder's on this machine by its prefix ("WEB-2"), or another machine's with the
-    machine first ("vm-b:HAT-12"): {ref, machine, prefix, id}."""
+    """--after: (this folder's task numbers, other tasks). Tasks here by title or key ("Add the API route", HAT-3, 3),
+    comma-separated (SHEP-322; keys alone may be split by spaces too). Another folder's on this machine by its key
+    ("WEB-2"), another machine's with the machine first ("vm-b:HAT-12"): {ref, machine, prefix, id}."""
     ids, ext = [], []
-    for part in re.split(r"[,\s]+", text or ""):
-        part = part.strip()
-        if not part:
-            continue
+    keyish = re.compile(r"#?[0-9]+|[A-Za-z]+[0-9]*-[0-9]+|.+?[:/][A-Za-z]+[0-9]*-[0-9]+")
+    words = [w for w in re.split(r"[,\s]+", text or "") if w.strip()]
+    parts = words if all(keyish.fullmatch(w) for w in words) else [p.strip() for p in (text or "").split(",") if p.strip()]
+    for part in parts:
         m = REMOTE.fullmatch(part)
-        if m:
+        if m and keyish.fullmatch(part):
             pre, n = parse_ref(m.group(2))
             ext.append({"ref": f"{m.group(1)}:{pre}-{n}", "machine": m.group(1), "prefix": pre, "id": n})
             continue
-        pre, n = parse_ref(part)
-        if pre and pre != s.prefix:
+        try:
+            pre, n = parse_ref(part)
+        except Fail:
+            pre = n = None
+        if pre and pre != s.prefix and pre in prefixes_in_use():
             ext.append({"ref": f"{pre}-{n}", "machine": None, "prefix": pre, "id": n})
             continue
-        ids.append(n)
+        ids.append(s.find(part)["id"])
     return ids, ext
 
 
@@ -50,7 +53,10 @@ def ext_state(x):
         d = read_list(store_path(folder)[1])
         if d is None:
             raise Fail(f"Couldn't read {ref}'s list.")
-        return next((t.get("state") for t in d.get("tasks") or [] if t.get("id") == x["id"]), None)
+        t = next((t for t in d.get("tasks") or [] if t.get("id") == x["id"]), None)
+        if t and t.get("title"):
+            x["title"] = t["title"]  # SHEP-322: what a reason says instead of its key
+        return t.get("state") if t else None
     args = [sys.executable, ENTRY, "--on", x["machine"], "show", ref, "--json"]
     guard(["hc"])
     try:
@@ -62,6 +68,8 @@ def ext_state(x):
     except ValueError:
         d = None
     if isinstance(d, dict) and d.get("state"):
+        if d.get("title"):
+            x["title"] = d["title"]
         return d["state"]
     err = (d or {}).get("error") if isinstance(d, dict) else None
     if err and ("No task" in err or "isn't a task" in err):
@@ -107,7 +115,7 @@ def set_after(s, task, ids, ext=()):
     known = {t["id"]: t for t in s.data["tasks"]}
     for i in ids:
         if i == task["id"]:
-            raise Fail(f"{s.prefix}-{i} can't come after itself.")
+            raise Fail(f"{s.name(task)} can't come after itself.")
         if i not in known:
             raise Fail(f"No task {s.prefix}-{i} here.")
     # A loop: following "after" from the new ones leads back to this task.
@@ -115,7 +123,7 @@ def set_after(s, task, ids, ext=()):
     while todo:
         i = todo.pop()
         if i == task["id"]:
-            raise Fail(f"That makes a loop: {s.ref(task)} would end up waiting for itself.")
+            raise Fail(f"That makes a loop: {s.name(task)} would end up waiting for itself.")
         if i in seen or i not in known:
             continue
         seen.add(i)
@@ -146,11 +154,15 @@ def waiting_for(s, task):
 
 
 def queue_reason(s, task):
-    """Why a start has to wait, in plain words: "after HAT-3, vm-b:WEB-5", or its machine too busy
+    """Why a start has to wait, in plain words: 'after "Add the API route"', or its machine too busy
     ("vm-a's memory is 92% full", HERD-40); None when it can go. Never a count: any number of tasks
     run at once (3.2)."""
     refresh_ext(s, task)
-    wait = [f"{s.prefix}-{i}" for i in waiting_for(s, task)] + waiting_ext(task)
+    known = {t["id"]: t for t in s.data["tasks"]}
+    # SHEP-322: by title, never by key
+    wait = [quoted(known[i].get("title")) for i in waiting_for(s, task)] + [
+        quoted(x["title"]) if x.get("title") else "a task on " + x["machine"] if x.get("machine") else "a task in another folder"
+        for x in task.get("after_ext") or [] if x.get("state") not in ("done", "gone")]
     if wait:
         return "after " + ", ".join(wait)
     return machine_hold()

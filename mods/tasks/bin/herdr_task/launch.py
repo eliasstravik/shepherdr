@@ -577,7 +577,7 @@ def space_for_folder(folder, caller=None):
 
 
 def tab_title(s, task):
-    return f"{s.ref(task)} {task['title']}"
+    return " ".join(str(task.get("title") or "").split())
 
 
 def name_tab(tab, title):
@@ -609,7 +609,7 @@ def retag_tabs(s):
                 pairs.append((tab, tab_title(s, t)))
                 continue
             rest = re.sub(r"^(#\d+|[A-Z]+\d*-\d+)\s*", "", old)
-            pairs.append((tab, f"{s.ref(t)} {rest}".strip()))
+            pairs.append((tab, rest or tab_title(s, t)))
     return name_tabs(pairs)
 
 
@@ -682,14 +682,14 @@ def brief(s, task, parent=None, space=None, argv=None):
     start = notes_part("Before you start", notes(s, task, "start", space))
     if start and task.get("worktree"):
         start += f"\n(The main folder is {s.loc['folder']}.)"
-    body = "Your task, " + s.ref(task) + ":\n" + ((task.get("prompt") or "").strip() or task["title"])
+    body = "Your task, " + s.name(task) + ":\n" + ((task.get("prompt") or "").strip() or task["title"])
     finish = notes_part("Before you say ready", notes(s, task, "finish", space))
     return "\n\n".join(x for x in [instructions("worker"), start, body, where_line(task), finish, closing_line(s, task, parent, argv),
                                     settings_block(s, task, space, argv, live=True)] if x)
 
 
 def handoff(s, task, prev, parent=None, argv=None):
-    lines = [f"You are taking over task {s.ref(task)} \"{task['title']}\" from another agent.", instructions("worker")]
+    lines = [f"You are taking over the task {s.name(task)} from another agent.", instructions("worker")]
     lines.append(where_line(task))
     lines.append("The task:\n" + ((task.get("prompt") or "").strip() or task["title"]))
     if prev and prev.get("log"):
@@ -769,7 +769,7 @@ def branch_taken(s, t, name):
     it answers within seconds, else as git last fetched it). None: it's free."""
     for o in s.data.get("tasks") or []:
         if o is not t and o.get("branch") == name:
-            return f"{s.ref(o)} already uses it"
+            return f"the task {s.name(o)} already uses it"
     main = s.loc["folder"]
     if git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{name}")[0]:
         return "a branch by that name is already here"
@@ -791,7 +791,7 @@ def set_branch(s, t, name):
     if t.get("worktree"):
         if name == t.get("branch"):
             return
-        raise Fail(f"{s.ref(t)} already has its worktree on {t.get('branch')}; its branch can't change now.")
+        raise Fail(f"{s.name(t)} already has its worktree on {t.get('branch')}; its branch can't change now.")
     if not name:
         t.pop("branch", None)
         return
@@ -809,8 +809,10 @@ def set_branch(s, t, name):
 
 
 def branch_for(s, task):
-    """A task's branch: its own (--branch), else its folder's pattern (Shepherdr settings > Tasks >
-    Branch names: {n} its number, {key} its id, {slug} its title's words), else task/{n}-{slug}."""
+    """A task's branch: its own (--branch), else its folder's pattern (Shepherdr settings > Tasks > Branch names:
+    {slug} its title's words, {n} its number, {key} its key), else task/{slug}. SHEP-322: no number in it unless a
+    pattern asks for one; a name without {n} or {key} that is taken (here, on the remote, by another task) gets -2,
+    -3, ..., and is kept on the task from then on, so it never lands on another task's branch."""
     if task.get("branch"):
         return task["branch"]
     words = re.sub(r"[^a-z0-9]+", "-", task["title"].lower()).strip("-")[:40].strip("-") or "task"
@@ -819,7 +821,15 @@ def branch_for(s, task):
         pattern = BRANCH_PATTERN
     name = pattern.replace("{n}", str(task["id"])).replace("{key}", s.ref(task)).replace("{slug}", words)
     if branch_problem(s.loc["folder"], name):
-        name = BRANCH_PATTERN.replace("{n}", str(task["id"])).replace("{slug}", words)
+        pattern = BRANCH_PATTERN
+        name = BRANCH_PATTERN.replace("{slug}", words)
+    if "{n}" in pattern or "{key}" in pattern:
+        return name
+    base, n = name, 1
+    while branch_taken(s, task, name) and n < 100:
+        n += 1
+        name = f"{base}-{n}"
+    task["branch"] = name
     return name
 
 

@@ -377,7 +377,7 @@ def main():
     when_opts(c, edit=True)
     cmd("rm", cmd_rm, "remove a task")
     c = cmd("config", cmd_config, "this folder's settings", id=False)
-    c.add_argument("--prefix", help="task ids' prefix, 2 to 5 letters (HAT -> HAT-4); unique on this machine")
+    c.add_argument("--prefix", help=argparse.SUPPRESS)  # SHEP-322: tasks are named by title; taken and left alone
     c = cmd("tick", cmd_tick, "start queued tasks that can go; mark merged ones done (Herdr runs this)", id=False)
     c.add_argument("--machine", help=argparse.SUPPRESS)  # this machine's name, from Herdr's window (HERD-40)
     c.add_argument("--hold", help=argparse.SUPPRESS)  # its start limits as JSON, from Settings > Machines

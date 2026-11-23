@@ -11,7 +11,7 @@ import * as SPc from "../core/spaces.js";
 import { kindOf as kindOfTerm } from "../core/chat-reader.js";
 import * as CL from "../core/chat-log.js";
 import * as CV from "../core/chat-view.js";
-import { taskArtifacts } from "../core/task-artifacts.js";
+import { taskArtifacts, titleInTask } from "../core/task-artifacts.js";
 const { summary, names } = CL as any;
 const { senderName, briefLabel, firstUser, firstKeys, newsTimeline, resolveArtifacts, unsigned, fromName, sentTo, selfName, subagentsOf, isHelper } = CV as any;
 import { mentionedIn } from "../core/send.js";
@@ -162,7 +162,8 @@ export function artifactOf(a: any, spaces: Space[], program: (addr: string) => s
   const versions: any[] = Array.isArray(a.versions) ? a.versions : [];
   // one kind only (3.2): a web page. A task's proof stays on its task until kept; its picture is its newest version's
   return {
-    id: a.id, title: a.title, place, v: a.version, at: a.at, when: ago(a.at, false), by, keeper: by,
+    // SHEP-322: an older title's task key in front ("SHEP-60: Coverage") never shows
+    id: a.id, title: a.task ? titleInTask(a.title, a.task) : a.title, place, v: a.version, at: a.at, when: ago(a.at, false), by, keeper: by,
     folder: a.folder ?? "", folderName: name, store: `${m ?? ""}|${a.folder ?? ""}`, ...(m ? { machine: m } : {}), ...(a.task ? { task: a.task } : {}),
     ...(a.proof ? { proof: true } : {}), ...(a.pinned ? { pinned: true } : {}), ...(a.thumb ?? versions[versions.length - 1]?.thumb ? { thumb: true } : {}),
     versions: [...versions].reverse().map((x: any) => ({ n: x.v, at: x.at, when: ago(x.at, false), by, html: x.v, ...(x.note ? { note: x.note } : {}) })),
@@ -514,7 +515,8 @@ export class Compat {
     // it never said from the task's own record), and their workers, by address, for who sent a message
     const space = key.startsWith("p:") ? key.slice(2).replace(":", "/") : null;
     const spaceRows = space ? this.rows.filter((r) => r.space === space && r.ref) : [];
-    const workerOf = new Map<string, string>(this.rows.filter((r) => r.worker).map((r) => [r.worker, r.ref]));
+    // SHEP-322: a task's agent goes by its task's title
+    const workerOf = new Map<string, string>(this.rows.filter((r) => r.worker).map((r) => [r.worker, r.title || "Task"]));
     // here: this machine's name in herdr-core (another machine's agent writes ours as "<here>/t75")
     const here = (this as any).coreName?.() ?? null;
     const sender = (from: string, text: string) => senderName(from, text, { find: term, machine, taskOf: (a: string) => workerOf.get(a) ?? null, here, machineName: (m: string) => this.machineNames.get(m) ?? null });
@@ -522,7 +524,7 @@ export class Compat {
     // who this chat's own agent is when it sends one ("Assistant → SHEP-4")
     const taskLabel = String(t?.labels?.["herdr.task"] ?? "");
     const peers = { machineName: (m: string) => this.machineNames.get(m) ?? null, here: machine ?? here };
-    const self = selfName({ assistant: key.startsWith("p:"), task: taskLabel ? workerOf.get(this.chats.get(key) ?? "") ?? (/^[a-z]+-\d+$/i.test(taskLabel) ? taskLabel.toUpperCase() : null) : null, kind: reader.kind });
+    const self = selfName({ assistant: key.startsWith("p:"), task: taskLabel ? workerOf.get(this.chats.get(key) ?? "") ?? (/^[a-z]+-\d+$/i.test(taskLabel) ? "Task" : null) : null, kind: reader.kind });
     const news = space ? newsTimeline(items, new Map(spaceRows.map((r) => [r.ref, { ...r, status: r.section }])), { start: reader.start }) : [];
     const newsLine = (e: any): Message => {
       const task = machine ? `${machine}:${e.ref}` : e.ref;
@@ -684,8 +686,9 @@ export class Compat {
       const a = (this.asks?.of(r.worker) ?? []).sort((p: any, q: any) => p.at - q.at)[0];
       if (a) messages.push({ id: `ask:${a.id}`, who: "agent", at: a.at, question: { ...this.question(a, key), by } as any });
       else for (const s of (this.secrets?.asks() ?? []).filter((x) => x.address === r.worker)) messages.push({ id: `secret:${s.address}:${s.name}`, who: "agent", at: Date.now(), secret: { ...this.secretAsk(s), by } } as Message);
-      for (const e of (this.asks as any)?.endsOf?.(r.worker) ?? []) messages.push(quiet(`ae:${e.id}`, e.at, `${r.ref} · ${e.title} · ${e.how}`));
-      screens(r.worker, r.ref, by);
+      // SHEP-322: by its title, never its key
+      for (const e of (this.asks as any)?.endsOf?.(r.worker) ?? []) messages.push(quiet(`ae:${e.id}`, e.at, `${r.title} · ${e.title} · ${e.how}`));
+      screens(r.worker, r.title, by);
     }
     const st = t?.status?.state ?? null;
     // the CLI's own subagents still at work, then its background shells and watchers, above the box (3.0: the helpers

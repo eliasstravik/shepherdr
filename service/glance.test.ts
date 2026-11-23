@@ -52,7 +52,7 @@ test("the Tasks panel's order: needs first, then ready, working, done today; nev
   expect(need).toMatchObject({ type: "need", tag: "HERD-5", task: "HERD-5", title: "Watch voice: fix… · Needs you", body: "Rerun CI on main?", space: "Home", machine: "Mac mini", progress: 8, left: "5h", alert: true, at: NOW - 5000 });
   expect(need.url).toBe("./?place=sp1&task=HERD-5&focus=q1");
   expect(g.items[1]).toMatchObject({ accept: { task: "HERD-4" }, title: "Fix login · Ready for review", url: "./?place=sp1&task=HERD-4", alert: true });
-  expect(g.items[2]).toMatchObject({ alert: false, title: "HERD-3 · Working", line: "Designing the per-hop timing logs" });
+  expect(g.items[2]).toMatchObject({ alert: false, title: "Tidy the docs · Working", line: "Designing the per-hop timing logs" });
 });
 
 test("a 3-choice question gives 3 buttons; a plan, a menu, a merge, a pick of several give none", () => {

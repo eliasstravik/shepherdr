@@ -99,7 +99,7 @@ export function expand(text, picked) {
   });
 }
 
-// Spaces as [#name](space:target), tasks as [@REF](task:target) (taskTarget()).
+// Spaces as [#name](space:target), tasks as [@its title](task:target) (taskTarget(); an older one's words were its key).
 const RE = /\[([#@])([^\]\n]{1,80})\]\((space|task):([^)\s]+)\)/g;
 
 // A message's words and the mentions in it: [{ text } | { mention: { name, target, id, route } } | { task: { ref, target,
@@ -110,7 +110,7 @@ export function split(text) {
   for (const m of s.matchAll(RE)) {
     if ((m[1] === "#") !== (m[3] === "space")) continue;
     if (m.index > at) out.push({ text: s.slice(at, m.index) });
-    out.push(m[3] === "space" ? { mention: parse(m[2], m[4]) } : { task: parseTask(m[4]) });
+    out.push(m[3] === "space" ? { mention: parse(m[2], m[4]) } : { task: parseTask(m[4], m[2]) });
     at = m.index + m[0].length;
   }
   if (at < s.length) out.push({ text: s.slice(at) });
@@ -137,7 +137,7 @@ export function plain(text, reach, machineOf, titleOf) {
     if (p.text !== undefined) return p.text;
     if (p.task) {
       const title = titleOf?.(p.task), where = p.task.route.split(">").pop();
-      return "`@" + p.task.ref + (title ? ` · ${short(title)}` : "") + (where ? ` · ${where}` : "") + "`";
+      return "`@" + short(title || p.task.name || p.task.ref) + (where ? ` · ${where}` : "") + "`";
     }
     const m = p.mention, ok = !reach || reach.has(m.id);
     const where = machineOf?.(m) || m.route.split(">").pop() || "";
@@ -166,14 +166,16 @@ const enc = (folder) => String(folder).split("/").map(encodeURIComponent).join("
 export const taskTarget = ({ route = "", ref, folder = "" }) => `${route ? `${route}/` : ""}${ref}${folder ? `?folder=${enc(folder)}` : ""}`;
 
 // What a picked task puts in the message.
-export const taskToken = (t) => `[@${t.ref}](task:${taskTarget(t)})`;
+// SHEP-322: its words are the task's title (what the person reads); its key rides in the target only.
+const label = (t) => String(t.title ?? "").replace(/[[\]\n\r]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80).trim() || t.ref;
+export const taskToken = (t) => `[@${label(t)}](task:${taskTarget(t)})`;
 
-export function parseTask(target) {
+export function parseTask(target, name = "") {
   const q = target.indexOf("?folder="), head = q < 0 ? target : target.slice(0, q);
   let folder = q < 0 ? "" : target.slice(q + 8);
   try { folder = decodeURIComponent(folder); } catch {}
   const i = head.lastIndexOf("/");
-  return { ref: i < 0 ? head : head.slice(i + 1), target, route: i < 0 ? "" : head.slice(0, i), folder };
+  return { ref: i < 0 ? head : head.slice(i + 1), target, route: i < 0 ? "" : head.slice(0, i), folder, ...(name ? { name } : {}) };
 }
 
 // The box with the "@word" being typed swapped for a picked task's short form ("@SHEP-4 "); its token goes in at send.

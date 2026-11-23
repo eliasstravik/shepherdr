@@ -21,7 +21,7 @@ const work = (folder: string, name: string): Task['work'] => ({ name, folder, sh
 const task = (id: string, name: string, pl: string, status: Task['status'], x: Partial<Task> = {}): Task => ({ id, name, place: pl, asked: pl, status, state: status, on: pl === P.garden ? 'vm' : 'mac-mini', created: '', age: '', work: FOLDER[pl] && work(...FOLDER[pl]), agent: { chat: `${id}/worker`, role: 'worker', cli: pl === P.garden ? 'codex' : 'claude', status: status === 'need' ? 'need' : 'work', running: true, age: '', note: '' }, ...x })
 
 export const tasks: Task[] = [
-  task('SHOP-12', 'Faster product search', P.shop, 'ready', { needsAt: NOW - 8 * hour, repo: 'branch', branch: 'task/shop-12', pr: { number: 212, url: 'https://github.com/example/shop/pull/212' }, summary: 'Results show in about 80 ms, down from 400.', proof: 'a-shop12' }),
+  task('SHOP-12', 'Faster product search', P.shop, 'ready', { needsAt: NOW - 8 * hour, repo: 'branch', branch: 'task/faster-product-search', pr: { number: 212, url: 'https://github.com/example/shop/pull/212' }, summary: 'Results show in about 80 ms, down from 400.', proof: 'a-shop12' }),
   task('BLOG-10', 'Fix typo on the About page', P.blog, 'ready', { needsAt: NOW - hour, repo: 'folder', summary: 'Fixed the typo and two more I found on the same page.' }),
   task('NOTES-4', 'Compare supplier quotes', P.notes, 'ready', { needsAt: NOW - 3 * hour, summary: 'Brightpack is cheapest at your volume. Norbox ships fastest.', proof: 'a-quotes' }),
   task('SHOP-14', 'Switch payment provider', P.shop, 'need', { needsAt: NOW - 2 * hour, blocked: 'question', repo: 'branch', report: { msg: 'Which provider, Stripe or Adyen?', progress: 35, paused: true } }),
@@ -172,17 +172,17 @@ const permQ = (by?: typeof byPhoto) => [a('I need an image library to resize the
 export const chats: Record<string, Chat> = Object.fromEntries(
   [
     chat(EV, [
-      a('Morning, Sam. GARDEN-3 is still in progress. Three things are ready for you:', { at: today(7, 30), suggest: 'Show me what needs me' }),
+      a('Morning, Sam. Watering reminders is still in progress. Three things are ready for you:', { at: today(7, 30), suggest: 'Show me what needs me' }),
       me('', { at: today(9, 11), file: { name: 'supplier-quotes-november.pdf', path: '/demo/supplier-quotes-november.pdf' } }),
       me('Nice. Add a task to make the checkout button bigger on phones.', { at: today(9, 12), reactions: [{ emoji: '👀', by: 'them' }] }),
-      a('Added SHOP-15 to #shop and started it.', { at: today(9, 12), reactions: [{ emoji: '🎉', by: 'me' }] }),
-      did(today(9, 12), [['run', 'herdr-task add', 'SHOP-15'], ['run', 'herdr-task start', 'SHOP-15']]),
+      a('Added Bigger checkout button on phones to #shop and started it.', { at: today(9, 12), reactions: [{ emoji: '🎉', by: 'me' }] }),
+      did(today(9, 12), [['run', 'herdr-task add', '"Bigger checkout button on phones"'], ['run', 'herdr-task start', '"Bigger checkout button on phones"']]),
       a("I'll tell you here when it's ready.", { at: today(9, 13), reactions: [{ emoji: '👍', by: 'me' }] }),
       { id: `m${++n}`, who: 'agent', news: { task: 'SHOP-14', ref: 'SHOP-14', mark: 'needs', what: '', text: "Which provider should I switch to, Stripe or Adyen? I'd go with Stripe." } },
       ask('q-pay', '', byPay, ['Stripe', 'Adyen']),
       { id: `m${++n}`, who: 'agent', news: { task: 'vm:GARDEN-4', ref: 'GARDEN-4', mark: 'needs', what: '', text: 'I need an image library to resize the photos.' } },
       ask('q-pil', 'Run a command', byPhoto, ['Allow once', 'Decline'], { command: 'pip install pillow' }),
-      a('SHOP-16 started on its schedule in #shop. It found 3 packages behind and is updating them.', { suggest: 'Show me what needs me' }),
+      a('Dependency check started on its schedule in #shop. It found 3 packages behind and is updating them.', { suggest: 'Show me what needs me' }),
     ], sonnet),
     chat(P.shop, [a('I made a mock-up of the new checkout. Have a look.'), { id: `m${++n}`, who: 'agent', artifact: { id: 'a-mock', v: 3 } }, a('Started SHOP-15, added from Everything.'), { id: `m${++n}`, who: 'agent', news: { task: 'SHOP-14', ref: 'SHOP-14', mark: 'needs', what: '', text: "Which provider should I switch to, Stripe or Adyen? I'd go with Stripe." } }, ask('q-pay', '', byPay, ['Stripe', 'Adyen']), a('SHOP-16 started on its schedule in #shop. It found 3 packages behind and is updating them.', { suggest: 'How is the checkout button going?' })], sonnet),
     // working, nothing written yet: the working sign alone (SHEP-313)

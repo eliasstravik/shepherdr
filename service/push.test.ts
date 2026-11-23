@@ -67,6 +67,18 @@ test("SHEP-255: an alert carries the task it is about: its chat's, or a task's h
   expect(out[2].notify).toBe(true);
 });
 
+test("SHEP-322: an agent's alert names its task by title, never its key (--task too)", () => {
+  const snap = { places: [{ id: "sp1", name: "home", chat: "sp1" }], tasks: [{ id: "SHOP-1", name: "Fix login", place: "sp1" }, { id: "SHOP-3", name: "Docs", place: "sp1" }], settings: [] };
+  const al = (id: string, task?: string) => JSON.stringify({ id, at: 5, title: "Look", body: "now", ...(task ? { task, about: true } : {}) });
+  const terms = [
+    { address: "t1", name: "worker", state: "live", labels: { "herdr.task": "shop#1", "herdr.alert": al("a") } },
+    { address: "t2", name: "shop-1-review", state: "live", labels: { "herdr.task": "shop#1", "herdr.role": "reviewer", "herdr.alert": al("b") } },
+    { address: "t5", name: "worker2", state: "live", labels: { "herdr.task": "shop#1", "herdr.alert": al("c", "SHOP-3") } },
+  ];
+  const out = agentAlerts(terms, snap, (a) => (a === "t1" || a === "t5" ? "SHOP-1/worker" : null), "/nonexistent");
+  expect(out.map((a) => [a.title, a.task])).toEqual([["Fix login · Look", "SHOP-1"], ["Fix login · Look", "SHOP-1"], ["Docs · Look", "SHOP-3"]]);
+});
+
 // SHEP-243: each alert's buttons do the thing from the phone or the watch, in words that fit a watch
 const watch = (snap: any) => [...alertsOf(snap, (c) => (c === "sp1" ? "Merged **SHEP-9**, all green.\n\nNext: the login page." : undefined)).values()];
 test("a ready task's alert offers Accept, the Tasks panel's Accept", () => {
