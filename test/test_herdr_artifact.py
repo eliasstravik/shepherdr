@@ -171,7 +171,8 @@ class Publish(Base):
         taken = []
 
         def fake(folder):
-            taken.append(open(os.path.join(folder, "index.html")).read())
+            with open(os.path.join(folder, "index.html")) as f:
+                taken.append(f.read())
             tmp = tempfile.mkdtemp(dir=self.dir)
             out = {"dir": tmp}
             for n in (A.THUMB, A.THUMB_DARK):
