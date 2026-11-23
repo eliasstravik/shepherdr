@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Open chats clear the working indicator when an agent finishes, even if its log hasn't changed.
+
 ## 3.2.6
 
 Replies you tap to send, replying to a task from the chat, question cards where they were asked, and fewer hangs and

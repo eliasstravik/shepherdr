@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Hub } from "./hub.ts";
 import { Chats } from "./chats.ts";
+import { Compat } from "./compat.ts";
 
 // A throwaway home with one Claude session: the agent with pid 4242 writes to its log.
 const home = mkdtempSync(join(tmpdir(), "chats-test-"));
@@ -54,6 +55,32 @@ test("a followed chat finds the log of an agent that starts in its terminal late
   expect(r.path).toBe(log);
   expect(seen.at(-1)).toBe("ready");
 });
+
+test("an open chat stops showing work when only the terminal status changes", async () => {
+  const h = hub();
+  feed(h, "restarted", "t7", {
+    address: "t7", state: "live", status: { app: "claude-code", state: "working" },
+    argv: ["claude"], cwd: "/work/demo", labels: {},
+    foreground: { name: "claude", pid: 4242, argv: ["claude"], cwd: "/work/demo" },
+  });
+  const chats = new Chats(h);
+  const compat = new Compat();
+  const working = Promise.withResolvers<void>();
+  const done = Promise.withResolvers<void>();
+  const page: Parameters<Chats["watch"]>[1] = (r, t) => {
+    if (r.state !== "ready") return;
+    const chat = compat.chat("p:demo", r, t);
+    (chat.working ? working : done).resolve();
+  };
+  chats.watch("t7", page);
+  try {
+    await working.promise;
+    feed(h, "status", "t7", { status: { app: "claude-code", state: "done" } });
+    await done.promise;
+  } finally {
+    chats.unwatch("t7", page);
+  }
+}, 2000);
 
 // SHEP-90: a task's worker restarted in a new terminal (t1y's sh ended, t1z runs the agent): its followed chat stayed
 // on the old terminal ("Can't find this conversation") until the service restarted, as the page sends the same key.

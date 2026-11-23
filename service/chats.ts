@@ -17,7 +17,9 @@ type Followed = { reader: ChatReader; pages: Set<Watcher>; busy: boolean; idleSi
   again?: boolean;
   /** its terminal's watch-only stream, and a read it asked for soon */
   stream?: { close(): void } | null; soon?: ReturnType<typeof setTimeout> | null; last?: number;
-  /** what its CLI said it does when last told (the working line's words while no call is open in its log) */
+  status?: string;
+  terminalState?: string;
+  /** The CLI's working line the last time the chat was published. */
   said?: string;
   /** its subagents as last told (SHEP-54): one starting, changing state or ending is news for its chat */
   kids?: string };
@@ -135,9 +137,9 @@ export class Chats {
       let changed = await f.reader.locate(t);
       if (await f.reader.pull()) changed = true;
       if (await f.reader.lookJobs()) changed = true;
-      // its CLI says it does something else now (a status change, no new line in its log): told too
-      const said = reportMsg(t);
-      if (said !== f.said) { f.said = said; changed = true; }
+      // A turn can finish after its reply was read, with no new log line or status text.
+      const current = this.hub.terminals.get(addr);
+      if (current?.status?.state !== f.status || current?.state !== f.terminalState || reportMsg(current) !== f.said) changed = true;
       const kids = subagentsOf([...this.hub.terminals.values()], addr).map((k: any) => `${k.address}:${k.status}:${k.ended ?? ""}`).join(" ");
       if (kids !== (f.kids ?? "")) { f.kids = kids; changed = true; }
       if (changed || !f.ready) this.publish(addr, f);
@@ -152,6 +154,9 @@ export class Chats {
   private publish(addr: string, f: Followed) {
     f.ready = true;
     const t = this.hub.terminals.get(addr);
+    f.status = t?.status?.state;
+    f.terminalState = t?.state;
+    f.said = reportMsg(t);
     for (const page of f.pages) page(f.reader, t);
   }
 }
