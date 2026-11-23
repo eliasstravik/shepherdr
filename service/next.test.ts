@@ -70,6 +70,15 @@ test("two home spaces on this computer: Everything is always the same one, and n
   }
 });
 
+test("another machine's home space keeps the name given it; unnamed it is home, and Everything always is", async () => {
+  const { enrich } = await import("./next.ts");
+  const { HOME } = await import("./paths.ts");
+  const spaces = [{ id: "home", folder: HOME, machine: null }, { id: "vm/a", folder: "/home/x", machine: "vm" }, { id: "pi/b", folder: "/home/y", machine: "pi" }];
+  const places = [{ id: "home", name: "Home", unnamed: true }, { id: "vm/a", name: "box" }, { id: "pi/b", name: "Home", unnamed: true }].map((p) => ({ ...p, chat: `p:${p.id}`, machine: "mini" }));
+  const out: any = enrich({ places, tasks: [], machines: [] } as any, { spaces, rows: [], archived: ["vm/a"], asked: () => null, reportOf: () => null, config: { plans: [] } } as any);
+  expect(out.places.map((p: any) => [p.id, p.name, !!p.home, !!p.archived])).toEqual([["home", "home", true, false], ["vm/a", "box", true, true], ["pi/b", "home", true, false]]);
+});
+
 test("Up next: it waits for the tasks not done yet, the first by title and the rest counted (SHEP-356)", async () => {
   const { enrich } = await import("./next.ts");
   const spaces = [{ id: "sp1", folder: "/srv/app", machine: null }];

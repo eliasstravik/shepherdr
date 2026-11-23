@@ -17,7 +17,7 @@ const snap: any = {
     { id: "sp1", name: "shop", machine: "box", chat: "p:sp1", level: 2, status: "idle" },
     { id: "mini/sp2", name: "garden", machine: "mini", chat: "p:mini:sp2", level: 2, status: "idle", needs: true },
     { id: "sp3", name: "attic", machine: "box", chat: "p:sp3", level: 2, status: "idle", archived: true },
-    { id: "mini/h", name: "home", home: true, machine: "mini", chat: "p:mini:h", level: 1, status: "idle" },
+    { id: "mini/h", name: "home", unnamed: true, home: true, machine: "mini", chat: "p:mini:h", level: 1, status: "idle" },
   ],
   tasks: [
     { ...base, id: "SHOP-45", name: "Voice reads the new app", status: "work", place: "sp1", started: now - 600_000, report: { msg: "Writing tests", progress: 50, eta: 10 }, repo: "branch", agent: { chat: "SHOP-45/worker", role: "worker", cli: "claude", status: "work", age: "" }, at: now - 60_000 },
@@ -186,7 +186,7 @@ test("look spaces, machines, news, schedules", async () => {
   const spaces = await look({ what: "spaces" });
   expect(spaces).toContain("Everything, the root chat: 5 need you in all.");
   expect(spaces).toContain("On box: #shop: 3 need you, 1 working.");
-  expect(spaces).toContain("On Mac mini (can't reach it): its home space (~); #garden: 2 need you.");
+  expect(spaces).toContain("On Mac mini (can't reach it): #garden: 2 need you; its home space (~).");
   expect(spaces).toContain("Archived: #attic.");
   const machines = await look({ what: "machines" });
   expect(machines).toContain("box (serves Shepherdr): online, 1 space, 1 task working.");

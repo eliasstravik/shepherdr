@@ -86,23 +86,29 @@ test('the ring shows the share done in every unfinished state; Ready and Done sh
 const snap = (x: Partial<Snapshot>): Snapshot => ({ name: '', host: 'mini', user: '', places: [], machines: [], tasks: [], automations: {}, artifacts: [], asks: {}, needs: [], settings: [], ...x })
 const place = (id: string, machine: string, x = {}) => ({ id, name: id, machine, level: 0 as const, status: 'idle' as const, mode: 'regular' as const, chat: id, ...x })
 
-test("the list: machines as headings, another machine's home space first, groups next, archived by the filter", () => {
+test("the list: machines as headings, another machine's home space a space like any, groups next, archived by the filter", () => {
   const s = snap({
     everything: 'home',
-    places: [place('home', 'mini', { home: true }), place('shop', 'mini'), place('blog', 'mini', { archived: true }), place('vmhome', 'vm', { home: true }), place('garden', 'vm')],
+    places: [place('home', 'mini', { home: true }), place('shop', 'mini'), place('blog', 'mini', { archived: true }), place('vmhome', 'vm', { home: true, unnamed: true }), place('garden', 'vm')],
     machines: [{ id: 'm:mini', machine: 'mini', name: 'mini', status: 'idle' }, { id: 'm:vm', machine: 'vm', name: 'vm', status: 'off', unreachableSince: '14:02' }],
     sections: [{ id: 's:1', name: 'Store', machine: 'mini', spaces: ['shop', 'blog'] }],
   })
   const active = listOf(s, 'Active')
   expect(active.map((m) => m.machine.name)).toEqual(['mini', 'vm'])
   expect(active[0]!.groups[0]!.spaces.map((p) => p.id)).toEqual(['shop'])
-  expect(active[1]!.spaces.map((p) => p.id)).toEqual(['garden'])
+  expect(active[1]!.spaces.map((p) => p.id)).toEqual(['vmhome', 'garden'])
   expect(active[1]!.warn).toBe("Can't reach")
-  // every machine's home space: vm's is its first row; mini's is Everything, never a row of its own
-  expect(active.map((m) => m.home?.id)).toEqual([undefined, 'vmhome'])
-  expect(listOf(s, 'All')[1]!.home?.id).toBe('vmhome')
-  expect(listOf(s, 'Archived')[1]!.home).toBeUndefined()
+  // every machine's home space: vm's is one of its spaces, first; mini's is Everything, never a row of its own
+  expect(active[0]!.spaces.map((p) => p.id)).not.toContain('home')
+  expect(listOf(s, 'Archived')[1]!.spaces).toEqual([])
   expect(spaceLabel(s, 'vmhome')).toBe('~ on vm')
+  // named, it shows its name as any space; archived, it moves to the Archived filter
+  const named = { ...s, places: s.places.map((p) => (p.id === 'vmhome' ? { ...p, name: 'box', unnamed: undefined, archived: true } : p)) }
+  expect(spaceLabel(named, 'vmhome')).toBe('#box')
+  expect(spaceName(named, named.places[3]!)).toBe('box')
+  expect(listOf(named, 'Active')[1]!.spaces.map((p) => p.id)).toEqual(['garden'])
+  expect(listOf(named, 'Archived')[1]!.spaces.map((p) => p.id)).toEqual(['vmhome'])
+  expect(listOf(named, 'Archived')[1]!.archived).toBe(1)
   expect(spaceLabel(s, 'home')).toBe('Everything')
   expect(spaceName(s, s.places[3]!)).toBe('~')
   expect(placeOf(s, 'vmhome')?.id).toBe('vmhome')

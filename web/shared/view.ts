@@ -14,8 +14,12 @@ export function everything(snap: Snapshot): Place | undefined {
 
 export const isEverything = (snap: Snapshot, id: string) => everything(snap)?.id === id
 
-/** another machine's home space: its home folder's, listed first under it as ~ (this computer's is Everything) */
+/** another machine's home space: its home folder's (this computer's is Everything). A space like any other: renamed,
+ *  grouped, archived or removed; New space at ~ there brings it back. */
 export const isHomeSpace = (snap: Snapshot, p: Pick<Place, 'id' | 'home' | 'machine'>) => !!p.home && p.machine !== snap.host && !isEverything(snap, p.id)
+
+/** a home space nobody named: it shows as ~ with a folder icon (a name given shows as any space's, with #) */
+export const isTilde = (snap: Snapshot, p: Pick<Place, 'id' | 'home' | 'machine' | 'unnamed'>) => isHomeSpace(snap, p) && !!p.unnamed
 
 /** a space the app shows: Everything, every machine's home space or a space */
 export function placeOf(snap: Snapshot, id: string | null | undefined): Place | undefined {
@@ -26,14 +30,14 @@ export function placeOf(snap: Snapshot, id: string | null | undefined): Place | 
 /** the spaces of the list: every space but Everything (other machines' home spaces among them) */
 export const spacesOf = (snap: Snapshot) => snap.places.filter((p) => !isEverything(snap, p.id))
 
-/** a space's name as its row shows it: ~ for a machine's home space */
-export const spaceName = (snap: Snapshot, p: Pick<Place, 'id' | 'home' | 'machine' | 'name'>) => (isHomeSpace(snap, p) ? '~' : p.name)
+/** a space's name as its row shows it: ~ for a machine's home space nobody named */
+export const spaceName = (snap: Snapshot, p: Pick<Place, 'id' | 'home' | 'machine' | 'name' | 'unnamed'>) => (isTilde(snap, p) ? '~' : p.name)
 
-/** "#shop", "~ on vm" (another machine's home space), or "Everything" */
+/** "#shop", "~ on vm" (another machine's home space, unnamed), or "Everything" */
 export function spaceLabel(snap: Snapshot, id: string): string {
   if (isEverything(snap, id)) return 'Everything'
   const p = snap.places.find((x) => x.id === id)
-  if (p && isHomeSpace(snap, p)) return `~ on ${machineLabel(snap, p.machine)}`
+  if (p && isTilde(snap, p)) return `~ on ${machineLabel(snap, p.machine)}`
   return p ? `#${p.name}` : ''
 }
 
@@ -102,8 +106,6 @@ export interface ListMachine {
   /** what its filter shows, and how many of its spaces are archived (the filter's menu says) */
   filter: ListFilter
   archived: number
-  /** its home space, first (another machine's; none under the Archived filter) */
-  home?: Place
   /** groups first as the person ordered them, then the spaces in no group */
   groups: ListGroup[]
   spaces: Place[]
@@ -122,17 +124,16 @@ export function listOf(snap: Snapshot, filter: ListFilter | ((machine: string) =
   const sections: Section[] = (snap.sections ?? []).filter((s) => s.id !== 'pinned')
   return snap.machines.map((machine) => {
     const f = typeof filter === 'function' ? filter(machine.machine) : filter
-    // its home space (another machine's: this computer's is Everything) is its first row, in Active and All, never
-    // grouped, archived or removed, so every machine always has a chat
-    const home = snap.places.find((p) => p.machine === machine.machine && isHomeSpace(snap, p))
-    const all = snap.places.filter((p) => p.machine === machine.machine && !p.home)
+    // its home space (another machine's: this computer's is Everything) is one of its spaces, first in the service's
+    // order until moved: grouped, archived or removed like any
+    const all = snap.places.filter((p) => p.machine === machine.machine && (!p.home || isHomeSpace(snap, p)))
     const mine = all.filter((p) => f === 'All' || (f === 'Archived') === !!p.archived)
     const groups = sections
       .filter((s) => (s.machine ?? snap.host) === machine.machine)
       .map((s) => ({ id: s.id, name: s.name, spaces: s.spaces.map((id) => mine.find((p) => p.id === id)).filter((p): p is Place => !!p) }))
     const grouped = new Set(groups.flatMap((g) => g.spaces.map((p) => p.id)))
     // the archived view lists spaces only
-    return { machine, warn: machineWarn(machine), filter: f, archived: all.filter((p) => p.archived).length, groups: f === 'Archived' ? [] : groups, home: f === 'Archived' ? undefined : home, spaces: mine.filter((p) => f === 'Archived' || !grouped.has(p.id)) }
+    return { machine, warn: machineWarn(machine), filter: f, archived: all.filter((p) => p.archived).length, groups: f === 'Archived' ? [] : groups, spaces: mine.filter((p) => f === 'Archived' || !grouped.has(p.id)) }
   })
 }
 

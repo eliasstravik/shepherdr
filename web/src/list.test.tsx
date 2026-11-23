@@ -37,7 +37,7 @@ const snap: Snapshot = {
   user: '',
   everything: 'home',
   // mini: several spaces, one archived; vm: its home space and one, and a warning mark; pi: its home space only
-  places: [place('home', 'mini', { home: true }), place('shop', 'mini'), place('blog', 'mini'), place('old', 'mini', { archived: true }), place('vmh', 'vm', { home: true, name: 'home' }), place('garden', 'vm'), place('pih', 'pi', { home: true, name: 'home' })],
+  places: [place('home', 'mini', { home: true }), place('shop', 'mini'), place('blog', 'mini'), place('old', 'mini', { archived: true }), place('vmh', 'vm', { home: true, name: 'home', unnamed: true }), place('garden', 'vm'), place('pih', 'pi', { home: true, name: 'home', unnamed: true })],
   machines: [
     { id: 'm:mini', machine: 'mini', name: 'mini', status: 'idle' },
     { id: 'm:vm', machine: 'vm', name: 'vm', status: 'off', unreachableSince: '14:02' },
@@ -84,7 +84,7 @@ test("a machine's filter shows only that machine's spaces as it says, and marks 
   expect(part(html, 'vm')).not.toContain('fdot')
   // a machine with none to show says so, and keeps its heading (and so its filter); its home space is no archived one
   expect(part(html, 'pi')).toContain('No archived spaces.')
-  expect(part(html, 'pi')).not.toContain('data-home')
+  expect(part(html, 'pi')).not.toContain('data-project="pih"')
 })
 
 test("every other machine's home space is its first row, as ~; this computer's is Everything, never a row (SHEP-429)", () => {
@@ -92,14 +92,25 @@ test("every other machine's home space is its first row, as ~; this computer's i
   const html = draw()
   for (const [m, id] of [['vm', 'vmh'], ['pi', 'pih']] as const) {
     const it = part(html, m)
-    expect(it).toContain(`data-project="${id}" data-home=""`)
+    expect(it).toContain(`data-project="${id}"`)
     expect(it).toContain(`aria-label="~ on ${m}"`)
     expect(it).toContain(`aria-label="More for ~ on ${m}"`)
     expect(it).not.toContain('>home<')
   }
   // vm's home row before its other space
   expect(part(html, 'vm').indexOf('data-project="vmh"')).toBeLessThan(part(html, 'vm').indexOf('data-project="garden"'))
-  expect(part(html, 'mini')).not.toContain('data-home')
+  expect(part(html, 'mini')).not.toContain('data-project="home"')
+})
+
+test("a machine's home space is a space like any other: named, it shows its name with #; archived, it leaves the list", () => {
+  const named = { ...snap, places: snap.places.map((p) => (p.id === 'vmh' ? { ...p, name: 'vm-box', unnamed: undefined } : p.id === 'pih' ? { ...p, archived: true } : p)) }
+  const html = renderToStaticMarkup(<List snap={named} />)
+  expect(part(html, 'vm')).toContain('>vm-box<')
+  expect(part(html, 'vm')).toContain('aria-label="More for vm-box"')
+  expect(part(html, 'vm')).not.toContain('aria-label="~ on vm"')
+  expect(part(html, 'pi')).not.toContain('data-project="pih"')
+  setUI({ shown: { pi: 'Archived' } })
+  expect(part(renderToStaticMarkup(<List snap={named} />), 'pi')).toContain('data-project="pih"')
 })
 
 test("a machine's plus opens New space with that machine picked", () => {
