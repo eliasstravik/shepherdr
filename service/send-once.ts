@@ -61,6 +61,14 @@ export function once(cid: string, go: (again: boolean) => Promise<unknown>): Pro
   return p;
 }
 
+/** when a send went in (by its page's id), from its kept answer: null when it didn't, or isn't known here */
+export function wentIn(cid: string): number | null {
+  const was = load().get(cid);
+  const r = was?.result as { ok?: boolean; waiting?: boolean; at?: number } | undefined;
+  if (!was || !r?.ok || r.waiting) return null;
+  return typeof r.at === "number" ? r.at : was.at;
+}
+
 /** held messages that couldn't go once the agent was free, by agent address: the page shows them failed with Retry */
 const heldFailed = new Map<string, { cid: string; error: string; at: number }[]>();
 export function noteFailed(addr: string, cid: string, error: string, stayed = false) {

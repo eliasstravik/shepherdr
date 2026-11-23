@@ -48,7 +48,10 @@ export const newsKey = (rows: Row[]) => JSON.stringify(rows.filter((r) => r.spac
 // a news event's dot: what the task was at that moment
 const NEWS: Record<string, TaskStatus> = { added: "todo", queued: "queued", started: "work", needs: "need", asks: "need", stalled: "need", failed: "need", ready: "ready", merging: "merging", merged: "done", done: "done", closed: "done" };
 type Sent = { cid: string; text: string; files: string[]; at: number };
-const said = (v: string) => v.replace(/\s+/g, " ").trim();
+// (the tag lines a send puts before the words, if a log keeps them: the message it answers, the tasks it mentions)
+const said = (v: string) => v.replace(/^\s*<hc\b[^>]*\/>\s*$/gm, "").replace(/^\s*<hc task=[^\n]*<\/hc>\s*$/gm, "").replace(/\s+/g, " ").trim();
+/** how much earlier than the service's clock another machine's log may stamp a message (its clock may differ) */
+const CLOCKS = 60_000;
 const base = (p: string) => p.split("/").pop() ?? p;
 
 /** The page's id for one of the person's messages in the log: what it sent lately with the same words (the paths of
@@ -57,7 +60,7 @@ const base = (p: string) => p.split("/").pop() ?? p;
 export function sentAs(sends: Sent[], x: { text?: string; at?: number; images?: number; paths?: string[] }, taken: Set<string>): string | undefined {
   const at = x.at ?? 0;
   const s = sends.find((s) => {
-    if (taken.has(s.cid) || at < s.at - 5000 || at - s.at > 30 * 60_000) return false;
+    if (taken.has(s.cid) || at < s.at - CLOCKS || at - s.at > 30 * 60_000) return false;
     const names = new Set(s.files.map(base));
     const lines = String(x.text ?? "").split("\n");
     const words = said(lines.filter((l) => !(/^[/~]/.test(l.trim()) && names.has(base(l.trim())))).join("\n"));

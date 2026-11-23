@@ -97,7 +97,7 @@ async function deliver(cid: string, pending: Promise<string>[]) {
     let r: { waiting?: boolean; waitsFor?: Outgoing['waitsFor']; at?: number }
     try {
       r = await retrying(
-        () => act<typeof r>({ type: 'send', chat: o.chat, text: o.text, attachments: files.map((f) => f.path), cid, reply: o.reply?.id, human: true, ...(o.hold ? { hold: true } : {}) }, AbortSignal.timeout(SEND_TIMEOUT)),
+        () => act<typeof r>({ type: 'send', chat: o.chat, text: o.text, attachments: files.map((f) => f.path), cid, reply: o.reply?.id, human: true, ...(o.hold ? { hold: true } : {}), ...(o.was ? { was: o.was } : {}) }, AbortSignal.timeout(SEND_TIMEOUT)),
         first.at,
         { onWait: (offline) => patch((x) => (!!x.offline === offline ? {} : { offline: offline || undefined })) },
       )
@@ -149,9 +149,18 @@ export function retry(cid: string) {
   const s = getState()
   const o = s.outbox.find((x) => x.cid === cid)
   if (!o) return
-  const again: Outgoing = { ...o, cid: o.lost ? newCid() : o.cid, state: 'sending', error: undefined, lost: undefined, waiting: undefined, waitsFor: undefined, queued: undefined, serverAt: undefined, wentAt: undefined, busyAt: undefined, pastAt: undefined, offline: undefined, at: Date.now(), prior: priorOf(s.chats[o.chat]), after: anchorOf(s.chats[o.chat]), before: s.outbox.filter((x) => x.chat === o.chat && x.cid !== cid).map((x) => x.cid) }
+  // one that went in but didn't show up goes as a new message, naming the first: the server sends it again only when
+  // the agent's log doesn't have the first after all (it came back late: never twice)
+  const again: Outgoing = { ...o, cid: o.lost ? newCid() : o.cid, was: o.lost ? (o.was ?? o.cid) : o.was, state: 'sending', error: undefined, lost: undefined, waiting: undefined, waitsFor: undefined, queued: undefined, serverAt: undefined, wentAt: undefined, busyAt: undefined, pastAt: undefined, offline: undefined, at: Date.now(), prior: priorOf(s.chats[o.chat]), after: anchorOf(s.chats[o.chat]), before: s.outbox.filter((x) => x.chat === o.chat && x.cid !== cid).map((x) => x.cid) }
   setOutbox((all) => all.map((x) => (x.cid === cid ? again : x)))
   void deliver(again.cid, [])
 }
 
 export const dropOut = (cid: string) => setOutbox((all) => all.filter((x) => x.cid !== cid))
+
+/** a reload (or the phone dropping the page) cut these off on their way: they go on with the same id, which the
+ *  server answers once (a send asked again never goes twice). Ones whose files had not gone up yet fail in time. */
+export function resumeSending() {
+  for (const o of getState().outbox) if (o.state === 'sending' && !gates.has(o.cid) && o.files.every((f) => f.path)) void deliver(o.cid, [])
+}
+if (typeof window !== 'undefined') setTimeout(resumeSending, 0)

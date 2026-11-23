@@ -38,6 +38,8 @@ export interface Outgoing {
   error?: string
   /** it went in but never showed in the chat: Retry sends it as a new message */
   lost?: boolean
+  /** sent again by Retry after it didn't show up: the first's id, so the server never sends it twice (SHEP-312) */
+  was?: string
   /** when the chat first showed a newer message of yours than it, by this screen's clock: the log moved past it */
   pastAt?: number
   /** the chat's last message when it was sent: it shows right after it (and after the ones sent before it), never
@@ -69,7 +71,53 @@ const KEEP_OUT = 24 * 60 * 60_000
 /** one waiting that the chat never showed waiting (a machine out of reach) fails after this */
 const KEEP_WAITING = 30 * 60_000
 
-const words = (s: string) => s.replace(/\s+/g, ' ').trim()
+/** a message's words as the agent's log gives them back: without the tag lines a send puts before them (the message it
+ *  answers, the tasks it mentions: core/send.js messageBody), whitespace as one space */
+export const words = (s: string) =>
+  s
+    .replace(/^\s*<hc\b[^>]*\/>\s*$/gm, '')
+    .replace(/^\s*<hc task=[^\n]*<\/hc>\s*$/gm, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+/** how far the screen's clock may be from the agent's log's (another machine, a phone's own clock) when the server's
+ *  time for it is not known: a reload cut it off on its way, or it never answered */
+const CLOCKS = 2 * 60_000
+
+/* ---------- what came back already: a cleared one never comes back (SHEP-312) ---------- */
+
+// The ones that came back (by cid) and the chat's messages they took (by chat and id), a day each, kept on the device:
+// a reload, or another tab of the app still holding an older outbox, must not bring one back, and two of the same words
+// sent in a row each take a message of their own.
+const DONE = 'shepherdr.outbox.done'
+type Done = { cids: Record<string, number>; took: Record<string, number> }
+let done: Done = { cids: {}, took: {} }
+function readDone(): Done {
+  try {
+    const v = JSON.parse(localStorage.getItem(DONE) ?? 'null') as Done | null
+    return v && typeof v === 'object' ? { cids: v.cids ?? {}, took: v.took ?? {} } : { cids: {}, took: {} }
+  } catch {
+    return { cids: {}, took: {} }
+  }
+}
+/** what this and the other tabs know came back, with what is new here, a day at most */
+function syncDone(now = Date.now()) {
+  const there = readDone()
+  const keep = (a: Record<string, number>, b: Record<string, number>) =>
+    Object.fromEntries(Object.entries({ ...a, ...b }).filter(([, at]) => now - at < KEEP_OUT))
+  done = { cids: keep(there.cids, done.cids), took: keep(there.took, done.took) }
+  try {
+    if (Object.keys(done.cids).length || Object.keys(done.took).length) localStorage.setItem(DONE, JSON.stringify(done))
+    else localStorage.removeItem(DONE)
+  } catch {
+    /* private window: this tab still knows */
+  }
+}
+const tookKey = (chat: string, id: string) => `${chat} ${id}`
+export const cameBack = (cid: string) => cid in done.cids
+/** tests: a fresh screen */
+export function forgetDone() {
+  done = { cids: {}, took: {} }
+}
 /** how much earlier than the server's clock the agent's log may stamp it: its machine's clock may differ a little */
 const SLACK = 5000
 /** a file as the log has it: on another machine it landed in a folder of its own there (hc put), under its own name */
@@ -81,15 +129,21 @@ const sameFile = (a: string | undefined, b: string) => a === b || (!!a && a.spli
  *  nothing blinks while it goes in. */
 export function settle(out: Outgoing[], chat: Chat, now = Date.now()): Outgoing[] {
   if (!out.some((o) => o.chat === chat.key)) return out
-  const taken = new Set<string>()
+  // the chat's messages already taken by one sent before (two of the same words each take their own)
+  const taken = new Set<string>(Object.keys(done.took).flatMap((k) => (k.startsWith(`${chat.key} `) ? [k.slice(chat.key.length + 1)] : [])))
   let changed = false
+  const gone = (o: Outgoing, ids: string[] = []) => {
+    changed = true
+    done.cids[o.cid] = now
+    for (const id of ids) done.took[tookKey(chat.key, id)] = now
+    return []
+  }
   const next = out.flatMap((o) => {
     if (o.chat !== chat.key) return [o]
+    // it came back on another tab, or before a reload
+    if (cameBack(o.cid)) return gone(o)
     const shown = chat.messages.filter((m) => m.cid === o.cid)
-    if (shown.some((m) => !m.waiting)) {
-      changed = true
-      return []
-    }
+    if (shown.some((m) => !m.waiting)) return gone(o, shown.map((m) => m.id))
     if (shown.length) {
       if (o.state === 'sent' && o.waiting && o.queued) return [o]
       changed = true
@@ -106,17 +160,21 @@ export function settle(out: Outgoing[], chat: Chat, now = Date.now()): Outgoing[
       changed = true
       return [{ ...o, waiting: undefined, queued: undefined, wentAt: now }]
     }
-    if (o.state === 'sending' || o.waiting || o.serverAt === undefined) return [o]
+    // held by the server for the agent's turn: it comes back with its id
+    if (o.waiting) return [o]
+    // the log has it without its id (another machine's, a restart, a reload that cut its answer off): its very words,
+    // new since it was sent, whatever this screen thinks of it (still sending, or given up on: it went in after all)
     const parts = sameAs(o, chat, taken)
-    if (!parts) {
-      if (o.pastAt || !(o.state === 'sent' || o.lost) || !movedPast(o, chat)) return [o]
-      changed = true
-      return [{ ...o, pastAt: now }]
+    if (parts) {
+      for (const id of parts) taken.add(id)
+      return gone(o, parts)
     }
-    for (const id of parts) taken.add(id)
+    if (o.state === 'sending' || o.serverAt === undefined) return [o]
+    if (o.pastAt || !(o.state === 'sent' || o.lost) || !movedPast(o, chat)) return [o]
     changed = true
-    return []
+    return [{ ...o, pastAt: now }]
   })
+  if (changed) syncDone(now)
   return changed ? next : out
 }
 
@@ -137,7 +195,9 @@ function unfiled(text: string, files: Outgoing['files']) {
  *  the same words and the same files */
 function sameAs(o: Outgoing, chat: Chat, taken: Set<string>): string[] | null {
   const prior = new Set(o.prior ?? [])
-  const fresh = chat.messages.filter((m) => m.who === 'you' && !m.cid && !m.answered && !m.waiting && !prior.has(m.id) && !taken.has(m.id) && (m.at ?? 0) >= o.serverAt! - SLACK)
+  // from when it began to go in by the server's clock, else by this screen's (a reload ago, or its answer lost)
+  const since = o.serverAt !== undefined ? o.serverAt - SLACK : o.at - CLOCKS
+  const fresh = chat.messages.filter((m) => m.who === 'you' && !m.cid && !m.answered && !m.waiting && !m.brief && !prior.has(m.id) && !taken.has(m.id) && (m.at ?? 0) >= since)
   const ids: string[] = []
   let named = new Set<string>()
   for (const m of o.text || o.files.length ? fresh : []) {
@@ -283,13 +343,18 @@ export function loadOutbox(): Outgoing[] {
   try {
     for (const k of OLD) localStorage.removeItem(k)
     const v = JSON.parse(localStorage.getItem(STORE) ?? '[]')
-    return Array.isArray(v) ? prune(v, Date.now()) : []
+    syncDone()
+    // one another tab (or the screen before a reload) saw come back stays gone
+    return Array.isArray(v) ? prune(v, Date.now()).filter((o: Outgoing) => !cameBack(o.cid)) : []
   } catch {
     return []
   }
 }
 
 export function saveOutbox(out: Outgoing[]) {
+  // a tab still holding an older outbox never writes back one that came back meanwhile
+  syncDone()
+  out = out.filter((o) => !cameBack(o.cid))
   try {
     if (out.length) localStorage.setItem(STORE, JSON.stringify(out))
     else localStorage.removeItem(STORE)
