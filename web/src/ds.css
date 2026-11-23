@@ -58,7 +58,7 @@ button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"])
 .lab{padding:12px 8px 4px;color:var(--muted);font-size:var(--sec);line-height:var(--secl)}
 /* a machine's heading (SHEP-342): its name (a button when it carries a warning mark), then its own filter and New space,
    in the column of the rows' ⋯ below */
-.lab.mh{display:flex;align-items:center;gap:0;padding:8px 0 0 8px}
+.lab.mh{display:flex;align-items:center;gap:0;padding:8px 0 0 8px;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
 .mh>.mn{display:flex;align-items:center;gap:8px;flex:1;min-width:0;height:var(--ib);color:inherit;font:inherit;text-align:left}
 .mh>.mn>.n{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mh .mf{flex:none;color:var(--fg)}
 .mh>.mn>.i{flex:none}.mempty{padding:4px 8px}

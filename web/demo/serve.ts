@@ -115,7 +115,7 @@ function action(a: Record<string, any>): unknown {
   if (a.type === 'task-move' && t) return patchTask(t.id, { place: a.place }), { ok: true }
   if (a.type === 'task-start' && t) { patchTask(t.id, { status: 'work', started: Date.now() - 15 * 60_000, report: { msg: 'Just started', progress: 50 }, agent: { chat: `${t.id}/worker`, role: 'worker', cli: 'claude', status: 'work', running: true, age: '', note: '' } }); say(`${t.id}/worker`, { text: "Started. I'll tell you when it's ready for review." }); return { ok: true } }
   if (a.type === 'stop' && t) return patchTask(t.id, { status: 'need', stopped: { by: 'you' } }), { ok: true }
-  if (a.type === 'rename') return each((snap) => { snap.places = snap.places.map((p) => (p.id === a.id ? { ...p, name: a.name } : p)); snap.sections = snap.sections?.map((s) => (s.id === a.id ? { ...s, name: a.name } : s)) }), { ok: true }
+  if (a.type === 'rename') return each((snap) => { snap.places = snap.places.map((p) => (p.id === a.id ? { ...p, name: a.name } : p)); snap.sections = snap.sections?.map((s) => (s.id === a.id ? { ...s, name: a.name } : s)); snap.machines = snap.machines.map((m) => (m.id === a.id ? { ...m, name: a.name || (m.ownName ?? m.machine) } : m)) }), { ok: true }
   if (a.type === 'space-archive') return each((snap) => { snap.places = snap.places.map((p) => (p.id === a.place ? { ...p, archived: a.on } : p)) }), { ok: true }
   if (a.type === 'space-remove') return each((snap) => { snap.places = snap.places.filter((p) => p.id !== a.place) }), { ok: true }
   if (a.type === 'move') return each((snap) => { snap.sections = snap.sections?.map((s) => ({ ...s, spaces: [...s.spaces.filter((x) => x !== a.id), ...(s.id === a.to ? [a.id] : [])] })) }), { ok: true }

@@ -430,7 +430,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (b.id.startsWith("m:")) {
       // a machine's own name and emoji in the sidebar (this computer is the snapshot's host)
       const key = b.id.slice(2);
-      await sh.set("spaces-chat", withMachineLook(bar(), key === compat.host ? null : key, name, icon ?? null));
+      await sh.set("spaces-chat", withMachineLook(bar(), key === compat.host ? null : key, name, icon));
       return { ok: true };
     }
     // a space: its icon in the sidebar's data, its name in the list of spaces (shared "spaces")
