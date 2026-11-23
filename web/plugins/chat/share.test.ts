@@ -2,7 +2,7 @@
 // the share and opens the app on ./?share=<id>; the page puts it in the box of the chat open last. Here the real worker
 // runs in a sandbox with an in-memory Cache Storage, and the page's half takes what it kept.
 import { afterAll, beforeAll, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import vm from 'node:vm'
 import type { Snapshot } from '@shared/types.ts'
@@ -150,13 +150,13 @@ test("landed: the pictures are in that chat's box as thumbnails, the words after
   expect(getState().ui.files['SHOP-3/worker']).toBeUndefined()
 })
 
-test('both manifests (light and dark) carry the same share target, files by POST to ./share', () => {
+test('every manifest (the default, light and dark) carries the same share target, files by POST to ./share', () => {
   const read = (n: string) => JSON.parse(readFileSync(join(import.meta.dir, `../../public/${n}`), 'utf8'))
-  const light = read('manifest.webmanifest').share_target
-  expect(read('manifest-dark.webmanifest').share_target).toEqual(light)
-  expect(light).toMatchObject({ action: 'share', method: 'POST', enctype: 'multipart/form-data', params: { text: 'text', url: 'url', title: 'title' } })
-  expect(light.params.files[0].name).toBe('files')
-  expect(light.params.files[0].accept).toContain('image/*')
+  const target = read('manifest.webmanifest').share_target
+  for (const n of readdirSync(join(import.meta.dir, '../../public')).filter((f) => f.endsWith('.webmanifest'))) expect(read(n).share_target).toEqual(target)
+  expect(target).toMatchObject({ action: 'share', method: 'POST', enctype: 'multipart/form-data', params: { text: 'text', url: 'url', title: 'title' } })
+  expect(target.params.files[0].name).toBe('files')
+  expect(target.params.files[0].accept).toContain('image/*')
   // the worker answers the same path
   expect(SRC).toContain("new URL('share', self.registration.scope)")
 })
