@@ -432,7 +432,7 @@ BUTTON = "open-shepherdr"
 KEY = ("global", "ctrl-shift-o", f"mod.open:{BUTTON}")
 # SHEP-355: 3.1's window views, retired. A Herdr window that showed them keeps them on screen after the switch (and a
 # space's Assistant tab is a "chat" mod tab herdr-core keeps), so each old mod's place gets a stand-in
-# (herdr/window-notice in the source): the big views say Shepherdr lives in the web app, with a button to open it; the
+# (herdr/window-notice in the source): the main chat says Shepherdr lives in the web app, with a button to open it; the
 # rest draw nothing. Every mod name a 3.0 or 3.1 release shipped.
 NOTICE = "window-notice"
 RETIRED = ("accept-card", "artifacts", "chat", "chat-call", "chat-image", "chat-models", "chat-react", "confirm-chat",
@@ -440,7 +440,7 @@ RETIRED = ("accept-card", "artifacts", "chat", "chat-call", "chat-image", "chat-
            "prompt-chat", "shepherdr-settings", "spaces-chat", "tabs-tasks", "task-artifacts", "task-browser",
            "task-changes", "task-files", "task-pr", "tasks", "tasks-menu", "toasts", "workspace-chrome-shepherdr",
            "workspace-status-chat")
-NOTICE_SHOWS = ("chat", "spaces-chat", "tasks")
+NOTICE_SHOWS = ("chat",)   # the main chat; the Tasks panel's (props.panel) draws nothing too
 # Herdr keeps a mod's storage in data/<mod>: one of these means 3.1's window ran here
 WINDOW_RAN = ("spaces-chat", "tabs-tasks", "workspace-chrome-shepherdr", "chat", "coordinator")
 HOOKS = [  # (file under home, event, entry): the agents' question and permission cards

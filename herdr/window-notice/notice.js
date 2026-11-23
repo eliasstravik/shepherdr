@@ -1,14 +1,14 @@
 // Shepherdr 3.1's window views, retired. 3.2 moved Shepherdr into its web app and took its mods out of the Herdr app,
 // but a window that was showing them kept them on screen, each with Herdr's red "could not be re-rendered" banner,
 // and a space's Assistant tab (a "chat" mod tab, kept by herdr-core) said "chat did not load" even after a restart.
-// So the update puts this in each old mod's place, in one swap: the big views (the chat, the spaces list, the tasks
-// list) say where Shepherdr went, with a button that opens the web app (at the same space, from an Assistant tab);
-// the rest draw nothing. `shepherdr window --remove` takes them out once the window no longer shows them.
+// So the update puts this in each old mod's place, in one swap: the main chat (an Assistant's tab or pane) says where
+// Shepherdr went, with a button that opens the web app (at the same space, from an Assistant tab); the rest (the
+// sidebar, the tab bar, the Tasks panel and its task's chat, the status bar) draw nothing, so there is one notice. `shepherdr window --remove` takes them out once the window no longer shows them.
 // Self-contained: this folder is the whole mod (no shared modules). The source is herdr/window-notice.
 
 import { div, View } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { exec, theme, props } from "herdr";
+import { exec, theme, props, shared } from "herdr";
 
 // Prints the service's web.json: Shepherdr's own state folder first (SHEPHERDR_HOME, XDG_STATE_HOME), else the old path.
 const READ = [
@@ -43,6 +43,11 @@ export function linkAt(link, p) {
   return space ? `${link}${link.includes("?") ? "&" : "?"}place=${encodeURIComponent(space)}` : link;
 }
 
+/** The window still shows 3.1's Shepherdr layout (it's gone from disk, so Herdr's own comes back on a restart). */
+function oldLayout() {
+  try { return shared("layout") === "shepherdr"; } catch { return false; }
+}
+
 export default function notice(shows) {
   return class Retired extends View {
     init(_props, cx) {
@@ -58,9 +63,9 @@ export default function notice(shows) {
     }
 
     render(_cx) {
-      if (!shows) return div();
       let p = null;
       try { p = props(); } catch { p = null; }
+      if (!shows || p?.panel) return div();
       const t = theme();
       const link = linkAt(this.link, p);
       return v_flex().id("shepherdr-moved").size_full().items_center().justify_center().p(16).bg(t.canvas)
@@ -74,7 +79,7 @@ export default function notice(shows) {
               .child(WORDS.open))
             .child(div().text_size(12).text_color(t.muted).child(WORDS.phone)))
           .when(this.loaded && !link, (el) => el.child(div().text_size(12).text_color(t.muted).child(WORDS.down)))
-          .child(div().text_size(12).text_color(t.dim ?? t.muted).child(WORDS.layout)));
+          .when(oldLayout(), (el) => el.child(div().text_size(12).text_color(t.dim ?? t.muted).child(WORDS.layout))));
     }
   };
 }
