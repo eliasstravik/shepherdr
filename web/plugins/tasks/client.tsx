@@ -10,17 +10,11 @@ import { AgentField, pickFor, type Pick } from '@client/picker.tsx'
 import { edge } from '@client/resize.ts'
 import { Btn, Cnt, cx, Empty, Hd, I, IB } from '@client/ui.tsx'
 import type { MergeEvidence, Snapshot, Task } from '@shared/types.ts'
-import { isEverything, machineLabel, needsCount, nowGroups, onBranch, placeDown, spaceLabel, spacesOf, statusWord, taskChat, taskLine, taskRef, taskWhen, tasksIn, tstate, whereWords, type TaskState } from '@shared/view.ts'
+import { isEverything, machineLabel, needsCount, nowGroups, onBranch, placeDown, spaceLabel, spacesOf, etaOf, leftWords, statusWord, taskChat, taskLine, taskRef, taskWhen, tasksIn, tstate, whereWords } from '@shared/view.ts'
 import { DoneRow } from '@plugins/chat/cards.tsx'
+import { StatusIcon } from './icon.tsx'
 
-const ST: Record<TaskState | 'sched', [Parameters<typeof I>[0]['n'], string]> = { ask: ['ask', 'c-ask'], ready: ['ready', 'c-ready'], working: ['working', 'c-working'], next: ['next', 'c-mute'], done: ['check', 'c-mute'], archived: ['check', 'c-mute'], sched: ['clock', 'c-mute'] }
-
-/** a task's status mark: colour only for status (green ready, blue working, amber needs you, red stopped) */
-export function StatusIcon({ t, dim, c }: { t: Task; dim?: boolean; c?: string }) {
-  const s = tstate(t)
-  const [n, col] = ST[s]
-  return <I n={n} c={cx(c, dim ? 'c-mute' : t.stopped && t.stopped.by !== 'you' && s === 'ask' ? 'c-red' : col)} />
-}
+export { StatusIcon }
 
 /* ---------- a task's menu ---------- */
 
@@ -168,7 +162,7 @@ export function ReviewCard({ t, ctx }: { t: Task; ctx: 'chat' | 'thread' }) {
   const proof = t.proof ?? (typeof ev?.proof === 'string' ? ev.proof : ev?.proof?.id)
   return (
     <div className="card" data-card={`review:${t.id}`}>
-      {ctx === 'chat' && <span className="t">{t.name}</span>}
+      {ctx === 'chat' && <span className="t tw"><StatusIcon t={t} time="none" />{t.name}</span>}
       <span className="s">{where}</span>
       <span>{t.summary ?? ev?.summary ?? 'Ready for you to look at.'}</span>
       {proof && Tile && <div className="atile"><Tile id={proof} /></div>}
@@ -262,7 +256,7 @@ function TaskTop({ task: t }: { task: Task }) {
   const snap = useSnap()
   if (!snap) return null
   const w = statusWord(t)
-  const left = tstate(t) === 'working' ? taskWhen(t) : ''
+  const left = leftWords(etaOf(t))
   const strong = w.tone === 'ask' || w.tone === 'ready' || w.tone === 'red'
   return (
     <div className="status">

@@ -9,7 +9,7 @@ import type { AgentPick, Need, Snapshot, Task, Place } from "../web/shared/types
 import { ACTS, ASK_FIRST, navWords, REPLY_MAX, SETTINGS } from "../core/voice.js";
 import { screenParams, screenWords } from "../core/screen.js";
 import { planRows, windowWords, whyWords, healthWords } from "../core/machines.js";
-import { artifactsIn, everything, isEverything, listOf, machineLabel, machineWarn, needsCount, nowGroups, onBranch, scheduleLine, schedulesOf, spaceLabel, spacesOf, statusWord, taskLine, taskWhen, tstate, unreachable, whereWords } from "../web/shared/view.ts";
+import { artifactsIn, everything, isEverything, listOf, machineLabel, machineWarn, needsCount, nowGroups, onBranch, scheduleLine, schedulesOf, spaceLabel, spacesOf, etaOf, leftWords, statusWord, taskLine, taskWhen, tstate, unreachable, whereWords } from "../web/shared/view.ts";
 import { SOURCES, scrub, render, at, search, segments, type SourceArgs } from "./voice-data.ts";
 
 /** Where a call comes from and what its app shows now (sent by the page as it changes). SHEP-105: a call is with
@@ -319,7 +319,7 @@ export function taskSaid(snap: Snapshot, t: Task, withPlace = true) {
   // the row's second line, without the status said twice ("Stopped · it hit its limit" after "Stopped")
   const rest = line.startsWith(word) ? line.slice(word.length).replace(/^[\s·…]+/, "") : line.startsWith(word.split(" · ")[0]) ? "" : line;
   const what = s === "ready" ? t.summary ?? "" : handsOf(snap, `task:${t.id}`) ? `Needs your hands: ${handsOf(snap, `task:${t.id}`)}` : rest;
-  const when = taskWhen(t);
+  const when = tstate(t) === "working" ? leftWords(etaOf(t)) : taskWhen(t);
   const time = !when || when === "now" ? "" : s === "working" ? `, ${when}` : s === "ask" || s === "ready" ? `, for ${when}` : "";
   const space = withPlace ? label(snap, t.place) : "";
   return `${titled(t)}${space ? ` in ${space}` : ""}: ${plain(word)}${time}${what ? `. ${cut(plain(what), 140)}` : ""}`;
@@ -449,7 +449,7 @@ async function lookTask(io: VoiceIO, snap: Snapshot, where: Where, id: unknown) 
   const hands = handsOf(snap, `task:${t.id}`);
   if (hands) out.push(`It needs your hands on its Screen: ${cut(hands, 160)}.`);
   else if (screenOf(snap, `task:${t.id}`)?.active) out.push(`Its agent is using its Screen now${screenOf(snap, `task:${t.id}`)?.driver === "you" ? " (you took over)" : ""}.`);
-  if (s === "working" && taskWhen(t)) out.push(`About ${taskWhen(t)}.`);
+  if (s === "working" && etaOf(t) !== null) out.push(`About ${leftWords(etaOf(t))}.`);
   if (t.afterTitle && s === "next") out.push(`It starts after "${cut(t.afterTitle, 80)}".`);
   if (t.schedule) out.push("It is a run of a schedule.");
   if (t.summary) out.push(`Its summary: ${cut(t.summary, 300)}`);

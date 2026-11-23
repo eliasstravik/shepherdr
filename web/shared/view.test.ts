@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Snapshot, Task } from './types.ts'
-import { doneWords, folderName, folderOf, leftWords, listOf, minutesLeft, needsCount, nowGroups, statusWord, taskLine, taskWhen, tstate } from './view.ts'
+import { doneWords, etaOf, folderName, folderOf, leftShort, leftWords, listOf, needsCount, ringOf, nowGroups, statusWord, taskLine, taskWhen, tstate } from './view.ts'
 
 const task = (x: Partial<Task>): Task => ({ id: 'T-1', name: 'A task', place: 'shop', status: 'work', state: 'work', on: 'mini', created: '', age: '', ...x })
 
@@ -41,18 +41,42 @@ test('a row\'s second line: nothing for a plain task not started yet', () => {
   expect(taskLine(task({ status: 'work', schedule: 'Morning brief' }))).toBe('Started by its schedule')
 })
 
-test('time left is worked out, never guessed: spent × (100 − progress) ÷ progress', () => {
-  const now = 1_000_000_000
-  expect(minutesLeft(now - 10 * 60_000, 50, now)).toBe(10)
-  expect(minutesLeft(now - 30 * 60_000, 60, now)).toBe(20)
-  // no progress reported: no estimate
-  expect(minutesLeft(now - 10 * 60_000, undefined, now)).toBeNull()
-  expect(minutesLeft(now - 10 * 60_000, 0, now)).toBeNull()
+test('the time left is the agent\'s own, short under the icon: 59m, 1h, 2h, nothing when unknown', () => {
+  expect(leftShort(59)).toBe('59m')
+  expect(leftShort(13)).toBe('13m')
+  expect(leftShort(60)).toBe('1h')
+  expect(leftShort(120)).toBe('2h')
+  expect(leftShort(0)).toBe('<1m')
+  expect(leftShort(null)).toBe('')
+  expect(leftShort(undefined)).toBe('')
   expect(leftWords(10)).toBe('10 min left')
   expect(leftWords(null)).toBe('')
-  expect(taskWhen(task({ status: 'work', started: now - 10 * 60_000, report: { msg: '', progress: 50 } }), now)).toBe('10 min left')
-  // a Needs you row: how long it has waited for the person
+  // only while it works: none waiting on you, none finished, none when it gave none
+  expect(etaOf(task({ status: 'work', report: { msg: '', progress: 50, eta: 13 } }))).toBe(13)
+  expect(etaOf(task({ status: 'work', report: { msg: '', progress: 50 } }))).toBeNull()
+  expect(etaOf(task({ status: 'need', report: { msg: '', progress: 50, eta: 13, paused: true } }))).toBeNull()
+  expect(etaOf(task({ status: 'ready', report: { msg: '', eta: 13 } }))).toBeNull()
+  // the row's right: a Working row's time sits under its icon, not there; a Needs you row's wait does
+  const now = 1_000_000_000
+  expect(taskWhen(task({ status: 'work', report: { msg: '', progress: 50, eta: 10 } }), now)).toBe('')
   expect(taskWhen(task({ status: 'need', needsAt: now - 2 * 3_600_000 }), now)).toBe('2h')
+})
+
+test('the ring shows the share done in every unfinished state; Ready and Done show the check', () => {
+  const r = (x: Partial<Task>) => ringOf(task(x))
+  expect(r({ status: 'work', report: { msg: '', progress: 40 } })).toMatchObject({ kind: 'ring', tone: 'working', pct: 40 })
+  expect(r({ status: 'work' })).toMatchObject({ kind: 'ring', tone: 'working', pct: null })
+  expect(r({ status: 'need', report: { msg: '', progress: 70, paused: true } })).toMatchObject({ kind: 'ring', tone: 'ask', pct: 70, mark: 'dot' })
+  expect(r({ status: 'need', stopped: { by: 'error' }, report: { msg: '', progress: 30 } })).toMatchObject({ kind: 'ring', tone: 'red', pct: 30, mark: 'stop' })
+  expect(r({ status: 'todo', stopped: { by: 'you' }, report: { msg: '', progress: 55 } })).toMatchObject({ kind: 'ring', tone: 'ask', pct: 55, mark: 'stop' })
+  expect(r({ status: 'queued' })).toMatchObject({ kind: 'ring', tone: 'mute', pct: 0, mark: 'queued' })
+  expect(r({ status: 'scheduled' })).toMatchObject({ kind: 'ring', pct: 0, mark: 'queued' })
+  expect(r({ status: 'ready', report: { msg: '', progress: 100 } })).toMatchObject({ kind: 'check', tone: 'ready' })
+  expect(r({ status: 'merging' })).toMatchObject({ kind: 'check', tone: 'ready' })
+  expect(r({ status: 'done' })).toMatchObject({ kind: 'check', tone: 'mute' })
+  // out of range is held in 0-100, and the label says the share
+  expect(r({ status: 'work', report: { msg: '', progress: 140 } }).pct).toBe(100)
+  expect(r({ status: 'work', report: { msg: '', progress: 40 } }).label).toBe('Working, 40% done')
 })
 
 const snap = (x: Partial<Snapshot>): Snapshot => ({ name: '', host: 'mini', user: '', places: [], machines: [], tasks: [], automations: {}, artifacts: [], asks: {}, needs: [], settings: [], ...x })

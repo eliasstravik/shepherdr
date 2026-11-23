@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import { definePlugin, getState, go, openArtifact, setUI, useSnap } from '@client/kernel.ts'
 import { I, Row } from '@client/ui.tsx'
-import { StatusIcon, open as openTask } from '@plugins/tasks/client.tsx'
+import { open as openTask } from '@plugins/tasks/client.tsx'
+import { StatusIcon } from '@plugins/tasks/icon.tsx'
 import { agoShort, artifactsIn, everything, machineLabel, spaceLabel, spacesOf, whereWords } from '@shared/view.ts'
 
 function Search({ close }: { close: () => void }) {
@@ -29,7 +30,7 @@ function Search({ close }: { close: () => void }) {
         {spaces.length > 0 && <div className="lab">Spaces</div>}
         {spaces.map((p) => <Row key={p.id} icon={p.id === ev?.id ? 'layers' : 'hash'} label={p.id === ev?.id ? 'Everything' : p.name} value={machineLabel(snap, p.machine)} onClick={pick(() => go(p.id))} />)}
         {tasks.length > 0 && <div className="lab">Tasks</div>}
-        {tasks.map((t) => <Row key={t.id} lead={<StatusIcon t={t} />} label={t.name} sub={whereWords(snap, t.place)} onClick={pick(() => openTask(t))} />)}
+        {tasks.map((t) => <Row key={t.id} lead={<StatusIcon t={t} time="side" />} label={t.name} sub={whereWords(snap, t.place)} onClick={pick(() => openTask(t))} />)}
         {arts.length > 0 && <div className="lab">Artifacts</div>}
         {arts.map((a) => <Row key={a.id} icon="doc" label={a.title} sub={`${spaceLabel(snap, a.place)} · ${agoShort(a.at)}`} onClick={pick(() => openArtifact(a.id))} />)}
       </div>
