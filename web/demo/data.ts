@@ -9,7 +9,7 @@ const hour = 60 * min
 const day = 24 * hour
 const today = (h: number, m = 0) => new Date(new Date().setHours(h, m, 0, 0)).getTime()
 
-const place = (id: string, name: string, machine: string, x: Partial<Place> = {}): Place => ({ id, name, machine, level: 0, status: 'idle', mode: 'regular', chat: id, ...x })
+const place = (id: string, name: string, machine: string, x: Partial<Place> = {}): Place => ({ id, name, machine, level: 0, status: 'idle', chat: id, ...x })
 export const EV = 'p:mac-mini:~'
 /** a space's folder: the whole path, and as it shows (its machine's home as ~) */
 const at = (folder: string, where = folder.replace(/^\/(Users|home)\/[^/]+/, '~'), x: Partial<Place> = {}): Partial<Place> => ({ folder, where, ...x })
