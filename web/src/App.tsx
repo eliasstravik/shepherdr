@@ -2,7 +2,7 @@
 // (the whole screen on a phone), and the phone's bottom bar. SHEP-336: beside a pane the chat can swap to the right
 // (the pane then sits between the list and the chat); the page's order follows, so Tab goes the way it reads. It only lays out what the plugins put in the kernel's
 // places; the layout itself is the design system's (ds.css).
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import type { Snapshot } from '@shared/types.ts'
 import { downWords, folderName, folderOf, isEverything, needsCount, placeDown, placeOf, taskOf, type Space } from '@shared/view.ts'
 import { getState, openSettings, registry, setUI, sideHidden, togglePane, useNotice, useSnap, useUI, type Thread } from './kernel.ts'
@@ -194,10 +194,16 @@ function Toast() {
   return text ? <div className="toast" role="status">{text}</div> : null
 }
 
+/** a finger is the main pointer (a phone or a tablet): the app takes its touch sizes (SHEP-317) */
+const COARSE = typeof matchMedia === 'function' ? matchMedia('(pointer:coarse)') : null
+const onCoarse = (f: () => void) => (COARSE?.addEventListener('change', f), () => COARSE?.removeEventListener('change', f))
+const useCoarse = () => useSyncExternalStore(onCoarse, () => !!COARSE?.matches, () => false)
+
 export function App() {
   const snap = useSnap()
   const ui = useUI()
   const { side } = useSides()
+  const coarse = useCoarse()
   // the document says which layout it is in, for the few styles outside the shell
   useEffect(() => {
     document.documentElement.classList.toggle('is-phone', ui.phone)
@@ -216,13 +222,13 @@ export function App() {
     addEventListener('keydown', key)
     return () => removeEventListener('keydown', key)
   }, [])
-  if (!snap) return <div className="app"><div className="device" /></div>
+  if (!snap) return <div className={cx('app', (ui.phone || coarse) && 'tap')}><div className="device" /></div>
   const hidden = sideHidden(ui)
   const swap = !ui.phone && !!ui.pane && side === 'right'
   const Search = registry.views.search
   const Middle = registry.middle.find((m) => m.when(ui))
   return (
-    <div className={cx('app', ui.phone && 'phone')}>
+    <div className={cx('app', ui.phone && 'phone', (ui.phone || coarse) && 'tap')}>
       <div className="device">
         {registry.topBars.map((V, i) => <V key={i} />)}
         <div className={cx('shell', ui.pane && 'has-pane', hidden && 'noside', swap && 'swap')}>
