@@ -35,11 +35,47 @@ test('gone when words arrive and the turn ends', () => {
   expect(renderToStaticMarkup(<WorkingSign chat={undefined} />)).toBe('')
 })
 
-test('the bubble has the agent bubble look: .b, its height sized to the dots, left aligned', () => {
+test('the bubble has the agent bubble look: .b, sized to the dots like a one-line message, left aligned', () => {
   expect(css).toMatch(/\.b\{[^}]*border-radius:18px;background:var\(--raised\)/)
-  expect(css).toMatch(/\.wbub\{[^}]*height:36px;padding:0 14px/)
   expect(css).toMatch(/\.wdots i\{[^}]*animation:rise/)
   expect(css).toMatch(/\.wdots i:nth-child\(2\)\{animation-delay:\.15s\}\.wdots i:nth-child\(3\)\{animation-delay:\.3s\}/)
+})
+
+// SHEP-357: styles.css's `.b{display:block}` came after `.wbub{display:inline-flex}` and won, so the dots hung at the
+// bubble's top edge and their bounce left it. The sign's own rule outranks it, and the dots sit centred in its padding.
+const rule = (sel: string, src = css) => new RegExp(`(^|\\})${sel.replace(/[.*()]/g, '\\$&')}\\{([^}]*)\\}`, 'm').exec(src)?.[2] ?? ''
+const px = (decl: string, prop: string) => Number(new RegExp(`(^|;)${prop}:(-?[\\d.]+)px`).exec(decl)?.[2])
+
+test('layout: the bubble centres its dots both ways and outranks the plain bubble block', () => {
+  const bub = rule('.wsign .wbub')
+  expect(bub).toContain('display:flex')
+  expect(bub).toContain('align-items:center')
+  expect(bub).toContain('justify-content:center')
+  expect(bub).toContain('padding:6px 14px')
+  expect(rule('.b')).toMatch(/padding:6px 14px/)
+  const styles = readFileSync(new URL('../../src/styles.css', import.meta.url), 'utf8')
+  expect(rule('.b', styles)).toContain('display:block')
+  expect(rule('.wbub')).toBe('')
+})
+
+test('layout: the dots fill one 24px line, the bubble is a one-line message tall, the rise stays in its padding', () => {
+  const dots = rule('.wdots'), dot = rule('.wdots i')
+  expect(px(dots, 'height')).toBe(24)
+  const size = px(dot, 'width')
+  expect(px(dot, 'height')).toBe(size)
+  const rise = Number(/@keyframes rise\{[^@]*translateY\((-?[\d.]+)px\)/.exec(css)?.[1])
+  // the dot's top at its highest: the bubble's 6px padding, half the line's spare room, less the rise
+  expect(6 + (24 - size) / 2 + rise).toBeGreaterThanOrEqual(6)
+  expect(rise).toBeLessThan(0)
+})
+
+test("a task's chat shows its own status line beside the sign", () => {
+  const task = { key: 'SHOP-1', report: { msg: 'Changing the button' } } as any
+  const html = renderToStaticMarkup(<WorkingSign chat={chat({ working: true, doing: "Running python3 - <<'EOF' p='web" })} thread={{ chat: 'p:sp1', place: 'p:sp1', where: 'pane', task }} />)
+  expect(html).toContain('<span class="wstep">Changing the button</span>')
+  expect(html).not.toContain('python3')
+  const paused = renderToStaticMarkup(<WorkingSign chat={chat({ working: true, doing: "Running python3 - <<'EOF' p='web" })} thread={{ chat: 'p:sp1', place: 'p:sp1', where: 'pane', task: { ...task, report: { msg: 'Waiting on you', paused: true } } }} />)
+  expect(paused).toContain('<span class="wstep">Running a script</span>')
 })
 
 test('reduced motion: no bounce, a calm fade in turn, and the bubble fades in without moving', () => {
@@ -47,4 +83,8 @@ test('reduced motion: no bounce, a calm fade in turn, and the bubble fades in wi
   expect(block).toContain('.wdots i{animation:calm')
   expect(block).toContain('.wsign{animation-name:fade}')
   expect(css).toMatch(/@keyframes fade\{from\{opacity:0\}\}/)
+  // and the app's own Reduce motion switch does the same
+  const styles = readFileSync(new URL('../../src/styles.css', import.meta.url), 'utf8')
+  expect(styles).toContain(':root[data-motion="reduced"] .wdots i{animation:calm')
+  expect(styles).toContain(':root[data-motion="reduced"] .wsign{animation-name:fade}')
 })

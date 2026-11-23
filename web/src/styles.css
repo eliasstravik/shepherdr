@@ -19,6 +19,10 @@
 :root[data-motion="reduced"] .sheet.in,:root[data-motion="reduced"] .drawer.in,:root[data-motion="reduced"] .pop.in,:root[data-motion="reduced"] .dlg.in,:root[data-motion="reduced"] .win.in{animation:none}
 :root[data-motion="reduced"] .tg i{transition:none}
 :root[data-motion="reduced"] .i.turn{animation:calm 2.4s ease-in-out infinite}
+/* the app's own Reduce motion switch: the working sign fades in, its dots brighten in turn without moving */
+:root[data-motion="reduced"] .wsign{animation-name:fade}
+:root[data-motion="reduced"] .wdots i{animation:calm 2.4s ease-in-out infinite}
+:root[data-motion="reduced"] .wdots i:nth-child(2){animation-delay:.4s}:root[data-motion="reduced"] .wdots i:nth-child(3){animation-delay:.8s}
 
 /* an agent's own logo */
 .logo.img{box-shadow:none}.logo.img img{display:block;width:16px;height:16px;object-fit:contain}
