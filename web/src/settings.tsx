@@ -443,7 +443,7 @@ export function SettingsWindow({ snap }: { snap: Snapshot }) {
   const place = space ? space.id : 'all'
   const own = registry.settings.filter((x) => (space ? x.scope !== 'all' : x.scope !== 'space')).map((x) => [x.name, x.icon] as [string, IconName])
   const L = [...(space ? SPACE : ALL), ...own]
-  const title = space ? `Settings for #${space.name}` : 'Settings'
+  const title = space ? `Settings for ${spaceLabel(snap, space.id)}` : 'Settings'
   const cur = s.sec ?? (ph ? null : L[0]![0])
   const close = () => setUI({ settings: null })
   const X = <IB icon="x" label="Close settings" onClick={close} />

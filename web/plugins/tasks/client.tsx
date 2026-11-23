@@ -174,7 +174,7 @@ export function taskMenu(anchor: Element, t: Task, where: 'row' | 'thread') {
     { icon: every ? 'layers' : 'hash', label: `Show in ${spaceLabel(snap, t.place)}`, line: views.length + viewSwitch.length > 0, run: () => go(t.place) },
     ...(t.work ? [{ icon: 'folder' as const, label: `All tasks in ${workName(t)}`, run: () => showRepo(workKey(t)) }] : []),
     ...extra.filter((r) => r.label === 'Show screen'),
-    ...(s === 'next' ? [{ icon: 'folder' as const, label: 'Move to', sub: spacesOf(snap).filter((p) => p.id !== t.place && !p.archived).map((p) => ({ label: `#${p.name}`, run: () => void tryAct({ type: 'task-move', chat, place: p.id }) })) }] : []),
+    ...(s === 'next' ? [{ icon: 'folder' as const, label: 'Move to', sub: spacesOf(snap).filter((p) => p.id !== t.place && !p.archived).map((p) => ({ label: spaceLabel(snap, p.id), run: () => void tryAct({ type: 'task-move', chat, place: p.id }) })) }] : []),
     // from the menu it closes without merging: "Done · not merged" for a task on its own branch
     ...(s !== 'done' && s !== 'archived' ? [{ icon: 'check' as const, label: 'Mark as done', run: () => void tryAct({ type: 'close', chat, force: true }) }] : []),
     { icon: 'pen', label: 'Rename', run: () => renameDialog(t.name, (name) => tryAct({ type: 'task-rename', chat, name })) },

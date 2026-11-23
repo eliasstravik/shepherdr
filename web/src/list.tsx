@@ -4,7 +4,7 @@
 // Archive, Remove, Feedback).
 import { useState } from 'react'
 import type { Snapshot } from '@shared/types.ts'
-import { everything, folderOf, groupOf, isEverything, listOf, machineLabel, needsCount, placeDown, placeOf, tasksIn, tstate, unreachable, type ListMachine, type Space } from '@shared/view.ts'
+import { everything, folderOf, groupOf, isEverything, isHomeSpace, listOf, machineLabel, needsCount, placeDown, placeOf, spaceLabel, tasksIn, tstate, unreachable, type ListMachine, type Space } from '@shared/view.ts'
 import { act, getState, go, notice, openSettings, registry, setUI, shownOn, tryAct, useUI, type Filter, type MenuRow } from './kernel.ts'
 import { confirm, openDialog, openForm, openMenu } from './overlay.tsx'
 import { AgentField, MachineField, pickFor, type Pick } from './picker.tsx'
@@ -160,12 +160,15 @@ export function newSpaceDialog(machine?: string, pre?: { name: string; folder: s
         setBusy(true)
         try {
           const r = await fetch('api/spaces', { method: 'POST', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify({ machine: m === snap.host ? undefined : m, path, name: name.trim().replace(/^#\s*/, '') || undefined, agent: pick ?? undefined, create: true }) })
-          const j = (await r.json().catch(() => ({}))) as { place?: string; error?: string; warning?: string }
+          const j = (await r.json().catch(() => ({}))) as { place?: string; error?: string; warning?: string; existed?: boolean }
           if (!r.ok || !j.place) throw new Error(j.error || 'The space could not be made.')
           close()
           go(j.place)
-          // made, but its agent didn't start: said, not hidden (its first message starts one)
-          if (j.warning) notice(j.warning, 10000)
+          // made, but its agent didn't start: said, not hidden (its first message starts one); the folder had its
+          // space already (a machine's home one too): that one opened, said by the name the list shows
+          const now = getState().snap
+          const had = j.existed && now && !isEverything(now, j.place) && spaceLabel(now, j.place)
+          if (had || j.warning) notice(had ? `${had} already works in that folder, so it's open now.` : j.warning!, 10000)
         } catch (e) {
           setBusy(false)
           notice(e instanceof Error ? e.message : 'The space could not be made.')
@@ -269,6 +272,8 @@ export function spaceMenu(anchor: Element, placeId: string, head = false) {
   const first = [...registry.spaceMenu.flatMap((m) => m.rows(p, head)), ...(head ? swapRow(getState().ui) : [])]
   const line = first.length > 0
   if (isEverything(snap, p.id)) return openMenu(anchor, [...first, { icon: 'gear', label: 'Settings', line, run: () => openSettings('all') }], { label: 'Everything' })
+  // a machine's home space stays first under it: never renamed, grouped, archived or removed
+  if (isHomeSpace(snap, p)) return openMenu(anchor, [...first, { icon: 'gear', label: 'Settings', line, run: () => openSettings(p.id) }], { label: spaceLabel(snap, p.id) })
   const mine = groupOf(snap, p.id)
   const groups = (snap.sections ?? []).filter((s) => s.id !== 'pinned' && (s.machine ?? snap.host) === p.machine && s.id !== mine?.id)
   const moveTo = (to: string) => void tryAct({ type: 'move', id: p.id, to })
@@ -349,6 +354,28 @@ function SpaceRow({ snap, p, sub, under, siblings, section }: { snap: Snapshot; 
       <IB
         icon="dots"
         label={`More for ${p.name}`}
+        aria-haspopup="menu"
+        onClick={(e) => {
+          const el = e.currentTarget
+          go(p.id)
+          spaceMenu(el, p.id)
+        }}
+      />
+    </div>
+  )
+}
+
+/** a machine's home space: its first row, its home folder as ~; not dragged, as it stays first */
+function HomeRow({ snap, p }: { snap: Snapshot; p: Space }) {
+  const at = useUI((u) => u.at)
+  const wide = useUI((u) => u.wide)
+  const label = spaceLabel(snap, p.id)
+  return (
+    <div className="rowx" data-project={p.id} data-home="">
+      <Row icon="folder" label="~" aria-label={label} className={placeDown(snap, p.id) ? 'dim' : ''} current={at === p.id && !wide} end={<Cnt n={needsCount(snap, p.id)} />} onClick={() => go(p.id)} />
+      <IB
+        icon="dots"
+        label={`More for ${label}`}
         aria-haspopup="menu"
         onClick={(e) => {
           const el = e.currentTarget
@@ -498,10 +525,11 @@ export function List({ snap }: { snap: Snapshot }) {
         </div>
       )}
       {machines.map((m) => {
-        const { machine, groups, spaces, filter } = m
+        const { machine, home, groups, spaces, filter } = m
         return (
           <div key={machine.id} style={{ display: 'contents' }}>
             <MachineHead snap={snap} m={m} />
+            {home && <HomeRow snap={snap} p={home} />}
             {filter === 'Archived' && !spaces.length && <p className="hint mempty">No archived spaces.</p>}
             {groups.flatMap((g) => [
               // a group is dragged by its heading, among the groups of its machine; its spaces go with it

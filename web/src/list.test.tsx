@@ -36,8 +36,8 @@ const snap: Snapshot = {
   host: 'mini',
   user: '',
   everything: 'home',
-  // mini: several spaces, one archived; vm: one, and a warning mark; pi: none
-  places: [place('home', 'mini', { home: true }), place('shop', 'mini'), place('blog', 'mini'), place('old', 'mini', { archived: true }), place('garden', 'vm')],
+  // mini: several spaces, one archived; vm: its home space and one, and a warning mark; pi: its home space only
+  places: [place('home', 'mini', { home: true }), place('shop', 'mini'), place('blog', 'mini'), place('old', 'mini', { archived: true }), place('vmh', 'vm', { home: true, name: 'home' }), place('garden', 'vm'), place('pih', 'pi', { home: true, name: 'home' })],
   machines: [
     { id: 'm:mini', machine: 'mini', name: 'mini', status: 'idle' },
     { id: 'm:vm', machine: 'vm', name: 'vm', status: 'off', unreachableSince: '14:02' },
@@ -82,8 +82,24 @@ test("a machine's filter shows only that machine's spaces as it says, and marks 
   expect(part(html, 'vm')).toContain('data-project="garden"')
   expect(part(html, 'vm')).toContain('aria-label="Show which spaces on vm"')
   expect(part(html, 'vm')).not.toContain('fdot')
-  // a machine with none to show says so, and keeps its heading (and so its filter)
+  // a machine with none to show says so, and keeps its heading (and so its filter); its home space is no archived one
   expect(part(html, 'pi')).toContain('No archived spaces.')
+  expect(part(html, 'pi')).not.toContain('data-home')
+})
+
+test("every other machine's home space is its first row, as ~; this computer's is Everything, never a row (SHEP-429)", () => {
+  setUI({ shown: {} })
+  const html = draw()
+  for (const [m, id] of [['vm', 'vmh'], ['pi', 'pih']] as const) {
+    const it = part(html, m)
+    expect(it).toContain(`data-project="${id}" data-home=""`)
+    expect(it).toContain(`aria-label="~ on ${m}"`)
+    expect(it).toContain(`aria-label="More for ~ on ${m}"`)
+    expect(it).not.toContain('>home<')
+  }
+  // vm's home row before its other space
+  expect(part(html, 'vm').indexOf('data-project="vmh"')).toBeLessThan(part(html, 'vm').indexOf('data-project="garden"'))
+  expect(part(html, 'mini')).not.toContain('data-home')
 })
 
 test("a machine's plus opens New space with that machine picked", () => {

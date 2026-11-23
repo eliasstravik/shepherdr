@@ -4,7 +4,7 @@
 // places; the layout itself is the design system's (ds.css).
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import type { Snapshot } from '@shared/types.ts'
-import { downWords, isEverything, needsCount, placeDown, placeOf, taskOf, type Space } from '@shared/view.ts'
+import { downWords, isEverything, isHomeSpace, needsCount, placeDown, placeOf, spaceLabel, spaceName, taskOf, type Space } from '@shared/view.ts'
 import { getState, openSettings, registry, setUI, sideHidden, togglePane, useNotice, useSnap, useUI, type Thread } from './kernel.ts'
 import { List, spaceMenu } from './list.tsx'
 import { HeaderPath } from './where.tsx'
@@ -25,7 +25,7 @@ export function middleThread(snap: Snapshot, ui: { at: string; task: string | nu
 /** the message box's placeholder: "Message Shepherdr", "Message #shop", "Add a reply" in a task */
 export function placeholderOf(snap: Snapshot, thread: Thread): string {
   if (thread.task) return 'Add a reply'
-  return isEverything(snap, thread.place) ? 'Message Shepherdr' : `Message #${placeOf(snap, thread.place)?.name ?? ''}`
+  return isEverything(snap, thread.place) ? 'Message Shepherdr' : `Message ${spaceLabel(snap, thread.place)}`
 }
 
 function ChatHeader({ snap, thread, place, scrolled }: { snap: Snapshot; thread: Thread; place: Space; scrolled: boolean }) {
@@ -39,8 +39,8 @@ function ChatHeader({ snap, thread, place, scrolled }: { snap: Snapshot; thread:
       {phone ? <IB icon="burger" label="Spaces" onClick={() => setUI({ drawer: true })} /> : hidden ? <IB icon="panel" label="Show the list" onClick={showList} /> : null}
       <div className="ttl">
         <button type="button" className="tbtn" aria-haspopup="menu" onClick={(e) => spaceMenu(e.currentTarget, place.id, true)}>
-          {!every && <I n="hash" c="s16" />}
-          <span>{every ? 'Everything' : place.name}</span>
+          {!every && <I n={isHomeSpace(snap, place) ? 'folder' : 'hash'} c="s16" />}
+          <span>{every ? 'Everything' : spaceName(snap, place)}</span>
           <I n="down" c="s16 c-mute" />
         </button>
         <HeaderPath snap={snap} place={place} />
