@@ -19,6 +19,7 @@ stuck tasks.
 - Question cards, secret asks and review cards sit in the chat where they were asked, not stuck at the end. While one
   waits out of view, a line above the message box takes you to it.
 - The app opens even when its address has no slash at the end (…/shepherdr), instead of a blank page.
+- While an agent works, its step line wraps up to three lines instead of being cut, and Stop stays put.
 - Reactions sit on the bubble's top corner, facing the middle of the chat.
 - Chat rows: a task's time no longer runs into its title, a closed question says what closed it and shows once, and
   there's no empty logo spot after +.
