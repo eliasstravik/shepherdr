@@ -1540,6 +1540,41 @@ class OwnBackgroundWork(unittest.TestCase):
         self.background(-4 * 3600_000)
         self.assertEqual(self.status()[:2], ("needs", "reply"))
 
+    def monitor(self, ago, job="m1", timeout=900000, persistent=False):
+        self.stamp(ago, {"type": "user", "toolUseResult": {"taskId": job, "timeoutMs": timeout, "persistent": persistent},
+                         "message": {"role": "user", "content": [{"tool_use_id": "toolu_2", "type": "tool_result",
+                                                                  "content": f"Monitor started (task {job}, expires in 15m)"}]}})
+
+    def test_an_expired_monitor_no_longer_runs(self):
+        """#1270: a Monitor's expiry notice has no <status>, and one may expire unannounced; either way
+        it no longer counts once its own timeout has passed (as Claude Code 2.1.323 logs it)."""
+        self.say(-1_200_000, "Watching CI.")
+        self.monitor(-1_300_000)
+        self.stamp(-200_000, {"type": "queue-operation", "operation": "enqueue", "content":
+                              "<task-notification>\n<task-id>m1</task-id>\n<summary>Monitor event: \"CI\"</summary>\n"
+                              "<event>[Monitor expired after 15m with no events delivered. Re-arm it if you still need the watch.]</event>\n"
+                              "</task-notification>"})
+        self.assertEqual(self.agents.background_jobs(self.log)[0], {})
+        self.assertEqual(self.status()[:2], ("needs", "reply"))
+        # no notice at all: gone once its timeout has passed, running until then
+        self.lines[:] = self.lines[:2]
+        self.monitor(-1_000_000)
+        self.assertEqual(self.agents.background_jobs(self.log)[0], {})
+        self.lines[:] = self.lines[:2]
+        self.monitor(-600_000)
+        self.assertEqual(list(self.agents.background_jobs(self.log)[0]), ["m1"])
+        # a persistent one has no timeout of its own
+        self.lines[:] = self.lines[:2]
+        self.monitor(-1_000_000, persistent=True)
+        self.assertEqual(list(self.agents.background_jobs(self.log)[0]), ["m1"])
+        # another Monitor's event (not its expiry) ends nothing
+        self.lines[:] = self.lines[:2]
+        self.monitor(-600_000)
+        self.stamp(-100_000, {"type": "queue-operation", "operation": "enqueue", "content":
+                              "<task-notification>\n<task-id>m1</task-id>\n<summary>Monitor event</summary>\n"
+                              "<event>build 3 passed</event>\n</task-notification>"})
+        self.assertEqual(list(self.agents.background_jobs(self.log)[0]), ["m1"])
+
     def test_its_status_line_says_it_waits_on_ci_or_review(self):
         self.say(-200_000, "Pushed.")
         for text, want in (("Waiting on review round 1", "working"), ("Rebased, waiting on GitHub check", "working"),

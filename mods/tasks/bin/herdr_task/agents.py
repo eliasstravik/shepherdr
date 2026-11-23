@@ -828,6 +828,8 @@ BG_HINTS = ("<task-notification>", "task_id", "backgroundTaskId", "timeoutMs", "
 BG_MAX_MS = 3 * 3600_000  # a background job started longer ago than this no longer counts
 BG_STARTED = re.compile(r"Command running in background with ID: (\w+)|Monitor started \(task (\w+)|Async agent launched[\s\S]*?agentId: (\w+)")
 BG_ENDED = re.compile(r"<task-id>(\w+)</task-id>(?:(?!</task-notification>)[\s\S])*?<status>(\w+)</status>")
+# #1270: a Monitor's expiry notice has no <status>, only its event "[Monitor expired after 15m ...]"
+BG_EXPIRED = re.compile(r"<task-id>(\w+)</task-id>(?:(?!</task-notification>)[\s\S])*?\[Monitor expired\b")
 CODEX_RUNNING = re.compile(r"Process running with session ID (\d+)")
 CODEX_GONE = re.compile(r"Unknown process id:? (\d+)", re.I)
 # Codex 0.163+ code mode (SHEP-207): a script starts commands and polls them with tools.exec_command /
@@ -919,7 +921,9 @@ def background_jobs(log):
         end = chunk.rfind(b"\n") + 1  # a last line still being written waits for its end
         c["offset"] += end
         _bg_scan(chunk[:end].decode("utf-8", "replace").split("\n"), c)
-    return {i: t for i, t in c["running"].items() if now() - t < BG_MAX_MS}, c["ended"]
+    # #1270: a Monitor past its own timeout has ended, its notice or not
+    until = c.get("until") or {}
+    return {i: t for i, t in c["running"].items() if now() - t < BG_MAX_MS and now() < until.get(i, now() + 1)}, c["ended"]
 
 
 def open_tool(log):
@@ -962,7 +966,7 @@ def _bg_scan(lines, seen):
             at = _ms(d.get("timestamp")) or now()
             # Claude Code: ended by its notice (in the queue, an attachment or a user line), or stopped.
             if "<task-notification>" in raw and (d.get("type") in ("queue-operation", "attachment") or from_person(d) is not None):
-                for m in BG_ENDED.finditer(raw):
+                for m in [*BG_ENDED.finditer(raw), *BG_EXPIRED.finditer(raw)]:
                     running.pop(m.group(1), None)
                     ended = max(ended, at)
             r = d.get("toolUseResult")
@@ -980,6 +984,10 @@ def _bg_scan(lines, seen):
                         ids += [next(g for g in m.groups() if g)] if m else []
                 for i in filter(None, ids):
                     running.setdefault(str(i), at)
+                # a Monitor that isn't persistent expires after its timeoutMs (#1270)
+                if isinstance(r, dict) and r.get("taskId") and isinstance(r.get("timeoutMs"), (int, float)) \
+                        and r["timeoutMs"] > 0 and not r.get("persistent"):
+                    seen.setdefault("until", {})[str(r["taskId"])] = at + r["timeoutMs"]
             # Codex: a process left running has a session id until an output says it exited.
             p = d.get("payload") or {}
             # #1093 #1143: Codex says itself when a command ended, whatever polled it (a batch, an id no
