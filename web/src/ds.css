@@ -476,8 +476,23 @@ textarea.cin{overflow-y:auto}
 .asked{display:block;margin:-4px 8px 8px;color:var(--muted);font-size:var(--sec);line-height:var(--secl);text-align:left}
 /* the Tasks filter (SHEP-331): a multi-select menu that scrolls inside the screen, its ticks, the dot on its button,
    the chips of what is on */
-.tfm{display:grid;max-height:min(70vh,560px);overflow-y:auto;overscroll-behavior:contain}.pop:has(>.tfm){min-width:248px}
-.tfm>hr:first-of-type:first-child{display:none}.tfq{margin:2px 0 4px;height:var(--btns)}
+/* a menu's group (MenuGroup): its quiet name 8 px under the hairline before it, 4 px over its rows; the filter menus'
+   one rhythm (the Tasks panel's and each machine's in the list) */
+.mg{display:grid}.mg+.mg::before{content:"";height:1px;margin:4px 8px;background:var(--line)}
+.pop .mg .cap{padding:8px 8px 4px}.pop .mg:first-child>.cap{padding-top:4px}
+/* the Tasks filter: as wide as its rows (kept inside its panel by the popover), its body scrolling with no system bar,
+   fading at an edge with more; Clear on a hairline at its foot */
+.pop:not(.sheet):has(>.tfm){display:flex;flex-direction:column;width:max-content;max-width:280px;max-height:640px;min-width:min(240px,100%);overflow:hidden}
+.sheet:has(>.tfm){display:flex;flex-direction:column;overflow:hidden}
+.tfm{display:flex;flex-direction:column;min-height:0;flex:1 1 auto}
+.tfb{min-height:0;flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none;--fu:0px;--fd:0px;-webkit-mask-image:linear-gradient(to bottom,transparent,#000 var(--fu),#000 calc(100% - var(--fd)),transparent);mask-image:linear-gradient(to bottom,transparent,#000 var(--fu),#000 calc(100% - var(--fd)),transparent)}
+.tfb::-webkit-scrollbar{display:none}.tfb[data-up]{--fu:24px}.tfb[data-down]{--fd:40px}
+.tff{flex:none;display:grid}.tff::before{content:"";height:1px;margin:4px 8px;background:var(--line)}
+.tfm .row .n:has(>.tft){display:flex;align-items:baseline;gap:8px}
+.tft{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.tfw{flex:none;max-width:45%;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-size:var(--sec);line-height:var(--secl)}
+.tfq{width:auto;margin:0 4px 4px;height:var(--btns)}
+.tfnone{padding:6px 8px;color:var(--muted);font-size:var(--sec);line-height:var(--secl)}
 .cbx{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--line2);flex:none}
 .cbx.on{background:var(--fg);color:var(--canvas);box-shadow:none}.cbx .i{width:12px;height:12px;stroke-width:2;color:inherit!important}
 .app.tap .cbx{width:20px;height:20px;border-radius:5px}.app.tap .cbx .i{width:14px;height:14px}

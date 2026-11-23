@@ -2,14 +2,14 @@
 // (back, title, Terminal, Screen, its menu, expand, its own reply box), the review card wherever it comes up, the
 // Start task dialog for one not started yet, and a task's menu. Now lists every task everywhere unless its filter says
 // otherwise (SHEP-331): a filter button in the header, the choices that are on as chips under it.
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { PaneFrame, placeholderOf } from '@client/App.tsx'
 import { newSpaceDialog, renameDialog } from '@client/list.tsx'
 import { definePlugin, getState, go, has, notice, openTask, registry, setUI, togglePane, tryAct, act, useSnap, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
 import { confirm, openDialog, openForm, openMenu } from '@client/overlay.tsx'
 import { AgentField, pickFor, type Pick } from '@client/picker.tsx'
 import { edge } from '@client/resize.ts'
-import { Btn, Cnt, cx, Empty, Hd, I, IB, Row } from '@client/ui.tsx'
+import { Btn, Cnt, cx, Empty, Hd, I, IB, MenuGroup, Row } from '@client/ui.tsx'
 import type { MergeEvidence, Snapshot, Task } from '@shared/types.ts'
 import { askedWords, isEverything, machineLabel, nowGroups, onBranch, placeDown, reposOf, spaceLabel, spaceOnFolder, spacesOf, etaOf, leftWords, statusWord, taskChat, taskLine, taskWhen, tasksIn, tstate, workKey, workName, workWords, type Repo } from '@shared/view.ts'
 import { DoneRow } from '@plugins/chat/cards.tsx'
@@ -523,17 +523,35 @@ const setTF = (f: (tf: TaskFilter) => TaskFilter) => setUI((ui) => ({ tf: f(clea
 /** a box in a multi-select row: ticked when the choice is on */
 const Tick = ({ on }: { on: boolean }) => <span className={cx('cbx', on && 'on')} aria-hidden="true">{on && <I n="check" />}</span>
 
-/** the menu (a sheet on a phone): the quick choices, then State, Machine and Space, each a multi-select; it stays open
- *  while you pick. A long Space list gets a search box. */
+/** the menu (a sheet on a phone): the quick choices, then State, Machine, Space and Repo, each a multi-select under its
+ *  name, in the list's filter rhythm (MenuGroup); it stays open while you pick. Each row: its box, its name (a space's or
+ *  repo's machine quiet beside it when there are several) and how many tasks it has. Its body scrolls, fading at the
+ *  edge with more; Clear stays at its foot while a filter is on. A long Space or Repo list gets a search box. */
 function FilterMenu() {
   const snap = useSnap()
   const f = useUI((u) => u.tf)
   const at = useUI((u) => u.at)
   const [qs, setQs] = useState<Record<string, string>>({})
+  const body = useRef<HTMLDivElement>(null)
+  const [fade, setFade] = useState({ up: false, down: false })
+  const look = () => {
+    const el = body.current
+    if (!el) return
+    const next = { up: el.scrollTop > 1, down: el.scrollHeight - el.scrollTop - el.clientHeight > 1 }
+    setFade((was) => (was.up === next.up && was.down === next.down ? was : next))
+  }
+  useLayoutEffect(() => {
+    look()
+    const el = body.current
+    const ro = el && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(look) : null
+    if (el) ro?.observe(el)
+    return () => ro?.disconnect()
+  })
   if (!snap) return null
   const inSpace = !!at && !isEverything(snap, at)
-  const check = (label: string, on: boolean, run: () => void, value?: string) => (
-    <Row key={label} lead={<Tick on={on} />} label={label} value={value} role="menuitemcheckbox" aria-checked={on} onClick={run} />
+  const machines = new Set(snap.machines.map((m) => m.machine)).size > 1
+  const check = (key: string, label: ReactNode, on: boolean, run: () => void, n?: number) => (
+    <Row key={key} lead={<Tick on={on} />} label={label} value={n ? String(n) : undefined} role="menuitemcheckbox" aria-checked={on} onClick={run} />
   )
   const group = (key: GroupKey, name: string) => {
     const all = choices(snap, key, f)
@@ -541,37 +559,50 @@ function FilterMenu() {
     const many = (key === 'space' || key === 'repo') && all.length > 8
     const q = qs[key] ?? ''
     const shown = many && q ? all.filter((c) => `${c.label} ${c.machine ?? ''}`.toLowerCase().includes(q.toLowerCase())) : all
-    const machines = new Set(snap.machines.map((m) => m.machine)).size > 1
+    const find = key === 'space' ? 'Find a space' : 'Find a repo'
     return (
-      <div key={key} style={{ display: 'contents' }}>
-        <hr />
-        <div className="cap">{name}</div>
-        {many && <input className="inp tfq" name={`${key}-search`} aria-label={key === 'space' ? 'Find a space' : 'Find a repo'} placeholder={key === 'space' ? 'Find a space' : 'Find a repo'} value={q} onChange={(e) => setQs({ ...qs, [key]: e.target.value })} />}
-        {shown.map((c) => check(c.label, f[key].includes(c.id), () => setTF((x) => toggle(x, key, c.id)), key === 'space' || key === 'repo' ? (machines ? c.machine : '') : String(c.n)))}
-      </div>
+      <MenuGroup key={key} cap={name}>
+        {many && <input className="inp tfq" name={`${key}-search`} aria-label={find} placeholder={find} value={q} onChange={(e) => setQs({ ...qs, [key]: e.target.value })} />}
+        {shown.map((c) => {
+          const where = machines && c.machine ? c.machine : ''
+          const label = where ? <><span className="tft">{c.label}</span><span className="tfw">{where}</span></> : c.label
+          return check(c.id, label, f[key].includes(c.id), () => setTF((x) => toggle(x, key, c.id)), c.n)
+        })}
+        {many && q && !shown.length && <p className="tfnone">Nothing called “{q}”</p>}
+      </MenuGroup>
     )
   }
+  const on = filterOn(snap, f, at)
+  const picked = chipsOf(snap, f, at).length
   return (
     <div className="tfm">
-      {inSpace && check(`${spaceLabel(snap, at)} only`, f.here, () => setTF((x) => ({ ...x, here: !x.here })))}
-      {check('Hide done', f.hideDone, () => setTF((x) => ({ ...x, hideDone: !x.hideDone, state: x.hideDone ? x.state : x.state.filter((s) => s !== 'done' && s !== 'archived') })))}
-      {filterOn(snap, f, at) && <Row icon="x" label="Clear" role="menuitem" onClick={() => setUI({ tf: NO_FILTER })} />}
-      {group('state', 'State')}
-      {group('machine', 'Machine')}
-      {group('space', 'Space')}
-      {group('repo', 'Repo')}
+      <div ref={body} className="tfb" onScroll={look} data-up={fade.up || undefined} data-down={fade.down || undefined}>
+        <MenuGroup>
+          {inSpace && check('here', `${spaceLabel(snap, at)} only`, f.here, () => setTF((x) => ({ ...x, here: !x.here })))}
+          {check('hideDone', 'Hide done', f.hideDone, () => setTF((x) => ({ ...x, hideDone: !x.hideDone, state: x.hideDone ? x.state : x.state.filter((s) => s !== 'done' && s !== 'archived') })))}
+        </MenuGroup>
+        {group('state', 'State')}
+        {group('machine', 'Machine')}
+        {group('space', 'Space')}
+        {group('repo', 'Repo')}
+      </div>
+      {on && (
+        <div className="tff">
+          <Row icon="x" label="Clear filters" value={`${picked} on`} role="menuitem" onClick={() => setUI({ tf: NO_FILTER })} />
+        </div>
+      )}
     </div>
   )
 }
 
-/** the filter button: the sidebar's, with a dot while a filter is on */
+/** the filter button: the sidebar's, with a dot while a filter is on; its menu stays inside the panel, lined up with it */
 function FilterButton() {
   const snap = useSnap()
   const f = useUI((u) => u.tf)
   const at = useUI((u) => u.at)
   const on = !!snap && filterOn(snap, f, at)
   return (
-    <IB icon="filter" label={on ? 'Filter tasks (on)' : 'Filter tasks'} aria-haspopup="menu" data-marks="" onClick={(e) => openMenu(e.currentTarget, () => <FilterMenu />, { label: 'Filter tasks' })}>
+    <IB icon="filter" label={on ? 'Filter tasks (on)' : 'Filter tasks'} aria-haspopup="menu" data-marks="" onClick={(e) => openMenu(e.currentTarget, () => <FilterMenu />, { label: 'Filter tasks', within: e.currentTarget.closest('.hd')?.parentElement })}>
       {on && <span className="fdot" />}
     </IB>
   )

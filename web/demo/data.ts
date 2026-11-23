@@ -13,7 +13,7 @@ const place = (id: string, name: string, machine: string, x: Partial<Place> = {}
 export const EV = 'p:mac-mini:~'
 /** a space's folder: the whole path, and as it shows (its machine's home as ~) */
 const at = (folder: string, where = folder.replace(/^\/(Users|home)\/[^/]+/, '~'), x: Partial<Place> = {}): Partial<Place> => ({ folder, where, ...x })
-const P = { shop: 'p:mac-mini:shop', blog: 'p:mac-mini:blog', notes: 'p:mac-mini:notes', docs: 'p:mac-mini:docs', garden: 'p:vm:garden-app', vmShop: 'p:vm:shop', vmRoot: 'p:vm:root', oldSite: 'p:mac-mini:old-site', studioSite: 'p:studio:site' }
+const P = { shop: 'p:mac-mini:shop', blog: 'p:mac-mini:blog', notes: 'p:mac-mini:notes', docs: 'p:mac-mini:docs', garden: 'p:vm:garden-app', vmShop: 'p:vm:shop', vmRoot: 'p:vm:root', oldSite: 'p:mac-mini:old-site', studioSite: 'p:studio:site', vmPortal: 'p:vm:customer-portal-and-billing-redesign' }
 
 // where a task works (SHEP-325): its space's folder unless it says otherwise; notes and the home folder are no repos
 const FOLDER: Record<string, [string, string]> = { [EV]: ['/Users/sam', '~'], [P.shop]: ['/Users/sam/dev/shop', 'shop'], [P.blog]: ['/Users/sam/dev/blog', 'blog'], [P.notes]: ['/Users/sam/notes', 'notes'], [P.garden]: ['/home/sam/dev/garden-app', 'garden-app'], [P.vmShop]: ['/home/sam/clients/acme/shop', 'shop'], [P.vmRoot]: ['/home/sam/clients/acme/shop', 'shop'] }
@@ -55,6 +55,14 @@ export const tasks: Task[] = [
   task('vm:ACME-3', 'Sync stock from the warehouse', P.vmShop, 'need', { on: 'vm', stopped: { by: 'error', why: 'Its agent is no longer running.' }, needsAt: NOW - 25 * min, repo: 'branch' }),
   task('vm:ACME-4', 'Nightly price export', P.vmShop, 'scheduled', { on: 'vm', desc: 'Exports prices for the shop feed at 02:00', agent: undefined }),
   task('vm:ROOT-2', 'Rotate server logs', P.vmRoot, 'work', { on: 'vm', started: NOW - 6 * min, report: { msg: 'Compressing last week', progress: 30 } }),
+  // SHEP-354: a long-named space, more repos (the filter's Repo search shows past eight) and a task whose space was
+  // removed (the service gives it no space: the filter must not list a blank one)
+  task('vm:PORTAL-2', 'Invoice PDF layout', P.vmPortal, 'work', { on: 'vm', started: NOW - 15 * min, repo: 'branch', work: work('/home/sam/clients/northwind/portal', 'portal'), report: { msg: 'Laying out the line items', progress: 50 } }),
+  task('vm:PORTAL-1', 'Billing page tests', P.vmPortal, 'todo', { on: 'vm', agent: undefined, work: work('/home/sam/dev/payments-service', 'payments-service') }),
+  task('vm:PORTAL-3', 'Shared button styles', P.vmPortal, 'done', { on: 'vm', doneAt: NOW - 2 * day, merged: true, work: work('/home/sam/dev/design-system', 'design-system') }),
+  task('studio:SITE-3', 'Swap the hero image', P.studioSite, 'work', { on: 'studio', started: NOW - 4 * min, repo: 'branch', work: work('/Users/sam/dev/site', 'site'), report: { msg: 'Resizing the images', progress: 60 } }),
+  task('studio:SITE-4', 'App store screenshots', P.studioSite, 'todo', { on: 'studio', agent: undefined, work: work('/Users/sam/dev/mobile-app', 'mobile-app') }),
+  task('EV-15', 'Old export script', '', 'done', { doneAt: NOW - 3 * day, work: work('/Users/sam/dev/exports', 'exports') }),
 ]
 
 const sched = (id: string, name: string, pl: string, when: string, nextWords: string, last: string, what: string, x: Partial<Automation> = {}): Automation => ({ id, name, place: pl, when, what, on: true, next: [], nextWords, last, ...x })
@@ -125,7 +133,9 @@ export function snapshot(mode: 'normal' | 'empty' | 'down' | 'more' = 'normal'):
     // two spaces called shop, in other folders on other machines, and one deep folder (SHEP-302); a space at the root (SHEP-316)
     places: [place(EV, 'home', 'mac-mini', at('/Users/sam', '~', { home: true })), place(P.shop, 'shop', 'mac-mini', at('/Users/sam/dev/shop', undefined, { git: 'main' })), place(P.blog, 'blog', 'mac-mini', at('/Users/sam/dev/blog')), place(P.notes, 'notes', 'mac-mini', at('/Users/sam/notes')), place(P.docs, 'docs', 'mac-mini', at('/Users/sam/dev/clients/northwind/website-redesign-2026/docs')), place(P.garden, 'garden-app', 'vm', at('/home/sam/dev/garden-app')), place(P.vmShop, 'shop', 'vm', at('/home/sam/clients/acme/shop')), place(P.vmRoot, 'root', 'vm', at('/')),
       // SHEP-342: an archived space for the machines' filter, a machine with one space and one with none
-      place(P.oldSite, 'old-site', 'mac-mini', at('/Users/sam/dev/old-site', undefined, { archived: true })), place(P.studioSite, 'site', 'studio', at('/Users/sam/dev/site'))],
+      place(P.oldSite, 'old-site', 'mac-mini', at('/Users/sam/dev/old-site', undefined, { archived: true })), place(P.studioSite, 'site', 'studio', at('/Users/sam/dev/site')),
+      // SHEP-354: a space with a long name, for the Tasks filter's width
+      place(P.vmPortal, 'customer-portal-and-billing-redesign', 'vm', at('/home/sam/clients/northwind/portal'))],
     sections: [{ id: 's:store', name: 'Store', machine: 'mac-mini', spaces: [P.shop, P.blog] }],
     machines: [
       { id: 'm:mac-mini', machine: 'mac-mini', name: 'mac-mini', status: 'idle', here: true, health: { meters: [{ name: 'CPU', pct: 34, detail: '', level: 'ok' }, { name: 'Memory', pct: 71, detail: '', level: 'ok' }, { name: 'Disk', pct: 58, detail: '', level: 'ok' }], herdr: true, working: 5, held: 0, at: '' } },

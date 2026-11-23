@@ -93,3 +93,18 @@ test('Repo is one more group (SHEP-325): picks add up, it narrows the others', (
   expect(choices(snap, 'repo', NO_FILTER).map((c) => `${c.label} ${c.machine} ${c.n}`)).toEqual(['shop vm 2', 'site mini 1'])
   expect(chipsOf(snap, { ...NO_FILTER, repo: ['mini:/w/site'] }, 'shop').map((c) => [c.label, c.icon])).toEqual([['site', 'folder']])
 })
+
+// SHEP-354: a task whose space was removed comes with no space (''); the Space group showed it as a row with no name
+test('no blank choices: a task with no space, machine or repo adds no empty row', () => {
+  const s = { ...snap, tasks: [...snap.tasks, task('Z', '', 'done', { on: '' })] } as Snapshot
+  for (const key of ['state', 'machine', 'space', 'repo'] as const) {
+    const all = choices(s, key, NO_FILTER)
+    expect(all.length).toBeGreaterThan(0)
+    for (const c of all) {
+      expect(c.id.trim()).not.toBe('')
+      expect(c.label.trim()).not.toBe('')
+    }
+  }
+  // a blank pick kept from before is no row either
+  expect(choices(s, 'space', { ...NO_FILTER, space: [''] }).some((c) => !c.id)).toBe(false)
+})
