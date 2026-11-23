@@ -10,8 +10,8 @@ the rest. [`web/plugins.json`](../web/plugins.json) is the list, in order.
 | artifacts | always on | The Artifacts pane, a page's tile in a chat, Mark up | |
 | search | always on | One search for spaces, tasks and artifacts (Ctrl+K) | |
 | alerts | always on | Push alerts, one choice per device | |
-| terminal | yes | Your own terminal in a space or a task, and "Switch to terminal" | No Terminal button or menu item |
-| screens | yes | An agent's browser and desktop: watch, Take over, Hand back | No Screen button, live picture or card |
+| terminal | yes | Your own terminal in a space or a task, and "Switch to terminal" | No Terminal menu items |
+| screens | yes | An agent's browser and desktop: watch, Take over, Hand back | No Screen menu item, live picture or card |
 | voice | yes | Voice over the whole app, and dictation in the message box | No voice or mic button |
 | schedules | yes | Tasks › Scheduled | No Scheduled tab |
 | reactions | yes | Emoji reactions on messages | No emoji row in a message's menu |
@@ -38,7 +38,7 @@ Settings › Plugins has the switches. They are kept as `everywhere.plugins_off`
 | Place | What goes there |
 |---|---|
 | `views` | The parts of a thread: `messages`, `box`, `taskHead`, `taskTop`, `scheduled`, `tile`, `search` |
-| `header`, `taskHeader` | Buttons in a chat's or a task's header (Tasks, Artifacts, voice, Terminal, Screen) |
+| `header`, `taskHeader` | Buttons in a chat's or a task's header (Tasks, Artifacts, voice; Terminal and Screen are menu rows) |
 | `panes` | What the right-hand pane can show |
 | `bar`, `barEnd`, `barAbove` | The phone's bottom bar, its right end, and one line above it |
 | `spaceMenu`, `taskMenu`, `messageMenu` | Rows of a space's, a task's and a message's menu |
