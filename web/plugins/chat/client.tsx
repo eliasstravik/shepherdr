@@ -32,6 +32,7 @@ import { BoxThumb, openPreview, SentThumb, sourcesOf } from './thumbs.tsx'
 import { heldStep, signOf } from './typing.ts'
 import { newsRow, type NewsRow } from './news.ts'
 import { outOfView, setAway, useAway, type Waiting } from './away.ts'
+import { keepAtEnd, rowEdges } from './stick.ts'
 
 export { fileUrl } from './thumbs.tsx'
 
@@ -497,13 +498,8 @@ function Messages({ thread }: { thread: Thread }) {
     const sc = end.current?.closest<HTMLElement>('.scroll')
     const box = end.current?.parentElement
     if (!sc || !box) return
-    const ro = new ResizeObserver(() => {
-      if (stuck.current) sc.scrollTop = sc.scrollHeight
-    })
-    ro.observe(box)
     // the box or the suggested replies above it grew: the chat's window got shorter, its bottom stays in view
-    ro.observe(sc)
-    return () => ro.disconnect()
+    return keepAtEnd(sc, box, () => stuck.current)
   }, [thread.chat])
   // the cards that wait for an answer: while one is out of view, a reminder above the box leads to it (away.ts)
   const waiting = useRef<Waiting[]>([])
@@ -739,8 +735,12 @@ const spent = new Set<string>()
  *  one as it is, a press held (or a right-click) puts it in the box to edit instead (ReplyPress). One line each; the
  *  row scrolls sideways when they don't fit. */
 export function Replies({ texts, onSend, onEdit }: { texts: string[]; onSend: (t: string) => void; onEdit: (t: string) => void }) {
+  const row = useRef<HTMLDivElement>(null)
+  // a new set starts at its first bubble, fully in view; a soft fade where more continues sideways
+  const all = texts.join('\n')
+  useLayoutEffect(() => (row.current ? rowEdges(row.current) : undefined), [all])
   return (
-    <div className="sugs" role="group" aria-label="Suggested replies">
+    <div className="sugs" ref={row} role="group" aria-label="Suggested replies">
       {texts.map((t, i) => <Reply key={`${i}:${t}`} text={t} primary={i === 0} onSend={onSend} onEdit={onEdit} />)}
     </div>
   )
