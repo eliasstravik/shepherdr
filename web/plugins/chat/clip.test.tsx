@@ -5,7 +5,9 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { imagesOf, markOf, pasteImages } from './clip.ts'
 import { pasted } from './paste.ts'
 
-mock.module('./markdown.tsx', () => ({ Markdown: ({ text }: { text: string }) => <div className="md">{text}</div>, toHtml: (t: string) => t, linked: (t: string) => t }))
+// the formatted words need a browser (DOMPurify): drawn as they are here; every other export stays the real one
+const realMarkdown = await import('./markdown.tsx')
+mock.module('./markdown.tsx', () => ({ ...realMarkdown, Markdown: ({ text }: { text: string }) => <div className="md">{text}</div>, toHtml: (t: string) => t, linked: (t: string) => t }))
 const { AddButtons } = await import('./client.tsx')
 
 const item = (types: Record<string, Blob>) => ({ types: Object.keys(types), getType: async (t: string) => types[t] })
