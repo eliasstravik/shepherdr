@@ -133,6 +133,7 @@ export const SCENES: Scene[] = [
   { name: 'search', steps: ['phone-list', 'label:Search'] },
   { name: 'header title', steps: ['.tbtn'] },
   { name: 'tasks', steps: ['[aria-label="Tasks"], .pt:has-text("Tasks")'] },
+  { name: 'tasks filter', steps: ['[aria-label="Tasks"], .pt:has-text("Tasks")', '[aria-label^="Filter tasks"]'] },
   { name: 'a task', steps: ['[aria-label="Tasks"], .pt:has-text("Tasks")', '.pane .row.tk >> nth=0'] },
   { name: 'artifacts', steps: ['[aria-label="Artifacts"], .pt:has-text("Artifacts")'] },
   { name: 'an artifact', steps: ['[aria-label="Artifacts"], .pt:has-text("Artifacts")', '.pane .tile >> nth=0'] },
