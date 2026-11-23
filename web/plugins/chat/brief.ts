@@ -26,7 +26,7 @@ const agentSaid = (chat: Chat | undefined) => !!chat?.messages.some((m) => m.who
 /** Under the brief, while its agent isn't at work yet: queued, scheduled, not started, or starting. '' once its agent
  *  says or does anything, or while its working sign shows. */
 export function startWords(t: Task, chat: Chat | undefined): string {
-  if (t.status === 'queued') return t.afterTitle ? `Queued. It starts when “${t.afterTitle}” is done.` : 'Queued. It starts when the tasks before it are done.'
+  if (t.status === 'queued') return t.afterTitle ? `Queued. It starts when “${t.afterTitle}”${t.afterMore ? ` and ${t.afterMore} more are` : ' is'} done.` : 'Queued. It starts when the tasks before it are done.'
   if (t.status === 'scheduled') return t.left ? `Scheduled. It starts in ${t.left}.` : 'Scheduled. It starts by itself.'
   if (t.status === 'todo' && !t.agent && !t.started) return 'Not started yet. It starts when you say go.'
   if (t.status !== 'todo' && t.status !== 'work') return ''

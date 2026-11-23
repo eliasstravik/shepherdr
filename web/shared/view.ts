@@ -172,7 +172,14 @@ export function taskLine(t: Task): string {
   if (t.stopped) return t.stopped.by === 'you' ? 'Stopped by you' : `Stopped${t.stopped.why ? ` · ${t.stopped.why}` : ''}`
   if (s === 'ask') return t.report?.msg || (t.blocked === 'prompt' ? 'Waiting at a prompt' : t.blocked === 'permission' ? 'Wants to run a command' : 'Waits for your reply')
   if (s === 'working') return t.waitsDesktop ? 'Waiting for the desktop' : t.report?.msg || (t.schedule ? 'Started by its schedule' : '')
-  return t.afterTitle ? `Starts after ${t.afterTitle}` : t.startsAt ? `Starts ${dayTime(t.startsAt)}` : ''
+  return t.afterTitle ? afterWords(t) : t.startsAt ? `Starts ${dayTime(t.startsAt)}` : ''
+}
+
+/** what an Up next task waits for, short: "Starts after Fix typo", or "Starts after 6 tasks" when it waits for several
+ *  (a long title then a cut-off line said less than the count) */
+export function afterWords(t: Pick<Task, 'afterTitle' | 'afterMore'>): string {
+  if (!t.afterTitle) return ''
+  return t.afterMore ? `Starts after ${t.afterMore + 1} tasks` : `Starts after ${t.afterTitle}`
 }
 
 /** "2h", "5m", "1w": how long ago, short */

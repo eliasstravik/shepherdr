@@ -204,7 +204,7 @@ function startDialog(t: Task) {
             <h2 style={{ flex: 1, minWidth: 0 }}>{t.name}</h2>
             <IB icon="x" label="Close" onClick={close} />
           </div>
-          <p>{t.desc ? `${t.desc.replace(/\s+$/, '')}${/[.!?]$/.test(t.desc.trim()) ? '' : '.'} ` : ''}{t.afterTitle ? `It waits for ${t.afterTitle}; nothing starts before that unless you say go.` : 'Nothing starts until you say go.'}</p>
+          <p>{t.desc ? `${t.desc.replace(/\s+$/, '')}${/[.!?]$/.test(t.desc.trim()) ? '' : '.'} ` : ''}{t.afterTitle ? `It waits for ${t.afterTitle}${t.afterMore ? ` and ${t.afterMore} more` : ''}; nothing starts before that unless you say go.` : 'Nothing starts until you say go.'}</p>
           <div className="fld">
             <span>Space</span>
             <span className="fake">
