@@ -12,12 +12,20 @@ export const fileUrl = (chat: string, path: string, small = false) => `api/file?
 
 /** where an attachment's picture and file are: this screen's own copy first, else Shepherdr's */
 export function sourcesOf(chat: string, f: { name: string; path?: string; id?: string }) {
-  const l = localOf(f.id)
+  const l = localOf(f.id, f.path)
   return {
     small: l?.url || (f.path ? fileUrl(chat, f.path, true) : ''),
     full: l?.url || (f.path ? fileUrl(chat, f.path) : ''),
     size: l?.file.size,
+    box: l?.w && l.h ? picBox(l.w, l.h) : undefined,
   }
+}
+
+/** a sent picture's box from its size: at most PIC px each way (as .pic img's max sizes), never wider than its row */
+export const PIC = 320
+export function picBox(w: number, h: number) {
+  const k = Math.min(1, PIC / w, PIC / h)
+  return { width: Math.round(w * k), maxWidth: '100%', height: 'auto', aspectRatio: `${w} / ${h}` }
 }
 
 /** the preview of one attachment */
@@ -26,7 +34,7 @@ export function openPreview(chat: string, f: { name: string; path?: string; id?:
   const { full, size } = sourcesOf(chat, f)
   const inline = fileType(f.name).inline
   // a file Shepherdr has: one it can show opens in a new tab, anything else downloads
-  const href = full && f.path && !localOf(f.id)?.url ? (inline ? full : `${full}&download=1`) : full
+  const href = full && f.path && !localOf(f.id, f.path)?.url ? (inline ? full : `${full}&download=1`) : full
   openDialog(
     (close) => (
       <>

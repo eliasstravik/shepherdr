@@ -297,6 +297,20 @@ export function partsOf(o: Outgoing, chat?: Chat): Message[] {
   ]
 }
 
+/** the chat's rows with each send's parts put in at its place (placesOf), in the order they were sent, and each
+ *  send's own parts in their order: its words, then its files under them, as the chat log gives them back, so the
+ *  copy on its way and the delivered one look the same and nothing jumps when one replaces the other */
+export function placeOutgoing<T>(rows: T[], groups: { at: number; rows: T[] }[]): T[] {
+  const out: T[] = []
+  const at = groups.map((g, i) => ({ ...g, i })).sort((x, y) => x.at - y.at || x.i - y.i)
+  let k = 0
+  for (let i = 0; i <= rows.length; i++) {
+    while (k < at.length && Math.min(at[k]!.at, rows.length) <= i) out.push(...at[k++]!.rows)
+    if (i < rows.length) out.push(rows[i]!)
+  }
+  return out
+}
+
 /** the chat's last message to send after: one in the conversation, not one waiting or a card that moves */
 export function anchorOf(chat: Chat | undefined): string | undefined {
   const ms = chat?.messages ?? []

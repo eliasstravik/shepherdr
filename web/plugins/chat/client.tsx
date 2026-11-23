@@ -4,7 +4,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { copyText } from '@client/copy.ts'
 import { act, definePlugin, getState, notice, registry, setUI, tryAct, useChat, useDraft, useSnap, useStore, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
-import { partsOf, placesOf, keyOf, readNow, showsAs, type Outgoing } from '@client/outbox.ts'
+import { partsOf, placeOutgoing, placesOf, keyOf, readNow, showsAs, type Outgoing } from '@client/outbox.ts'
 import { confirm, openMenu } from '@client/overlay.tsx'
 import { AgentLine, openPicker, pickFor, pickWords, type Pick } from '@client/picker.tsx'
 import { attach, detach, dropOut, retry, reupload, send } from '@client/send.ts'
@@ -391,7 +391,7 @@ export function BriefMessage({ msg, b, space }: { msg: Message; b: TaskBrief; sp
 function FileRow({ msg, chat, gap }: { msg: Message; chat: Chat; gap: boolean }) {
   const f = msg.file! as NonNullable<Message['file']> & { id?: string }
   const mine = msg.who === 'you'
-  const { small, full } = sourcesOf(chat.key, f)
+  const { small, full, box } = sourcesOf(chat.key, f)
   // a picture or video shows itself (this screen's own copy while it still goes up); a tap opens the preview
   if (full && (isImage(f.name) || isVideo(f.name)))
     return (
@@ -408,7 +408,7 @@ function FileRow({ msg, chat, gap }: { msg: Message; chat: Chat; gap: boolean })
           openPreview(chat.key, f)
         }}
       >
-        {isVideo(f.name) ? <video src={full} controls playsInline preload="metadata" /> : <img src={small} alt={f.alt || f.name} loading="lazy" />}
+        {isVideo(f.name) ? <video src={full} controls playsInline preload="metadata" /> : <img src={small} alt={f.alt || f.name} loading="lazy" style={box} />}
       </a>
     )
   return (
@@ -436,8 +436,7 @@ function shownOf(chat: Chat | undefined, key: string, outbox: Outgoing[]): Shown
   const mine = outbox.filter((o) => o.chat === key)
   if (mine.length) {
     const at = placesOf(rows.map((r) => ({ id: r.msg.id, cid: r.msg.cid })), mine)
-    const add = mine.flatMap((o) => partsOf(o, chat).map((msg) => ({ at: at.get(o.cid) ?? rows.length, row: { msg, ...showsAs(o) } })))
-    for (const a of add.sort((x, y) => y.at - x.at)) rows.splice(a.at, 0, a.row)
+    rows.splice(0, rows.length, ...placeOutgoing(rows, mine.map((o) => ({ at: at.get(o.cid) ?? rows.length, rows: partsOf(o, chat).map((msg) => ({ msg, ...showsAs(o) })) }))))
   }
   // your latest message, taken in and not answered yet: read
   const last = rows[rows.length - 1]
