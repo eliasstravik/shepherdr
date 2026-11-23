@@ -4,8 +4,9 @@ import { I } from './ui.tsx'
 
 export function UpdateChip() {
   const newer = useStore(newerServed)
-  const calling = useStore((s) => s.ui.call)
-  if (!newer || calling) return null
+  // in a call it waits; with settings open, About has the same button
+  const away = useStore((s) => s.ui.call || !!s.ui.settings)
+  if (!newer || away) return null
   return (
     <button type="button" className="upchip" onClick={updateNow}>
       <I n="reload" c="s16" />
