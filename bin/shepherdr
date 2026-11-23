@@ -242,6 +242,177 @@ def keep_instructions(r, a, root):
         r.notes.append(f"Settings › Instructions is gone: agents follow AGENTS.md / CLAUDE.md. What you wrote there is in {short(out)}")
 
 
+# SHEP-335: the settings that shape a task are the repo's (or plain folder's) it works in, not the space's that started it.
+# The update moves each space's task settings (tasks, worker, reviewer) to settings.json "repos", once: to the repo its
+# folder is in, or, for a space whose tasks all work elsewhere (root, on /), to each repo they work in. A move that isn't
+# to the space's own folder, and a value two spaces disagree on, is said once and kept in SETTINGS_MOVED. Nothing dropped.
+REPO_SECTIONS = ("tasks", "worker", "reviewer")
+SETTINGS_MOVED = "settings-moved.md"
+MERGE_NAMES = {"ask": "When I mark it as done", "checks": "When checks pass", "auto": "Right away"}
+
+
+def repo_folder(folder):
+    """The repo's main checkout a folder is in (as herdr-task keys a folder's tasks), else the folder itself."""
+    if not folder or not os.path.isdir(folder):
+        return folder
+    try:
+        p = subprocess.run(["git", "-C", folder, "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel"],
+                           capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return folder
+    lines = p.stdout.strip().split("\n") if p.returncode == 0 else []
+    if len(lines) == 2:
+        common, top = lines
+        return common[:-5] if common.endswith("/.git") else top
+    return os.path.realpath(folder)
+
+
+def tasks_by_space(root):
+    """{space id: {folder: how many of its tasks work there}} from this machine's task lists."""
+    out = {}
+    try:
+        where = where_for(root).path("tasks")
+        names = os.listdir(where)
+    except (OSError, Exception):
+        return out
+    for name in names:
+        if name.startswith(".") or not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(where, name)) as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            continue
+        folder = d.get("folder") if isinstance(d, dict) else None
+        for t in (d.get("tasks") or []) if folder else []:
+            sp = t.get("space") if isinstance(t, dict) else None
+            if sp:
+                n = out.setdefault(str(sp).split("/")[-1], {})
+                n[folder] = n.get(folder, 0) + 1
+    return out
+
+
+def setting_words(sec, field, v):
+    """One moved value as Settings says it: Merge "Right away", Tasks run on codex gpt-5..."""
+    if sec in ("worker", "reviewer"):
+        pick = " ".join(str(v.get(k)) for k in ("agent", "model", "effort") if isinstance(v, dict) and v.get(k)) or "their own"
+        return f"{'Tasks' if sec == 'worker' else 'Reviews'} run on {pick}"
+    if field == "merge":
+        return f'Merge "{MERGE_NAMES.get(v, v)}"'
+    if field == "review_rounds":
+        return f"Review on ({v} rounds)" if int(v or 0) > 0 else "Review off"
+    if field == "proof":
+        return "Proof " + ("on" if v else "off")
+    if field == "base":
+        return f"Base branch {v}"
+    return f"{field.replace('_', ' ')} {json.dumps(v, ensure_ascii=False)}"
+
+
+def repos_out(d, used, home=None):
+    """settings.json d with each space's task settings moved to "repos" (SHEP-335): (moved dict, notes, record lines).
+    used: tasks_by_space. A space on another machine ("<machine>/<id>") moves to "<machine>:<its folder>"."""
+    d = json.loads(json.dumps(d)) if isinstance(d, dict) else {}
+    spaces = d.get("spaces") if isinstance(d.get("spaces"), dict) else {}
+    repos = d.get("repos") if isinstance(d.get("repos"), dict) else {}
+    short = (lambda f: "~" + f[len(home):] if home and (f == home or f.startswith(home + "/")) else f)
+    plans = []  # (order, space id, name, targets, elsewhere)
+    for sid, layer in spaces.items():
+        if not isinstance(layer, dict) or not any(sec in layer for sec in REPO_SECTIONS):
+            continue
+        other = sid.split("/")[0] if "/" in sid else None
+        folder = layer.get("folder")
+        name = str(layer.get("name") or sid)
+        if other:
+            targets, elsewhere = ([f"{other}:{folder}"] if folder else []), False
+        else:
+            own = repo_folder(folder) if folder else None
+            where = used.get(sid, {})
+            if where and own not in where:
+                targets, elsewhere = sorted(where, key=lambda f: (-where[f], f)), True
+            else:
+                targets, elsewhere = ([own] if own else []), False
+        n = sum(used.get(sid.split("/")[-1], {}).values())
+        plans.append(((1 if elsewhere else 0, -n, sid), sid, name, targets, elsewhere))
+    notes, record = [], []
+    for _, sid, name, targets, elsewhere in sorted(plans):
+        layer = spaces[sid]
+        values = {sec: layer.pop(sec) for sec in REPO_SECTIONS if sec in layer}
+        if not targets:
+            words = [setting_words(sec, f, v) for sec, part in values.items() for f, v in
+                     ((part.items() if sec == "tasks" and isinstance(part, dict) else [(None, part)])) if v not in (None, {}, "")]
+            if words:
+                notes.append(f"{name}'s task settings ({', '.join(words)}) had no folder to go to: set them again in Settings › Tasks")
+                record.append(f"- {name}: {', '.join(words)}: no folder, not kept")
+            continue
+        for target in targets:
+            repo = repos.setdefault(target, {})
+            took, clashed = [], []
+            for sec, part in values.items():
+                pairs = list(part.items()) if sec == "tasks" and isinstance(part, dict) else [(None, part)]
+                for field, v in pairs:
+                    if v is None or v == {} or (sec != "tasks" and not v):
+                        continue
+                    have = (repo.get(sec) or {}).get(field) if field else repo.get(sec)
+                    if have is None or have == {}:
+                        if field:
+                            repo.setdefault(sec, {})[field] = v
+                        else:
+                            repo[sec] = v
+                        took.append(setting_words(sec, field, v))
+                    elif have != v:
+                        clashed.append(setting_words(sec, field, v))
+            if not repo:
+                del repos[target]
+            where = short(target)
+            if took:
+                record.append(f"- {name}: {', '.join(took)} → {where}")
+                if elsewhere:
+                    notes.append(f"{name}'s {', '.join(took)} now appl{'ies' if len(took) == 1 else 'y'} to {where}, where its tasks work")
+            if clashed:
+                record.append(f"- {name}: {', '.join(clashed)} not taken for {where}: it already had its own")
+                notes.append(f"{name}'s {', '.join(clashed)} didn't move to {where}: another space there set it differently, which it keeps")
+    if repos:
+        d["repos"] = repos
+    return d, notes, record
+
+
+def move_repo_settings(r, a, root):
+    """Moves the spaces' task settings to the repos their tasks work in (repos_out), once: says what went elsewhere,
+    and keeps the whole record in SETTINGS_MOVED beside the settings. Never stops the install."""
+    path = where_for(root).path("settings")
+    raw = read(path)
+    if raw is None:
+        return
+    try:
+        d = json.loads(raw)
+    except ValueError:
+        return
+    if not isinstance(d, dict):
+        return
+    moved, notes, record = repos_out(d, tasks_by_space(root), root)
+    if moved == d:
+        return
+    real = os.path.realpath(path)
+    out = os.path.join(os.path.dirname(real), SETTINGS_MOVED)
+    if a.dry_run:
+        say("  settings: would move each space's task settings to the repo its tasks work in")
+        return
+    try:
+        if record:
+            had = (read(out) or b"").decode("utf-8", "replace")
+            text = ("# Task settings moved to repos\n\nTask settings now follow the repo a task works in, not the space that "
+                    "started it. The update moved what each space had set:\n\n" + "\n".join(record) + "\n")
+            atomic_write(out, ((had.rstrip("\n") + "\n\n---\n\n") if had.strip() else "").encode() + text.encode(), 0o600)
+        atomic_write(real, (json.dumps(moved, indent=2, ensure_ascii=False) + "\n").encode(), os.stat(real).st_mode & 0o777)
+    except OSError as e:
+        r.notes.append(f"the spaces' task settings couldn't be moved to their repos ({e.strerror}); tasks get them as before")
+        return
+    for n in notes:
+        r.notes.append(f"task settings follow the repo now: {n}")
+    if notes:
+        r.notes.append(f"what moved where is in {short(out)}")
+
+
 # Helpers on the PATH: their name, and where the link leads (under Shepherdr's own folder). herdr-task and
 # herdr-artifact keep their 3.1 paths, so machines on 3.1 and 3.2 find each other's copies.
 LINKS = {"herdr-task": "mods/tasks/bin/herdr-task", "herdr-artifact": "mods/artifacts/bin/herdr-artifact",
@@ -1683,6 +1854,7 @@ def finish_install(a, r, rec, old, src, home, root, actions, old_files, gone, bu
     rec["hooks"] = set_hooks(r, rec, None if a.no_hooks else True)
     move_data(r, a, home)   # before the service starts again: it then finds the data where it now is
     keep_instructions(r, a, root)   # SHEP-319: written Instructions into a plain file, said once
+    move_repo_settings(r, a, root)   # SHEP-335: the spaces' task settings to the repos their tasks work in, said once
     # SHEP-305: an install switched by 3.2.0 has no carry_over_records yet: its records may name old ids, so once more
     if switching or rec.get("carry_over") == "waiting" or rec.get("carry_over_agents") != "done" or rec.get("carry_over_records") != "done":
         carry_over_session(r, rec, home)   # and its documents and machines in Shepherdr's own herdr-core session
