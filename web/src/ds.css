@@ -326,7 +326,7 @@ button.fake .n span,button.fake>.i{color:var(--muted)}
 .sug.pri{background:var(--control2);box-shadow:none;color:var(--fg);font-weight:500}
 .sug.pri:hover{background:var(--control2)}
 .sug:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
-.app.tap .sug{height:40px;border-radius:20px}
+.app.tap .sug{height:44px;border-radius:22px}
 
 /* screens */
 .scr{position:relative;border-radius:12px;overflow:hidden;background:var(--well);box-shadow:inset 0 0 0 1px var(--line2)}
