@@ -529,7 +529,7 @@ export class Compat {
     const news = space ? newsTimeline(items, new Map(spaceRows.map((r) => [r.ref, { ...r, status: r.section }])), { start: reader.start }) : [];
     const newsLine = (e: any): Message => {
       const task = machine ? `${machine}:${e.ref}` : e.ref;
-      return { id: e.id, who: "agent", at: e.at, news: { task, ref: e.ref, mark: e.mark, what: e.what, text: e.text, ...(e.live ? { live: true } : {}), ...(e.accept ? { accept: true } : {}) } };
+      return { id: e.id, who: "agent", at: e.at, news: { task, ref: e.ref, event: e.event, mark: e.mark, what: e.what, text: e.text, ...(e.live ? { live: true } : {}), ...(e.accept ? { accept: true } : {}) } };
     };
     const inline = new Map(news.filter((e: any) => !e.made).map((e: any) => [e.id, e]));
     const made = news.filter((e: any) => e.made);

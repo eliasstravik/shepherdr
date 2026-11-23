@@ -523,7 +523,7 @@ def home_pass(report, force=False, only=None, to=None):
                 space = names_by_id.get(sid) or x.get("folder") or "?"
                 place = f"{m} · {space}" if m else space
                 for line in x.get("lines") or []:
-                    mt = re.match(r'<herdr-news task="([^"]*)" event="([^"]*)">(.*)</herdr-news>$', line)
+                    mt = re.match(r'<herdr-news task="([^"]*)" event="([^"]*)"[^>]*>(.*)</herdr-news>$', line)
                     task, event, text = mt.groups() if mt else (None, None, re.sub(r"<[^>]+>", "", line))
                     text = text.split(" · For AGENTS.md:")[0]  # the space's own Assistant decides that
                     if x.get("to") and event not in OVERVIEW_OWN_EVENTS:

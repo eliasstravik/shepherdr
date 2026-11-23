@@ -25,6 +25,7 @@ import { openSendTo } from './sendto.tsx'
 import { suggestionOf, suggestionsOn } from './suggest.ts'
 import { BoxThumb, openPreview, SentThumb, sourcesOf } from './thumbs.tsx'
 import { signOf } from './typing.ts'
+import { newsRow, type NewsRow } from './news.ts'
 
 export { fileUrl } from './thumbs.tsx'
 
@@ -67,6 +68,21 @@ function Did({ a }: { a: TurnActivity }) {
           {a.more ? <span>and {a.more} more</span> : null}
         </div>
       )}
+    </>
+  )
+}
+
+/** a task's news as one quiet row (news.ts newsRow); longer words wait behind its fold */
+function NewsLine({ row }: { row: NewsRow }) {
+  const [open, setOpen] = useState(false)
+  if (!row.body) return <div className="fold news"><I n="note" c="s16" /><span>{row.label}</span></div>
+  return (
+    <>
+      <button type="button" className="fold news" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <I n={open ? 'down' : 'right'} c="s16" />
+        <span>{row.label}</span>
+      </button>
+      {open && <div className="newsb">{row.body}</div>}
     </>
   )
 }
@@ -546,15 +562,20 @@ function Messages({ thread }: { thread: Thread }) {
       if (m.question.title && !m.question.command && !m.question.plan && !m.question.parts?.length && m.question.sent === undefined && !m.question.closed) out.push(<div key={`q:${k}`} className={cx('b', gap && 'gap')}>{m.question.title}</div>)
       out.push(<QuestionCard key={k} q={m.question} chat={m.question.by?.chat ?? thread.chat} place={place} />)
     } else if (m.secret) out.push(<SecretCard key={k} ask={m.secret} chat={thread.chat} />)
-    else if (m.news && (m.news.mark === 'started' || m.news.mark === 'ready' || m.news.mark === 'done')) {
-      // what the app shows by itself from the task's status (its review card, its Done line): not said twice
-      continue
-    } else if (m.news || m.card) {
-      const taskId = m.news?.task ?? m.card?.task
-      const t = taskOf(snap, taskId)
+    else if (m.news) {
+      // Herdr's news of a task, never a message (SHEP-365): one quiet row under the task's line, or nothing for what
+      // the app shows by itself from the task's status (its review card, its Done line)
+      const t = taskOf(snap, m.news.task)
+      const row = newsRow(m.news, t?.name ?? '')
+      if (!row) continue
       if (t && !thread.task && t.id !== lastRef) out.push(<TaskRef key={`r:${k}`} id={t.id} title={t.name} t={t} />)
       if (t) lastRef = t.id
-      const text = m.news?.text ?? m.card?.text ?? m.text ?? ''
+      out.push(<NewsLine key={k} row={row} />)
+    } else if (m.card) {
+      const t = taskOf(snap, m.card.task)
+      if (t && !thread.task && t.id !== lastRef) out.push(<TaskRef key={`r:${k}`} id={t.id} title={t.name} t={t} />)
+      if (t) lastRef = t.id
+      const text = m.card.text ?? m.text ?? ''
       if (text) out.push(<Bubble key={k} msg={{ ...m, text }} chat={stub} thread={thread} gap={false} />)
     }
     // when its agent was started again, earlier messages stay, above a thin "New session" line

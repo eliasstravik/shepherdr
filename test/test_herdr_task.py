@@ -461,6 +461,17 @@ class HomeLead(unittest.TestCase):
                 rep = self.home.local_report(news_only=True)
         self.assertEqual(rep["stale_links"], [{"name": "vm-demo", "answers": "e5a9"}])
 
+    def test_a_news_line_with_more_attributes_keeps_its_task_and_event(self):
+        """A feedback report's news line carries key= too: the overview still reads its task and event, never
+        the tag's attributes as words."""
+        world = home_world()
+        world["mini"]["news"] = [{"space": "sp-shop", "folder": "~/shop", "lines": [
+            '<herdr-news task="SHOP-1" event="feedback" key="fb-1">"Fix login" feedback: the button is small</herdr-news>']}]
+        [l] = [l for _, l in self.overview(self.round(world, "mini")) if "SHOP-1" in l]
+        self.assertIn('task="SHOP-1"', l)
+        self.assertIn('event="feedback"', l)
+        self.assertNotIn("key=", l.split(">", 1)[1])
+
     def test_a_hub_that_doesnt_link_back_gets_none_of_the_others_news(self):
         """#1188: the mini can't reach the laptop, so its home Assistant never gets the laptop's news
         (it could only sum up items it can't check); the laptop's own home Assistant keeps them."""
