@@ -352,7 +352,10 @@ const withNext = (snap: Snapshot, b: Parameters<NonNullable<typeof model.onBuild
     return { state: st?.state, kind: st?.kind ?? k.report?.kind };
   };
   const bar = model.value("spaces-chat") as any;
-  return (shown = enrich(snap, { spaces: b.spaces.map((s: any) => watch.notes.has(s.assistant) ? { ...s, assistantStatus: "stopped" } : s), rows: b.rows, archived: Array.isArray(bar?.archived) ? bar.archived : [], asked, reportOf, config, screens: pluginOn("screens") ? screens.screensOf() : {}, waiting: pluginOn("screens") ? screens.waiting() : [], hostName: hostname().split(".")[0], schedules: pluginOn("schedules") ? b.automations : [] }));
+  const next = enrich(snap, { spaces: b.spaces.map((s: any) => watch.notes.has(s.assistant) ? { ...s, assistantStatus: "stopped" } : s), rows: b.rows, archived: Array.isArray(bar?.archived) ? bar.archived : [], asked, reportOf, config, screens: pluginOn("screens") ? screens.screensOf() : {}, waiting: pluginOn("screens") ? screens.waiting() : [], hostName: hostname().split(".")[0], schedules: pluginOn("schedules") ? b.automations : [] });
+  const sidebarWarning = host.sidebarLinkWarning();
+  if (sidebarWarning) next.warnings = [...(next.warnings ?? []), { id: "sidebar-link", kind: "machine", text: sidebarWarning }];
+  return (shown = next);
 };
 const pickFrom = (v: any) => (v?.agent ? { agent: String(v.agent), model: v.model ?? null, effort: v.effort ?? null, fast: v.fast === "ultrafast" ? "ultrafast" as const : !!v.fast, perm: v.perm ?? null } : null);
 /** where your own terminal starts: a space's folder, or a task's (its worktree when it has one), on its machine */

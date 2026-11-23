@@ -5,7 +5,7 @@
 // undo each other: a write that lost the race reads the new version and applies its change again. Every write is a
 // change event both clients hear (the host's: read again every 3 s, as no event comes from there).
 import type { Hub } from "./hub.ts";
-import type { Host } from "./host.ts";
+import { type Host, sidebarLinkMessage } from "./host.ts";
 import * as HC from "../core/host.js";
 
 const { relocate, relocateDoc, keepForeign } = HC as any;
@@ -70,7 +70,15 @@ export class Store {
         for (const k of new Set([...Object.keys(base.value), ...Object.keys(next)])) {
           if (JSON.stringify(base.value[k]) === JSON.stringify(next[k])) continue;
           if (next[k] === undefined) delete value[k];
-          else value[k] = keepForeign(k, relocate(k, next[k], to), raw.value[k], back);
+          else {
+            // Read projections can omit unknown machines. A sidebar write must keep every change or fail.
+            const rename = k === "spaces-chat" ? (machine: string | null) => {
+              const name = to(machine);
+              if (name === undefined) throw new Error(sidebarLinkMessage(machine));
+              return name;
+            } : to;
+            value[k] = keepForeign(k, relocate(k, next[k], rename), raw.value[k], back);
+          }
         }
       }
       try {

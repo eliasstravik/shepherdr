@@ -196,3 +196,17 @@ test("the heading opens the menu on a right click, never from its filter or plus
   expect(html).toContain('data-heading="m:vm"')
   expect(html).toContain('>Dev box<')
 })
+
+test('Machines settings show why a sidebar change cannot be saved', async () => {
+  const { SettingsWindow } = await import('./settings.tsx')
+  const text = 'Run hc machine add on the serving machine.'
+  const settingsSnap = { ...snap, config: {} as NonNullable<Snapshot['config']> }
+  setUI({ settings: { scope: 'all', sec: 'Machines' } })
+  try {
+    const warning: NonNullable<Snapshot['warnings']> = [{ id: 'sidebar-link', kind: 'machine', text }]
+    expect(renderToStaticMarkup(<SettingsWindow snap={{ ...settingsSnap, warnings: warning }} />)).toContain(text)
+    expect(renderToStaticMarkup(<SettingsWindow snap={settingsSnap} />)).not.toContain(text)
+  } finally {
+    setUI({ settings: null })
+  }
+})

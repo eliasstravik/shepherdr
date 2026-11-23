@@ -321,8 +321,15 @@ const meterOf = (m: Snapshot['machines'][number], re: RegExp) => m.health?.meter
 
 function Machines({ snap }: { snap: Snapshot }) {
   const warns = snap.machines.filter((m) => machineWarn(m))
+  const sidebarWarning = snap.warnings?.find((w) => w.id === 'sidebar-link')
   return (
     <>
+      {sidebarWarning && (
+        <div className="banner">
+          <I n="warn" c="c-ask" />
+          <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>{sidebarWarning.text}</span>
+        </div>
+      )}
       {warns.map((m) => (
         <div className="banner" key={m.id}>
           <I n="warn" c="c-ask" />

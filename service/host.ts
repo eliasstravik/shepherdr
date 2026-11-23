@@ -18,6 +18,10 @@ const { HOST_DOC, NODE_DOC, WEB_DOC, newestHost, nodeAlive, renamer } = HC as an
 export type Node = { id: string; name: string; os: string; version: string; build?: string; link: string | null; serving: boolean; links: Record<string, string>; remotes: string[]; at: number };
 export type MachineRow = { name: string; id: string | null; state: string; here?: boolean };
 
+export function sidebarLinkMessage(machine: string | null): string {
+  return `The machine serving Shepherdr has no link to ${machine ?? "this computer"}. Run hc machine add on the serving machine to link it, then try again.`;
+}
+
 export class Host {
   /** this machine's herdr-core identity */
   me: { id: string; name: string } | null = null;
@@ -103,6 +107,10 @@ export class Host {
   /** Moves names from this machine's words to the host's, and back. */
   toHost() { return renamer(this.node(), this.hostNode); }
   fromHost() { return renamer(this.hostNode, this.node()); }
+
+  sidebarLinkWarning() {
+    return !this.serving() && this.reachable() && this.toHost()(null) === undefined ? sidebarLinkMessage(null) : null;
+  }
 
   /** Where the web app is: this machine's link, or the host's. */
   hostLink() { return this.serving() ? this.link : this.hostNode?.link ?? null; }

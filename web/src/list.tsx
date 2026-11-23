@@ -119,7 +119,8 @@ export function newGroupDialog(machine?: string, then?: (id: string) => void) {
       const ok = async () => {
         if (!name.trim()) return
         close()
-        const r = await act<{ ok?: boolean; id?: string; error?: string }>({ type: 'section', op: 'new', name: name.trim(), machine: m }).catch(() => ({ ok: false, error: 'That did not work.' }) as { ok?: boolean; id?: string; error?: string })
+        const r = await act<{ ok?: boolean; id?: string; error?: string }>({ type: 'section', op: 'new', name: name.trim(), machine: m })
+          .catch((error: unknown) => ({ ok: false, error: error instanceof Error ? error.message : 'That did not work.', id: undefined }))
         if (r.ok === false) return notice(r.error || 'That did not work.')
         if (r.id) then?.(r.id)
       }

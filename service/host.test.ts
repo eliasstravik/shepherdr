@@ -26,7 +26,7 @@ function world() {
       throw new Error(`no ${method}`);
     },
   });
-  return { docs, up, hub };
+  return { docs, names, up, hub };
 }
 
 test("the newest host record reaches every machine, and the one that slept learns it when it wakes", async () => {
@@ -85,4 +85,43 @@ test("a machine this one only links can't make itself the host; a record from th
   await laptop.poll();
   expect(laptop.serving()).toBe(true);                 // the host itself handed it back
   expect(w.docs.L.get("shepherdr.host")?.value).toEqual({ id: "L", at: 9 });
+});
+
+test("one-way links refuse sidebar changes the host would drop and allow them when linked back", async () => {
+  const w = world();
+  delete w.names.M.m3;
+  w.docs.L.set("shepherdr.host", { value: { id: "M", at: 1 }, version: 1 });
+  w.docs.M.set("shepherdr.host", { value: { id: "M", at: 1 }, version: 1 });
+  const original = { sections: [{ id: "mine", name: "On the mini", machine: null, spaces: ["sp2"] }], pinned: ["sp2"] };
+  w.docs.M.set("shepherdr", { value: { "spaces-chat": original }, version: 1 });
+  const laptop = new Host(w.hub("L") as any, "t"), mini = new Host(w.hub("M") as any, "t");
+  await mini.poll(); await laptop.poll();
+  const store = new Store(w.hub("L") as any, laptop);
+  const sidebar = (await store.load()).value["spaces-chat"] as typeof original;
+  const section = { id: "new", name: "On the laptop", machine: null, spaces: ["sp1"] };
+
+  expect(laptop.reachable()).toBe(true);
+  await expect(store.set("spaces-chat", { ...sidebar, sections: [...sidebar.sections, section], pinned: [] }))
+    .rejects.toThrow("hc machine add");
+  expect(w.docs.M.get("shepherdr")).toEqual({ value: { "spaces-chat": original }, version: 1 });
+  expect((await store.load()).value["spaces-chat"]).toEqual(sidebar);
+
+  for (const edit of [{ icons: { sp1: "🐑" } }, { pinned: ["sp1"] }, { order: { "": ["sp1"] } }]) {
+    await expect(store.set("spaces-chat", { ...sidebar, ...edit })).rejects.toThrow("this computer");
+  }
+  expect(w.docs.M.get("shepherdr")?.version).toBe(1);
+  expect(laptop.sidebarLinkWarning()).toContain("hc machine add");
+
+  await store.set("spaces-chat", { ...sidebar, pinned: [] });
+  expect(w.docs.M.get("shepherdr")?.value["spaces-chat"]).toMatchObject({ sections: original.sections, pinned: [] });
+
+  w.names.M.m3 = "L";
+  await mini.poll(); await laptop.poll();
+  expect(laptop.sidebarLinkWarning()).toBeNull();
+  await store.set("spaces-chat", { ...sidebar, sections: [...sidebar.sections, section], pinned: ["sp1"] });
+  expect(w.docs.M.get("shepherdr")?.value["spaces-chat"]).toMatchObject({
+    sections: [...original.sections, { ...section, machine: "m3", spaces: ["m3/sp1"] }],
+    pinned: ["m3/sp1"],
+  });
+  expect((await store.load()).value["spaces-chat"]).toMatchObject({ sections: [...sidebar.sections, section] });
 });
