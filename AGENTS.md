@@ -171,3 +171,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - A throwaway service's API from curl: `Authorization: Bearer $(cat <SHEPHERDR_DATA>/token)` plus `x-shepherdr: 1`; GET /api/state shows the spaces list. Publish proof artifacts from the worktree (cwd), not from a scratch folder, or they land in the scratch folder's store. (from SHEP-296)
 
 - A send to a space by API on a throwaway service: POST /api/action `{type:"send", chat:"p:<space id>", text, cid}` through `web/demo/live.ts`; a new space's Claude Assistant waits on "trust this folder" (`hc keys <t> down enter`). (from SHEP-297)
+
+- herdr-browser's headless Chrome reports prefers-reduced-motion: reduce by default: run `herdr-browser set media dark` before checking animations, `set media dark reduced-motion` for the reduced case. (from SHEP-304)
