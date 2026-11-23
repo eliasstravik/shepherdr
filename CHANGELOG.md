@@ -1,5 +1,29 @@
 # Changelog
 
+## 3.2.2
+
+Fixes for 3.2.1: a machine link that broke for good after an update, a smoother app on a phone, and clearer signs of
+an agent at work and of dictation.
+
+### Machines
+
+- A link to another machine that herdr-core refused for good ("a different core answers there") is linked again by
+  carry-over, in the update or by hand, when it's safe: same address, name and session.
+  The records naming the old id follow it. When it can't, `shepherdr doctor`, the home page's health, the sync report
+  and the Machines page say why, in full, and what to run.
+
+### The web app
+
+- On a phone, the app's own colour reaches the edges: no white flash as the keyboard opens and no white strip under
+  the bottom bar, in the dark theme too, also in the installed app.
+- A sent message never leaves a stuck grey copy behind, also after a reload, in an older tab or with another
+  machine's clock a little behind. A send cut off by a reload goes on, never twice, and Retry doesn't send one that
+  arrived after all.
+- While an agent works, the chat's end shows three dots that rise in turn, with the step it's on beside them when
+  known, instead of three still dots and a separate working line. With reduced motion the dots brighten in turn.
+- Dictation turns the message box into the recording: a live wave, the time, Cancel, Done and the words as they're
+  heard. The time holds while the words are written down, and Escape cancels the dictation before it closes a dialog.
+
 ## 3.2.1
 
 Fixes for 3.2.0, found on a Mac mini that serves the web app with machines linked to it, and a smoother app on a
