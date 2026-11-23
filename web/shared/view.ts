@@ -40,27 +40,8 @@ export function folderOf(snap: Snapshot, p: Pick<Place, 'machine' | 'where' | 'f
   return { short, full: p.folder || short, machine: p.machine && p.machine !== snap.host ? machineLabel(snap, p.machine) : null }
 }
 
-/** a folder in words where it would be a lone symbol (SHEP-316): ~ is Home, / is Root folder */
-export const folderWords = (path: string) => (path === '~' ? 'Home' : path === '/' || path === '' ? 'Root folder' : path)
-
-/** What tells a space apart, quietly on its name's line (SHEP-316): nothing while its name is its own (the whole path
- *  is in its menu); with a namesake, the folder it sits in ("~/dev", Home, Root folder), else its machine, else its
- *  own folder. */
-export function spaceHint(snap: Snapshot, p: Pick<Place, 'id' | 'name' | 'machine' | 'where' | 'folder'>): string | null {
-  const same = spacesOf(snap).filter((q) => q.id !== p.id && q.name.toLowerCase() === p.name.toLowerCase())
-  if (!same.length) return null
-  const short = (q: typeof p) => folderOf(snap, q).short
-  // the folder it sits in: a space at home or the root says so itself
-  const parent = (q: typeof p) => {
-    const f = short(q)
-    return folderWords(f === '~' || f === '/' ? f : f.slice(0, Math.max(0, f.lastIndexOf('/'))) || '/')
-  }
-  const mine = parent(p)
-  const twins = same.filter((q) => parent(q) === mine)
-  if (!twins.length) return mine
-  if (twins.every((q) => q.machine !== p.machine)) return machineLabel(snap, p.machine)
-  return folderWords(short(p))
-}
+/** a folder as it shows, in words where it would be a lone symbol (SHEP-316): ~ is Home folder, / is Root folder */
+export const folderName = (path: string) => (path === '~' ? 'Home folder' : path === '/' || path === '' ? 'Root folder' : path)
 export const machineLabel = (snap: Snapshot, key: string) => machineOf(snap, key)?.name ?? key
 
 /** a machine the serving one can't reach now */

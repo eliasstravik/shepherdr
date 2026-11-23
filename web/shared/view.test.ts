@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Snapshot, Task } from './types.ts'
-import { doneWords, folderOf, folderWords, leftWords, listOf, minutesLeft, needsCount, nowGroups, spaceHint, statusWord, taskLine, taskWhen, tstate } from './view.ts'
+import { doneWords, folderName, folderOf, leftWords, listOf, minutesLeft, needsCount, nowGroups, statusWord, taskLine, taskWhen, tstate } from './view.ts'
 
 const task = (x: Partial<Task>): Task => ({ id: 'T-1', name: 'A task', place: 'shop', status: 'work', state: 'work', on: 'mini', created: '', age: '', ...x })
 
@@ -98,44 +98,8 @@ test("a space's folder: home as ~, the whole path, another machine named (SHEP-3
 })
 
 test('a lone ~ or / is said in words (SHEP-316)', () => {
-  expect(folderWords('~')).toBe('Home')
-  expect(folderWords('/')).toBe('Root folder')
-  expect(folderWords('~/dev')).toBe('~/dev')
-})
-
-test("a space's folder shows beside its name only when a namesake needs telling apart (SHEP-316)", () => {
-  const sp = (id: string, name: string, machine: string, where: string) => ({ id, name, machine, where, level: 0, status: 'idle', mode: 'regular', chat: id })
-  const places = [
-    { ...sp('ev', 'home', 'mini', '~'), home: true },
-    sp('shop', 'shop', 'mini', '~/dev/shop'),
-    sp('vshop', 'Shop', 'vm-b', '~/clients/acme/shop'),
-    sp('blog', 'blog', 'mini', '~/dev/blog'),
-    sp('root', 'root', 'vm-b', '/'),
-    sp('notes', 'notes', 'mini', '~/notes'),
-    sp('notes2', 'notes', 'vm-b', '~/notes'),
-    sp('srv', 'app', 'mini', '/app'),
-    sp('app', 'app', 'mini', '~/app'),
-    sp('home2', 'tools', 'vm-b', '~'),
-    sp('tools', 'tools', 'mini', '~/dev/tools'),
-    sp('w1', 'web', 'mini', '~/dev/web'),
-    sp('w2', 'web', 'mini', '~/dev/web-old'),
-  ]
-  const snap = { host: 'mini', everything: 'ev', places, machines: [{ id: 'm:vm-b', machine: 'vm-b', name: 'Build box', status: 'idle' }] } as unknown as Snapshot
-  const hint = (id: string) => spaceHint(snap, places.find((p) => p.id === id)!)
-  // its own name: nothing, not even at the root or home
-  expect(hint('blog')).toBeNull()
-  expect(hint('root')).toBeNull()
-  // namesakes (any case): the folder each sits in
-  expect(hint('shop')).toBe('~/dev')
-  expect(hint('vshop')).toBe('~/clients/acme')
-  // never a lone symbol: in words
-  expect(hint('srv')).toBe('Root folder')
-  expect(hint('app')).toBe('Home')
-  expect(hint('home2')).toBe('Home')
-  // the same folder on two machines: the machine
-  expect(hint('notes')).toBe('mini')
-  expect(hint('notes2')).toBe('Build box')
-  // side by side in one folder: its own folder
-  expect(hint('w1')).toBe('~/dev/web')
-  expect(hint('w2')).toBe('~/dev/web-old')
+  expect(folderName('~')).toBe('Home folder')
+  expect(folderName('/')).toBe('Root folder')
+  expect(folderName('~/dev/shop')).toBe('~/dev/shop')
+  expect(folderName('/srv/app')).toBe('/srv/app')
 })

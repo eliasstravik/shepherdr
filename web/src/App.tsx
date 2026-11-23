@@ -3,13 +3,13 @@
 // places; the layout itself is the design system's (ds.css).
 import { useEffect, useRef, type ReactNode } from 'react'
 import type { Snapshot } from '@shared/types.ts'
-import { downWords, folderOf, isEverything, spaceHint, needsCount, placeDown, placeOf, taskOf, type Space } from '@shared/view.ts'
+import { downWords, folderName, folderOf, isEverything, needsCount, placeDown, placeOf, taskOf, type Space } from '@shared/view.ts'
 import { getState, openSettings, registry, setUI, sideHidden, togglePane, useNotice, useSnap, useUI, type Thread } from './kernel.ts'
-import { List, spaceMenu } from './list.tsx'
+import { folderMenu, List, spaceMenu } from './list.tsx'
 import { closeTop, Layers } from './overlay.tsx'
 import { edge } from './resize.ts'
 import { SettingsWindow } from './settings.tsx'
-import { cx, Empty, I, IB, SpaceName, useScrolled } from './ui.tsx'
+import { cx, Empty, I, IB, useScrolled } from './ui.tsx'
 
 /** the thread the middle column shows: the open task when it has the middle, else the space's chat */
 export function middleThread(snap: Snapshot, ui: { at: string; task: string | null; wide: boolean }): Thread | null {
@@ -25,11 +25,19 @@ export function placeholderOf(snap: Snapshot, thread: Thread): string {
   return isEverything(snap, thread.place) ? 'Message Shepherdr' : `Message #${placeOf(snap, thread.place)?.name ?? ''}`
 }
 
-/** the header's quiet words beside a space's name: its machine when it is another, then what tells it from a namesake */
-function headHint(snap: Snapshot, place: Space): string | null {
-  const m = folderOf(snap, place).machine
-  const h = spaceHint(snap, place)
-  return [m, h !== m ? h : null].filter(Boolean).join(' · ') || null
+/** The open space's folder beside its name (SHEP-316): a quiet chip, Home folder / Root folder in words, its machine
+ *  when it is another; a long path gives way from its start. A tap shows the whole path with Copy. */
+function FolderChip({ snap, place }: { snap: Snapshot; place: Space }) {
+  const f = folderOf(snap, place)
+  if (!f.short) return null
+  const name = folderName(f.short)
+  return (
+    <button type="button" className="fchip" aria-haspopup="menu" aria-label={`Folder: ${f.full}${f.machine ? ` on ${f.machine}` : ''}`} onClick={(e) => folderMenu(e.currentTarget, place.id)}>
+      <I n="folder" c="s16" />
+      <span className={cx('fct', name === f.short && 'cut')}><bdi>{name}</bdi></span>
+      {f.machine && <span className="fcm">{f.machine}</span>}
+    </button>
+  )
 }
 
 function ChatHeader({ snap, thread, place, scrolled }: { snap: Snapshot; thread: Thread; place: Space; scrolled: boolean }) {
@@ -44,11 +52,10 @@ function ChatHeader({ snap, thread, place, scrolled }: { snap: Snapshot; thread:
       <div className="ttl">
         <button type="button" className="tbtn" aria-haspopup="menu" onClick={(e) => spaceMenu(e.currentTarget, place.id)}>
           {!every && <I n="hash" c="s16" />}
-          {/* one line (SHEP-316): its machine when it is another and what tells it from a namesake, dim beside its name;
-              the whole path is at the top of its menu */}
-          <SpaceName name={every ? 'Everything' : place.name} hint={every ? null : headHint(snap, place)} />
+          <span>{every ? 'Everything' : place.name}</span>
           <I n="down" c="s16 c-mute" />
         </button>
+        {!every && <FolderChip snap={snap} place={place} />}
       </div>
       {registry.header.filter((h) => !phone || h.phone).map((h, i) => <h.View key={i} thread={thread} />)}
     </header>

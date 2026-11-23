@@ -4,10 +4,10 @@
 // A sheet on a phone, a 560 px dialog on a desktop; an open list takes the form's place, with a back arrow.
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { AgentPick, Catalog, CatalogAgent, CatalogModel, Snapshot } from '@shared/types.ts'
-import { everything, isEverything, machineLabel, machineOf, spaceHint, spacesOf, unreachable } from '@shared/view.ts'
+import { everything, isEverything, machineLabel, machineOf, spacesOf, unreachable } from '@shared/view.ts'
 import { act, getState } from './kernel.ts'
 import { openDialog } from './overlay.tsx'
-import { Btn, I, IB, Logo, Row, Seg, SpaceName } from './ui.tsx'
+import { Btn, I, IB, Logo, Row, Seg } from './ui.tsx'
 
 /** what runs: the agent, its model, effort, speed and permission mode; `label`: the model's name as a running agent reports it */
 export type Pick = AgentPick & { label?: string | null }
@@ -386,13 +386,11 @@ function SpacePicker({ value, onPick, close }: { value: string; onPick: (place: 
   // the search matches a space's name or its machine's
   const hit = (name: string, machine: string) => !q.trim() || `${name} ${machineLabel(snap, machine)}`.toLowerCase().includes(q.trim().toLowerCase())
   const spaces = spacesOf(snap).filter((p) => !p.archived)
-  // a namesake's folder, dim beside its name (SHEP-316)
-  const hintOf = (id: string) => { const p = spaces.find((x) => x.id === id); return p ? spaceHint(snap, p) : null }
   const row = (id: string, name: string, root: boolean, machine: string) => (
     <Row
       key={id}
       icon={root ? 'layers' : 'hash'}
-      label={root ? name : <SpaceName name={name} hint={hintOf(id)} />}
+      label={name}
       value={root ? machineLabel(snap, machine) : undefined}
       current={value === id}
       end={value === id ? <I n="check" /> : undefined}

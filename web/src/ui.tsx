@@ -33,17 +33,6 @@ export function Btn({ kind, small, className, children, ...rest }: ButtonHTMLAtt
   )
 }
 
-/** A space's name on one line, with what tells it apart from a namesake beside it, dim (view.ts spaceHint, SHEP-316):
- *  the hint gives way first, from its start, so "…/acme" keeps its end. */
-export function SpaceName({ name, hint }: { name: ReactNode; hint?: string | null }) {
-  return (
-    <span className="sn">
-      <span className="snn">{name}</span>
-      {hint && <span className="snh"><bdi>{hint}</bdi></span>}
-    </span>
-  )
-}
-
 /** a row: of the list, of a menu, of a picker */
 export function Row({
   icon,
