@@ -2,10 +2,13 @@
 
 ## 3.2.7
 
-Reply bubbles that are easier to tap and never cover the chat, and schedules that no longer miss a merge.
+The step line shows what an agent is doing now, reply bubbles that are easier to tap and never cover the chat, and
+schedules that no longer miss a merge.
 
 ### The web app
 
+- The step line beside the working sign shows the step running now. An old step from an earlier turn no longer
+  sticks there.
 - Suggested replies get their own row: the chat ends just above them and fades softly instead of being cut, and a new
   set starts at its first bubble.
 - All reply bubbles look the same, and a short one is round and at least a fingertip big.
