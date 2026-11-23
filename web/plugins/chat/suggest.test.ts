@@ -33,12 +33,11 @@ test('none with the setting off, nor in an empty chat', () => {
   expect(suggestionOf(chat([]), true)).toBeNull()
 })
 
-test('they hide while typing, dictating, in a call, while the agent replies, while a send is on its way, and once used', () => {
-  const idle = { text: '', files: 0, dictating: false, call: false, working: false, sending: false, spent: false }
+test('they stay whatever is in the box; they hide only dictating, in a call, while the agent replies, while a send is on its way, and once used', () => {
+  const idle = { dictating: false, call: false, working: false, sending: false, spent: false }
   expect(repliesHidden(idle)).toBe(false)
-  expect(repliesHidden({ ...idle, text: 'h' })).toBe(true)
-  expect(repliesHidden({ ...idle, text: '  ' })).toBe(false)
-  expect(repliesHidden({ ...idle, files: 1 })).toBe(true)
+  // typing or attaching never hides them: the check takes nothing from the box
+  expect(repliesHidden({ ...idle, text: 'a draft', files: 2 } as typeof idle)).toBe(false)
   expect(repliesHidden({ ...idle, dictating: true })).toBe(true)
   expect(repliesHidden({ ...idle, call: true })).toBe(true)
   expect(repliesHidden({ ...idle, working: true })).toBe(true)

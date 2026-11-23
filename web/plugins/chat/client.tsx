@@ -731,8 +731,8 @@ function StoppedChat({ chat, thread }: { chat: Chat | undefined; thread: Thread 
 /** suggested replies already used: gone once you send something */
 const spent = new Set<string>()
 
-/** The agent's suggested replies as bubbles above the box (SHEP-186), in its order, the first the primary: a tap sends
- *  one as it is, a press held (or a right-click) puts it in the box to edit instead (ReplyPress). One line each; the
+/** The agent's suggested replies as bubbles above the box (SHEP-186), in its order, all alike (no first pick): a tap
+ *  sends one as it is, a press held (or a right-click) puts it in the box to edit instead (ReplyPress). One line each; the
  *  row scrolls sideways when they don't fit. */
 export function Replies({ texts, onSend, onEdit }: { texts: string[]; onSend: (t: string) => void; onEdit: (t: string) => void }) {
   const row = useRef<HTMLDivElement>(null)
@@ -741,12 +741,12 @@ export function Replies({ texts, onSend, onEdit }: { texts: string[]; onSend: (t
   useLayoutEffect(() => (row.current ? rowEdges(row.current) : undefined), [all])
   return (
     <div className="sugs" ref={row} role="group" aria-label="Suggested replies">
-      {texts.map((t, i) => <Reply key={`${i}:${t}`} text={t} primary={i === 0} onSend={onSend} onEdit={onEdit} />)}
+      {texts.map((t, i) => <Reply key={`${i}:${t}`} text={t} onSend={onSend} onEdit={onEdit} />)}
     </div>
   )
 }
 
-function Reply({ text, primary, onSend, onEdit }: { text: string; primary: boolean; onSend: (t: string) => void; onEdit: (t: string) => void }) {
+function Reply({ text, onSend, onEdit }: { text: string; onSend: (t: string) => void; onEdit: (t: string) => void }) {
   const edit = useRef(onEdit)
   edit.current = onEdit
   const press = useMemo(() => new ReplyPress(() => edit.current(text)), [text])
@@ -754,7 +754,7 @@ function Reply({ text, primary, onSend, onEdit }: { text: string; primary: boole
   return (
     <button
       type="button"
-      className={cx('sug', primary && 'pri')}
+      className="sug"
       onMouseDown={keepFocus}
       onPointerDown={(e) => press.down(e.clientX, e.clientY)}
       onPointerMove={(e) => press.move(e.clientX, e.clientY)}
@@ -808,7 +808,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   const call = useUI((u) => u.call)
   const dictating = useDictating()
   const sending = useStore((s) => s.outbox.some((o) => o.chat === key))
-  const sug = sg && !repliesHidden({ text, files: files?.length ?? 0, dictating, call, working: busy, sending, spent: spent.has(sg.id) }) ? sg : null
+  const sug = sg && !repliesHidden({ dictating, call, working: busy, sending, spent: spent.has(sg.id) }) ? sg : null
   const machine = snap.places.find((p) => p.id === thread.place)?.machine ?? snap.host
   const pick = pickOf(snap, chat, thread)
   // a message sent while the agent works goes in at once (it steers); only Ctrl/Cmd+Enter asks it to wait its turn.
@@ -824,13 +824,12 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
     if (shared) putAway()
   }
 
-  /** a suggested reply tapped: sent at once as your message, as if typed (no keyboard comes up: its bubble takes no
-   *  focus) */
+  /** a suggested reply tapped: exactly its text sent at once as its own message (no keyboard comes up: its bubble takes
+   *  no focus). Whatever is in the box (text, files, a quoted reply) is neither sent nor merged: it stays as it was */
   const sendSug = (t: string) => {
     if (!sug || (getState().ui.call && !TEXT_IN_CALL)) return
     spent.add(sug.id)
-    send(key, key, t, false)
-    if (shared) putAway()
+    send(key, key, t, false, true)
   }
   /** a suggested reply held: written into the box to edit, the box focused at its end */
   const editSug = (t: string) => {
