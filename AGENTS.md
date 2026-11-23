@@ -181,3 +181,5 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - herdr-browser's tab may lack page focus (focus events don't fire, set viewport/screenshot lag or time out): for focus/keyboard repros drive your own headless Chrome over CDP (Emulation.setFocusEmulationEnabled, setTouchEmulationEnabled, setDeviceMetricsOverride to shrink the height). (from SHEP-308)
 
 - A stale link ("a different core answers there") on throwaway cores: link a->b, then stop b, rm its core.json and start it again. (from SHEP-310)
+
+- Android keyboard/edge colours can't be seen headless (they're the phone's window behind the page): check color-scheme, html background and the manifest colours over CDP instead; Emulation.setSafeAreaInsetsOverride emulates the gesture-bar inset. (from SHEP-311)
