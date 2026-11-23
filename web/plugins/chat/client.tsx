@@ -4,7 +4,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { copyText } from '@client/copy.ts'
 import { act, definePlugin, getState, notice, registry, setUI, tryAct, useChat, useDraft, useSnap, useStore, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
-import { partsOf, placesOf, keyOf } from '@client/outbox.ts'
+import { partsOf, placesOf, keyOf, readNow, showsAs, type Outgoing } from '@client/outbox.ts'
 import { confirm, openMenu } from '@client/overlay.tsx'
 import { AgentLine, openPicker, pickFor, pickWords, type Pick } from '@client/picker.tsx'
 import { attach, detach, dropOut, retry, reupload, send } from '@client/send.ts'
@@ -92,7 +92,7 @@ function msgMenu(anchor: Element, msg: Message, chat: Chat, thread: Thread, sele
   openMenu(anchor, rows, { label: 'Message', top: tops.length ? (close) => tops.map((m, i) => (m.Top ? <m.Top key={i} msg={msg} chat={chat} close={close} /> : null)) : undefined })
 }
 
-function Bubble({ msg, chat, thread, gap, pending, failed }: { msg: Message; chat: Chat; thread: Thread; gap: boolean; pending?: boolean; failed?: string }) {
+function Bubble({ msg, chat, thread, gap, pending, failed, mark }: { msg: Message; chat: Chat; thread: Thread; gap: boolean; pending?: boolean; failed?: string; mark?: Shown['mark'] }) {
   const [sel, setSel] = useState(false)
   const jump = useUI((u) => u.jump === msg.id)
   const mine = msg.who === 'you'
@@ -116,6 +116,7 @@ function Bubble({ msg, chat, thread, gap, pending, failed }: { msg: Message; cha
         {msg.reply && <span className="quote">{msg.reply.text}</span>}
         {mine ? <div className="md" style={{ whiteSpace: 'pre-wrap' }}>{msg.text}</div> : <Markdown text={msg.text ?? ''} mentions={msg.mentions} />}
       </div>
+      {mark && <div className="seen" role="status">{mark === 'read' ? 'Read' : 'Sent'}</div>}
       {failed !== undefined && msg.cid && (
         <div className="ref" style={{ justifySelf: 'end', marginTop: 0 }}>
           <span className="c-red">Not sent{failed ? ` · ${failed}` : ''}</span>
@@ -160,18 +161,28 @@ function FileRow({ msg, chat, gap }: { msg: Message; chat: Chat; gap: boolean })
 
 interface Shown {
   msg: Message
+  /** dimmed: not in the agent yet (still on its way, or held on purpose for its turn) */
   pending?: boolean
   failed?: string
+  /** under your message (SHEP-329): sent (in the agent's terminal, or its CLI's own queue, which takes it within
+   *  seconds), then read (the agent took it in), on your latest until the agent answers */
+  mark?: 'sent' | 'read'
 }
 
 /** the chat's messages with what you sent that it does not show yet, in the order things were sent */
-function shownOf(chat: Chat | undefined, key: string, outbox: ReturnType<typeof getState>['outbox']): Shown[] {
-  const rows: Shown[] = (chat?.messages ?? []).filter((m) => !(m.waiting && m.waitsFor === 'turn' && m.cid && outbox.some((o) => o.cid === m.cid))).map((msg) => ({ msg, pending: !!msg.waiting }))
+function shownOf(chat: Chat | undefined, key: string, outbox: Outgoing[]): Shown[] {
+  const rows: Shown[] = (chat?.messages ?? [])
+    .filter((m) => !(m.waiting && m.waitsFor === 'turn' && m.cid && outbox.some((o) => o.cid === m.cid)))
+    .map((msg) => (msg.waiting && msg.waitsFor === 'queue' ? { msg, mark: 'sent' } : { msg, pending: !!msg.waiting }))
   const mine = outbox.filter((o) => o.chat === key)
-  if (!mine.length) return rows
-  const at = placesOf(rows.map((r) => ({ id: r.msg.id, cid: r.msg.cid })), mine)
-  const add = mine.flatMap((o) => partsOf(o, chat).map((msg) => ({ at: at.get(o.cid) ?? rows.length, row: { msg, pending: o.state !== 'failed', failed: o.state === 'failed' ? (o.error ?? '') : undefined } as Shown })))
-  for (const a of add.sort((x, y) => y.at - x.at)) rows.splice(a.at, 0, a.row)
+  if (mine.length) {
+    const at = placesOf(rows.map((r) => ({ id: r.msg.id, cid: r.msg.cid })), mine)
+    const add = mine.flatMap((o) => partsOf(o, chat).map((msg) => ({ at: at.get(o.cid) ?? rows.length, row: { msg, ...showsAs(o) } })))
+    for (const a of add.sort((x, y) => y.at - x.at)) rows.splice(a.at, 0, a.row)
+  }
+  // your latest message, taken in and not answered yet: read
+  const last = rows[rows.length - 1]
+  if (last && readNow(last.msg) && !last.pending && !last.mark && last.failed === undefined) rows[rows.length - 1] = { ...last, mark: 'read' }
   return rows
 }
 
@@ -255,7 +266,7 @@ function Messages({ thread }: { thread: Thread }) {
     }
   }
   const stub: Chat = chat ?? { key: thread.chat, messages: [], cli: '' }
-  for (const { msg: m, pending, failed } of rows) {
+  for (const { msg: m, pending, failed, mark } of rows) {
     if (m.at) cardsUntil(m.at)
     const who = m.who === 'you' ? 'me' : 'a'
     const k = keyOf(m)
@@ -295,7 +306,7 @@ function Messages({ thread }: { thread: Thread }) {
     else if (m.file) out.push(<FileRow key={k} msg={m} chat={stub} gap={gap} />)
     else if (m.text) {
       lastRef = ''
-      out.push(<Bubble key={k} msg={m} chat={stub} thread={thread} gap={gap} pending={pending} failed={failed} />)
+      out.push(<Bubble key={k} msg={m} chat={stub} thread={thread} gap={gap} pending={pending} failed={failed} mark={mark} />)
     }
     for (const [i, p] of registry.messageParts.entries()) out.push(<p.View key={`${k}:p${i}`} msg={m} chat={stub} thread={thread} />)
     // In the fictional shop conversation the review follows the mock-up, before the later task messages.
