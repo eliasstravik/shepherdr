@@ -99,3 +99,38 @@ test('a finger that slides (scrolling the row) is not a hold', () => {
   run()
   expect(edits).toEqual([])
 })
+
+// A question with options: one bubble per option (up to five), the app filling in what the agent left out (SHEP-436).
+const asked = 'Which way should the cards go?\n\n1. **One card per provider** (recommended) — simplest\n2. One card for all, with tabs\n3. A table instead: denser\n4. Other'
+
+test('a question with options gets one bubble per option, made from the list when the agent gave too few, without "Other"', () => {
+  expect(suggestionOf(chat([{ text: asked, suggests: ['1'] }]), true)!.texts)
+    .toEqual(['1. One card per provider', '2. One card for all, with tabs', '3. A table instead'])
+  // none given: the list alone
+  expect(suggestionOf(chat([{ text: asked }]), true)!.texts).toHaveLength(3)
+  // the agent's own bubble for an option is kept, in the option's place; its others after
+  expect(suggestionOf(chat([{ text: asked, suggests: ['2, tabs please', 'status?'] }]), true)!.texts)
+    .toEqual(['1. One card per provider', '2, tabs please', '3. A table instead', 'status?'])
+  // enough of its own: those, up to five
+  expect(suggestionOf(chat([{ text: asked, suggests: ['1, per provider', '2, tabs', '3, a table', '4', '5', '6'] }]), true)!.texts)
+    .toEqual(['1, per provider', '2, tabs', '3, a table', '4', '5'])
+  // lettered, and at most five; a long option is cut at a word
+  const many = 'Pick one?\na) ' + 'Alpha beta gamma delta epsilon zeta eta theta iota' + '\nb) B\nc) C\nd) D\ne) E\nf) F'
+  const t = suggestionOf(chat([{ text: many }]), true)!.texts
+  expect(t).toEqual(['a. Alpha beta gamma delta epsilon zeta', 'b. B', 'c. C', 'd. D', 'e. E'])
+  expect(t.every((x) => x.length <= 40)).toBe(true)
+})
+
+test('an ordinary numbered list is no question: steps, a summary, or a question only after the list', () => {
+  const steps = 'Done. What changed:\n1. The row scrolls\n2. The cap is five\n3. Tests pass'
+  expect(suggestionOf(chat([{ text: steps, suggests: ['Merge it'] }]), true)!.texts).toEqual(['Merge it'])
+  expect(suggestionOf(chat([{ text: steps }]), true)).toBeNull()
+  expect(suggestionOf(chat([{ text: steps + '\n\nWant me to merge?', suggests: ['Yes'] }]), true)!.texts).toEqual(['Yes'])
+  // a question, a list, then more words: not the end of the message
+  expect(suggestionOf(chat([{ text: 'Which?\n1. A\n2. B\n\nI lean to A.' }]), true)).toBeNull()
+  // out of order, or a single item
+  expect(suggestionOf(chat([{ text: 'Which?\n2. A\n3. B' }]), true)).toBeNull()
+  expect(suggestionOf(chat([{ text: 'Which?\n1. A' }]), true)).toBeNull()
+  // an ordinary reply still shows at most three of the agent's own
+  expect(suggestionOf(chat([{ text: 'Merged.', suggests: ['a', 'b', 'c', 'd'] }]), true)!.texts).toEqual(['a', 'b', 'c'])
+})

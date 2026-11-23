@@ -882,11 +882,12 @@ export class Conversation {
     this.reactions.set(target.id, list);
   }
 
-  // The suggested replies a reply ends with: { suggests } for its item (at most 3, in order), else nothing. Taken once.
+  // The suggested replies a reply ends with: { suggests } for its item (at most 5, in order: one per option when it
+  // asks with options; the page shows at most 3 otherwise), else nothing. Taken once.
   takeSuggest() {
     const s = this.suggestion;
     this.suggestion = null;
-    return s?.length ? { suggests: s.slice(0, 3) } : {};
+    return s?.length ? { suggests: s.slice(0, 5) } : {};
   }
 
   // What the agent wrote, without its reaction and no-reply lines (those act instead).

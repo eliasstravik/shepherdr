@@ -594,7 +594,7 @@ export interface Message {
   byVoice?: boolean
   /** the agent's first suggested reply (an older page's single suggestion; suggests holds them all) */
   suggest?: string
-  /** the agent's suggested replies (its reply's last lines, best first, at most 3): bubbles above the box (SHEP-186) */
+  /** the agent's suggested replies (its reply's last lines, best first, at most 5): bubbles above the box (SHEP-186) */
   suggests?: string[]
   /** a live row: when it last changed; at keeps its place in the chat */
   updated?: number

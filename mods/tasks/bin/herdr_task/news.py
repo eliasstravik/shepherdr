@@ -596,7 +596,7 @@ def same_words(a, b):
 
 
 def suggested(k):
-    """The replies this agent's newest reply suggests (its <hc suggest="…"/> lines, up to three), or []: none, or the
+    """The replies this agent's newest reply suggests (its <hc suggest="…"/> lines, up to five), or []: none, or the
     person wrote since. k: its hc get (its session log from its herdr.resume label)."""
     try:
         log = json.loads(((k or {}).get("labels") or {}).get("herdr.resume") or "{}").get("log")
