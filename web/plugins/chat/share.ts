@@ -49,37 +49,41 @@ export async function takeShared(id: string, store: CacheStorage = caches, at: U
 
 /* ---------- the chat you had open last: a task's, or else your space's ---------- */
 
-const LAST = 'shepherdr.lastTask'
-let lastTask: string | null = null
+const LAST = 'shepherdr.lastChat'
+/** the chat on screen: its space, and the task open in it */
+type Last = { at: string; task: string | null }
+let last: Last | null = null
 try {
-  lastTask = JSON.parse(localStorage.getItem(LAST) ?? 'null')
+  last = JSON.parse(localStorage.getItem(LAST) ?? 'null')
 } catch {
   /* no storage here */
 }
-/** the task open when the app was last on screen: a share opens the app on ./?share=<id>, which has no task in it */
-const launchTask = lastTask
+/** the chat open when the app was last on screen: a share opens the app on ./?share=<id>, which names none */
+const launchLast = last
 
-/** keep which task is open, so a share later lands in it (the space is kept already, as shepherdr.at) */
+/** keep which chat is open (a space opened from a link too, which the app doesn't keep as its space), so a share lands
+ *  there later */
 export function watchLastChat() {
   return subscribe(() => {
     const ui = getState().ui
-    const t = ui.task && ui.pane === 'tasks' ? ui.task : null
-    if (t === lastTask) return
-    lastTask = t
+    if (!ui.at) return
+    const now = { at: ui.at, task: ui.task && ui.pane === 'tasks' ? ui.task : null }
+    if (last?.at === now.at && last.task === now.task) return
+    last = now
     try {
-      localStorage.setItem(LAST, JSON.stringify(t))
+      localStorage.setItem(LAST, JSON.stringify(now))
     } catch {
       /* a private window */
     }
   })
 }
 
-/** the box a share lands in: the task last open, while it has a chat, else the space on screen */
-export function landingChat(snap: Snapshot, at: string, task: string | null): { key: string; task?: string } | null {
+/** the box a share lands in: the task last open, while it has a chat, else the space last on screen */
+export function landingChat(snap: Snapshot, at: string, task: string | null): { key: string; place?: string; task?: string } | null {
   const t = taskOf(snap, task)
   if (t?.agent && !t.archived) return { key: taskChat(t), task: t.id }
   const p = placeOf(snap, at)
-  return p ? { key: p.chat } : null
+  return p ? { key: p.chat, place: p.id } : null
 }
 
 /* ---------- the chip that says where it goes ---------- */
@@ -141,10 +145,11 @@ export async function landLaunchShare(href = launchHref) {
   const put = () => {
     const { snap, ui } = getState()
     if (done || !snap) return done
-    const to = landingChat(snap, ui.at, launchTask)
+    const to = (launchLast && landingChat(snap, launchLast.at, launchLast.task)) || landingChat(snap, ui.at, null)
     if (!to) return false
     done = true
     if (to.task) openTask(to.task)
+    else if (to.place && to.place !== ui.at) go(to.place)
     land(to.key, s)
     return true
   }

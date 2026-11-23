@@ -133,10 +133,10 @@ test('only a POST to ./share is taken; the app opens with "share it again" when 
 
 test('it lands in the chat open last: the task that was open (with an agent), else the space on screen', () => {
   expect(landingChat(snap, 'p:shop', 'SHOP-3')).toEqual({ key: 'SHOP-3/worker', task: 'SHOP-3' })
-  expect(landingChat(snap, 'p:shop', null)).toEqual({ key: 'shop' })
+  expect(landingChat(snap, 'p:shop', null)).toEqual({ key: 'shop', place: 'p:shop' })
   // a task with no agent yet has no box: the space's
-  expect(landingChat(snap, 'p:shop', 'SHOP-4')).toEqual({ key: 'shop' })
-  expect(landingChat(snap, 'p:everything', 'gone')).toEqual({ key: 'all' })
+  expect(landingChat(snap, 'p:shop', 'SHOP-4')).toEqual({ key: 'shop', place: 'p:shop' })
+  expect(landingChat(snap, 'p:everything', 'gone')).toEqual({ key: 'all', place: 'p:everything' })
 })
 
 test("landed: the pictures are in that chat's box as thumbnails, the words after what was typed there", () => {
