@@ -75,6 +75,8 @@ export class Model {
   spaces: any[] = [];
   /** every task as last built (its folder, worktree and machine among them) */
   rows: any[] = [];
+  /** each task's whole prompt, by its key (rows keep only its start): its page's first message (SHEP-330) */
+  prompts = new Map<string, string>();
   /** Each space folder's git: { name (the repo), linked (a worktree), repo }, null:
    *  not a repo. Read once, then again each minute. */
   private git = new Map<string, { info: { name: string; linked: boolean; repo: string; branch?: string | null } | null; at: number }>();
@@ -277,7 +279,9 @@ export class Model {
     const lists = [null, ...this.machines].flatMap((m) => this.lists.get(m) ?? []);
 
     let settles = Infinity;
+    const prompts = new Map<string, string>();
     const rows = lists.flatMap((list) => list.tasks.map((task: any) => {
+      if (task.prompt) prompts.set(taskKey(list, task), String(task.prompt));
       const live = this.agentsOf(list, task);
       const p = place(list, task, { live, helpers: this.helpersOf(list, task, live) });
       if (p.settles) settles = Math.min(settles, p.settles);
@@ -314,6 +318,7 @@ export class Model {
       };
     }));
     this.rows = rows;
+    this.prompts = prompts;
     this.live.put("tasks", rows);
     // a task in its grace before Needs you (core GRACE_MS): built again the moment it ends, not up to 10 s later
     if (this.settleTimer) clearTimeout(this.settleTimer);

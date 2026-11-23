@@ -292,6 +292,7 @@ artifacts.on(() => model.rebuild());
 const taskLogs = new TaskLogs();
 taskLogs.onChange = () => model.rebuild();
 compat.taskLogs = taskLogs;
+compat.promptOf = (k) => model.prompts.get(k) ?? null;
 artifacts.start();
 const asks = new Asks();
 compat.asks = asks;

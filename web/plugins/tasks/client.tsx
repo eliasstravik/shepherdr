@@ -46,9 +46,10 @@ export function WorkTag({ snap, t, inRow }: { snap: Snapshot; t: Task; inRow?: b
 
 /* ---------- a task's menu ---------- */
 
-/** open a task: one not started yet opens its Start dialog instead of an empty thread */
+/** open a task: one not started yet opens its Start dialog instead of its thread; one whose agent is starting opens
+ *  its thread (its brief, and that it is starting: SHEP-330) */
 export function open(t: Task) {
-  if (tstate(t) === 'next') return startDialog(t)
+  if (tstate(t) === 'next' && !t.agent && !t.started) return startDialog(t)
   openTask(t.id)
 }
 

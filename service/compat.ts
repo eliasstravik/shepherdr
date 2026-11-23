@@ -224,7 +224,23 @@ export class Compat {
   /** A space's Assistant chat with no Assistant yet (SHEP-263): nothing said, and what its first message starts it
    *  on, as the window's chat says it on its model button before then (the choice kept for the space, else Shepherdr
    *  settings' Assistant, else the CLI's own), with its CLI. null: the key is no space's, or its Assistant runs. */
+  /** Each task's whole prompt by its key (service/model.ts prompts), set by main. */
+  promptOf: ((key: string) => string | null) | null = null;
+
+  /** The task whose chat this is ("<task id>/worker"), else null. */
+  private taskRowOf(key: string) { return key.endsWith("/worker") ? this.rows.find((r) => taskId(r) === key.slice(0, -7)) ?? null : null; }
+
+  /** A task's brief as the first message of its chat (SHEP-330, core/chat-view.js taskBrief). launch: the text its
+   *  agent was started with, as its log has it. */
+  briefMessage(r: Row, id: string, state: "waiting" | "sent" | "read", launch = "", at?: number): Message {
+    const tb = CV.taskBrief({ title: r.title, prompt: this.promptOf?.(r.key) ?? r.prompt ?? "", launch, from: "Assistant", state });
+    return { id, who: "you", ...(at ? { at } : {}), text: tb.text, taskBrief: tb } as Message;
+  }
+
   freshChat(key: string): Chat | null {
+    // a task whose agent hasn't started (queued, scheduled, to do, starting): its brief, waiting to go
+    const r = this.taskRowOf(key);
+    if (r) return { key, messages: [this.briefMessage(r, `brief:${taskId(r)}`, "waiting")], cli: "claude", working: false, top: true } as Chat;
     const s = this.spaceList.find((x) => placeKey(x.id) === key);
     if (!s || s.assistant || !(this.agents as any)?.fresh) return null;
     const f = (this.agents as any).fresh(s.machine ?? null, this.assistantPick?.(s.id) ?? null);
@@ -517,7 +533,11 @@ export class Compat {
     let mi = 0;
     // which artifact each publish made (core/chat-view.js resolveArtifacts, as the window's chat)
     const arts = resolveArtifacts(items, this.rawArts.filter((a: any) => (a.machine ?? null) === machine), String(reader.addr ?? "").split("/").pop());
-    const template = t?.template ?? null, task = Boolean(t?.labels?.["herdr.task"]);
+    // a task's chat: its brief is its first message (SHEP-330), read once its log has it (a finished task's log too,
+    // whose terminal is gone)
+    const taskRow = this.taskRowOf(key);
+    const template = t?.template ?? null, task = Boolean(t?.labels?.["herdr.task"]) || !!taskRow;
+    let briefShown = false;
     const mentionable = this.tasksFor(key);
     const own = this.chats.get(key);
     // what pages sent it, known again in the log: the page's id comes back on it
@@ -546,7 +566,10 @@ export class Compat {
       }
       // not typed by the person: a launch brief or another agent's message, as one quiet row
       const brief = x.kind === "user" && !first ? briefLabel(x, i, { start: reader.start, template, task, sender, ...peers, first: fi }) : null;
-      if (brief) {
+      if (brief === "Task brief" && taskRow) {
+        messages.push(this.briefMessage(taskRow, x.id, "read", String(x.text ?? ""), x.at));
+        briefShown = true;
+      } else if (brief) {
         const restart = /^<restart>/.test(x.text ?? "");
         messages.push({ id: x.id, who: "you", at: x.at, text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, brief: { label: brief, ...(restart ? { bare: true } : {}), ...(x.from ? { from: fromName(x, sender, peers) } : {}) } });
       } else if (x.kind === "user" && (x.text || x.paths?.length || x.images)) {
@@ -608,6 +631,10 @@ export class Compat {
       }
     }
     while (mi < made.length) messages.push(newsLine(made[mi++]));
+    // its agent started but its log doesn't have the brief yet (still opening, or not found): the brief, sent. Not when
+    // the log has a conversation that starts elsewhere (a later page, a restart, a handoff).
+    const said = items.some((x: any) => ["user", "agent", "tools", "sent", "ask", "artifact"].includes(x.kind));
+    if (taskRow && !briefShown && !said && !reader.start) messages.unshift(this.briefMessage(taskRow, `brief:${taskId(taskRow)}`, "sent"));
     const addr = this.chats.get(key);
     // what was typed while it works, waiting in its CLI's queue until it takes it (at its next step): shown at once,
     // quietly; one a page sent comes back with its id and files

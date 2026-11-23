@@ -4,7 +4,7 @@
 import { useSyncExternalStore, type FC, type ReactNode } from 'react'
 import { buildId } from '@shared/build.ts'
 import type { Action, Chat, Message, ReplyQuote, ServerEvent, Snapshot, Task, UpdateStatus } from '@shared/types.ts'
-import { everything, placeOf, taskOf, type Space } from '@shared/view.ts'
+import { everything, placeOf, taskChat, taskOf, type Space } from '@shared/view.ts'
 import type { IconName } from './icons.ts'
 import { OPEN_WITHIN, PONG_WITHIN, retryIn, SAY_LOST_AFTER } from './link.ts'
 import { expire, loadOutbox, prune, saveOutbox, settle, type Outgoing } from './outbox.ts'
@@ -628,13 +628,13 @@ export function watchAlso(key: string) {
   }
 }
 
-/** the chats on screen: the space's, and the open task's */
+/** the chats on screen: the space's, and the open task's (one with no agent yet too: its brief, SHEP-330) */
 export function visibleChats(ui: UI, snap: Snapshot): string[] {
   const keys = new Set<string>(extra)
   const p = placeOf(snap, ui.at)
   if (p) keys.add(p.chat)
   const t = taskOf(snap, ui.task)
-  if (t?.agent) keys.add(t.agent.chat)
+  if (t) keys.add(taskChat(t))
   return [...keys]
 }
 
