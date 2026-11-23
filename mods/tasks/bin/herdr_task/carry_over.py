@@ -23,6 +23,20 @@ and the machines it links to. `herdr-task carry-over` copies them, once each:
 The default session is only read, but for that one terminal and the agents moved. Safe to run again: what is done is
 left alone, and nothing in Shepherdr's session is replaced.
 shepherdr.node is not carried: each service writes its own every minute.
+
+SHEP-305: a record can still name a machine by its default-session id after the switch (3.2.0 left some so: the Mac
+then didn't know it keeps the secrets, and voice lost its key). Each run also looks at the records in Shepherdr's
+session, here and on each machine it links now (records_pass): one naming an id no machine has there, but that a
+machine had in the default session, is changed to that machine's id now (and dated now, so the services hand it on to
+a machine off at the time). One naming a real machine is never touched; one naming an id nobody knows is only said
+(doctor says it too, with the fix). The secrets themselves never move.
+Records checked for machine ids, and what they hold:
+  shepherdr.secrets, shepherdr.host, shepherdr.web   one id each ("id", and "by" who wrote it): repaired here
+  shepherdr          spaces, pins and groups by machine NAME (link names), not ids
+  herdr-app          pane, tab and space ids, no machine ids
+  shepherdr.node     this machine's id and its links' ids, rewritten by its service every minute
+  the settings file  machines by name ("local", link names); the vault's scopes: by name too
+  herdr-task's stores: the lead facts (home.py) hold core ids, refreshed each round and dropped after 10 minutes
 """
 
 import json
@@ -36,6 +50,12 @@ from .output import say
 SHARED = ("shepherdr", "shepherdr.secrets", "shepherdr.host", "shepherdr.web", "herdr-app")
 # These name one machine by its herdr-core id ("id"): without that machine's id in Shepherdr's session they'd name nobody.
 RECORDS = ("shepherdr.secrets", "shepherdr.host", "shepherdr.web")
+# What a record names, in the person's words (doctor's line), and the fix when no machine can be found for it.
+ABOUT = {"shepherdr.secrets": "which machine keeps the secrets", "shepherdr.host": "which machine serves the web app",
+         "shepherdr.web": "the web app's link"}
+FIX = {"shepherdr.secrets": "on the machine that has the secrets, run `shepherdr secrets move-to here --restore`",
+       "shepherdr.host": "on the machine that should serve the web app, run `shepherdr web serve-from here`",
+       "shepherdr.web": "the machine serving the web app writes it again by itself"}
 SPACES_DOC = "herdr-app"
 WAIT_S = 20
 
@@ -114,6 +134,44 @@ def id_map(old, new):
         if m.get("id") and n.get("id"):
             ids[m["id"]] = n["id"]
     return ids
+
+
+def records_pass(new, ids, dry):
+    """Each record (RECORDS) in Shepherdr's session, here and on each machine it links now: one naming an id that is no
+    machine's there, but was a machine's in the default session (ids), changed to that machine's id now (module doc).
+    [{name, machine?, id, state: repaired | would-repair | unknown | failed, to?, why?}]; a record naming a real
+    machine, or none, isn't listed. An unknown id is only said for this machine's own records: a linked machine may
+    name one it links and this one doesn't."""
+    real = {new.get("id")} | {m.get("id") for m in new["machines"].values()}
+    real.discard(None)
+    rows = []
+    for on in [None] + sorted(n for n, m in new["machines"].items() if m.get("state") == "connected"):
+        at = {"on": on} if on else {}
+        got = rpc(SESSION, [("doc.get", {"name": name, **at}) for name in RECORDS])
+        for name, d in zip(RECORDS, got):
+            v = None if failed(d) else d.get("value")
+            rid = v.get("id") if isinstance(v, dict) else None
+            if not isinstance(rid, str) or not rid or rid in real:
+                continue
+            row = {"name": name, **({"machine": on} if on else {}), "id": rid}
+            if rid not in ids:
+                if not on:
+                    rows.append({**row, "state": "unknown", "why": FIX[name]})
+                continue
+            if dry:
+                rows.append({**row, "state": "would-repair", "to": ids[rid]})
+                continue
+            value = translate(v, ids)
+            if isinstance(value.get("at"), (int, float)):
+                value["at"] = int(time.time() * 1000)
+            [done] = rpc(SESSION, [("doc.set", {"name": name, "value": value, "version": d.get("version") or 0, **at})])
+            if failed(done):
+                # written meanwhile (a conflict): a service wrote a newer one, which a later run looks at again
+                conflict = (done["error"].get("data") or {}).get("kind") == "conflict"
+                rows.append({**row, "state": "waiting" if conflict else "failed", "why": "written meanwhile: a later run looks again" if conflict else why(done)})
+                continue
+            rows.append({**row, "state": "repaired", "to": ids[rid]})
+    return rows
 
 
 def old_scheduler(dry):
@@ -326,16 +384,27 @@ def move_one(k, dry, have, me, kids, agent_running, status_word, read_record, re
     return {**base, "state": "moved", **({"to": to} if to else {})}
 
 
-def carry_over(dry=False, wait=WAIT_S, agents_only=False):
-    """Does it (module doc). {from, to, machines, documents, scheduler, agents, ok}. agents_only: only the agents
-    (doctor's look, with dry)."""
-    out = {"from": OLD_SESSION, "to": SESSION, "dry_run": bool(dry), "machines": [], "documents": [], "scheduler": "none", "agents": [], "ok": True}
+def carry_over(dry=False, wait=WAIT_S, agents_only=False, records_only=False):
+    """Does it (module doc). {from, to, machines, documents, records, scheduler, agents, ok}. agents_only: only the
+    agents, records_only: only the records (doctor's looks, with dry)."""
+    out = {"from": OLD_SESSION, "to": SESSION, "dry_run": bool(dry), "machines": [], "documents": [], "records": [], "scheduler": "none", "agents": [], "ok": True}
     if FOREIGN_SESSION:
         raise Fail(f"carry-over runs in Shepherdr's own session ({SESSION}); this is another (HC_SESSION).")
     if OLD_SESSION == SESSION:
         out["note"] = "Shepherdr's session is the default one here: nothing to carry over."
         return out
-    if not os.path.isfile(os.path.join(core_dir(OLD_SESSION), "core.json")):
+    has_old = os.path.isfile(os.path.join(core_dir(OLD_SESSION), "core.json"))
+    if records_only:
+        # doctor: the records in Shepherdr's session, mapped through the default session's ids when there is one
+        new = who(SESSION)
+        try:
+            ids = id_map(who(OLD_SESSION), new) if has_old else {}
+        except Fail:
+            ids = {}   # the default session doesn't answer: an old id then reads as unknown
+        out["records"] = records_pass(new, ids, dry)
+        out["ok"] = not any(x["state"] == "failed" for x in out["records"])
+        return out
+    if not has_old:
         out["note"] = f"herdr-core has no {OLD_SESSION} session here: nothing to carry over."
         return out
     if agents_only:
@@ -392,9 +461,11 @@ def carry_over(dry=False, wait=WAIT_S, agents_only=False):
             out["documents"].append({"name": SPACES_DOC, "machine": n, "state": "waiting", "why": "that machine isn't connected now"})
             continue
         out["documents"].append(copy(SPACES_DOC, n))
+    # SHEP-305: what was copied before (3.2.0) or handed around since may still name an old id: repaired here and there
+    out["records"] = records_pass(new, ids, dry)
     out["scheduler"] = old_scheduler(dry)
     out["agents"] = agents_pass(dry)
-    out["ok"] = not any(x.get("state") == "failed" for x in out["machines"] + out["documents"] + out["agents"]) and out["scheduler"] != "failed"
+    out["ok"] = not any(x.get("state") == "failed" for x in out["machines"] + out["documents"] + out["records"] + out["agents"]) and out["scheduler"] != "failed"
     return out
 
 
@@ -407,11 +478,18 @@ WORDS = {"moved": "moved into Shepherdr's session", "would-move": "would move in
 
 
 def cmd_carry_over(args):
-    out = carry_over(getattr(args, "dry_run", False), getattr(args, "wait", WAIT_S), getattr(args, "agents", False))
+    out = carry_over(getattr(args, "dry_run", False), getattr(args, "wait", WAIT_S), getattr(args, "agents", False), getattr(args, "records", False))
     lines = [out["note"]] if out.get("note") else []
     lines += [f"machine {m['name']}: {WORDS.get(m['state'], m['state'])}" + (f" ({m['error']})" if m.get("error") else "") for m in out["machines"]]
     lines += [f"{d['name']}{' on ' + d['machine'] if d.get('machine') else ''}: {WORDS.get(d['state'], d['state'])}" + (f" ({d['why']})" if d.get("why") else "")
               for d in out["documents"]]
+    for x in out["records"]:
+        where = f" on {x['machine']}" if x.get("machine") else ""
+        lines.append(f"{x['name']}{where} ({ABOUT[x['name']]}) " + {
+            "repaired": "named a machine by its id from before 3.2: changed to its id now",
+            "would-repair": "names a machine by its id from before 3.2: would be changed to its id now",
+            "unknown": "names a machine no machine here knows: " + FIX[x["name"]],
+            "waiting": "was written meanwhile: a later run looks again"}.get(x["state"], "couldn't be changed") + (f" ({x['why']})" if x["state"] == "failed" else ""))
     for x in out["agents"]:
         state = x["state"]
         words = {"waiting": "stays in herdr-core's default session for now", "kept": "stays in herdr-core's default session"}.get(state) or WORDS.get(state, state)

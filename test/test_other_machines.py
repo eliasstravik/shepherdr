@@ -608,6 +608,71 @@ class CarryOver(unittest.TestCase):
         self.assertIn("herdr-task resume", row["why"])
         self.assertFalse(out["ok"])
 
+    def test_shep_305_a_carried_secrets_record_names_the_new_ids_only(self):
+        self.old("shepherdr.secrets", {"id": "old-here", "at": 5, "by": "old-here", "auto": True})
+        self.old("shepherdr.host", {"id": "old-here", "at": 6})
+        self.old("shepherdr.web", {"link": "https://x.test/shepherdr", "id": "old-here"})
+        out = self.co.carry_over()
+        self.assertEqual(out["records"], [], "fresh copies name the new ids already: nothing to repair")
+        self.assertEqual(self.new("shepherdr.secrets"), {"id": "new-here", "at": 5, "by": "new-here", "auto": True})
+        self.assertEqual((self.new("shepherdr.host")["id"], self.new("shepherdr.web")["id"]), ("new-here", "new-here"))
+        stale = {"old-here", "old-mini"}
+        for docs in (self.cores[self.co.SESSION]["docs"], self.cores[self.co.SESSION]["there"]["mini"]):
+            self.assertFalse(stale & set(json.dumps(docs).replace('"', " ").split()), docs)
+
+    def test_shep_305_a_stale_record_from_3_2_0_is_repaired_here_and_on_linked_machines(self):
+        # 3.2.0 left Shepherdr's session naming the default session's ids, here and on mini
+        new = self.cores[self.co.SESSION]
+        new["docs"]["shepherdr.secrets"] = {"value": {"id": "old-here", "at": 5, "by": "old-here"}, "version": 4}
+        new["docs"]["shepherdr.host"] = {"value": {"id": "old-mini", "at": 6}, "version": 2}
+        new["there"]["mini"]["shepherdr.secrets"] = {"value": {"id": "old-here", "at": 5}, "version": 1}
+        # a record naming a real machine is never touched, even on a linked one
+        new["there"]["mini"]["shepherdr.host"] = {"value": {"id": "new-mini", "at": 9}, "version": 1}
+        self.old("shepherdr.secrets", {"id": "old-here", "at": 5})
+        dry = self.co.carry_over(dry=True)
+        self.assertEqual({(x["name"], x.get("machine"), x["state"]) for x in dry["records"]},
+                         {("shepherdr.secrets", None, "would-repair"), ("shepherdr.host", None, "would-repair"), ("shepherdr.secrets", "mini", "would-repair")})
+        self.assertEqual(self.sets, [], "a dry run writes nothing")
+        out = self.co.carry_over()
+        self.assertTrue(out["ok"])
+        self.assertEqual(self.states(out)[("shepherdr.secrets", None)], "kept", "the copy still replaces nothing")
+        self.assertEqual({(x["name"], x.get("machine"), x["state"], x["to"]) for x in out["records"]},
+                         {("shepherdr.secrets", None, "repaired", "new-here"), ("shepherdr.host", None, "repaired", "new-mini"),
+                          ("shepherdr.secrets", "mini", "repaired", "new-here")})
+        mine = self.new("shepherdr.secrets")
+        self.assertEqual((mine["id"], mine["by"]), ("new-here", "new-here"))
+        self.assertGreater(mine["at"], 5, "dated now: the services hand it on to a machine that was off")
+        self.assertEqual(self.new("shepherdr.secrets", on="mini")["id"], "new-here")
+        self.assertEqual(self.new("shepherdr.host")["id"], "new-mini")
+        self.assertEqual(self.new("shepherdr.host", on="mini"), {"id": "new-mini", "at": 9})
+        self.assertTrue(all(s == self.co.SESSION for s, _, _ in self.sets), "the default session is only read")
+        # safe to run again: nothing left to do
+        n = len(self.sets)
+        self.assertEqual(self.co.carry_over()["records"], [])
+        self.assertEqual(len(self.sets), n)
+
+    def test_shep_305_an_id_nobody_knows_is_said_never_changed(self):
+        new = self.cores[self.co.SESSION]
+        new["docs"]["shepherdr.secrets"] = {"value": {"id": "gone-box", "at": 5}, "version": 1}
+        new["there"]["mini"]["shepherdr.secrets"] = {"value": {"id": "a-box-mini-links", "at": 5}, "version": 1}
+        out = self.co.carry_over()
+        [row] = out["records"]
+        self.assertEqual((row["name"], row.get("machine"), row["state"]), ("shepherdr.secrets", None, "unknown"))
+        self.assertIn("shepherdr secrets move-to here --restore", row["why"])
+        self.assertTrue(out["ok"])
+        self.assertEqual(self.new("shepherdr.secrets"), {"id": "gone-box", "at": 5})
+        self.assertEqual(self.sets, [])
+
+    def test_shep_305_records_only_is_doctors_look_and_needs_no_default_session(self):
+        new = self.cores[self.co.SESSION]
+        new["docs"]["shepherdr.secrets"] = {"value": {"id": "old-here", "at": 5}, "version": 1}
+        out = self.co.carry_over(dry=True, records_only=True)
+        self.assertEqual(([x["state"] for x in out["records"]], out["documents"], out["agents"]), (["would-repair"], [], []))
+        os.remove(os.path.join(self.dir, "herdr-core", self.co.OLD_SESSION, "core.json"))
+        [row] = self.co.carry_over(dry=True, records_only=True)["records"]
+        self.assertEqual(row["state"], "unknown", "without the default session the old id can't be told")
+        self.assertEqual(self.sets, [])
+
     def test_agents_only_is_doctors_read_only_look(self):
         self.agent("t1", {"herdr.task": "shop#3"})
         out = self.co.carry_over(dry=True, agents_only=True)
@@ -649,16 +714,16 @@ class InstallerCarriesOver(unittest.TestCase):
         return ran, rec, r.notes
 
     def test_it_runs_the_installed_herdr_task_once_the_files_are_in(self):
-        ran, rec, notes = self.go({"ok": True, "machines": [{"name": "mini", "state": "added"}], "documents": [{"name": "shepherdr", "state": "copied"}], "scheduler": "removed"})
+        ran, rec, notes = self.go({"ok": True, "machines": [{"name": "mini", "state": "added"}], "documents": [{"name": "shepherdr", "state": "copied"}], "records": [], "scheduler": "removed"})
         [(argv, env)] = ran
         self.assertEqual(argv[1:], [os.path.join(os.path.dirname(argv[1]), "herdr-task"), "carry-over", "--json"])
         self.assertTrue(argv[1].endswith(".local/share/shepherdr/mods/tasks/bin/herdr-task"), argv[1])
         self.assertNotIn("HC_SESSION", env)
-        self.assertEqual((rec, notes), ({"carry_over": "done", "carry_over_agents": "done"}, []))
+        self.assertEqual((rec, notes), ({"carry_over": "done", "carry_over_agents": "done", "carry_over_records": "done"}, []))
 
     def test_what_waits_is_a_note_and_the_next_update_tries_again(self):
         _, rec, notes = self.go({"ok": True, "machines": [], "documents": [{"name": "shepherdr.host", "state": "waiting", "why": "it names mini"}], "scheduler": "none"})
-        self.assertEqual(rec, {"carry_over": "waiting", "carry_over_agents": "done"})
+        self.assertEqual(rec, {"carry_over": "waiting", "carry_over_agents": "done", "carry_over_records": "waiting"})
         self.assertIn("shepherdr.host (it names mini)", notes[0])
         for bad in (None, OSError("no python")):
             _, rec, notes = self.go(bad, code=1)
@@ -675,13 +740,13 @@ class InstallerCarriesOver(unittest.TestCase):
         body = text[text.index("def cmd_install("):text.index("# ---- doctor")]
         self.assertLess(body.index("move_data(r, a, home)"), body.index("carry_over_session(r, rec, home)"))
         self.assertLess(body.index("carry_over_session(r, rec, home)"), body.index("install_service(r, rec, home)"))
-        self.assertIn('if switching or rec.get("carry_over") == "waiting" or rec.get("carry_over_agents") != "done":', body)
+        self.assertIn('if switching or rec.get("carry_over") == "waiting" or rec.get("carry_over_agents") != "done" or rec.get("carry_over_records") != "done":', body)
 
     def test_agents_left_in_the_default_session_are_said_and_the_next_update_looks_again(self):
         _, rec, notes = self.go({"ok": True, "machines": [], "documents": [], "scheduler": "none", "agents": [
             {"name": "the Assistant of space sp1", "address": "t1", "state": "moved", "to": "t7"},
             {"name": "task #3 (shop)", "address": "t2", "state": "waiting", "why": "it's at work now"}]})
-        self.assertEqual(rec, {"carry_over": "done", "carry_over_agents": "waiting"})
+        self.assertEqual(rec, {"carry_over": "done", "carry_over_agents": "waiting", "carry_over_records": "waiting"})
         self.assertEqual(notes, ["task #3 (shop) (t2) still runs in herdr-core's default session, outside Shepherdr: it's at work now"])
 
     def test_an_agent_running_the_update_in_the_default_session_is_named_to_herdr_task(self):
@@ -720,6 +785,47 @@ class InstallerCarriesOver(unittest.TestCase):
             text = f.read()
         doctor = text[text.index("def cmd_doctor("):text.index("# ---- uninstall")]
         self.assertIn("bad += agents_bad", doctor, "an agent left behind isn't whole")
+
+
+    def test_shep_305_doctor_flags_a_record_naming_no_machine(self):
+        root = scratch(self)
+        helper = os.path.join(root, self.sh.SHARE, "mods", "tasks", "bin", "herdr-task")
+        os.makedirs(os.path.dirname(helper))
+        open(helper, "w").close()
+        ran = []
+        answer = {"records": [{"name": "shepherdr.secrets", "id": "0123456789abcdef", "state": "unknown"},
+                              {"name": "shepherdr.host", "id": "old-mini", "state": "would-repair", "to": "new-mini"},
+                              {"name": "shepherdr.web", "id": "x", "state": "unknown"}]}
+
+        def run(argv, **k):
+            ran.append(argv)
+            return subprocess.CompletedProcess(argv, 0, json.dumps(answer), "")
+        from unittest import mock
+        with mock.patch.object(self.sh.shutil, "which", lambda n: "/x/hc"):
+            lines = self.sh.records_naming_nobody(root, run=run)
+            self.assertEqual(ran[0][1:], [helper, "carry-over", "--records", "--dry-run", "--json"])
+            self.assertEqual(len(lines), 2, "the web link is the host's own: not flagged")
+            self.assertIn("which machine keeps the secrets names a machine none here knows", lines[0])
+            self.assertIn("`shepherdr secrets move-to here --restore`", lines[0])
+            self.assertIn("serves the web app still names a machine by its id from before 3.2", lines[1])
+            self.assertIn("`herdr-task carry-over`", lines[1])
+            answer = {"records": []}
+            self.assertEqual(self.sh.records_naming_nobody(root, run=run), [])
+        with open(os.path.join(ROOT, "bin", "shepherdr")) as f:
+            text = f.read()
+        doctor = text[text.index("def cmd_doctor("):text.index("# ---- uninstall")]
+        self.assertIn("bad += records_naming_nobody(root)", doctor, "a record naming no machine isn't whole")
+
+    def test_shep_305_the_update_says_what_it_repaired_and_what_it_cannot(self):
+        _, rec, notes = self.go({"ok": True, "machines": [], "documents": [], "scheduler": "none", "records": [
+            {"name": "shepherdr.secrets", "id": "old", "state": "repaired", "to": "new"},
+            {"name": "shepherdr.host", "id": "gone", "state": "unknown"}]})
+        self.assertEqual(rec, {"carry_over": "done", "carry_over_agents": "done", "carry_over_records": "done"})
+        self.assertEqual(len(notes), 1)
+        self.assertIn("shepherdr web serve-from here", notes[0])
+        _, rec, _ = self.go({"ok": True, "machines": [], "documents": [], "scheduler": "none", "records": [
+            {"name": "shepherdr.secrets", "id": "old", "state": "waiting", "why": "written meanwhile"}]})
+        self.assertEqual(rec["carry_over_records"], "waiting", "the next update looks again")
 
 
 class TaskSpaceByRepo(unittest.TestCase):
