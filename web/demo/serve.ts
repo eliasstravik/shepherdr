@@ -59,7 +59,7 @@ function action(a: Record<string, any>): unknown {
       if (a.text) c.messages.push({ id, who: 'you', at, text: a.text, cid: a.cid } as Message)
       for (const [i, path] of paths.entries()) c.messages.push({ id: `${id}:f${i}`, who: 'you', at, cid: a.cid, file: { name: path.split('/').pop() ?? 'image', path } } as Message)
       pushChat(a.chat)
-    }, 1500)
+    }, 700)
     const text = String(a.text ?? '').trim()
     const from = state.normal.places.find((p) => p.chat === a.chat)?.id ?? EV
     const place = from === EV ? state.normal.places.find((p) => p.name === 'shop')?.id ?? EV : from
