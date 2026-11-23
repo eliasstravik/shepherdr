@@ -274,6 +274,8 @@ export function spaceMenu(anchor: Element, placeId: string) {
   const rows: MenuRow[] = [
     ...first,
     { icon: 'gear', label: 'Settings', line, run: () => openSettings(p.id) },
+    // SHEP-335: a space on a repo opens that repo's task settings
+    ...((r) => (p.git && r ? [{ icon: 'folder' as const, label: 'Repo settings', run: () => openSettings('all', 'Tasks', r.key) }] : []))(snap.config?.repos?.find((x) => x.spaces.includes(p.id))),
     { icon: 'pen', label: 'Rename', run: () => renameDialog(p.name, (name) => tryAct({ type: 'rename', id: p.id, name })) },
     {
       icon: 'folder',

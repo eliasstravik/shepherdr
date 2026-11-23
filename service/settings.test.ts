@@ -28,25 +28,28 @@ test("the Tasks rows say the window's words, and a change keeps the rest of the 
 test("a space's own values go in its layer with its folder, and Reset drops them", () => {
   const s = new Settings();
   s.start();
-  const scope = { id: "sp2", name: "web", machine: null, folder: "/repo" };
+  const scope = { id: "sp2", name: "web", machine: null, folder: "/repo", repo: "/repo" };
   s.set("tasks.merge", "Right away", "sp2", scope);
   s.set("role.worker", JSON.stringify({ agent: "codex", model: "gpt-5", effort: "high" }), "sp2", scope);
   let f = JSON.parse(readFileSync(file, "utf8"));
-  expect(f.spaces.sp2).toEqual({ folder: "/repo", name: "web", tasks: { merge: "auto" }, worker: { agent: "codex", model: "gpt-5", effort: "high", fast: false, perm: null } });
+  // SHEP-335: a task's settings set from a space are the repo's it sits on; the space keeps none of them
+  expect(f.repos["/repo"]).toEqual({ tasks: { merge: "auto" }, worker: { agent: "codex", model: "gpt-5", effort: "high", fast: false, perm: null } });
+  expect(f.spaces.sp2).toBeUndefined();
   const tasks = s.sections(null, [scope]).find((x) => x.name === "Tasks" && x.level === "sp2")!;
   // as the window's: "Set for this space · Reset", Reset back to Everywhere's; Base branch only in a space's own
   expect(tasks.rows.find((r) => r.key === "tasks.merge")).toMatchObject({ value: "Right away", inherits: { from: "Everywhere" } });
   expect(tasks.rows.find((r) => r.key === "tasks.base")).toMatchObject({ label: "Base branch", text: true, placeholder: "Its current branch" });
   s.set("tasks.merge", null, "sp2", scope);
   f = JSON.parse(readFileSync(file, "utf8"));
-  expect(f.spaces.sp2.tasks).toBeUndefined();
+  expect(f.repos["/repo"].tasks).toBeUndefined();
   expect(() => s.set("tasks.merge", "Right away", "sp3", null)).toThrow();
+  expect(() => s.set("tasks.merge", "Right away", "sp3", { id: "sp3", name: "x", machine: null })).toThrow("isn't in a repo");
 });
 
 test("Before the agent starts (#1197): a space's own command, in a monospace box before the notes", () => {
   const s = new Settings();
   s.start();
-  const scope = { id: "sp7", name: "pi", machine: null, folder: "/pi" };
+  const scope = { id: "sp7", name: "pi", machine: null, folder: "/pi", repo: "/pi" };
   const rows = () => s.sections(null, [scope]).find((x) => x.name === "Tasks" && x.level === "sp7")!.rows;
   const row = () => rows().find((r) => r.key === "tasks.setup")!;
   expect(row()).toMatchObject({ label: "Before the agent starts", multiline: true, mono: true, value: "", placeholder: "bun install" });
@@ -54,10 +57,10 @@ test("Before the agent starts (#1197): a space's own command, in a monospace box
   const keys = rows().map((r) => r.key);
   expect(keys.indexOf("tasks.setup")).toBe(keys.indexOf("tasks.start_notes") - 1);
   s.set("tasks.setup", "ln -s ../../node_modules .", "sp7", scope);
-  expect(JSON.parse(readFileSync(file, "utf8")).spaces.sp7.tasks.setup).toBe("ln -s ../../node_modules .");
+  expect(JSON.parse(readFileSync(file, "utf8")).repos["/pi"].tasks.setup).toBe("ln -s ../../node_modules .");
   expect(row()).toMatchObject({ value: "ln -s ../../node_modules ." });
   s.set("tasks.setup", null, "sp7", scope);
-  expect(JSON.parse(readFileSync(file, "utf8")).spaces.sp7.tasks).toBeUndefined();
+  expect(JSON.parse(readFileSync(file, "utf8")).repos["/pi"].tasks).toBeUndefined();
   // the notes keep their keys
   s.set("tasks.start_notes", "Read the README", "all");
   expect(JSON.parse(readFileSync(file, "utf8")).everywhere.tasks.start_notes).toBe("Read the README");
@@ -67,20 +70,20 @@ test("Before the agent starts (#1197): a space's own command, in a monospace box
 test("Branch names (#570): Everywhere's or a space's own pattern, checked before it's kept", () => {
   const s = new Settings();
   s.start();
-  const scope = { id: "sp6", name: "api", machine: null, folder: "/api" };
+  const scope = { id: "sp6", name: "api", machine: null, folder: "/api", repo: "/api" };
   const row = (level: string) => s.sections(null, [scope]).find((x) => x.name === "Tasks" && x.level === level)!.rows.find((r) => r.key === "tasks.branch")!;
   expect(row("all")).toMatchObject({ label: "Branch names", text: true, value: "", placeholder: "task/{slug}" });
   s.set("tasks.branch", "feat/{key}-{slug}", "all");
   s.set("tasks.branch", " {key} ", "sp6", scope);
   const f = JSON.parse(readFileSync(file, "utf8"));
   expect(f.everywhere.tasks.branch).toBe("feat/{key}-{slug}");
-  expect(f.spaces.sp6.tasks.branch).toBe("{key}");
+  expect(f.repos["/api"].tasks.branch).toBe("{key}");
   expect(row("sp6")).toMatchObject({ value: "{key}", inherits: { value: "feat/{key}-{slug}", from: "Everywhere" } });
   // SHEP-322: {slug} alone is enough (a name taken gets -2); nothing of the task in it is refused
   expect(() => s.set("tasks.branch", "feat/x", "all")).toThrow("Put {slug} in it");
   expect(() => s.set("tasks.branch", "a b/{n}", "all")).toThrow("isn't a name git allows");
   s.set("tasks.branch", "", "sp6", scope);
-  expect(JSON.parse(readFileSync(file, "utf8")).spaces.sp6.tasks).toBeUndefined();
+  expect(JSON.parse(readFileSync(file, "utf8")).repos["/api"].tasks).toBeUndefined();
 });
 
 test("3.2: Autopilot, Tasks at once and the add-ons' switches are gone; what a file still keeps of them is ignored, never an error", () => {
@@ -90,7 +93,7 @@ test("3.2: Autopilot, Tasks at once and the add-ons' switches are gone; what a f
   writeFileSync(file, JSON.stringify(f));
   const s = new Settings();
   s.start();
-  const web = { id: "sp4", name: "web", machine: null, folder: "/web" };
+  const web = { id: "sp4", name: "web", machine: null, folder: "/web", repo: "/web" };
   const all = s.sections(null, [web], [], "box");
   expect([...new Set(all.map((x) => x.name))]).toEqual(["Agents", "Tasks", "Machines", "Web"]);
   expect(all.flatMap((x) => x.rows).some((r) => /^(autopilot|window|addon|notify)|max_running/.test(r.key))).toBe(false);
@@ -100,7 +103,8 @@ test("3.2: Autopilot, Tasks at once and the add-ons' switches are gone; what a f
   s.set("tasks.proof", "On", "sp4", web);
   const after = JSON.parse(readFileSync(file, "utf8"));
   expect(after.everywhere.autopilot).toEqual({ every: "every 60 minutes", events: ["ready"] });
-  expect(after.spaces.sp4).toMatchObject({ autopilot: { direction: "Launch the shop" }, tasks: { proof: true } });
+  expect(after.spaces.sp4).toMatchObject({ autopilot: { direction: "Launch the shop" } });
+  expect(after.repos["/web"]).toEqual({ tasks: { proof: true } });
 });
 
 test("machine limits: percents on the page, the file's own units, and this computer as local", () => {
@@ -120,12 +124,17 @@ test("another machine's space keeps its machine/id key, and its machine is sent 
   const { pushBody } = await import("./settings.ts");
   const s = new Settings();
   s.start();
-  s.set("tasks.merge", "Right away", "vm/sp9", { id: "vm/sp9", name: "api", machine: "vm", folder: "/srv/api" });
+  s.set("agents.reactions", "off", "vm/sp9", { id: "vm/sp9", name: "api", machine: "vm", folder: "/srv/api", repo: "vm:/srv/api" });
+  s.set("tasks.merge", "Right away", "vm/sp9", { id: "vm/sp9", name: "api", machine: "vm", folder: "/srv/api", repo: "vm:/srv/api" });
   const f = JSON.parse(readFileSync(file, "utf8"));
-  expect(f.spaces["vm/sp9"]).toMatchObject({ machine: "vm", folder: "/srv/api", tasks: { merge: "auto" } });
+  expect(f.spaces["vm/sp9"]).toMatchObject({ machine: "vm", folder: "/srv/api", agents: { reactions: false } });
+  // SHEP-335: its repo's task settings as <machine>:<folder>, sent to that machine by the bare folder
+  expect(f.repos["vm:/srv/api"]).toEqual({ tasks: { merge: "auto" } });
   const sent = JSON.parse(pushBody(f, "vm"));
-  expect(sent).toMatchObject({ pushed_from: "herdr-app", here: "vm", spaces: { sp9: { folder: "/srv/api" } } });
+  expect(sent).toMatchObject({ pushed_from: "herdr-app", here: "vm", spaces: { sp9: { folder: "/srv/api" } }, repos: { "/srv/api": { tasks: { merge: "auto" } } } });
   expect(Object.keys(sent.spaces)).toEqual(["sp9"]);
+  expect(Object.keys(sent.repos)).toEqual(["/srv/api"]);
+  expect(JSON.parse(pushBody(f, "other")).repos).toBeUndefined();
 });
 
 test("a machine that isn't connected, a prototype key, or an unreadable file is refused, and nothing is written", () => {
@@ -245,7 +254,7 @@ test("Feedback offers and its repo", () => {
 test("Extra flags (#1222): a box per CLI, Everywhere's or a space's own, kept as herdr-task's list", () => {
   const s = new Settings();
   s.start();
-  const scope = { id: "sp7", name: "api", machine: null, folder: "/api" };
+  const scope = { id: "sp7", name: "api", machine: null, folder: "/api", repo: "/api" };
   const row = (level: string, cli: string) => s.sections(null, [scope]).find((x) => x.name === "Tasks" && x.level === level)!.rows.find((r) => r.key === `tasks.${cli}_flags`)!;
   expect(row("all", "claude")).toMatchObject({ label: "Claude Code flags", text: true, value: "", placeholder: "--advisor opus" });
   expect(row("all", "codex")).toMatchObject({ label: "Codex flags", text: true, value: "" });
@@ -253,25 +262,25 @@ test("Extra flags (#1222): a box per CLI, Everywhere's or a space's own, kept as
   s.set("tasks.claude_flags", "[]", "sp7", scope);
   const f = JSON.parse(readFileSync(file, "utf8"));
   expect(f.everywhere.tasks.claude_flags).toEqual(["--advisor=opus", "--name=a b"]);
-  expect(f.spaces.sp7.tasks.claude_flags).toEqual([]);
+  expect(f.repos["/api"].tasks.claude_flags).toEqual([]);
   expect(row("all", "claude").value).toBe("--advisor=opus '--name=a b'");
   expect(row("sp7", "claude")).toMatchObject({ value: "none", inherits: { value: "--advisor=opus '--name=a b'", from: "Everywhere" } });
   expect(() => s.set("tasks.codex_flags", JSON.stringify(["a prompt"]), "all")).toThrow("Not a list of flags.");
   s.set("tasks.claude_flags", null, "sp7", scope);
-  expect(JSON.parse(readFileSync(file, "utf8")).spaces.sp7.tasks).toBeUndefined();
+  expect(JSON.parse(readFileSync(file, "utf8")).repos["/api"].tasks).toBeUndefined();
 });
 
 test("SHEP-275: When a task is accepted is a command box under the notes, Everywhere's or a space's own", () => {
   const s = new Settings();
   s.start();
-  const scope = { id: "sp3", name: "api", machine: null, folder: "/api" };
+  const scope = { id: "sp3", name: "api", machine: null, folder: "/api", repo: "/api" };
   s.set("tasks.accept_command", 'dropdb --if-exists "test_$HERDR_TASK_ID"', "sp3", scope);
   const f = JSON.parse(readFileSync(file, "utf8"));
-  expect(f.spaces.sp3.tasks).toEqual({ accept_command: 'dropdb --if-exists "test_$HERDR_TASK_ID"' });
+  expect(f.repos["/api"].tasks).toEqual({ accept_command: 'dropdb --if-exists "test_$HERDR_TASK_ID"' });
   const tasks = s.sections(null, [scope]).find((x) => x.name === "Tasks" && x.level === "sp3")!;
   const keys = tasks.rows.map((r) => r.key);
   expect(keys.slice(-3)).toEqual(["tasks.start_notes", "tasks.finish_notes", "tasks.accept_command"]);
   expect(tasks.rows.at(-1)).toMatchObject({ label: "When a task is accepted", multiline: true, mono: true, value: 'dropdb --if-exists "test_$HERDR_TASK_ID"' });
   s.set("tasks.accept_command", null, "sp3", scope);
-  expect(JSON.parse(readFileSync(file, "utf8")).spaces.sp3.tasks?.accept_command).toBeUndefined();
+  expect(JSON.parse(readFileSync(file, "utf8")).repos["/api"].tasks?.accept_command).toBeUndefined();
 });

@@ -1464,10 +1464,29 @@ export interface LevelConfig {
   proof: boolean
 }
 
+export interface RepoConfig extends LevelConfig {
+  /** its key in the settings file's repos: its folder here, "<machine>:<folder>" on another machine */
+  key: string
+  folder: string
+  /** its machine; none: the one serving the app */
+  machine: string | null
+  /** its folder's last part */
+  name: string
+  /** the spaces sitting on it */
+  spaces: string[]
+  /** how many tasks work in it */
+  tasks: number
+  /** the rows it sets itself ("agents.Tasks", "merge", …): the rest are Everywhere's */
+  own: string[]
+}
+
 export interface Config {
   all: LevelConfig
   /** a space's own values, and which of them it set itself ("agents.Chats", "merge", …): the rest are Everything's */
   spaces: Record<string, LevelConfig & { own: string[] }>
+  /** SHEP-335: the repos and folders tasks work in (or a space sits on), per machine, with their task settings (what
+   *  shapes a task: Tasks and Reviews run on, Review, Merge, Proof), and which of them each set itself */
+  repos?: RepoConfig[]
   /** secrets by name (never their values): for every space, or one space */
   secrets: { name: string; scope: string; at?: number }[]
   /** every feature is a plugin: the optional ones and whether each is on */

@@ -6,7 +6,8 @@
 import type { Automation, Catalog, CatalogAgent, Config, LevelConfig, Place, Snapshot, Task, AgentPick } from "../web/shared/types.ts";
 import { HOME } from "./paths.ts";
 import { everythingOf, sameFolder } from "../core/spaces.js";
-import { readSettings, writeSettings } from "./settings.ts";
+import { readSettings, repoLayer, REPO_SECTIONS, writeSettings } from "./settings.ts";
+import { repoKey, repoOf } from "../core/host.js";
 
 /** the plugins: Tasks, Artifacts, Search and Alerts are always on; the rest each have a switch */
 export const PLUGINS: { id: string; name: string; always?: boolean }[] = [
@@ -57,20 +58,64 @@ function levelOf(layer: any, base: LevelConfig): { lv: LevelConfig; own: string[
   };
 }
 
-export function configOf(input: { defaults: Defaults; spaces: string[]; secrets: { name: string; space: string | null }[]; plans: Config["plans"]; addMachine?: string; desktops?: string[] }): Config {
+/** SHEP-335: a repo (or plain folder) tasks work in, on its machine: its key in settings.json "repos" (core/host.js
+ *  repoKey), the spaces sitting on it and how many tasks work there. */
+export type RepoInfo = { key: string; folder: string; machine: string | null; name: string; spaces: string[]; tasks: number };
+const only = (layer: any, keep: (k: string) => boolean) => Object.fromEntries(Object.entries(layer && typeof layer === "object" ? layer : {}).filter(([k]) => keep(k)));
+/** A repo's own task settings: its "repos" entry, else (a file not moved yet) the task settings of a space on it. */
+export function repoOwn(f: any, r: { key: string; spaces: string[] }): any {
+  if (f.repos?.[r.key]) return only(f.repos[r.key], (k) => REPO_SECTIONS.includes(k));
+  const sp = r.spaces.map((id) => f.spaces?.[id]).find((l) => l && REPO_SECTIONS.some((k) => k in l));
+  return only(sp, (k) => REPO_SECTIONS.includes(k));
+}
+
+/** The folder a space's tasks are kept by: its repo's main checkout (from its git's common folder), else its own. */
+const repoFolder = (sp: { folder?: string; git?: { repo?: string } | null }) => {
+  const repo = sp.git?.repo ?? "";
+  return repo.endsWith("/.git") ? repo.slice(0, -5) : sp.folder ?? "";
+};
+/** A space's repo key (settings.json "repos"), or null when it has no folder. machine: the space's, null here. */
+export const spaceRepo = (sp: { folder?: string; machine?: string | null; git?: { repo?: string } | null } | null | undefined) =>
+  sp?.folder ? repoKey(sp.machine ?? null, repoFolder(sp)) : null;
+
+/** The repos and folders tasks work in or a space sits on, per machine (spaces: Shepherdr's, their machine null here; tasks:
+ *  the snapshot's, `on` their machine by name; host: this machine's name). A space in a repo's subfolder or worktree is
+ *  on the repo's main checkout, as herdr-task keys a folder's tasks. Most tasks first. */
+export function reposOf(spaces: { id: string; folder?: string; machine?: string | null; git?: { repo?: string } | null; archived?: boolean }[],
+  tasks: { on?: string; taskFolder?: string }[], host: string | null): RepoInfo[] {
+  const out = new Map<string, RepoInfo>();
+  const at = (machine: string | null, folder: string) => {
+    const key = repoKey(machine, folder);
+    let r = out.get(key);
+    if (!r) out.set(key, (r = { key, folder, machine, name: folder.split("/").filter(Boolean).pop() ?? "/", spaces: [], tasks: 0 }));
+    return r;
+  };
+  for (const sp of spaces) if (sp.folder) at(sp.machine ?? null, repoFolder(sp)).spaces.push(sp.id);
+  for (const t of tasks) if (t.taskFolder) at(!t.on || t.on === host ? null : t.on, t.taskFolder).tasks++;
+  return [...out.values()].sort((a, b) => b.tasks - a.tasks || a.folder.localeCompare(b.folder));
+}
+
+export function configOf(input: { defaults: Defaults; spaces: string[]; secrets: { name: string; space: string | null }[]; plans: Config["plans"]; addMachine?: string; desktops?: string[]; repos?: RepoInfo[] }): Config {
   const f = file();
   const start: LevelConfig = { agents: input.defaults, review: false, merge: "done", proof: true };
   const all = levelOf(f.everywhere, start).lv;
   const spaces: Config["spaces"] = {};
+  // a space keeps only what is about itself (its Assistant: Chats); its tasks' settings are its repo's
   for (const id of input.spaces) {
     const layer = f.spaces?.[id];
     if (!layer) continue;
-    const { lv, own } = levelOf(layer, all);
+    const { lv, own } = levelOf(only(layer, (k) => !REPO_SECTIONS.includes(k)), all);
     if (own.length) spaces[id] = { ...lv, own };
   }
+  const known = [...(input.repos ?? [])];
+  for (const key of Object.keys(f.repos ?? {})) if (!known.some((r) => r.key === key)) {
+    const { machine, folder } = repoOf(key);
+    known.push({ key, folder, machine, name: folder.split("/").filter(Boolean).pop() ?? "/", spaces: [], tasks: 0 });
+  }
+  const repos: Config["repos"] = known.map((r) => { const { lv, own } = levelOf(repoOwn(f, r), all); return { ...r, ...lv, own }; });
   const off = offPlugins();
   return {
-    all, spaces,
+    all, spaces, repos,
     secrets: input.secrets.map((s) => ({ name: s.name, scope: s.space ?? "all" })),
     plugins: PLUGINS.map((p) => ({ id: p.id, name: p.name, on: !off.includes(p.id), ...(p.always ? { always: true } : {}) })),
     plans: input.plans,
@@ -79,9 +124,10 @@ export function configOf(input: { defaults: Defaults; spaces: string[]; secrets:
   };
 }
 
-/** One setting changed from the settings window: for everything ("all") or a space; null puts a space's row back to
- *  Everything's value (Reset). */
-export function setConfig(place: string, key: string, value: unknown, scope?: { id: string; name: string; machine: string | null; folder?: string | null } | null) {
+/** One setting changed from the settings window: for everything ("all"), a repo ("repo:<its key>", SHEP-335) or a space;
+ *  null puts a row back to Everything's value (Reset). A task's setting asked of a space (a voice call) goes to the repo
+ *  it sits on (scope.repo); on a repo, `scope` is a space sitting on it, if any (what a file not moved yet carries). */
+export function setConfig(place: string, key: string, value: unknown, scope?: { id: string; name: string; machine: string | null; folder?: string | null; repo?: string | null } | null) {
   const next = structuredClone(file());
   if (key.startsWith("plugin.")) {
     const id = key.slice(7);
@@ -93,10 +139,16 @@ export function setConfig(place: string, key: string, value: unknown, scope?: { 
     return writeSettings(next);
   }
   const all = place === "all";
-  if (!all && !scope) throw new Error("That space isn't here any more.");
+  const repoPlace = place.startsWith("repo:") ? place.slice(5) : null;
+  const forTasks = /^agents\.(Tasks|Reviews)$/.test(key) || ["review", "merge", "proof"].includes(key);
+  const repo = repoPlace ?? (forTasks && !all ? scope?.repo ?? null : null);
+  if (repo !== null && !/^(\/|[\w.-]+:\/)/.test(repo)) throw new Error("That repo isn't here any more.");
+  if (repoPlace && !forTasks) throw new Error("That is set per space.");
+  if (!all && !repoPlace && !scope) throw new Error("That space isn't here any more.");
+  if (!all && !repoPlace && forTasks && !repo) throw new Error("This space isn't in a repo or folder tasks can use.");
   if (!all && ["__proto__", "constructor", "prototype"].includes(place)) throw new Error("That space isn't here any more.");
-  const layer = all ? (next.everywhere ??= {}) : ((next.spaces ??= {})[place] ??= {});
-  if (!all) {
+  const layer = all ? (next.everywhere ??= {}) : repo ? repoLayer(next, repo, scope?.id ?? null) : ((next.spaces ??= {})[place] ??= {});
+  if (!all && !repo) {
     if (scope!.folder) layer.folder = scope!.folder;
     layer.name = scope!.name;
     if (scope!.machine) layer.machine = scope!.machine;

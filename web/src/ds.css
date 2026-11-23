@@ -236,7 +236,7 @@ button.b{cursor:pointer}
 h3+.srow,.hint+.srow,.banner+.srow{border-top:0}
 .srow .n{flex:1;min-width:0}.srow .n small{display:block;color:var(--muted);font-size:var(--sec);line-height:var(--secl)}
 .srow .val{color:var(--muted);font-size:var(--sec);line-height:var(--secl);text-align:right;min-width:0}
-.srow.wrap{flex-wrap:wrap}
+.srow.wrap{flex-wrap:wrap}.srow.wrap .n{min-width:min(10rem,100%)}
 .note{padding:8px 12px;border-radius:8px;background:var(--raised);color:var(--sub)}
 .mcard{display:grid;gap:12px;margin-top:8px;padding:16px;border-radius:12px;box-shadow:inset 0 0 0 1px var(--line2)}
 .mcard .nm{font-weight:600;white-space:nowrap}

@@ -29,7 +29,7 @@ import { Live } from "./live.ts";
 import { Model } from "./model.ts";
 import { checkFlags } from "./flags.ts";
 import type { Snapshot } from "../web/shared/types.ts";
-import { catalogOf, configOf, enrich, offPlugins, pluginOn, plansOf, scheduleOf, setConfig } from "./next.ts";
+import { catalogOf, configOf, enrich, offPlugins, pluginOn, plansOf, reposOf, scheduleOf, setConfig, spaceRepo } from "./next.ts";
 import { ensureShell, type ShellAt } from "./shells.ts";
 import { Chats } from "./chats.ts";
 import { act, findMachines, hc as hcRun } from "./actions.ts";
@@ -337,7 +337,7 @@ const withNext = (snap: Snapshot, b: Parameters<NonNullable<typeof model.onBuild
   const others = Object.keys(settings.choices?.menus ?? {}).filter((k) => k !== d.agent);
   const review = others.length ? { agent: others[0], model: settings.choices.menus[others[0]]?.models?.[0]?.id ?? null, effort: null, fast: false as const, perm: null } : d;
   const config = configOf({ defaults: { Chats: d, Tasks: d, Reviews: review }, spaces: b.spaces.map((x: any) => x.id), secrets: secretNames, plans: plansOf(snap),
-    addMachine: "hc machine add <its name on your tailnet>", desktops: desktopsOf() });
+    addMachine: "hc machine add <its name on your tailnet>", desktops: desktopsOf(), repos: reposOf(b.spaces, snap.tasks ?? [], me?.host ?? null) });
   const asked = (chat: string) => {
     const a = compat.addrOf(chat);
     if (a) for (const x of compat.asks?.open.values() ?? []) if ((x as any).terminal === a) return (x as any).words?.kind === "permission" ? "permission" as const : "question" as const;
@@ -393,7 +393,7 @@ if (pluginOn("screens")) screens.start();
 let desktopsOf: () => string[] = () => (pluginOn("screens") ? screens.desktops() : []);
 const snapshotOf = (b: Parameters<NonNullable<typeof model.onBuild>>[0]) => live.setSnapshot(alertNewAnd(withNext(compat.snapshot({
   host: me?.host ?? "this machine", user: me?.name ?? "You", spaces: b.spaces, sections: b.sections, rows: b.rows, artifacts: artifacts.list, automations: b.automations,
-  settings: [...settings.sections(webNow ?? ownLink(), b.spaces.map((s: any) => ({ id: s.id, name: s.name, machine: s.machine ?? null })), b.machines, me?.host ?? "this machine"),
+  settings: [...settings.sections(webNow ?? ownLink(), b.spaces.map((s: any) => ({ id: s.id, name: s.name, machine: s.machine ?? null, repo: spaceRepo(s) })), b.machines, me?.host ?? "this machine"),
     // Secrets (Everywhere's and each space's own): every kept secret and where, and the agents waiting on one
     ...[{ id: "all" }, ...b.spaces].map((s: any) => ({ name: "Secrets", level: s.id, rows: [], ...secretsPage(b.spaces),
       secrets: secretNames.filter((x) => (s.id === "all" ? !x.space : x.space === s.id)) }))], offPlugins: offPlugins(),
@@ -637,8 +637,9 @@ async function doAction(body: any): Promise<Response> {
   if (body?.type === "config" && typeof body.key === "string") {
     try {
       const place = typeof body.place === "string" ? body.place : "all";
-      const sp = place === "all" ? null : (model.spaces as any[]).find((x) => x.id === place);
-      setConfig(place, body.key, body.value ?? null, sp ? { id: sp.id, name: sp.name, machine: sp.machine ?? null, folder: sp.folder ?? null } : null);
+      // a repo's (SHEP-335): a space sitting on it goes along, for what a file not moved yet still keeps there
+      const sp = place === "all" ? null : (model.spaces as any[]).find((x) => (place.startsWith("repo:") ? spaceRepo(x) === place.slice(5) : x.id === place));
+      setConfig(place, body.key, body.value ?? null, sp ? { id: sp.id, name: sp.name, machine: sp.machine ?? null, folder: sp.folder ?? null, repo: spaceRepo(sp) } : null);
       model.rebuild();
       return json({ ok: true });
     } catch (err) { return json({ ok: false, error: (err as Error).message }); }
@@ -769,7 +770,7 @@ async function doAction(body: any): Promise<Response> {
           exec(hub, ["git", "-C", folder || sp.folder || "~", "show-ref", "--verify", "--quiet", ref], sp.machine ?? null).catch(() => null)))).some((r) => r?.code === 0);
         if (!there) return json({ ok: false, error: SC.BASE.missing(want) });
       }
-      settings.set(body.key, value, level, sp ? { id: sp.id, name: sp.name, machine: sp.machine ?? null, folder } : null);
+      settings.set(body.key, value, level, sp ? { id: sp.id, name: sp.name, machine: sp.machine ?? null, folder, repo: spaceRepo(sp) } : null);
       return json({ ok: true });
     } catch (err) { return json({ ok: false, error: (err as Error).message }); }
   }

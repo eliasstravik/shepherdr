@@ -88,7 +88,9 @@ export type Role = 'Chats' | 'Tasks' | 'Reviews'
 /** what a role runs on, at a level ('all', or a space's id): Settings › Agents */
 export function pickFor(snap: Snapshot, level: string, role: Role): Pick {
   const c = snap.config
-  return (level !== 'all' && c?.spaces[level]?.agents[role]) || c?.all.agents[role] || { agent: 'claude' }
+  // a repo's (SHEP-335: "repo:<key>"), a space's own, else Everywhere's
+  const own = level.startsWith('repo:') ? c?.repos?.find((r) => r.key === level.slice(5)) : level !== 'all' ? c?.spaces[level] : undefined
+  return own?.agents[role] || c?.all.agents[role] || { agent: 'claude' }
 }
 
 /* ---------- the agent picker ---------- */
@@ -132,7 +134,7 @@ export function AgentField({ title, machine, pick, onChange }: { title: string; 
   )
 }
 
-function PickerHead({ title, back, close }: { title: ReactNode; back?: () => void; close: () => void }) {
+export function PickerHead({ title, back, close }: { title: ReactNode; back?: () => void; close: () => void }) {
   return (
     <div className="hd">
       {back && <IB icon="back" label="Back" onClick={back} />}

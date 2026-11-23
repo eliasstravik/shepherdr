@@ -4531,25 +4531,32 @@ class AssistantSettings(unittest.TestCase):
         # nothing differs from Herdr's default: no line says who set it
         self.assertNotIn("; set for", note)
         self.assertNotIn("; your setting", note)
-        self.assertEqual(len(note.split("\n")), 13)  # head, 11 lines (Suggested next message included), the Reactions guide
+        self.assertEqual(len(note.split("\n")), 14)  # head, 12 lines (Suggested next message, Repo settings), the Reactions guide
+        self.assertIn("- Repo settings: none (every repo has the task lines above)", note)
+        self.assertIn("the task lines below are Everywhere's", note)
         self.assertIn("- Suggested next message: on (end each reply", note)
 
     def test_the_block_for_a_space_with_its_own(self):
+        """SHEP-335: the task lines are the repo's the space sits on (repos[<folder>]), its own lines (Reactions) the
+        space's; a space elsewhere (root on /) gets Everywhere's task lines and sees the repo's in Repo settings."""
+        shop = os.path.realpath(tempfile.mkdtemp())
         self.write({"everywhere": {"tasks": {"review_rounds": 2, "merge": "checks"}, "assistant": {"reactions": True}},
-                    "spaces": {"sp1": {"tasks": {"base": "dev", "start_notes": "bun install", "max_running": 3, "worktrees": False,
-                                                  "setup": "ln -s ../node_modules ."},
-                                       "worker": {"agent": "codex", "model": "gpt-5", "effort": "high"},
-                                       "reviewer": {"agent": "claude", "model": "opus"},
-                                       "assistant": {"reactions": False}},
-                               "sp2": {"tasks": {"merge": "auto"}}}})
+                    "repos": {shop: {"tasks": {"base": "dev", "start_notes": "bun install", "max_running": 3, "worktrees": False,
+                                               "setup": "ln -s ../node_modules ."},
+                                     "worker": {"agent": "codex", "model": "gpt-5", "effort": "high"},
+                                     "reviewer": {"agent": "claude", "model": "opus"}}},
+                    "spaces": {"sp1": {"folder": shop, "assistant": {"reactions": False}},
+                               "sp2": {"folder": "/", "tasks": {"merge": "auto"}}}})
         self.assistant()
         note = self.aset.session_note("t5")
-        self.assertEqual(self.line(note, "Review"), "- Review: on, at most 2 rounds, must fix major and up (blocker, major), reviewer claude, model opus; set for this space")
+        self.assertIn(f"the task lines below are {shop}'s", note)
+        self.assertEqual(self.line(note, "Review"), "- Review: on, at most 2 rounds, must fix major and up (blocker, major), reviewer claude, model opus; this repo's setting")
         self.assertEqual(self.line(note, "Merge"), "- Merge: after checks (Herdr merges a ready task once its checks pass); your setting everywhere")
         self.assertEqual(self.line(note, "Proof"), "- Proof: on")
-        self.assertEqual(self.line(note, "Task agent"), "- Task agent: codex, model gpt-5, effort high; set for this space")
+        self.assertEqual(self.line(note, "Task agent"), "- Task agent: codex, model gpt-5, effort high; this repo's setting")
         self.assertIn("- Base branch: dev ", note)
-        self.assertIn("- Worktrees: off (tasks work in the folder itself); set for this space", note)
+        self.assertIn("- Worktrees: off (tasks work in the folder itself); this repo's setting", note)
+        self.assertIn(f"- Repo settings: {shop}: Task agent codex, model gpt-5, effort high, Reviewer claude, model opus, Base branch dev, also", note)
         self.assertNotIn("Tasks at once", note)
         self.assertIn("- Task notes: start notes set", note)
         self.assertIn("- Before the agent starts: ln -s ../node_modules . (runs in each new worktree first", note)
@@ -4559,11 +4566,20 @@ class AssistantSettings(unittest.TestCase):
         labels = self.terminals["t5"]["labels"]
         self.assertEqual(labels["herdr.reactions"], "off")
         self.assertEqual(sorted(self.aset.parse(labels["herdr.settings"])),
-                         sorted(["review", "merge", "proof", "agent", "base", "worktrees", "notes", "setup", "reactions", "suggestions", "feedback"]))
-        # another space inherits Everywhere's, with its own merge
+                         sorted(["review", "merge", "proof", "agent", "base", "worktrees", "notes", "setup", "reactions", "suggestions", "feedback", "repos"]))
+        # a space on / (root), its file not moved yet: its task values are the / folder's, not the shop repo's
         self.assistant("t6", "sp2")
         other = self.aset.session_note("t6")
-        self.assertIn("- Merge: on its own (Herdr merges a ready task); set for this space", other)
+        self.assertIn("- Merge: on its own (Herdr merges a ready task); this repo's setting", other)
+        self.assertIn("the task lines below are /'s", other)
+        self.assertIn(f"- Repo settings: {shop}: ", other)
+        # moved (repos), root sits on no repo of its own: Everywhere's task lines, and the repos listed with theirs
+        self.write({"everywhere": {"tasks": {"merge": "checks"}}, "repos": {shop: {"tasks": {"merge": "auto"}}},
+                    "spaces": {"sp2": {"folder": "/"}}})
+        other = self.aset.session_note("t6")
+        self.assertIn("- Merge: after checks (Herdr merges a ready task once its checks pass); your setting everywhere", other)
+        self.assertIn("the task lines below are Everywhere's", other)
+        self.assertIn(f"- Repo settings: {shop}: Merge on its own\n", other)
         self.assertIn("- Reactions: on", other)
         self.assertIn("👀", other)
 
@@ -4643,13 +4659,14 @@ class AssistantSettings(unittest.TestCase):
         # another space's change, and Everywhere's where this space sets its own
         self.write({"everywhere": {"tasks": {"merge": "checks"}}, "spaces": {"sp2": {"tasks": {"merge": "auto"}}}})
         self.aset.settings_pass({}, {})
+        shop = os.path.realpath(tempfile.mkdtemp())
         self.write({"everywhere": {"tasks": {"merge": "checks"}, "worker": {"agent": "codex"}},
-                    "spaces": {"sp1": {"worker": {"agent": "claude", "model": "opus"}}}})
+                    "spaces": {"sp1": {"folder": shop, "worker": {"agent": "claude", "model": "opus"}}}})
         self.aset.settings_pass({}, {})
-        self.assertEqual(len(self.sent), 1)  # only the last: sp1's own agent
-        self.assertIn('name="agent" value="claude/opus" scope="space"', self.sent[0][1])
+        self.assertEqual(len(self.sent), 1)  # only the last: sp1's repo's own agent (a file not moved yet: the space's)
+        self.assertIn('name="agent" value="claude/opus" scope="repo"', self.sent[0][1])
         self.write({"everywhere": {"tasks": {"merge": "checks"}, "worker": {"agent": "codex"}},
-                    "spaces": {"sp1": {"worker": {"agent": "claude", "model": "opus"}}}})
+                    "spaces": {"sp1": {"folder": shop, "worker": {"agent": "claude", "model": "opus"}}}})
         self.aset.settings_pass({}, {})
         self.assertEqual(len(self.sent), 1)
 
@@ -9629,3 +9646,119 @@ class NeverTypedIntoAShell(unittest.TestCase):
                 self.machines._deliver(["vm-b"], ["herdr-core"], "t3", "hello")
         self.assertIn("plain shell", str(e.exception))
         self.assertEqual(self.typed(), [])
+
+
+class RepoSettings(unittest.TestCase):
+    """SHEP-335: the settings that shape a task are the repo's it works in, whichever space started it: Everywhere,
+    then the repo (settings.json "repos"), then the task's own --set. A throwaway settings file; no hc."""
+
+    def setUp(self):
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.settings as settings
+        self.settings = settings
+        self.dir = tempfile.mkdtemp()
+        self.file = os.path.join(self.dir, "settings.json")
+        p = mock.patch.object(settings, "SETTINGS", self.file)
+        p.start()
+        self.addCleanup(p.stop)
+        self.repo = os.path.join(self.dir, "shop")
+        self.store = types.SimpleNamespace(loc={"folder": self.repo, "kind": "repo"})
+
+    def write(self, d):
+        with open(self.file, "w") as f:
+            json.dump(d, f)
+
+    def merge(self, task):
+        return next(x for x in self.settings.task_settings(self.store, task) if x["label"] == "Merge")
+
+    def test_everywhere_then_the_repo_then_the_task(self):
+        self.write({"everywhere": {"tasks": {"merge": "checks", "proof": False}},
+                    "repos": {self.repo: {"tasks": {"merge": "auto"}}}, "spaces": {"sproot": {"folder": "/", "name": "root"}}})
+        # started by root (its folder is /), it works in the shop repo: the shop repo's Merge
+        t = {"id": "SHOP-1", "mode": "worktree", "space": "sproot"}
+        m = self.merge(t)
+        self.assertEqual((m["value"], m["by"], m["from"]), ("auto", "repo", "repo"))
+        self.assertIn("(this repo's setting)", self.settings.settings_block(self.store, t, argv=["claude"]))
+        self.assertEqual(self.settings.merge_policy(self.store, t), "auto")
+        # Everywhere's where the repo sets nothing
+        proof = next(x for x in self.settings.task_settings(self.store, t) if x["label"] == "Proof")
+        self.assertEqual((proof["value"], proof["by"]), (False, "all"))
+        # the task's own --set wins
+        self.settings.set_task(t, "merge", "ask me first")
+        self.assertEqual((self.merge(t)["value"], self.merge(t)["by"]), ("ask", "task"))
+        # another repo of the same space gets Everywhere's
+        other = types.SimpleNamespace(loc={"folder": os.path.join(self.dir, "blog"), "kind": "repo"})
+        self.assertEqual(self.settings.merge_policy(other, {"space": "sproot"}), "checks")
+
+    def test_a_space_on_the_repo_no_longer_sets_its_tasks_once_moved(self):
+        self.write({"repos": {self.repo: {"tasks": {"merge": "checks"}}},
+                    "spaces": {"sp1": {"folder": self.repo, "tasks": {"merge": "auto"}, "worker": {"agent": "codex"}}}})
+        self.assertEqual(self.settings.merge_policy(self.store, {"space": "sp1"}), "checks")
+        self.assertEqual(self.settings.worker_pick(self.store, {"space": "sp1"})["agent"], "claude")
+
+    def test_a_file_not_moved_yet_reads_the_space_on_the_repo(self):
+        """Before the update moves them: a space whose folder is the repo still gives its tasks its values, as before."""
+        self.write({"spaces": {"sp1": {"folder": self.repo, "tasks": {"merge": "auto"}}, "sproot": {"folder": "/", "tasks": {"merge": "checks"}}}})
+        m = self.merge({"space": "sproot", "mode": "worktree"})
+        self.assertEqual((m["value"], m["by"]), ("auto", "repo"))
+
+    def test_a_spaces_own_settings_stay_the_spaces(self):
+        """What is about the space (Suggested next message) comes from the space that started the task, not the repo."""
+        self.write({"spaces": {"sproot": {"folder": "/", "agents": {"suggestions": False}}},
+                    "repos": {self.repo: {"tasks": {"merge": "auto"}}}})
+        sug = next(x for x in self.settings.task_settings(self.store, {"space": "sproot"}) if x["label"] == "Suggested next message")
+        self.assertEqual((sug["value"], sug["by"], sug["from"]), (False, "space", "space"))
+
+    def test_sources(self):
+        self.write({"everywhere": {"tasks": {"proof": False}}, "machines": {"local": {"tasks": {"must_fix": "minor"}}},
+                    "repos": {self.repo: {"tasks": {"merge": "auto"}, "worker": {"agent": "codex"}}}})
+        src = self.settings.setting_sources(self.store)
+        self.assertEqual(src["tasks.merge"], "repo")
+        self.assertEqual(src["tasks.proof"], "Everywhere")
+        self.assertEqual(src["tasks.must_fix"], "machine")
+        self.assertEqual(src["tasks.review_rounds"], "default")
+        self.assertEqual(src["worker"], "repo")
+        # show: every line says where it comes from, the defaults too
+        block = self.settings.settings_block(self.store, {"mode": "worktree"}, argv=["claude"], sources=True)
+        self.assertIn("- Review: off (Herdr's default)", block)
+        self.assertIn("(this repo's setting)", block)
+        self.assertIn("(your setting everywhere)", block)
+
+    def test_config_show_and_add_say_where_from(self):
+        """The real CLI on a scratch repo, a fake hc (refusing) first on PATH: config lists each value's source, add says
+        what the new task got from its repo; show's lines mark every value's source."""
+        tmp = self.dir
+        os.makedirs(os.path.join(tmp, "bin"))
+        with open(os.path.join(tmp, "bin", "hc"), "w") as f:
+            f.write("#!/bin/sh\nexit 1\n")
+        os.chmod(os.path.join(tmp, "bin", "hc"), 0o755)
+        repo = os.path.realpath(os.path.join(tmp, "repo-shep335-cli"))
+        os.makedirs(repo)
+        subprocess.run(["git", "-C", repo, "init", "-q"], check=True)
+        subprocess.run(["git", "-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "i"], check=True)
+        self.write({"everywhere": {"tasks": {"merge": "checks"}}, "repos": {repo: {"tasks": {"merge": "auto"}}},
+                    "spaces": {"sproot": {"folder": "/", "name": "root"}}})
+        env = {"HOME": os.environ["HOME"], "PATH": f"{tmp}/bin:/usr/bin:/bin", "HC_SESSION": "t335", "SHEPHERDR_SESSION": "t335",
+               "HERDR_TASK_STORE": os.path.join(tmp, "store"), "HERDR_TASK_SETTINGS": self.file, "SHEPHERDR_NO_MIGRATE": "1"}
+        cli = [sys.executable, os.path.join(BIN, "herdr-task")]
+
+        def run(*args):
+            p = subprocess.run(cli + list(args), capture_output=True, text=True, env=env)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            return p.stdout
+        conf = json.loads(run("config", "--folder", repo, "--json"))
+        self.assertEqual(conf["settings"]["tasks"]["merge"], "auto")
+        self.assertEqual(conf["from"]["tasks.merge"], "repo")
+        self.assertIn('tasks.merge: "auto" (repo)', run("config", "--folder", repo))
+        added = run("add", "Try it", "--folder", repo, "--space", "sproot")
+        self.assertIn("Its settings: Merge on its own (this repo's setting).", added)
+        # show asks hc (refused on a test's HOME): its lines are settings_block(sources=True), its JSON task_settings
+        lists = [f for f in os.listdir(os.path.join(tmp, "store")) if f.endswith(".json") and not f.startswith(".")]
+        with open(os.path.join(tmp, "store", lists[0])) as f:
+            t = json.load(f)["tasks"][0]
+        store = types.SimpleNamespace(loc={"folder": repo, "kind": "repo"})
+        self.assertIn("- Merge: on its own: once you say ready, Herdr merges it (this repo's setting)",
+                      self.settings.settings_block(store, t, argv=["claude"], sources=True))
+        rows = {x["label"]: x for x in self.settings.task_settings(store, t, argv=["claude"])}
+        self.assertEqual((rows["Merge"]["from"], rows["Review"]["from"]), ("repo", "default"))

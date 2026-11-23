@@ -16,9 +16,9 @@ const at = (folder: string, where = folder.replace(/^\/(Users|home)\/[^/]+/, '~'
 const P = { shop: 'p:mac-mini:shop', blog: 'p:mac-mini:blog', notes: 'p:mac-mini:notes', docs: 'p:mac-mini:docs', garden: 'p:vm:garden-app', vmShop: 'p:vm:shop', vmRoot: 'p:vm:root', oldSite: 'p:mac-mini:old-site', studioSite: 'p:studio:site' }
 
 // where a task works (SHEP-325): its space's folder unless it says otherwise; notes and the home folder are no repos
-const FOLDER: Record<string, [string, string]> = { [EV]: ['/Users/sam', '~'], [P.shop]: ['/Users/sam/dev/shop', 'shop'], [P.blog]: ['/Users/sam/dev/blog', 'blog'], [P.notes]: ['/Users/sam/notes', 'notes'], [P.garden]: ['/home/sam/dev/garden-app', 'garden-app'] }
+const FOLDER: Record<string, [string, string]> = { [EV]: ['/Users/sam', '~'], [P.shop]: ['/Users/sam/dev/shop', 'shop'], [P.blog]: ['/Users/sam/dev/blog', 'blog'], [P.notes]: ['/Users/sam/notes', 'notes'], [P.garden]: ['/home/sam/dev/garden-app', 'garden-app'], [P.vmShop]: ['/home/sam/clients/acme/shop', 'shop'], [P.vmRoot]: ['/home/sam/clients/acme/shop', 'shop'] }
 const work = (folder: string, name: string): Task['work'] => ({ name, folder, short: folder.replace(/^\/(Users|home)\/[^/]+/, '~'), repo: !['~', 'notes'].includes(name) })
-const task = (id: string, name: string, pl: string, status: Task['status'], x: Partial<Task> = {}): Task => ({ id, name, place: pl, asked: pl, status, state: status, on: pl === P.garden ? 'vm' : 'mac-mini', created: '', age: '', work: FOLDER[pl] && work(...FOLDER[pl]), agent: { chat: `${id}/worker`, role: 'worker', cli: pl === P.garden ? 'codex' : 'claude', status: status === 'need' ? 'need' : 'work', running: true, age: '', note: '' }, ...x })
+const task = (id: string, name: string, pl: string, status: Task['status'], x: Partial<Task> = {}): Task => ({ id, name, place: pl, asked: pl, status, state: status, on: pl === P.garden || pl === P.vmShop || pl === P.vmRoot ? 'vm' : 'mac-mini', created: '', age: '', work: FOLDER[pl] && work(...FOLDER[pl]), ...(FOLDER[pl] ? { taskFolder: FOLDER[pl][0] } : {}), agent: { chat: `${id}/worker`, role: 'worker', cli: pl === P.garden ? 'codex' : 'claude', status: status === 'need' ? 'need' : 'work', running: true, age: '', note: '' }, ...x })
 
 export const tasks: Task[] = [
   task('SHOP-12', 'Faster product search', P.shop, 'ready', { needsAt: NOW - 8 * hour, repo: 'branch', branch: 'task/faster-product-search', pr: { number: 212, url: 'https://github.com/example/shop/pull/212' }, summary: 'Results show in about 80 ms, down from 400.', proof: 'a-shop12' }),
@@ -33,6 +33,7 @@ export const tasks: Task[] = [
   // a repo no space works in: its tag still shows its tasks (SHEP-325)
   task('EV-13', 'New level select', EV, 'need', { needsAt: NOW - 20 * min, repo: 'branch', work: work('/Users/sam/dev/tor-gameboy', 'tor-gameboy'), report: { msg: 'Should locked levels show?' } }),
   task('SHOP-16', 'Dependency check', P.shop, 'work', { started: NOW - 10 * min, schedule: 'Dependency check', report: { msg: 'Updating 3 packages', progress: 85, eta: 2 } }),
+  task('vm:ACME-7', 'Shipping rates by region', P.vmRoot, 'todo', { agent: undefined }),
   task('vm:GARDEN-3', 'Watering reminders', P.garden, 'work', { started: NOW - 30 * min, repo: 'branch', report: { msg: 'Writing tests', progress: 25, eta: 110 } }),
   // SHEP-321: a task just started (no % yet: the turning ring) and one stopped by an error part way
   task('SHOP-18', 'Product page copy', P.shop, 'work', { started: NOW - 2 * min, report: { msg: 'Reading the product pages' } }),
@@ -79,7 +80,16 @@ export const artifacts = [
 const cc = (model: string, effort: string) => ({ agent: 'claude', model, effort, fast: false as const, perm: null })
 export const config: Config = {
   all: { agents: { Chats: cc('sonnet', 'medium'), Tasks: cc('opus', 'high'), Reviews: { agent: 'codex', model: 'gpt-5.5-codex', effort: 'high', fast: false, perm: null } }, review: false, merge: 'done', proof: true },
-  spaces: { [P.shop]: { agents: { Chats: cc('sonnet', 'medium'), Tasks: cc('opus', 'high'), Reviews: { agent: 'codex', model: 'gpt-5.5-codex', effort: 'high', fast: false, perm: null } }, review: false, merge: 'done', proof: true, own: ['agents.Tasks'] } },
+  spaces: { [P.shop]: { agents: { Chats: cc('fable', 'high'), Tasks: cc('opus', 'high'), Reviews: { agent: 'codex', model: 'gpt-5.5-codex', effort: 'high', fast: false, perm: null } }, review: false, merge: 'done', proof: true, own: ['agents.Chats'] } },
+  // SHEP-335: task settings are the repo's a task works in; root on vm sits on /, its tasks work in the acme shop
+  repos: [
+    { key: '/Users/sam/dev/shop', folder: '/Users/sam/dev/shop', machine: null, name: 'shop', spaces: [P.shop], tasks: 6, agents: { Chats: cc('sonnet', 'medium'), Tasks: cc('opus', 'xhigh'), Reviews: { agent: 'codex', model: 'gpt-5.5-codex', effort: 'high', fast: false, perm: null } }, review: true, merge: 'checks', proof: true, own: ['agents.Tasks', 'review', 'merge'] },
+    { key: 'vm:/home/sam/clients/acme/shop', folder: '/home/sam/clients/acme/shop', machine: 'vm', name: 'shop', spaces: [P.vmShop], tasks: 1, agents: { Chats: cc('sonnet', 'medium'), Tasks: cc('opus', 'high'), Reviews: { agent: 'codex', model: 'gpt-5.5-codex', effort: 'high', fast: false, perm: null } }, review: false, merge: 'now', proof: true, own: ['merge'] },
+    { key: 'vm:/home/sam/dev/garden-app', folder: '/home/sam/dev/garden-app', machine: 'vm', name: 'garden-app', spaces: [P.garden], tasks: 2, agents: { Chats: cc('sonnet', 'medium'), Tasks: cc('opus', 'high'), Reviews: { agent: 'codex', model: 'gpt-5.5-codex', effort: 'high', fast: false, perm: null } }, review: false, merge: 'done', proof: true, own: [] },
+    { key: '/Users/sam/dev/blog', folder: '/Users/sam/dev/blog', machine: null, name: 'blog', spaces: [P.blog], tasks: 1, agents: { Chats: cc('sonnet', 'medium'), Tasks: cc('opus', 'high'), Reviews: { agent: 'codex', model: 'gpt-5.5-codex', effort: 'high', fast: false, perm: null } }, review: false, merge: 'done', proof: true, own: [] },
+    { key: '/Users/sam/notes', folder: '/Users/sam/notes', machine: null, name: 'notes', spaces: [P.notes], tasks: 1, agents: { Chats: cc('sonnet', 'medium'), Tasks: cc('opus', 'high'), Reviews: { agent: 'codex', model: 'gpt-5.5-codex', effort: 'high', fast: false, perm: null } }, review: false, merge: 'done', proof: false, own: ['proof'] },
+    { key: 'vm:/', folder: '/', machine: 'vm', name: '/', spaces: [P.vmRoot], tasks: 0, agents: { Chats: cc('sonnet', 'medium'), Tasks: cc('opus', 'high'), Reviews: { agent: 'codex', model: 'gpt-5.5-codex', effort: 'high', fast: false, perm: null } }, review: false, merge: 'done', proof: true, own: [] },
+  ],
   secrets: [{ name: 'GITHUB_TOKEN', scope: 'all' }, { name: 'STRIPE_KEY', scope: P.shop }],
   plugins: [['tasks', 'Tasks', true], ['artifacts', 'Artifacts', true], ['terminal', 'Terminal', false], ['screens', 'Screens', false], ['voice', 'Voice', false], ['schedules', 'Schedules', false], ['reactions', 'Reactions', false], ['search', 'Search', true], ['alerts', 'Alerts', true]].map(([id, name, always]) => ({ id: id as string, name: name as string, on: true, ...(always ? { always: true } : {}) })),
   plans: [{ name: 'Claude Max', windows: [{ name: 'This week', used: 76, resets: 'Resets Monday 9:00' }, { name: 'These 5 hours', used: 40, resets: 'Resets in 2 h' }] }, { name: 'Codex Pro', windows: [{ name: 'This week', used: 12, resets: 'Resets Thursday' }] }],
@@ -111,7 +121,7 @@ export function snapshot(mode: 'normal' | 'empty' | 'down' | 'more' = 'normal'):
     user: 'Sam',
     everything: EV,
     // two spaces called shop, in other folders on other machines, and one deep folder (SHEP-302); a space at the root (SHEP-316)
-    places: [place(EV, 'home', 'mac-mini', at('/Users/sam', '~', { home: true })), place(P.shop, 'shop', 'mac-mini', at('/Users/sam/dev/shop')), place(P.blog, 'blog', 'mac-mini', at('/Users/sam/dev/blog')), place(P.notes, 'notes', 'mac-mini', at('/Users/sam/notes')), place(P.docs, 'docs', 'mac-mini', at('/Users/sam/dev/clients/northwind/website-redesign-2026/docs')), place(P.garden, 'garden-app', 'vm', at('/home/sam/dev/garden-app')), place(P.vmShop, 'shop', 'vm', at('/home/sam/clients/acme/shop')), place(P.vmRoot, 'root', 'vm', at('/')),
+    places: [place(EV, 'home', 'mac-mini', at('/Users/sam', '~', { home: true })), place(P.shop, 'shop', 'mac-mini', at('/Users/sam/dev/shop', undefined, { git: 'main' })), place(P.blog, 'blog', 'mac-mini', at('/Users/sam/dev/blog')), place(P.notes, 'notes', 'mac-mini', at('/Users/sam/notes')), place(P.docs, 'docs', 'mac-mini', at('/Users/sam/dev/clients/northwind/website-redesign-2026/docs')), place(P.garden, 'garden-app', 'vm', at('/home/sam/dev/garden-app')), place(P.vmShop, 'shop', 'vm', at('/home/sam/clients/acme/shop')), place(P.vmRoot, 'root', 'vm', at('/')),
       // SHEP-342: an archived space for the machines' filter, a machine with one space and one with none
       place(P.oldSite, 'old-site', 'mac-mini', at('/Users/sam/dev/old-site', undefined, { archived: true })), place(P.studioSite, 'site', 'studio', at('/Users/sam/dev/site'))],
     sections: [{ id: 's:store', name: 'Store', machine: 'mac-mini', spaces: [P.shop, P.blog] }],

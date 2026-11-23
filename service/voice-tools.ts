@@ -945,7 +945,10 @@ async function act(snap: Snapshot, where: Where, io: VoiceIO, p: any, id: string
     const sp = id ? findSpace(snap, id, where) : null;
     if (id && !sp) return fail(isHere(id) ? "Which space?" : `I can't find a space called "${cut(id, 60)}".`);
     const place = sp && !isEverything(snap, sp.id) ? sp.id : "all";
+    // SHEP-335: Merge, Review and Proof are a repo's: a space's go to the repo it sits on
+    const repo = place === "all" ? null : c.repos?.find((r) => r.spaces.includes(place));
     const forWhom = place === "all" ? "for every space" : `for ${label(snap, place)}`;
+    const forTasks = place === "all" ? forWhom : repo ? `for tasks in ${repo.name}` : forWhom;
     const k = norm(key), v = norm(value);
     const reset = /^(reset|default|same|aseverything|aseverywhere)$/.test(v);
     if (reset && place === "all") return fail("Only a space's own setting can be reset: say which space.");
@@ -954,11 +957,11 @@ async function act(snap: Snapshot, where: Where, io: VoiceIO, p: any, id: string
     if (/^merge/.test(k) || k === "whentomerge") {
       const m = reset ? null : /check/.test(v) ? "checks" : /now|rightaway|atonce|immediately|auto/.test(v) ? "now" : /done|mark|ask|review|manual/.test(v) ? "done" : undefined;
       if (m === undefined) return fail(`Merge can be: ${Object.values(MERGE_WORDS).join(", ")}.`);
-      body = { type: "config", place, key: "merge", value: m }; did = `Merge is ${m ? `"${MERGE_WORDS[m]}"` : "as everywhere"} ${forWhom}.`;
+      body = { type: "config", place, key: "merge", value: m }; did = `Merge is ${m ? `"${MERGE_WORDS[m]}"` : "as everywhere"} ${forTasks}.`;
     } else if (/^(review|proof)/.test(k) || /secondagent/.test(k)) {
       const which = /^proof/.test(k) ? "proof" : "review", on = reset ? null : toggle();
       if (on === null && !reset) return fail(`${which === "proof" ? "Proof" : "Review by a second agent"} is on or off: which?`);
-      body = { type: "config", place, key: which, value: on }; did = `${which === "proof" ? "Proof" : "Review by a second agent"} is ${on === null ? "as everywhere" : onOff(on)} ${forWhom}.`;
+      body = { type: "config", place, key: which, value: on }; did = `${which === "proof" ? "Proof" : "Review by a second agent"} is ${on === null ? "as everywhere" : onOff(on)} ${forTasks}.`;
     } else if (plugin) {
       if (plugin.always) return fail(`${plugin.name} is always on.`);
       const on = toggle();

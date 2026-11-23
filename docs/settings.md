@@ -14,12 +14,24 @@ Settings is one window. Open it from the foot of the list. On a phone it is a li
 | Usage | How much of each plan your agents have used, with reset times |
 | Plugins | A switch for Terminal, Screens, Voice, Schedules and Reactions ([Plugins](plugins.md)) |
 
+## Task settings follow the repo
+
+The settings that shape a task (Tasks and Reviews run on, Review, Merge, Proof, base branch, branch names, worktrees,
+notes, extra flags) are the repo's (or plain folder's) the task works in, on its machine, whichever space started it.
+A task gets Everywhere's, then its repo's, then its own (`herdr-task add --set`). `herdr-task show` and
+`herdr-task config` say where each value comes from.
+
+Settings › Tasks has "Applies to" at the top: Everything, or a repo picked from a searchable list (the repos and
+folders that have tasks or a space, by machine). On a repo, each row says "Same as Everything", or "Set here" with
+Reset.
+
 ## A space's own settings
 
-A space's menu › Settings opens the window for that space. It shows Agents, Tasks and Secrets only.
+A space's menu › Settings opens the window for that space: Agents (its own Assistant, "Chats"), Tasks and Secrets.
+Its Tasks page lists the repos its tasks work in, each opening that repo's settings. A space on a repo has
+Repo settings in its menu too.
 
-A space starts with Everything's settings. Under each row it says "Same as Everything", or "Set here" with Reset,
-which puts the row back. A secret added there is for that space only.
+A secret added there is for that space only.
 
 How agents should work is not a setting: they read the repo's or folder's `AGENTS.md` (or `CLAUDE.md`) and their own
 global file, as they do anywhere. The Instructions setting older versions had is gone; the update kept what you wrote
@@ -29,7 +41,10 @@ The picker in a message box changes that one chat or task. What new chats and ta
 
 ## Where they are kept
 
-`~/.config/shepherdr/settings.json` on the serving machine: `everywhere`, and `spaces[<space id>]` for a space's own.
+`~/.config/shepherdr/settings.json` on the serving machine: `everywhere`, `repos[<folder>]` for a repo's task settings
+(another machine's as `repos["<machine>:<folder>"]`), and `spaces[<space id>]` for what is a space's own. The update to
+this version moved each space's task settings to its repo, or, for a space whose tasks all work elsewhere (root, on
+`/`), to each repo they work in; what went elsewhere is said once and listed in `settings-moved.md` beside the file.
 `herdr-task` reads it each time, and turns Review, Merge and Proof into lines of each task's brief. When the app is
 served from another machine, its service keeps the file in step with that machine (`service/sync.ts`).
 
@@ -50,7 +65,7 @@ edits the file, or edit it yourself.
 | `tasks.archive_after` | Days before a Done task is archived |
 | `tasks.worktrees` | Off: tasks work in the folder itself |
 | `tasks.worktree_root` | The folder new task worktrees go in |
-| `tasks.base` | A space's base branch |
+| `tasks.base` | A repo's base branch |
 | `tasks.branch` | The pattern for new task branches (`{slug}`, the title; empty: `task/{slug}`, `-2` when taken; `{n}` and `{key}` still work) |
 | `tasks.claude_flags`, `tasks.codex_flags` | Extra flags for a task's agent |
 | `tasks.setup` | A shell command run in each new worktree before its agent starts |

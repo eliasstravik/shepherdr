@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 import fake_ab
@@ -481,6 +482,72 @@ class Install(unittest.TestCase):
         sh.keep_instructions(sh.Run(self.root, False), live, self.root)
         with open(out) as f:
             self.assertEqual(f.read(), again)
+
+    def test_space_task_settings_move_to_the_repos_their_tasks_work_in(self):
+        """SHEP-335: the update moves each space's task settings to settings.json "repos": a space on a repo to that
+        repo; root (on /), whose tasks work in the shop repo, to the shop repo, said once with what and where; two
+        spaces on one repo that disagree: the one with more tasks there keeps it, the other said. A dry run writes
+        nothing; a second run changes and says nothing; the spaces keep what is about themselves."""
+        sh = installer()
+        w = sh.where_for(self.root)
+        path = w.path("settings")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        os.makedirs(w.path("tasks"), exist_ok=True)
+        shop = os.path.join(self.root, "dev", "shop")
+        os.makedirs(shop)
+        subprocess.run(["git", "-C", shop, "init", "-q"], check=True)
+        shop = os.path.realpath(shop)
+        blog = os.path.realpath(os.path.join(self.root, "dev"))
+        old = {"everywhere": {"tasks": {"merge": "checks"}},
+               "spaces": {"sproot": {"folder": "/", "name": "root", "tasks": {"merge": "auto"}},
+                          "spshop": {"folder": os.path.join(shop, "src"), "name": "shop", "worker": {"agent": "codex", "model": "gpt-5"},
+                                     "coordinator": {"agent": "claude"}, "tasks": {"proof": False}},
+                          "spshop2": {"folder": shop, "name": "shop-two", "tasks": {"proof": True, "review_rounds": 2}},
+                          "spblog": {"folder": blog, "name": "blog", "agents": {"reactions": False}},
+                          "vmb/sp9": {"folder": "/home/x/web", "name": "web", "tasks": {"base": "dev"}}}}
+        os.makedirs(os.path.join(shop, "src"))
+        with open(path, "w") as f:
+            json.dump(old, f)
+        with open(os.path.join(w.path("tasks"), "shop.json"), "w") as f:
+            json.dump({"folder": shop, "tasks": [{"id": 1, "space": "sproot"}, {"id": 2, "space": "spshop"}, {"id": 3, "space": "spshop"},
+                                                 {"id": 4, "space": "spshop2"}]}, f)
+        dry, live = mock.Mock(dry_run=True), mock.Mock(dry_run=False)
+        with contextlib.redirect_stdout(io.StringIO()) as said:
+            sh.move_repo_settings(sh.Run(self.root, True), dry, self.root)
+        self.assertIn("would move", said.getvalue())
+        with open(path) as f:
+            self.assertEqual(json.load(f), old)
+        r = sh.Run(self.root, False)
+        sh.move_repo_settings(r, live, self.root)
+        with open(path) as f:
+            now = json.load(f)
+        self.assertEqual(now["repos"][shop], {"worker": {"agent": "codex", "model": "gpt-5"}, "tasks": {"proof": False, "review_rounds": 2, "merge": "auto"}})
+        self.assertEqual(now["repos"]["vmb:/home/x/web"], {"tasks": {"base": "dev"}})
+        self.assertEqual(now["spaces"]["sproot"], {"folder": "/", "name": "root"})
+        self.assertEqual(now["spaces"]["spshop"], {"folder": os.path.join(shop, "src"), "name": "shop", "coordinator": {"agent": "claude"}})
+        self.assertEqual(now["spaces"]["spblog"], old["spaces"]["spblog"])
+        self.assertEqual(now["everywhere"], old["everywhere"])
+        said = "\n".join(r.notes)
+        self.assertIn('root\'s Merge "Right away" now applies to ~/dev/shop, where its tasks work', said)
+        self.assertIn("shop-two's Proof on didn't move to ~/dev/shop: another space there set it differently", said)
+        self.assertNotIn("Tasks run on codex", said)  # a space on its own repo moves without a word
+        moved = os.path.join(os.path.dirname(os.path.realpath(path)), sh.SETTINGS_MOVED)
+        with open(moved) as f:
+            kept = f.read()
+        self.assertIn('- root: Merge "Right away" → ~/dev/shop', kept)
+        self.assertIn("- shop: Proof off, Tasks run on codex gpt-5 → ~/dev/shop", kept)
+        self.assertIn("- web: Base branch dev → vmb:/home/x/web", kept)
+        r = sh.Run(self.root, False)
+        sh.move_repo_settings(r, live, self.root)
+        self.assertEqual(r.notes, [])
+        with open(moved) as f:
+            self.assertEqual(f.read(), kept)
+        # herdr-task reads the moved file: root's task in the shop repo merges right away
+        sys.path.insert(0, os.path.join(ROOT, "mods", "tasks", "bin"))
+        from herdr_task import settings as hs
+        with mock.patch.object(hs, "SETTINGS", path):
+            store = types.SimpleNamespace(loc={"folder": shop, "kind": "repo"})
+            self.assertEqual(hs.merge_policy(store, {"space": "sproot"}), "auto")
 
     def test_no_instructions_no_file(self):
         sh = installer()

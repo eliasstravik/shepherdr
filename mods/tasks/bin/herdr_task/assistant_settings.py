@@ -13,7 +13,7 @@ import os
 import sys
 
 from .base import hc_json, now, run, STORE
-from .settings import DEFAULTS, LOCAL_MACHINE, MUST_WORDS, SETTINGS, agent_key, bare, read_settings
+from .settings import DEFAULTS, LOCAL_MACHINE, MUST_WORDS, REPO_SECTIONS, SETTINGS, agent_key, bare, read_settings, repo_own
 from .launch import coordinators, is_coordinator
 from . import reactions
 
@@ -22,12 +22,14 @@ LABEL = "herdr.settings"
 STATE = os.path.join(STORE, ".assistant-settings.json")
 EVERY_MS = 60000  # looked at again this often, and at once when the settings file changes
 
-HEAD = ("Your settings: (Shepherdr settings for this space, the truth for every task you add; a task's own --set wins, "
-        "and `herdr-task show <id>` says what one task has)")
+HEAD = ("Your settings: (Shepherdr settings, the truth for every task you add. A task gets the settings of the repo or folder "
+        "it works in, whichever space adds it; the task lines below are {where}'s, and Repo settings lists the repos that set "
+        "their own. A task's own --set wins, and `herdr-task show <id>` says what one task has and where each value comes from)")
 MERGE_SHORT = {"ask": "ask the person first (they mark it as done on its card, which merges it)",
                "checks": "after checks (Herdr merges a ready task once its checks pass)",
                "auto": "on its own (Herdr merges a ready task)"}
-BY = {"space": "set for this space", "machine": "this machine's setting", "everywhere": "your setting everywhere"}
+BY = {"space": "set for this space", "repo": "this repo's setting", "machine": "this machine's setting",
+      "everywhere": "your setting everywhere"}
 NOTICE_END = "Nothing to answer: reply only <hc no-reply/>."
 # Settings › Instructions is gone (SHEP-319): an Assistant told some before is told once that they no longer apply.
 INSTRUCTIONS_GONE = ("Shepherdr's Instructions setting is gone: the instructions you were told from it no longer apply. "
@@ -40,9 +42,28 @@ def space_of(k):
     return labels.get("herdr.space") or labels.get("herdr.coordinator.space")
 
 
-def layers(d, space):
+def space_folder(space, d=None):
+    """The repo (main checkout) or plain folder a space sits on, as herdr-task keys a folder's tasks: its folder in
+    Shepherdr's spaces (core_spaces), else the one its settings recorded; None when unknown."""
+    from .launch import core_spaces
+    from .store import locate
+    from .base import Fail
+    folder = next((x["folder"] for x in core_spaces() if x["id"] == bare(space)), None) if space else None
+    if not folder and space:
+        own = ((d or {}).get("spaces") or {}).get(bare(space))
+        folder = own.get("folder") if isinstance(own, dict) else None
+    if not folder:
+        return None
+    try:
+        return locate(folder)["folder"]
+    except (Fail, OSError):
+        return folder
+
+
+def layers(d, space, folder=None):
     """(name, layer) of the settings file d, least specific first: Everywhere's, this machine's
-    (agent and task values set before machine scope went), the space's own."""
+    (agent and task values set before machine scope went), the space's own (only what is about the
+    space: SHEP-335), then the task settings of the repo the space sits on (folder)."""
     def obj(x):
         x = x if isinstance(x, dict) else {}
         # Reactions as SHEP-42 kept them (the Assistant's) where the layer has no agents' (SHEP-48)
@@ -52,7 +73,44 @@ def layers(d, space):
         return x
     machine = obj(obj(d.get("machines")).get(d.get("here") or LOCAL_MACHINE))
     own = obj(obj(d.get("spaces")).get(bare(space))) if space else {}
-    return [("everywhere", obj(d.get("everywhere"))), ("machine", machine), ("space", own)]
+    own = {k: v for k, v in own.items() if k not in REPO_SECTIONS}
+    repo = repo_own(d, folder, space) if folder else {}
+    return [("everywhere", obj(d.get("everywhere"))), ("machine", machine), ("space", own), ("repo", repo)]
+
+
+def short_folder(folder):
+    home = os.path.expanduser("~")
+    return "~" + folder[len(home):] if folder == home or folder.startswith(home + "/") else folder
+
+
+def repo_lines(d):
+    """Repo settings: each repo or folder on this machine that sets its own task settings, with what it sets."""
+    repos = d.get("repos") if isinstance(d.get("repos"), dict) else {}
+    out = []
+    for folder, layer in sorted(repos.items()):
+        if ":" in folder or not isinstance(layer, dict):
+            continue  # another machine's: its own Assistants are told there
+        t = layer.get("tasks") if isinstance(layer.get("tasks"), dict) else {}
+        said = []
+        if t.get("merge") in MERGE_SHORT:
+            said.append(f"Merge {MERGE_SHORT[t['merge']].split(' (')[0]}")
+        if t.get("review_rounds") is not None:
+            n = int(t.get("review_rounds") or 0)
+            said.append(f"Review on, {n} round{'s' if n > 1 else ''}" if n > 0 else "Review off")
+        if t.get("proof") is not None:
+            said.append("Proof " + ("off" if t["proof"] is False else "on"))
+        if layer.get("worker"):
+            said.append(f"Task agent {pick_words(layer['worker'], 'claude')}")
+        if layer.get("reviewer"):
+            said.append(f"Reviewer {pick_words(layer['reviewer'], 'the other CLI')}")
+        if str(t.get("base") or "").strip():
+            said.append(f"Base branch {t['base']}")
+        rest = [k for k in t if k not in ("merge", "review_rounds", "proof", "base") and t[k] not in (None, "", [])]
+        if rest:
+            said.append("also " + ", ".join(k.replace("_", " ") for k in rest))
+        if said:
+            out.append(f"{short_folder(folder)}: {', '.join(said)}")
+    return out
 
 
 def resolve(ls):
@@ -75,12 +133,14 @@ def pick_words(p, unset):
     return agent + (f", model {p['model']}" if p.get("model") else "") + (f", effort {p['effort']}" if p.get("effort") else "")
 
 
-def rows(space, d=None):
+def rows(space, d=None, folder=None):
     """The block's lines for a space: [{key, label, text, value, by, scope}]. by: who set a line
     that differs from Herdr's default (None: the default); scope: "space" when the space sets one of
-    its parts itself, else "everywhere" (or "machine"). d: the settings file (read when None)."""
+    its parts itself, "repo" when the repo it sits on does, else "everywhere" (or "machine"). d: the
+    settings file (read when None); folder: the repo the space sits on (space_folder when None)."""
     d = read_settings() if d is None else d
-    ls = layers(d, space)
+    folder = space_folder(space, d) if folder is None else folder
+    ls = layers(d, space, folder)
 
     def lines(cfg):
         t = cfg["tasks"]
@@ -131,12 +191,17 @@ def rows(space, d=None):
         scope = setters[-1] if setters else "everywhere"
         by = setters[-1] if setters and text != default[key] else None
         out.append({"key": key, "label": label, "text": text, "value": value, "by": by, "scope": scope})
+    # SHEP-335: the repos that set their own task settings, so a task added in one is known to get them
+    own = repo_lines(d)
+    out.append({"key": "repos", "label": "Repo settings", "text": "; ".join(own) if own else "none (every repo has the task lines above)",
+                "value": str(len(own)), "by": None, "scope": "repo", "where": short_folder(folder) if folder and repo_own(d, folder, space) else "Everywhere"})
     return out
 
 
 def block(rs):
     """The "Your settings" lines."""
-    return "\n".join([HEAD] + [f"- {r['label']}: {r['text']}" + (f"; {BY[r['by']]}" if r["by"] else "") for r in rs])
+    where = next((r.get("where") for r in rs if r["key"] == "repos"), None) or "Everywhere"
+    return "\n".join([HEAD.format(where=where)] + [f"- {r['label']}: {r['text']}" + (f"; {BY[r['by']]}" if r["by"] else "") for r in rs])
 
 
 def digest(rs):
@@ -161,6 +226,8 @@ def notice(changed):
             INSTRUCTIONS_GONE if r["key"] == "instructions" else \
             f"{r['label']} is now {r['text']}" + (f"; {BY[r['by']]}" if r["by"] else "; Herdr's default") + \
             ("." if r["key"] == "feedback" else ". Tasks you add from now on get it; running ones keep their brief.")
+        if r["key"] == "repos":
+            words = f"Repo settings are now: {r['text']}. Tasks added in those repos from now on get them; running ones keep their brief."
         end = f" {NOTICE_END}" if i == len(changed) - 1 else ""
         out.append(f'<herdr-setting name="{r["key"]}" value="{attr(r["value"])}" scope="{r["scope"]}">{words}{end}</herdr-setting>')
     return "\n".join(out)
