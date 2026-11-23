@@ -85,7 +85,11 @@ export function edge(which: Edge, onDoubleTap?: () => void) {
       let last = 0
       let far = 0
       el.classList.add('on')
-      el.setPointerCapture(e.pointerId)
+      try {
+        el.setPointerCapture(e.pointerId)
+      } catch {
+        /* a pointer the page no longer has */
+      }
       const move = (ev: PointerEvent) => {
         far = Math.max(far, Math.hypot(ev.clientX - x0, ev.clientY - y0))
         if (touch && far < TAP_PX) return
