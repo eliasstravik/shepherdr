@@ -252,12 +252,10 @@ export function spaceMenu(anchor: Element, placeId: string) {
   const snap = getState().snap
   const p = snap && placeOf(snap, placeId)
   if (!snap || !p) return
-  // its whole folder at the top, where a phone can read it, and a row that copies it (SHEP-302)
-  const f = folderOf(snap, p)
-  const top = () => <FolderTop f={f} />
-  const first = [copyFolder(f.full), ...registry.spaceMenu.flatMap((m) => m.rows(p))]
+  // no folder here (SHEP-328): the header's folder chip shows it and copies it
+  const first = registry.spaceMenu.flatMap((m) => m.rows(p))
   const line = first.length > 0
-  if (isEverything(snap, p.id)) return openMenu(anchor, [...first, { icon: 'gear', label: 'Settings', line, run: () => openSettings('all') }], { label: 'Everything', top })
+  if (isEverything(snap, p.id)) return openMenu(anchor, [...first, { icon: 'gear', label: 'Settings', line, run: () => openSettings('all') }], { label: 'Everything' })
   const mine = groupOf(snap, p.id)
   const groups = (snap.sections ?? []).filter((s) => s.id !== 'pinned' && (s.machine ?? snap.host) === p.machine && s.id !== mine?.id)
   const moveTo = (to: string) => void tryAct({ type: 'move', id: p.id, to })
@@ -278,7 +276,7 @@ export function spaceMenu(anchor: Element, placeId: string) {
     { icon: 'archive', label: p.archived ? 'Unarchive' : 'Archive', run: () => archive(snap, p) },
     { icon: 'bin', label: 'Remove', danger: true, line: true, run: () => remove(snap, p) },
   ]
-  openMenu(anchor, rows, { label: `#${p.name}`, top })
+  openMenu(anchor, rows, { label: `#${p.name}` })
 }
 
 function groupMenu(anchor: Element, id: string, name: string) {
