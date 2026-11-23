@@ -17,7 +17,7 @@ from .agents import (
 )
 from .provider import provider_cut, provider_error
 from .sessions import find_lost_logs, refresh_sessions
-from .github import (already_merged, BEHIND, collision, collision_reason, collision_words, CHECKS_NEVER, checks_missing, checks_since, drop_branch, merge_checks, expected_checks, finish, github, merged_here, needs_approval, note_checks, pr_for_branch, pr_merged, pr_pending, pr_problem,
+from .github import (already_merged, BEHIND, checks_state, collision, collision_reason, collision_words, CHECKS_NEVER, checks_missing, checks_since, drop_branch, merge_checks, expected_checks, finish, github, merged_here, needs_approval, note_checks, pr_for_branch, pr_merged, pr_pending, pr_problem,
                      pr_view, pr_wait, queue_dropped_why, queue_entry, queue_merge, queue_refusal, unqueue, tidy_done, tidy_due, update_main, watch_main)
 from .launch import default_space
 from .store import locate, read_list, Store, store_files
@@ -186,6 +186,13 @@ def facts(s, t, report):
         since, expect = checks_since(s, t, v), expected_checks(s, t, v.get("headRefOid"))
         # #1044, #1018: no checks yet (at its newest commit) while some will come is never "all passed".
         missing = checks_missing(v, since, expect)
+        # SHEP-348: the mark on its row (running, failed, passed)
+        word = checks_state(v, missing)
+        if word != pr.get("checks"):
+            if word:
+                pr["checks"] = word
+            else:
+                pr.pop("checks", None)
         t["_pr_fresh"] = not problem and not pr_pending(v) and not needs_approval(v) and not missing
         # Ready only once its checks are done and GitHub knows it can merge (SHEP-175): Working till then.
         if (v.get("mergeable") or "").upper() == "MERGEABLE" and v.get("headRefOid"):

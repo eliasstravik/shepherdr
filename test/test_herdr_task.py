@@ -1163,6 +1163,26 @@ class BackToWork(unittest.TestCase):
         # a job that waits on another's needs isn't a check yet, but its run isn't finished
         self.assertTrue(github.pr_pending(dict(done, runs_pending=True)))
 
+    def test_its_checks_in_one_word_for_its_row(self):
+        # SHEP-348: the mark on a task row's repo line: running, failed, passed, or none
+        import herdr_task.github as github
+        row = lambda st, c="": {"name": "test", "status": st, "conclusion": c}
+        self.assertEqual(github.checks_state({"statusCheckRollup": [row("COMPLETED", "SUCCESS"), row("COMPLETED", "FAILURE")]}), "failed")
+        self.assertEqual(github.checks_state({"statusCheckRollup": [row("COMPLETED", "SUCCESS"), row("IN_PROGRESS")]}), "running")
+        self.assertEqual(github.checks_state({"statusCheckRollup": [row("COMPLETED", "SUCCESS"), row("COMPLETED", "SKIPPED")]}), "passed")
+        self.assertEqual(github.checks_state({"statusCheckRollup": [row("COMPLETED", "SUCCESS")], "runs_pending": True}), "running")
+        self.assertEqual(github.checks_state({"statusCheckRollup": []}, missing=True), "running")
+        self.assertIsNone(github.checks_state({"statusCheckRollup": []}))
+
+    def test_a_tick_keeps_its_checks_word_on_its_pull_request(self):
+        t = self.pr_task(ready_at=1_000_000)
+        running = dict(self.NONE_YET, statusCheckRollup=[{"name": "test", "status": "IN_PROGRESS", "conclusion": ""}])
+        self.early_tick(running, 1_010_000, "yes")
+        self.assertEqual(t["pr"]["checks"], "running")
+        passed = dict(self.NONE_YET, statusCheckRollup=[{"name": "test", "status": "COMPLETED", "conclusion": "SUCCESS"}])
+        self.early_tick(passed, 1_200_000, "yes")
+        self.assertEqual(t["pr"]["checks"], "passed")
+
     def test_accept_before_checks_start_merges_once_they_pass(self):
         import herdr_task.github as github
         t = self.pr_task(ready_at=1_000_000)

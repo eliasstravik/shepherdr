@@ -553,6 +553,20 @@ def pr_pending(v):
                for c in v.get("statusCheckRollup") or [])
 
 
+def checks_state(v, missing=False):
+    """SHEP-348: its pull request's checks in one word for its row's mark: "failed" (one failed), "running" (some still
+    run, or will come), "passed" (all green), or None (none, or they can't be read here)."""
+    rows = v.get("statusCheckRollup") or []
+    word = lambda c: (c.get("conclusion") or c.get("state") or "").upper()
+    if any(word(c) in BAD for c in rows):
+        return "failed"
+    if pr_pending(v) or missing:
+        return "running"
+    if rows and all(word(c) in ("SUCCESS", "NEUTRAL", "SKIPPED") for c in rows):
+        return "passed"
+    return None
+
+
 def needs_approval(v):
     """#743: the base requires an approving review that hasn't landed (or changes were asked for):
     a merge can't go through yet, and that is nobody's problem to fix here; it waits calmly."""
