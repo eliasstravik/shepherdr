@@ -99,5 +99,5 @@ export function useCopiedPicture(on: boolean): [{ file: File; mark: string; url:
   return [got, done]
 }
 
-/** a pointer that is a finger: a phone or a tablet, where the photo button and the plus menu are */
+/** a pointer that is a finger: a phone or a tablet, where the plus menu is */
 export const touch = () => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
