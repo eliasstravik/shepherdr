@@ -4,8 +4,8 @@
 
 ### Once, after updating
 
-- On Android, reinstall the app once to get the dark bottom bar: remove the installed app and add it to the home screen again. An app installed before 3.2.3 keeps
-  its old white bar, as Chrome rarely refreshes an installed app's colours by itself.
+- On Android, reinstall the app once to get the dark bottom bar: remove the installed app and add it to the home
+  screen again. An app installed before 3.2.3 keeps its old white bar, as Chrome rarely refreshes its colours itself.
 
 ## 3.2.4
 
@@ -17,7 +17,8 @@ Fixes for 3.2.3 so updating every machine works again, and a tidier message box 
   once: `herdr-task auto edit <schedule> --may-update-shepherdr on`, from your own terminal or your Assistant (a task's
   agent can't set it). Its runs then update Shepherdr outside their own terminal and say how it went; the schedule's
   own words can stay as they are.
-- On Android, reinstall the app once to get the dark bottom bar: remove the installed app and add it to the home screen again.
+- On Android, reinstall the app once to get the dark bottom bar: remove the installed app and add it to the home
+  screen again.
 
 ### Updating machines
 
@@ -53,7 +54,8 @@ calmer, roomier app on a phone and tablet.
   `settings-moved.md` beside the settings file. Look at Settings › Tasks › Applies to, once.
 - Pages already open update themselves after this release (see below). On Android, Shepherdr becomes a place to share
   into: if it doesn't show in the share sheet after a day, remove the installed app and add it to the home screen again.
-- On Android, reinstall the app once to get the dark bottom bar: remove the installed app and add it to the home screen again.
+- On Android, reinstall the app once to get the dark bottom bar: remove the installed app and add it to the home
+  screen again.
 - On a Mac, an agent's desktop needs Screen Sharing on, with its password given to Shepherdr as the secret
   `SCREEN_SHARING_PASSWORD`; `shepherdr doctor` says what is still missing.
 
