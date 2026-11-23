@@ -82,9 +82,9 @@ export const otherCli = (worker) => (worker === "codex" ? "claude" : "codex");
 // some of your messages with an emoji; off, none does. Kept as agents.reactions; SHEP-42 kept it as assistant.reactions
 // (upgradeReactions moves it).
 export const REACTIONS = { title: "Reactions", about: "Agents react to some of your messages with an emoji, as a person would." };
-// Suggested next message (SHEP-186): an agent ends its reply with what you would likely say next, shown greyed out in the
-// box: Enter sends it, Tab fills it in, typing replaces it. Off: no agent suggests, and none is shown.
-export const SUGGESTIONS = { title: "Suggested next message", about: "Your agents suggest what you'd likely say next, greyed out in the box: Enter sends it, Tab fills it in." };
+// Suggested replies (SHEP-186): an agent ends its reply with one to three replies you would likely send next, shown as
+// bubbles above the box: a tap sends one, a press held puts it in the box to edit. Off: no agent suggests, none show.
+export const SUGGESTIONS = { title: "Suggested replies", about: "Your agents suggest up to three replies you'd likely send next, as bubbles above the box: tap one to send it." };
 // A settings file's layers (everywhere, machines, spaces) with SHEP-42's assistant.reactions moved to agents.reactions
 // (a layer that has both keeps agents'), and Everywhere's star_prompt dropped (the one-time GitHub star card, SHEP-79,
 // is gone: SHEP-225). Changes cfg in place and returns it.

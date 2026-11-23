@@ -779,10 +779,10 @@ def task_settings(s, t, space=None, argv=None, live=False):
         by_layer(s, space, "worker", None, bool(cfg.get("worker")), False) or \
         (by_layer(s, space, "tasks", f"{agent}_flags", extra, []) if extra else None)
     add("Agent", text, {"agent": agent, "model": model, "effort": effort, "flags": extra}, a_by)
-    # Suggested next message (SHEP-186): the reply ends with the words the person would likely send next (templates/worker.md)
+    # Suggested replies (SHEP-186): the reply ends with one to three replies the person would likely send next (templates/worker.md)
     sug = (cfg.get("agents") or {}).get("suggestions") is not False
-    add("Suggested next message", "on (your reply ends with the message you'd likely send next, shown greyed out in the box)" if sug
-        else "off (no suggested next message)", sug, by_layer(s, space, "agents", "suggestions", sug, True))
+    add("Suggested replies", "on (your reply ends with one to three replies the person would likely send next, shown as bubbles to tap)" if sug
+        else "off (no suggested replies)", sug, by_layer(s, space, "agents", "suggestions", sug, True))
     return lines
 
 

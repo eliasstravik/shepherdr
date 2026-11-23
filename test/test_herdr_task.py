@@ -4852,10 +4852,10 @@ class AssistantSettings(unittest.TestCase):
         # nothing differs from Herdr's default: no line says who set it
         self.assertNotIn("; set for", note)
         self.assertNotIn("; your setting", note)
-        self.assertEqual(len(note.split("\n")), 14)  # head, 12 lines (Suggested next message, Repo settings), the Reactions guide
+        self.assertEqual(len(note.split("\n")), 14)  # head, 12 lines (Suggested replies, Repo settings), the Reactions guide
         self.assertIn("- Repo settings: none (every repo has the task lines above)", note)
         self.assertIn("the task lines below are Everywhere's", note)
-        self.assertIn("- Suggested next message: on (end each reply", note)
+        self.assertIn("- Suggested replies: on (end each reply with one to three replies", note)
 
     def test_the_block_for_a_space_with_its_own(self):
         """SHEP-335: the task lines are the repo's the space sits on (repos[<folder>]), its own lines (Reactions) the
@@ -5792,10 +5792,10 @@ class TaskFlow(unittest.TestCase):
         """SHEP-186: a worker's brief says whether its replies end with a suggested next message: on by default,
         and off when Settings › Agents turns it off (the agent then writes no suggest line)."""
         settings = self.settings({})
-        self.assertIn("- Suggested next message: on (your reply ends with the message you'd likely send next",
+        self.assertIn("- Suggested replies: on (your reply ends with one to three replies the person would likely send next",
                       settings.settings_block(self.store, self.task))
         settings = self.settings({"everywhere": {"agents": {"suggestions": False}}})
-        self.assertIn("- Suggested next message: off (no suggested next message) (your setting everywhere)",
+        self.assertIn("- Suggested replies: off (no suggested replies) (your setting everywhere)",
                       settings.settings_block(self.store, self.task))
 
     def test_a_running_task_keeps_its_briefs_review(self):
@@ -8402,6 +8402,13 @@ class ReadyAndPrFlow(unittest.TestCase):
     def test_a_suggested_reply_in_the_input_is_not_typing(self):
         self.assertIsNone(self.typing_with("❯ added a round, go ahead\n", [self.REPLY]))
 
+    def test_any_of_three_suggested_replies_in_the_input_is_not_typing(self):
+        three = {"type": "assistant", "message": {"content": [{"type": "text", "text": "Merge it?\n\n<hc suggest=\"Yes, merge it\"/>\n"
+                                                           "<hc suggest=\"Show me the diff\"/>\n<hc suggest=\"status?\"/>"}]}}
+        self.assertIsNone(self.typing_with("❯ Show me the diff\n", [three]))
+        self.assertIsNone(self.typing_with("❯ status?\n", [three]))
+        self.assertEqual(self.typing_with("❯ no\n", [three]), "input")
+
     def test_other_words_in_the_input_are_typing(self):
         self.assertEqual(self.typing_with("❯ wait, one more thing\n", [self.REPLY]), "input")
 
@@ -10038,10 +10045,10 @@ class RepoSettings(unittest.TestCase):
         self.assertEqual((m["value"], m["by"]), ("auto", "repo"))
 
     def test_a_spaces_own_settings_stay_the_spaces(self):
-        """What is about the space (Suggested next message) comes from the space that started the task, not the repo."""
+        """What is about the space (Suggested replies) comes from the space that started the task, not the repo."""
         self.write({"spaces": {"sproot": {"folder": "/", "agents": {"suggestions": False}}},
                     "repos": {self.repo: {"tasks": {"merge": "auto"}}}})
-        sug = next(x for x in self.settings.task_settings(self.store, {"space": "sproot"}) if x["label"] == "Suggested next message")
+        sug = next(x for x in self.settings.task_settings(self.store, {"space": "sproot"}) if x["label"] == "Suggested replies")
         self.assertEqual((sug["value"], sug["by"], sug["from"]), (False, "space", "space"))
 
     def test_sources(self):

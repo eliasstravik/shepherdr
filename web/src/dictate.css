@@ -22,7 +22,7 @@
 .vsi{display:grid;place-items:center;animation:fade .15s ease-out}
 .cbar:has(>.vin)>:not(.vin,.vs){display:none}
 .cbox:has(.vin.quiet) .cin{opacity:.4}
-.cbox:has(.vin.quiet) .kbd{display:none}
+
 .vin{display:flex;align-items:center;flex:1 1 0;min-width:0;padding-left:6px;overflow:hidden}
 @media(pointer:coarse){.ib.vs:not([aria-disabled="true"]):active{opacity:.6}}
 

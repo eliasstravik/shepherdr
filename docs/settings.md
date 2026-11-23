@@ -59,7 +59,7 @@ edits the file, or edit it yourself.
 |---|---|
 | `backup.agent` | The other agent takes over a task once when its own can't go on; `"off"` turns that off |
 | `agents.reactions` | Agents react to some of your messages with an emoji |
-| `agents.suggestions` | An agent may end its message with one suggested reply |
+| `agents.suggestions` | Suggested replies: an agent ends its message with one to three replies you can send with a tap |
 | `agents.feedback`, `agents.feedback_repo` | Agents offer once to file a problem with Shepherdr, and where |
 | `tasks.review_rounds`, `tasks.must_fix` | How many review rounds, and what a review must get fixed |
 | `tasks.archive_after` | Days before a Done task is archived |

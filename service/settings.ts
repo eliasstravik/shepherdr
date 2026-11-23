@@ -254,7 +254,7 @@ export class Settings {
     const re = this.pick(scope, "agents", "reactions");
     rows.push({ label: REACTIONS.title, key: "agents.reactions", value: ON(re.value !== false), options: ["on", "off"], hint: REACTIONS.about,
       ...this.follows(s, re, (v) => ON(v !== false), "agents", "reactions") });
-    // Suggested next message: the agent's guess at what you'd say next, greyed out in the box (SHEP-186; the agents' side is herdr-task's settings)
+    // Suggested replies: the agent's guesses at what you'd send next, bubbles above the box (SHEP-186; the agents' side is herdr-task's settings)
     const sg = this.pick(scope, "agents", "suggestions");
     rows.push({ label: SUGGESTIONS.title, key: "agents.suggestions", value: ON(sg.value !== false), options: ["on", "off"], hint: SUGGESTIONS.about,
       ...this.follows(s, sg, (v) => ON(v !== false), "agents", "suggestions") });

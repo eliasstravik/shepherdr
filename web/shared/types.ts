@@ -590,8 +590,10 @@ export interface Message {
   who: 'you' | 'agent'
   /** This answer was given through the voice call. */
   byVoice?: boolean
-  /** the agent's suggested next message (its reply's last line): greyed out in the box until something is typed (SHEP-186) */
+  /** the agent's first suggested reply (an older page's single suggestion; suggests holds them all) */
   suggest?: string
+  /** the agent's suggested replies (its reply's last lines, best first, at most 3): bubbles above the box (SHEP-186) */
+  suggests?: string[]
   /** a live row: when it last changed; at keeps its place in the chat */
   updated?: number
   /** plain text (yours) or markdown (the agent's) */

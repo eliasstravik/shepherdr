@@ -35,7 +35,7 @@ const chatFor = (s: Sock, key: string): Chat => {
   let chat = chats[key] ?? { key, messages: [], cli: 'claude' as const, top: true, agent: chats[EV]!.agent }
   // a link to the app itself (APP/?artifact=…) gets this page's own address, as `herdr-artifact link` prints it (SHEP-339)
   if (s.data.app) chat = { ...chat, messages: chat.messages.map((m) => (m.text?.includes('APP/') ? { ...m, text: m.text.replaceAll('APP/', s.data.app!) } : m)) }
-  return s.data.mode === 'down' ? { ...chat, messages: chat.messages.map(({ suggest, ...m }) => m) } : chat
+  return s.data.mode === 'down' ? { ...chat, messages: chat.messages.map(({ suggest, suggests, ...m }) => m) } : chat
 }
 const each = (f: (snap: Snapshot) => void) => { for (const s of Object.values(state)) f(s); push() }
 const taskOf = (id: string) => state.normal.tasks.find((t) => t.id === id || `${t.id}/worker` === id)
