@@ -150,7 +150,8 @@ export const chats: Record<string, Chat> = Object.fromEntries(
       a('SHOP-16 started on its schedule in #shop. It found 3 packages behind and is updating them.', { suggest: 'Show me what needs me' }),
     ], sonnet),
     chat(P.shop, [a('I made a mock-up of the new checkout. Have a look.'), { id: `m${++n}`, who: 'agent', artifact: { id: 'a-mock', v: 3 } }, a('Started SHOP-15, added from Everything.'), { id: `m${++n}`, who: 'agent', news: { task: 'SHOP-14', ref: 'SHOP-14', mark: 'needs', what: '', text: "Which provider should I switch to, Stripe or Adyen? I'd go with Stripe." } }, ask('q-pay', '', byPay, ['Stripe', 'Adyen']), a('SHOP-16 started on its schedule in #shop. It found 3 packages behind and is updating them.', { suggest: 'How is the checkout button going?' })], sonnet),
-    chat(P.blog, [a('To see it yourself, run this in the blog folder:\n\n```\nbun run dev\n```', { suggest: 'Mark Fix typo on the About page as done' })], sonnet),
+    // working, nothing written yet: the working sign alone (SHEP-313)
+    chat(P.blog, [a('To see it yourself, run this in the blog folder:\n\n```\nbun run dev\n```'), me('The link to the archive is broken too. Can you fix it?')], sonnet, { working: true }),
     chat(P.notes, [], sonnet),
     chat(P.garden, [a('GARDEN-3 is in progress, about 20 minutes left.'), { id: `m${++n}`, who: 'agent', news: { task: 'vm:GARDEN-4', ref: 'GARDEN-4', mark: 'needs', what: '', text: 'I need an image library to resize the photos.' } }, ask('q-pil', 'Run a command', byPhoto, ['Allow once', 'Decline'], { command: 'pip install pillow' })], gpt),
     chat('SHOP-14/worker', [a('I compared both for the shop. Stripe is already used for your invoices. Adyen gets cheaper above 50k a month but needs two weeks of paperwork.'), ...payQ().map((x, i) => (i ? x : { ...x, suggest: 'Go with Stripe' }))], opus),
