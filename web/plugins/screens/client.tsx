@@ -11,6 +11,7 @@ import { definePlugin, getState, notice, openSettings, setUI, togglePane, tryAct
 import { openMenu } from '@client/overlay.tsx'
 import { Btn, cx, Hd, I, IB } from '@client/ui.tsx'
 import { DoneRow } from '@plugins/chat/cards.tsx'
+import { StatusIcon } from '@plugins/tasks/icon.tsx'
 import { shortUrl, toUrl, type BrowserDown, type BrowserUp } from '@shared/browser.ts'
 import type { Chat, ScreenInfo, Snapshot, Task } from '@shared/types.ts'
 import { isEverything, machineLabel, placeOf, taskOf, tasksIn, tstate } from '@shared/view.ts'
@@ -390,7 +391,7 @@ function HandsCard({ k, sc, t, ref_ }: { k: string; sc: ScreenInfo; t: Task; ref
   if (sc.hands!.settled) return ref_ ? null : <DoneRow>{sc.hands!.settled === 'skip' ? 'You skipped this' : 'You did this step'}</DoneRow>
   return (
     <>
-      {ref_ && <button type="button" className="ref" onClick={() => setUI({ task: t.id, pane: 'tasks', wide: false })}><I n="chat" c="s16" /><span>{t.name}</span></button>}
+      {ref_ && <button type="button" className="ref" onClick={() => setUI({ task: t.id, pane: 'tasks', wide: false })}><StatusIcon t={t} time="side" /><span>{t.name}</span></button>}
       <div className="card" data-card={`hands:${t.id}`}>
         <span className="t">Needs your hands</span>
         <span className="s">{sc.hands!.what}{sc.b?.url ? ` · ${shortUrl(sc.b.url)}` : ''}</span>

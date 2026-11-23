@@ -15,7 +15,7 @@ import * as T from "../core/tasks.js";
 import { FIND } from "../core/chat-log.js";
 import { isHelper, subagentsOf } from "../core/chat-view.js";
 // The core is plain JavaScript; its defaults read as narrow types to TypeScript.
-const { place, refOf, taskKey, autoPrefix, reportOf, secondLine, leftOf, queueReason, machineOf } = T as any;
+const { place, refOf, taskKey, autoPrefix, reportOf, ownReport, secondLine, leftOf, queueReason, machineOf } = T as any;
 import * as S from "../core/spaces.js";
 const { sidebarOf, lastAssistantOf, isUnread, inOrder, byMachineOrder, machineOrderOf } = S as any;
 
@@ -290,8 +290,9 @@ export class Model {
       const live = this.agentsOf(list, task);
       const p = place(list, task, { live, helpers: this.helpersOf(list, task, live) });
       if (p.settles) settles = Math.min(settles, p.settles);
-      const own = live.map((a) => (this.hub.terminals.get(a.address) as any)?.report).find((r) => typeof r?.progress === "number" && r.progress >= 0);
-      const w = reportOf(task, p.section, own ? { pct: own.progress, msg: own.msg || null } : null);
+      // the % its agent's terminal reports itself (OSC 7501's progress, core ownReport), beside herdr-task status --done
+      const own = live.map((a) => ownReport(this.hub.terminals.get(a.address))).find(Boolean) ?? null;
+      const w = reportOf(task, p.section, own);
       const mine = live.filter((a) => a.role !== "reviewer" && a.role !== "helper");
       const worker = mine.find((a) => a.status === "blocked")?.address ?? mine[0]?.address ?? null;
       const last = task.agents?.[task.agents.length - 1];

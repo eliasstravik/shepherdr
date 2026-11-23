@@ -20,7 +20,7 @@ const snap: any = {
     { id: "mini/h", name: "home", home: true, machine: "mini", chat: "p:mini:h", level: 1, status: "idle" },
   ],
   tasks: [
-    { ...base, id: "SHOP-45", name: "Voice reads the new app", status: "work", place: "sp1", started: now - 600_000, report: { msg: "Writing tests", progress: 50 }, repo: "branch", agent: { chat: "SHOP-45/worker", role: "worker", cli: "claude", status: "work", age: "" }, at: now - 60_000 },
+    { ...base, id: "SHOP-45", name: "Voice reads the new app", status: "work", place: "sp1", started: now - 600_000, report: { msg: "Writing tests", progress: 50, eta: 10 }, repo: "branch", agent: { chat: "SHOP-45/worker", role: "worker", cli: "claude", status: "work", age: "" }, at: now - 60_000 },
     { ...base, id: "SHOP-41", name: "Fast switch in the picker", status: "ready", place: "sp1", summary: "The Fast switch is back", repo: "branch", branch: "task/41", needsAt: now - 7200_000, at: now - 3600_000, agent: { chat: "SHOP-41/worker", role: "worker", cli: "claude", status: "ready", age: "" } },
     { ...base, id: "mini:GARD-3", name: "Outbound list", status: "need", place: "mini/sp2", blocked: "question", needsAt: now - 300_000, agent: { chat: "mini:GARD-3/worker", role: "worker", cli: "claude", status: "need", age: "" }, at: now - 7200_000 },
     { ...base, id: "SHOP-30", name: "Old thing", status: "done", place: "sp1", merged: true, doneAt: now - 86400_000 * 3, at: now - 86400_000 * 3 },

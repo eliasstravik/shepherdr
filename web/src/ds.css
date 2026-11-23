@@ -256,7 +256,7 @@ button.fake .n span,button.fake>.i{color:var(--muted)}
 
 /* task rows: title, what it says, where it runs; icons sit on the first line */
 .row.tk{align-items:flex-start;padding-block:8px}
-.row.tk>.i{margin-top:calc((var(--uil) - var(--ic))/2)}
+.row.tk>.tring{margin-top:calc((var(--uil) - var(--ic))/2)}
 .row.tk .v{line-height:var(--uil)}
 .rowx:has(>.row.tk){align-items:flex-start}
 .rowx:has(>.row.tk)>.ib{margin-top:calc(8px + (var(--uil) - var(--ib))/2)}
@@ -315,6 +315,15 @@ html,body{height:100%}body{padding:0;overflow:hidden}
 @keyframes up{from{transform:translateY(24px);opacity:0}}
 @keyframes in{from{transform:translateX(-24px);opacity:0}}
 @keyframes fade{from{opacity:0}}
+/* a task's status icon (SHEP-321, tasks/client.tsx StatusIcon): the ring filled by the share done, the time left short
+   under it, centred on the icon without widening its column (a wider time overflows evenly); one-line rows: beside it */
+.tring{display:inline-flex;flex-direction:column;align-items:center;flex:none;width:var(--ic);color:var(--blue)}
+.tring.t-ask{color:var(--amber)}.tring.t-red{color:var(--red)}.tring.t-ready{color:var(--green)}.tring.t-mute{color:var(--muted)}
+.tring .mk{fill:currentColor;stroke:var(--canvas);stroke-width:1.5;paint-order:stroke}
+.tring .tk{stroke:var(--canvas);stroke-width:1.75}
+.tring .tl{margin-top:calc((var(--uil) - var(--ic))/2);font-size:calc(var(--sec) - 2px);line-height:var(--secl);font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tring.tside{flex-direction:row;width:auto;gap:4px}.tring.tside .tl{margin-top:0}
+.card .t.tw{display:flex;align-items:center;gap:8px}
 /* the Working ring: the whole icon turns about its centre; reduced motion: a slow, calm pulse instead */
 .i.turn{animation:turn 1s linear infinite}
 @keyframes turn{to{transform:rotate(1turn)}}

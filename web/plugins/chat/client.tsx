@@ -10,8 +10,9 @@ import { AgentLine, openPicker, pickFor, pickWords, type Pick } from '@client/pi
 import { attach, detach, dropOut, retry, reupload, send } from '@client/send.ts'
 import { Btn, cx, Empty, I, IB, useGrow } from '@client/ui.tsx'
 import { isImage, isVideo } from '@shared/files.ts'
-import type { Chat, Message, Snapshot, TurnActivity } from '@shared/types.ts'
+import type { Chat, Message, Snapshot, Task, TurnActivity } from '@shared/types.ts'
 import { isEverything, placeOf, taskOf } from '@shared/view.ts'
+import { StatusIcon } from '@plugins/tasks/icon.tsx'
 import { DoneRow, QuestionCard, SecretCard } from './cards.tsx'
 import { dayLabel } from './days.ts'
 import { Markdown } from './markdown.tsx'
@@ -66,10 +67,10 @@ function Did({ a }: { a: TurnActivity }) {
 }
 
 /** the line naming the task above messages that came from it */
-function TaskRef({ id, title }: { id: string; title: string }) {
+function TaskRef({ id, title, t }: { id: string; title: string; t?: Task }) {
   return (
     <button type="button" className="ref" onClick={() => setUI({ task: id, pane: 'tasks', wide: false })}>
-      <I n="chat" c="s16" />
+      {t ? <StatusIcon t={t} time="side" /> : <I n="chat" c="s16" />}
       {title}
     </button>
   )
@@ -270,7 +271,7 @@ function Messages({ thread }: { thread: Thread }) {
     else if (m.question) {
       // a question from a task, shown in this chat: under a line naming the task (once), and it says where that task runs
       const from = m.question.by && !thread.task ? taskIdOf(snap, m.question.by.chat) : null
-      if (from && from !== lastRef) out.push(<TaskRef key={`r:${k}`} id={from} title={m.question.by!.title ?? m.question.by!.ref} />)
+      if (from && from !== lastRef) out.push(<TaskRef key={`r:${k}`} id={from} title={m.question.by!.title ?? m.question.by!.ref} t={taskOf(snap, from)} />)
       if (from) lastRef = from
       const place = (from && taskOf(snap, from)?.place) || thread.place
       if (m.question.title && !m.question.command && !m.question.plan && !m.question.parts?.length && m.question.sent === undefined && !m.question.closed) out.push(<div key={`q:${k}`} className={cx('b', gap && 'gap')}>{m.question.title}</div>)
@@ -282,7 +283,7 @@ function Messages({ thread }: { thread: Thread }) {
     } else if (m.news || m.card) {
       const taskId = m.news?.task ?? m.card?.task
       const t = taskOf(snap, taskId)
-      if (t && !thread.task && t.id !== lastRef) out.push(<TaskRef key={`r:${k}`} id={t.id} title={t.name} />)
+      if (t && !thread.task && t.id !== lastRef) out.push(<TaskRef key={`r:${k}`} id={t.id} title={t.name} t={t} />)
       if (t) lastRef = t.id
       const text = m.news?.text ?? m.card?.text ?? m.text ?? ''
       if (text) out.push(<Bubble key={k} msg={{ ...m, text }} chat={stub} thread={thread} gap={false} />)

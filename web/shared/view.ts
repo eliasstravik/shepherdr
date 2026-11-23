@@ -188,27 +188,60 @@ export function dayTime(ms: number): string {
   return today ? `today ${time}` : `${d.toLocaleDateString('en', { weekday: 'short' })} ${time}`
 }
 
-/** Time left, worked out and never guessed: time spent so far × (100 − progress) ÷ progress, from the progress the
- *  agent reports. No progress reported: no estimate (null). In minutes. */
-export function minutesLeft(started: number | undefined, progress: number | undefined, now = Date.now()): number | null {
-  if (!started || progress === undefined || progress <= 0 || progress >= 100) return null
-  const spent = (now - started) / 60000
-  if (spent <= 0) return null
-  return Math.max(1, Math.round((spent * (100 - progress)) / progress))
+/** A task's time left as its agent reports it (herdr-task status --left, counted down by the service), in minutes:
+ *  only while it works (frozen and not shown while it waits on you); none when it gave none. 0: under a minute. */
+export function etaOf(t: Task): number | null {
+  const eta = t.report?.eta
+  if (tstate(t) !== 'working' || t.status === 'merging' || t.accepting || t.waitsDesktop || t.report?.paused) return null
+  return typeof eta === 'number' && eta >= 0 ? eta : null
 }
 
 /** "10 min left", "2 h left" */
 export function leftWords(min: number | null): string {
   if (min === null) return ''
-  return min < 90 ? `${min} min left` : `${Math.round(min / 60)} h left`
+  return min < 1 ? 'under a minute left' : min < 60 ? `${min} min left` : `${Math.round(min / 60)} h left`
 }
 
-/** the time at the right of a task's row: how long a Needs you row has waited for the person, a Working row's time
- *  left, how long ago a Done row ended */
+/** the time left as few letters as fit under a task's status icon: "<1m", "13m", "59m", "1h", "2h"; nothing unknown */
+export function leftShort(min: number | null | undefined): string {
+  if (min === null || min === undefined || !Number.isFinite(min) || min < 0) return ''
+  if (min < 1) return '<1m'
+  if (min < 60) return `${Math.round(min)}m`
+  return `${Math.round(min / 60)}h`
+}
+
+/** How a task's status icon draws (SHEP-321, as before 3.2.0: a ring filled by the % done its agent reports, the time
+ *  left under it). `check`: finished (Ready for review, merging, Done). Otherwise the ring: `pct` its share done
+ *  (0-100; null: none reported yet, an alive indeterminate ring while it works), `tone` its colour, `mark` the small
+ *  sign that tells states apart without colour (needs you: a dot; stopped: a square; queued: a dashed ring). */
+export interface Ring {
+  kind: 'check' | 'ring'
+  tone: 'working' | 'ask' | 'red' | 'ready' | 'mute'
+  pct: number | null
+  mark?: 'dot' | 'stop' | 'queued'
+  /** the words a screen reader says for it */
+  label: string
+}
+
+export function ringOf(t: Task): Ring {
+  const s = tstate(t)
+  if (s === 'done' || s === 'archived') return { kind: 'check', tone: 'mute', pct: 100, label: 'Done' }
+  if (s === 'ready' || t.status === 'merging' || t.accepting) return { kind: 'check', tone: 'ready', pct: 100, label: s === 'ready' ? 'Ready for review' : 'Merging' }
+  const p = t.report?.progress
+  const pct = typeof p === 'number' && Number.isFinite(p) ? Math.max(0, Math.min(100, Math.round(p))) : null
+  const done = pct === null ? '' : `, ${pct}% done`
+  if (t.stopped) return t.stopped.by === 'you' ? { kind: 'ring', tone: 'ask', pct, mark: 'stop', label: `Stopped by you${done}` } : { kind: 'ring', tone: 'red', pct, mark: 'stop', label: `Stopped${done}` }
+  if (s === 'ask') return { kind: 'ring', tone: 'ask', pct, mark: 'dot', label: `Needs you${done}` }
+  if (s === 'working') return { kind: 'ring', tone: 'working', pct, label: `Working${done}` }
+  // queued, scheduled or not started yet: an empty ring
+  return { kind: 'ring', tone: 'mute', pct: pct ?? 0, mark: 'queued', label: 'Up next' }
+}
+
+/** the time at the right of a task's row: how long a Needs you row has waited for the person, how long ago a Done row
+ *  ended. A Working row's time left sits under its status icon instead (leftShort). */
 export function taskWhen(t: Task, now = Date.now()): string {
   const s = tstate(t)
   if (s === 'ask' || s === 'ready') return t.needsAt ? agoShort(t.needsAt, now) : ''
-  if (s === 'working') return t.status === 'work' && !t.waitsDesktop ? leftWords(minutesLeft(t.started, t.report?.progress, now)) : ''
   if (s === 'done') return t.doneAt ? agoShort(t.doneAt, now) : ''
   return ''
 }
