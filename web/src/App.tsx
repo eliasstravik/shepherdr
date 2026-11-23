@@ -1,5 +1,6 @@
 // The shell: the list on the left (behind the menu button on a phone), the chat in the middle, the pane on the right
-// (the whole screen on a phone), and the phone's bottom bar. It only lays out what the plugins put in the kernel's
+// (the whole screen on a phone), and the phone's bottom bar. SHEP-336: beside a pane the chat can swap to the right
+// (the pane then sits between the list and the chat); the page's order follows, so Tab goes the way it reads. It only lays out what the plugins put in the kernel's
 // places; the layout itself is the design system's (ds.css).
 import { useEffect, useRef, type ReactNode } from 'react'
 import type { Snapshot } from '@shared/types.ts'
@@ -8,6 +9,7 @@ import { getState, openSettings, registry, setUI, sideHidden, togglePane, useNot
 import { folderMenu, List, spaceMenu } from './list.tsx'
 import { closeTop, Layers } from './overlay.tsx'
 import { edge } from './resize.ts'
+import { columnsOf, swapSides, useSides, type Side } from './sides.ts'
 import { SettingsWindow } from './settings.tsx'
 import { cx, Empty, I, IB, useScrolled } from './ui.tsx'
 
@@ -178,6 +180,15 @@ function Bar({ snap }: { snap: Snapshot }) {
   )
 }
 
+/** SHEP-336: the button on the edge between the chat and the pane that swaps them */
+export function SwapButton({ side }: { side: Side }) {
+  return (
+    <button type="button" className="swp" aria-label={side === 'left' ? 'Move the chat to the right' : 'Move the chat to the left'} onClick={swapSides}>
+      <I n="swap" c="s16" />
+    </button>
+  )
+}
+
 function Toast() {
   const text = useNotice()
   return text ? <div className="toast" role="status">{text}</div> : null
@@ -186,6 +197,7 @@ function Toast() {
 export function App() {
   const snap = useSnap()
   const ui = useUI()
+  const { side } = useSides()
   // the document says which layout it is in, for the few styles outside the shell
   useEffect(() => {
     document.documentElement.classList.toggle('is-phone', ui.phone)
@@ -206,22 +218,29 @@ export function App() {
   }, [])
   if (!snap) return <div className="app"><div className="device" /></div>
   const hidden = sideHidden(ui)
+  const swap = !ui.phone && !!ui.pane && side === 'right'
   const Search = registry.views.search
   const Middle = registry.middle.find((m) => m.when(ui))
   return (
     <div className={cx('app', ui.phone && 'phone')}>
       <div className="device">
         {registry.topBars.map((V, i) => <V key={i} />)}
-        <div className={cx('shell', ui.pane && 'has-pane', hidden && 'noside')}>
+        <div className={cx('shell', ui.pane && 'has-pane', hidden && 'noside', swap && 'swap')}>
           {!ui.phone && !hidden && (
             <nav className="side" aria-label="Spaces">
               <List snap={snap} />
             </nav>
           )}
-          {Middle ? <section className="col chat"><Middle.View /></section> : <ChatColumn snap={snap} />}
-          {ui.pane && <PaneColumn />}
+          {columnsOf(swap ? 'right' : 'left').map((c) =>
+            c === 'chat' ? (
+              Middle ? <section key="chat" className="col chat"><Middle.View /></section> : <ChatColumn key="chat" snap={snap} />
+            ) : (
+              ui.pane && <PaneColumn key="pane" />
+            ),
+          )}
           <div className="rz rzs" {...edge('side')} />
-          <div className="rz rzp" {...edge('pane')} />
+          <div className="rz rzp" {...edge('pane', swapSides)} />
+          {!ui.phone && ui.pane && <SwapButton side={swap ? 'right' : 'left'} />}
         </div>
         {ui.phone && <Bar snap={snap} />}
         <div className="layer">
