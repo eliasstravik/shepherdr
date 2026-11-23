@@ -13,15 +13,17 @@ const { WorkingSign } = await import('./client.tsx')
 const msgs = (...m: Partial<Message>[]) => m.map((x, i) => ({ id: `m${i}`, who: 'agent', ...x })) as Message[]
 const chat = (c: Partial<Chat>, messages: Message[] = msgs({ who: 'you', text: 'do it' })) => ({ key: 'p:sp1', cli: 'claude', messages, ...c }) as Chat
 const turn = (t: Partial<TurnActivity> = {}) => ({ id: 't1', at: 1, rows: [], steps: 0, ...t }) as TurnActivity
-const draw = (c: Chat) => renderToStaticMarkup(<WorkingSign chat={c} />)
+let k = 0
+// each draw its own chat key, so a step one test held never shows in the next
+const draw = (c: Chat) => renderToStaticMarkup(<WorkingSign chat={{ ...c, key: c.key === 'p:sp1' ? `p:w${k++}` : c.key }} />)
 const css = readFileSync(new URL('../../src/ds.css', import.meta.url), 'utf8')
 
 test('working with nothing new: three dots inside an agent bubble', () => {
   const html = draw(chat({ working: true }))
   expect(html).toContain('class="wsign"')
   expect(html).toMatch(/<span class="b wbub"[^>]*><span class="wdots"><i><\/i><i><\/i><i><\/i><\/span><\/span>/)
-  expect(html).toContain('aria-label="Working"')
-  expect(html).not.toContain('wstep')
+  expect(html).toContain('aria-label="Thinking"')
+  expect(html).toContain('<span class="wstep">Thinking</span>')
 })
 
 test('the step stays quiet text beside the bubble, not inside it', () => {
@@ -118,4 +120,35 @@ test('layout: Stop sits at the right end of the row, centred over the box\'s rou
   expect(css).toContain('.pane .msgs{padding-inline:8px}')
   expect(css).toContain('.pane>.foot{padding-inline:var(--gut)}')
   expect(css).toMatch(/--gut:16px/)
+})
+
+// SHEP-421: the step wraps onto up to three lines beside the bubble, top-aligned with it, an ellipsis only after that,
+// and Stop stays centred on the bubble's line so a longer step never moves it
+test('layout: the step wraps, capped at three lines, top-aligned with the bubble; Stop never squeezed or moved', () => {
+  const step = rule('.wstep')
+  expect(step).not.toContain('nowrap')
+  expect(step).toContain('-webkit-line-clamp:3')
+  expect(step).toContain('display:-webkit-box')
+  expect(step).toContain('min-width:0')
+  // the bubble is a one-line message: 6px padding round a 24px line; the step's 20px line sits on its middle
+  expect(rule('.wsign')).toContain('align-items:flex-start')
+  expect(rule('.wsign')).toContain('line-height:20px')
+  expect(px(step, 'padding-top')).toBe((6 + 24 + 6 - 20) / 2)
+  expect(rule('.wrow')).toContain('align-items:flex-start')
+  const stop = rule('.wrow>.wstop')
+  expect(stop).toContain('flex:none')
+  expect(stop).toContain('margin-top:calc((36px - var(--ib))/2)')
+})
+
+test('the step stays while it works: the last one held until the next, gone with the sign', () => {
+  const key = 'p:held'
+  const at = (c: Partial<Chat>, m?: Message[]) => renderToStaticMarkup(<WorkingSign chat={chat({ key, ...c }, m)} />)
+  expect(at({ working: true, live: turn() })).toContain('<span class="wstep">Thinking</span>')
+  expect(at({ working: true, live: turn({ now: { title: 'Reading app.ts' } as TurnActivity['now'] }) })).toContain('<span class="wstep">Reading app.ts</span>')
+  // between tools: the last step still shows, not the bare dots
+  expect(at({ working: true, live: turn() })).toContain('<span class="wstep">Reading app.ts</span>')
+  expect(at({ working: true, doing: 'Running bun test' })).toContain('<span class="wstep">Running tests</span>')
+  // the turn ends: the sign goes and forgets it; the next turn starts fresh
+  expect(at({ working: false }, msgs({ who: 'you', text: 'go' }, { text: 'Done.' }))).toBe('')
+  expect(at({ working: true, live: turn() })).toContain('<span class="wstep">Thinking</span>')
 })
