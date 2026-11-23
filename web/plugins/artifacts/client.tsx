@@ -111,7 +111,7 @@ function Page({ a, v, markup, pin, setPin }: { a: Artifact; v: number; markup: b
     return () => removeEventListener('message', on)
   }, [a.id, a.place, v])
   return (
-    <div style={{ position: 'relative', flex: 1, display: 'flex', minHeight: 0 }}>
+    <div className="pagebox">
       <iframe ref={frame} className="page" title={a.title} src={pageUrl(a, v)} sandbox="allow-scripts allow-forms allow-popups" referrerPolicy="no-referrer" />
       {markup && (
         <div

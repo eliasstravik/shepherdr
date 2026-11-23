@@ -23,6 +23,11 @@ put("files/plan-1a2b/v2/.thumb.png", "LIGHT2");
 put("srv-shop.json", "{\"secret\": true}");
 symlinkSync(join(store, "srv-shop.json"), join(store, "files/plan-1a2b/v2/out.json"));
 
+// a long page with four real pictures beside its index.html, like a list of the best matches (SHEP-340)
+const PNG = Buffer.from("89504e470d0a1a0a0000000d4948445200000001000000010806000000" + "1f15c4890000000d49444154789c63f8cfc0f01f0005000201" + "ff8e5a3f0000000049454e44ae426082", "hex");
+put("files/picks-3c4d/v1/index.html", `<h2>The best matches</h2>${[1, 2, 3, 4].map((n) => `<section><h3>Pick ${n}</h3><img src="pic${n}.png"><p>${"More words. ".repeat(80)}</p></section>`).join("")}<p id="end">The end.</p>`);
+for (const n of [1, 2, 3, 4]) { mkdirSync(join(store, "files/picks-3c4d/v1"), { recursive: true }); writeFileSync(join(store, `files/picks-3c4d/v1/pic${n}.png`), PNG); }
+
 // herdr-artifact, faked: says what it was asked and answers as the real one does
 const log = join(dir, "asked.log");
 const fake = join(dir, "herdr-artifact");
@@ -113,6 +118,15 @@ test("a page and its files are served sandboxed, each with its type, from the ve
     r = (await get(page(rest)))!;
     expect([rest, r.status, r.headers.get("content-type"), await r.text()]).toEqual([rest, 200, type, text]);
     expect(r.headers.get("content-security-policy")).toBe(SANDBOX);
+  }
+  // a long page's pictures beside its index.html load through the same route, whole (SHEP-340)
+  const long = (rest = "") => page(rest, 1, "picks-3c4d");
+  r = (await get(long()))!;
+  const html = await r.text();
+  expect([r.status, html.includes('<p id="end">The end.</p>'), [...html.matchAll(/src="(pic\d\.png)"/g)].length]).toEqual([200, true, 4]);
+  for (const [, src] of html.matchAll(/src="(pic\d\.png)"/g)) {
+    r = (await get(new URL(src!, `https://box.example.test${long()}`).pathname))!;
+    expect([src, r.status, r.headers.get("content-type"), Buffer.from(await r.arrayBuffer()).equals(PNG)]).toEqual([src, 200, "image/png", true]);
   }
   // a part of a file (a clip seeks)
   r = (await get(page("data.bin"), { headers: { range: "bytes=2-4" } }))!;

@@ -72,6 +72,7 @@ export const artifacts = [
   art('a-mock', 'Checkout mock-up', P.shop, NOW - 2 * day),
   art('a-deck', 'Launch deck', P.blog, NOW - 7 * day),
   art('a-csv', 'Sales 2026', P.notes, NOW - 14 * day),
+  art('a-picks', 'Garden chair picks', P.shop, NOW - 5 * hour),
   art('a-shop12', 'Faster product search · Proof', P.shop, NOW - 8 * hour, { task: 'SHOP-12', proof: true }),
 ] as Snapshot['artifacts']
 
