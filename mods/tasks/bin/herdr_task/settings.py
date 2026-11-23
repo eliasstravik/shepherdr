@@ -72,19 +72,48 @@ def reactions_on(space=None, d=None):
     return DEFAULTS["agents"]["reactions"]
 
 
+# SHEP-335: the settings that shape a task are the repo's (or plain folder's) it works in, on its machine, whichever
+# space started it: settings.json "repos" -> <folder> (this machine's; another machine's are "<machine>:<folder>" in the
+# serving machine's file, pushed there by their bare folder, as spaces are). A space keeps only what is about itself.
+REPO_SECTIONS = ("tasks", "worker", "reviewer")
+
+
+def repo_key(folder, machine=None):
+    """A repo's key in settings.json "repos": its folder here, "<machine>:<folder>" for another machine's."""
+    return f"{machine}:{folder}" if machine else folder
+
+
+def repo_own(d, folder, space=None):
+    """The repo's own task settings ({section: values}) for `folder` in settings file d: its "repos" entry, else (a file
+    not moved yet, SHEP-335) the task sections of the space sitting on that folder (--space's when several do)."""
+    repos = d.get("repos") if isinstance(d.get("repos"), dict) else {}
+    own = repos.get(folder)
+    if isinstance(own, dict):
+        return {k: v for k, v in own.items() if k in REPO_SECTIONS}
+    spaces = d.get("spaces") if isinstance(d.get("spaces"), dict) else {}
+    mine = [v for v in spaces.values() if isinstance(v, dict) and v.get("folder") == folder]
+    sp = spaces.get(bare(space)) if space else None
+    pick = sp if isinstance(sp, dict) and sp.get("folder") == folder else (mine[0] if mine else {})
+    return {k: v for k, v in pick.items() if k in REPO_SECTIONS}
+
+
+def space_own(d, folder, space=None):
+    """A space's own settings that aren't a repo's (agents' reactions, suggestions, feedback, backup, automations): the
+    space that started the task (`space`), else the one sitting on its folder."""
+    spaces = d.get("spaces") if isinstance(d.get("spaces"), dict) else {}
+    sp = spaces.get(bare(space)) if space else None
+    if not isinstance(sp, dict):
+        sp = next((v for v in spaces.values() if isinstance(v, dict) and v.get("folder") == folder), {})
+    return {k: v for k, v in sp.items() if k not in REPO_SECTIONS}
+
+
 def settings_layers(s, space=None):
-    """(Everywhere's, this machine's, this folder's) raw settings, least specific first: the
-    folder's are those of the space working in it (--space's when several do)."""
-    try:
-        with open(SETTINGS) as f:
-            d = json.load(f)
-    except (OSError, ValueError):
-        d = {}
-    spaces = d.get("spaces") or {}
-    mine = [v for k, v in spaces.items() if (v or {}).get("folder") == s.loc["folder"]]
-    pick = (spaces.get(bare(space)) if space and (spaces.get(bare(space)) or {}).get("folder") == s.loc["folder"] else None) or (mine[0] if mine else None)
+    """(Everywhere's, this machine's, this repo's) raw settings, least specific first. The third is the repo's own task
+    settings (repo_own) with the starting space's own other settings beside them (space_own)."""
+    d = read_settings()
+    folder = s.loc["folder"]
     machine = (d.get("machines") or {}).get(d.get("here") or LOCAL_MACHINE)
-    return d.get("everywhere") or {}, machine or {}, pick or {}
+    return d.get("everywhere") or {}, machine or {}, {**space_own(d, folder, space), **repo_own(d, folder, space)}
 
 
 # ---- Instructions (gone, SHEP-319) --------------------------------------------------------------
@@ -111,6 +140,26 @@ def settings_for(s, space=None):
     merge(everywhere)
     merge(machine)
     merge(pick)
+    return out
+
+
+def setting_sources(s, space=None):
+    """Where each of a folder's task settings comes from (herdr-task config, SHEP-335): {"tasks.merge": "repo", ...},
+    one of "repo" (its own, or "space" for a space's own), "machine" (set before machine scope went), "Everywhere" or
+    "default"."""
+    everywhere, machine, mine = settings_layers(s, space)
+    out = {}
+    for section, vals in DEFAULTS.items():
+        keys = list(vals) if vals else [None]
+        for key in keys:
+            name = f"{section}.{key}" if key else section
+            src = "default"
+            for word, layer in (("Everywhere", everywhere), ("machine", machine),
+                                ("repo" if section in REPO_SECTIONS else "space", mine)):
+                part = layer.get(section) if isinstance(layer, dict) else None
+                if (key and isinstance(part, dict) and part.get(key) is not None) or (not key and part):
+                    src = word
+            out[name] = src
     return out
 
 
@@ -273,8 +322,11 @@ def argv_model(argv):
 # --reviewer...). The brief's own words win over the block.
 
 SETTINGS_HEAD = "Settings: (from herdr-task show; where the brief above says otherwise, it wins)"
-SET_BY = {"task": "set by the assistant for this task", "folder": "this folder's setting", "machine": "this machine's setting",
-          "all": "your setting everywhere"}
+SET_BY = {"task": "set by the assistant for this task", "repo": "this repo's setting", "space": "its space's setting",
+          "folder": "this repo's setting", "machine": "this machine's setting", "all": "your setting everywhere"}
+# Where a value comes from, in one word (herdr-task show and config, SHEP-335): by -> word; None is Herdr's default.
+FROM_WORDS = {"task": "task", "repo": "repo", "folder": "repo", "space": "space", "machine": "machine", "all": "Everywhere",
+              None: "default"}
 MERGE_WORDS = {"ask": "ask the person first: they mark it as done on its card, which merges it",
                "checks": "after checks: once you say ready, Herdr merges it when its checks pass",
                "auto": "on its own: once you say ready, Herdr merges it"}
@@ -405,11 +457,12 @@ def set_opts(t, args, s=None, space=None):
 
 
 def by_layer(s, space, section, key, value, default):
-    """Who set a setting that differs from Herdr's default: "folder", "machine", "all", or None."""
+    """Who set a setting that differs from Herdr's default: "repo" (or "space" for a space's own), "machine", "all",
+    or None."""
     if value == default:
         return None
     everywhere, machine, mine = settings_layers(s, space)
-    for by, layer in (("folder", mine), ("machine", machine), ("all", everywhere)):
+    for by, layer in (("repo" if section in REPO_SECTIONS else "space", mine), ("machine", machine), ("all", everywhere)):
         if key in ((layer.get(section) or {}) if key else {}) or (not key and layer.get(section)):
             return by
     return None
@@ -630,7 +683,7 @@ def task_settings(s, t, space=None, argv=None, live=False):
     lines = []
 
     def add(label, text, value, by):
-        lines.append({"label": label, "text": text, "value": value, "by": by})
+        lines.append({"label": label, "text": text, "value": value, "by": by, "from": FROM_WORDS.get(by, by)})
 
     rounds_cfg = int(k.get("review_rounds") or 0)
     # The Review its brief gave (keep_review): a setting changed while it runs is for tasks added
@@ -712,7 +765,7 @@ def task_settings(s, t, space=None, argv=None, live=False):
         add("Merge", MERGE_WORDS[policy], policy, m_by)
         if t.get("base_set"):
             add("Base", f"{t['base']}: your branch starts from it and merges into it", t["base"],
-                "folder" if t.get("base_by") == "space" else "task")
+                "repo" if t.get("base_by") in ("space", "repo") else "task")
     proof = sets["proof"] == "on" if "proof" in sets else k.get("proof") is not False
     add("Proof", PROOF_WORDS["on" if proof else "off"], proof,
         "task" if "proof" in sets else by_layer(s, space, "tasks", "proof", proof, True))
@@ -732,9 +785,11 @@ def task_settings(s, t, space=None, argv=None, live=False):
     return lines
 
 
-def settings_block(s, t, space=None, argv=None, live=False):
+def settings_block(s, t, space=None, argv=None, live=False, sources=False):
+    """The Settings block a brief ends with. sources: every line says where it comes from, its default too (show)."""
     lines = task_settings(s, t, space, argv, live)
-    rows = [f"- {x['label']}: {x['text']}" + (f" ({SET_BY[x['by']]})" if x["by"] else "") for x in lines]
+    rows = [f"- {x['label']}: {x['text']}" + (f" ({SET_BY[x['by']]})" if x["by"] else " (Herdr's default)" if sources else "")
+            for x in lines]
     # Codex's sandbox can't start here (SHEP-227, #998): the worker hears it in its brief and tells the person.
     word = sandbox_word(lines, argv or (t["agents"][-1].get("argv") if t.get("agents") else None) or worker_argv(s, t, space))
     if word:

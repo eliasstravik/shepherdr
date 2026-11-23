@@ -14,7 +14,7 @@ from . import sandbox
 from .base import Fail, git, guard, now, run, STORE, stop_note, VERSION
 from .settings import (
     agent_argv, agent_key, bare, merge_policy, review_limits, set_opts, set_task, settings_block, settings_for, space_base,
-    task_settings, worker_argv, worktrees_on,
+    task_settings, worker_argv, worktrees_on, setting_sources, SET_BY,
 )
 from .agents import (
     agent_log, agent_running, background_jobs, busy_again, BY_YOU, clear_stopped, job_names, own_jobs, detail, fit, LINE_MAX, live_agents, ready_turns,
@@ -123,9 +123,13 @@ def cmd_add(args):
             # Started later by the scheduler, with no caller to ask: its space is kept now.
             schedule(s, t, at, {"space": space or default_space()})
         v = view(s, t)
+        # SHEP-335: what it got from its repo's settings (or Everywhere's), so the Assistant knows the repo's, not its own
+        got = [x for x in task_settings(s, t) if x["by"] and x["by"] != "task" and x["label"] in ("Review", "Merge", "Proof", "Agent")]
     if at:
         ensure_scheduler_quietly()
-    say(args, v, f"{s.name(t)} added (its key, for commands only: {s.ref(t)})" + (f": {v['why']}" if at else ""))
+    said = "; ".join(f"{x['label']} {x['text'].split(':')[0]} ({SET_BY[x['by']]})" for x in got)
+    say(args, v, f"{s.name(t)} added (its key, for commands only: {s.ref(t)})" + (f": {v['why']}" if at else "")
+        + (f"\nIts settings: {said}." if said else ""))
 
 
 # ---- scheduled (SHEP-38) -----------------------------------------------------------------------
@@ -181,7 +185,7 @@ def set_base(s, t, base, space=None, new=False):
             try:
                 base_ref(main, own)
             except Fail as e:
-                raise Fail(f"This space's base branch is {own} (Shepherdr settings > Tasks > Base branch), but: {e} "
+                raise Fail(f"This repo's base branch is {own} (Shepherdr settings > Tasks > Base branch), but: {e} "
                            "Change the setting, or pass --base.")
             t["base"], t["base_set"], t["base_by"] = own, True, "space"
         return
@@ -306,7 +310,7 @@ def cmd_show(args):
         known = {o["id"]: o for o in s.data["tasks"]}
         after_names = [s.name(known[i]) for i in t.get("after") or [] if i in known] + [
             quoted(x["title"]) if x.get("title") else x["ref"] for x in t.get("after_ext") or []]
-        block = settings_block(s, t)
+        block = settings_block(s, t, sources=True)
         if getattr(args, "evidence", False):
             # What the Accept card shows: commits, files, checks and the proof (proof.py).
             v["evidence"] = evidence(s, t)
@@ -316,7 +320,7 @@ def cmd_show(args):
     elif v.get("branch") and v.get("mode") == "worktree":
         text.append(f"branch: {v['branch']} (set for this task)")
     if v.get("base_set"):
-        text.append(f"merges into: {v['base']} (" + ("its space's base branch" if v.get("base_by") == "space" else "set for this task") + ")")
+        text.append(f"merges into: {v['base']} (" + ("its repo's base branch" if v.get("base_by") == "space" else "set for this task") + ")")
     if v.get("after_refs"):
         text.append("comes after: " + ", ".join(after_names))
     if v.get("review_rounds"):
@@ -1352,14 +1356,18 @@ def cmd_edit(args):
 
 def cmd_config(args):
     with open_store(args) as s:
-        out = {"folder": s.loc["folder"], "settings": settings_for(s), "worktrees": worktrees_on(s)}
+        out = {"folder": s.loc["folder"], "settings": settings_for(s), "from": setting_sources(s), "worktrees": worktrees_on(s)}
     where = "a worktree each" if out["worktrees"] else "in the folder itself"
     # SHEP-322: tasks are named by their titles; a task's key is herdr-task's own, so --prefix (an older Assistant's
     # habit) changes nothing.
     if getattr(args, "prefix", None) is not None:
         out["prefix_ignored"] = True
-    say(args, out, f"{out['folder']}: tasks work {where}." + (" Tasks are named by their titles now: --prefix changes nothing."
-                                                               if out.get("prefix_ignored") else ""))
+    # SHEP-335: what this repo's tasks get, and where each comes from (Everywhere, this repo, or Herdr's default)
+    shown = [f"  {k}: {json.dumps(out['settings'][k.split('.')[0]].get(k.split('.')[1]) if '.' in k else out['settings'][k])} ({v})"
+             for k, v in out["from"].items() if k.split(".")[0] in ("tasks", "worker", "reviewer")]
+    say(args, out, "\n".join([f"{out['folder']}: tasks work {where}." + (" Tasks are named by their titles now: --prefix changes nothing."
+                                                                         if out.get("prefix_ignored") else ""),
+                               "Settings for its tasks (a task's own --set wins):", *shown]))
 
 
 def cmd_rm(args):
