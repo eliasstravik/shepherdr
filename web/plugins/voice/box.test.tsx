@@ -109,7 +109,7 @@ test('a suggested reply is never sent as it is: the round button and Enter send 
 })
 
 test("the Tab chip fills the box without focusing it (no phone keyboard); the Tab key keeps the box's focus", () => {
-  const chip = chat.match(/<button type="button" className="kbd".*?\}>\n\s*(.*?)\n\s*<\/button>/s)!
+  const chip = chat.match(/<button type="button" className="ib kbd".*?\}>\n\s*(.*?)\n\s*<\/button>/s)!
   expect(chip[0]).toContain('aria-label="Use suggestion"')
   expect(chip[0]).toContain('onPointerDown={keepFocus}')
   expect(chip[0]).toContain('onMouseDown={keepFocus}')
@@ -128,4 +128,22 @@ test('the voice call button is gone from the header and the phone bottom bar; it
   expect(voice).toContain('reg.views.boxEnd = BoxEnd')
   expect('barEnd' in registry || 'barAbove' in registry).toBe(false)
   expect(app).not.toMatch(/barEnd|barAbove|Talk to Shepherdr/)
+})
+
+test("the Tab chip is one of the box's icon buttons: centred over the round button and on the text line", () => {
+  const css = read('../../src/ds.css')
+  const kbd = css.match(/\.crow>\.kbd\{([^}]*)\}/)![1]
+  // the icon-button size and radius (.ib), no outline of its own
+  expect(chat).toContain('className="ib kbd"')
+  expect(css).not.toMatch(/\.kbd\{[^}]*(width|height|box-shadow|border)/)
+  // the same right inset as the round button (the bar's 6px padding plus half the size difference): one centre line
+  expect(css).toMatch(/\.cbar\{[^}]*padding:0 6px 6px/)
+  expect(kbd).toContain('margin-right:calc(6px + (var(--send) - var(--ib))/2)')
+  // centred on the first text line: the textarea's 10px top padding plus half its 24px line
+  expect(css).toMatch(/textarea\.cin\{[^}]*padding:10px 16px/)
+  expect(css).toMatch(/\.cin\{[^}]*line-height:24px/)
+  expect(kbd).toContain('align-self:flex-start')
+  expect(kbd).toContain('margin-top:calc(22px - var(--ib)/2)')
+  // a long suggestion truncates before the chip
+  expect(css).toContain('.crow .cin{flex:1;min-width:0;text-overflow:ellipsis}')
 })

@@ -291,10 +291,10 @@ button.fake .n span,button.fake>.i{color:var(--muted)}
 .crow{display:flex;align-items:center;min-width:0}
 .crow .cin{flex:1;min-width:0;text-overflow:ellipsis}
 .cin::placeholder{text-overflow:ellipsis}
-/* the suggested reply's chip (SHEP-363): the tab icon, one square size at every width, a finger's target around it */
-.kbd{position:relative;flex:none;display:grid;place-items:center;width:32px;height:32px;margin-right:8px;border-radius:8px;color:var(--muted);box-shadow:inset 0 0 0 1px var(--line2)}
-.kbd:hover{background:var(--control);color:var(--fg)}
-@media(pointer:coarse){.kbd::after{content:"";position:absolute;inset:-6px}}
+/* the suggested reply's chip (SHEP-363): an icon button like the box's others (.ib: size, radius, no outline). It sits
+   on the text line's centre (textarea.cin's 10px top padding plus half its 24px line) and centred over the box's round
+   button (the box bar's 6px right padding plus half the size difference), so the two share a centre line */
+.crow>.kbd{align-self:flex-start;margin-top:calc(22px - var(--ib)/2);margin-right:calc(6px + (var(--send) - var(--ib))/2)}
 
 /* screens */
 .scr{position:relative;border-radius:12px;overflow:hidden;background:var(--well);box-shadow:inset 0 0 0 1px var(--line2)}
