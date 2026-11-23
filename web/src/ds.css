@@ -543,5 +543,7 @@ textarea.cin{overflow-y:auto}
 .msgs>:is(.fold,.ref,.donerow):nth-last-child(2){margin-bottom:-4px}
 .msgs>.ref>.tring{width:16px}.msgs>.ref>.tring>.i{width:16px;height:16px}
 .msgs>.quietb,.msgs>.files{margin-inline-start:24px}
-.app.tap .msgs>:is(.fold,button.ref){position:relative}
-.app.tap .msgs>:is(.fold,button.ref)::after{content:"";position:absolute;inset:-8px 0}
+/* on touch a row is itself 44 px tall (12 px of air above and below its words), not a 28 px row with an invisible pad:
+   packed 12 px apart, neighbouring pads split the space between them and each row kept only ~32 px for a finger. Touch
+   spacing is looser for it; desktop keeps the tight rhythm above */
+.app.tap .msgs>:is(.fold,.ref,.donerow){padding-block:12px}.app.tap .msgs>:is(.fold,.ref,.donerow):nth-last-child(2){margin-bottom:-12px}
