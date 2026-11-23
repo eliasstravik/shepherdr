@@ -174,11 +174,18 @@ const lastSaid = (key: string) => {
   const a = compat.addrOf(key), items: any[] = (a ? live.chats?.reader(a)?.conv?.items : null) ?? [];
   return items.findLast((x) => x.kind === "agent" && x.text)?.text as string | undefined;
 };
+// a chat's newest message with words (the person's or its agent's), for the glance's suggested replies
+const lastWords = (key: string) => {
+  const a = compat.addrOf(key), items: any[] = (a ? live.chats?.reader(a)?.conv?.items : null) ?? [];
+  // as the chat lists them (compat.ts): its words, a message it sent another agent (no bubbles), the person's
+  const m = items.findLast((x) => (x.kind === "agent" || x.kind === "sent" || x.kind === "user") && x.text);
+  return m ? { who: m.kind === "user" ? "you" as const : "agent" as const, text: m.text as string, ...(m.kind === "agent" ? { suggests: m.suggests as string[] | undefined } : {}) } : null;
+};
 function alertNew(snap: any) {
   // their words: service/push.ts alertsOf
   const now = alertsOf(snap, lastSaid);
   // the phone's and watch's glance, with these same words (service/glance.ts)
-  try { glance.set(glanceOf(snap, now)); } catch (err) { console.error(`glance: ${(err as Error).message}`); }
+  try { glance.set(glanceOf(snap, now, Date.now(), lastWords)); } catch (err) { console.error(`glance: ${(err as Error).message}`); }
   waitingNow = { count: waiting(snap).count, tags: [...new Set([...now.values()].filter((x) => x.waits).map((x) => x.tag))] };
   if (alerted) for (const [k, a] of now) if (!alerted.has(k)) void push.send({ ...a, badge: waitingNow.count, open: waitingNow.tags });
   alerted = new Set(now.keys());

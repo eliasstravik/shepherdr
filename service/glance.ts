@@ -7,6 +7,9 @@
 // (an item with no time of its own never takes "now": that changed `v` on every snapshot), and to list what the app
 // lists: every need (one its space's Notify keeps quiet too, without alerting), an agent's alert only while it stands.
 import { needAlert } from "./push.ts";
+import { needReason } from "../core/toasts.js";
+import { REASONS } from "../core/needs.js";
+import { suggestsOfMessage, suggestionsOn } from "../web/shared/suggest.ts";
 import { GROUPS } from "../web/shared/types.ts";
 import { ALERT_FRESH_MS, MEMORY_BACK_UNDER, alertStands, needsYou, unreadChats, waitingTasks } from "../web/shared/needs-you.ts";
 
@@ -45,6 +48,12 @@ export type Item = {
   /** other: the card takes free words too (Reply sends them as its "Other" answer) */
   answer?: { chat: string; question: string; choices: Choice[]; other?: boolean };
   reply?: { chat: string; to?: string };
+  /** what it asks or says in full, plain text (<= TEXT_MAX, cut at a word): only on needs and ready items; body is its
+   *  first 80 characters */
+  text?: string;
+  /** the chat's suggested replies, in order, at most 5 (the web app's bubbles): only on an item that takes words (reply
+   *  or answer.other), and only when it has some */
+  suggest?: string[];
 };
 export type Kind = Item["kind"];
 export type Counts = Record<Kind, number>;
@@ -66,10 +75,36 @@ export const KINDS: { kind: Kind; label: string }[] = GROUPS.flatMap(([s]) => KI
   .filter((k, i, all) => all.indexOf(k) === i)
   .map((kind) => ({ kind, label: GROUPS.find(([s]) => s === NAMED[kind])![1] }));
 
-export const WATCH_TITLE = 30, WATCH_BODY = 80, LABEL = 24, MAX_ITEMS = 40;
+export const WATCH_TITLE = 30, WATCH_BODY = 80, LABEL = 24, MAX_ITEMS = 40, TEXT_MAX = 2000;
 // the rule of what stands (an agent's alert while it lasts) is Needs you's own, shared with the web app
 export { ALERT_FRESH_MS, MEMORY_BACK_UNDER, alertStands };
 const clip = (s: string, n: number) => { const t = String(s ?? "").replace(/\s+/g, " ").trim(); return t.length <= n ? t : t.slice(0, n - 1).trimEnd() + "…"; };
+/** an item's full text: plain words (Markdown's marks, links' targets and code fences' backticks off), its paragraphs
+ *  kept, cut at a word to n with "…" */
+export function fullText(s: unknown, n = TEXT_MAX): string {
+  const t = String(s ?? "")
+    .replace(/```[^\n]*\n?/g, "")
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s*(#{1,6}|>)\s+/gm, "")
+    .replace(/\*\*|__|`/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (t.length <= n) return t;
+  const cut = t.slice(0, n);
+  const at = cut.search(/\s\S*$/);
+  return (at > n / 2 ? cut.slice(0, at) : cut.slice(0, n - 1)).replace(/[\s,;:.-]+$/, "") + "…";
+}
+/** what a need asks, in full: its card's question (a permission's command under it, a plan's words), a secret's ask,
+ *  or what the agent last said while it waits */
+const needText = (n: any) => {
+  const q = n?.question;
+  if (!q) return needReason(n);
+  if (q.kind === "Plan") return [REASONS.plan, q.plan].filter(Boolean).join("\n\n");
+  const parts = q.parts?.length > 1 ? q.parts.map((p: any) => p.title) : [];
+  return [q.title, q.command, ...parts].filter(Boolean).join("\n\n") || needReason(n);
+};
 const urlOf = (place: string, task?: string, focus?: string) => { const q = new URLSearchParams({ place }); if (task) q.set("task", task); if (focus) q.set("focus", focus); return `./?${q}`; };
 
 /** a card's choices a button may send by itself (Shepherdr's quickChoices and choiceButtons rules: never a plan, a form, a
@@ -87,11 +122,23 @@ const today = (now: number) => { const d = new Date(now); d.setHours(0, 0, 0, 0)
 
 /**
  * snap: Shepherdr's snapshot. alerts: alertsOf(snap, …) from service/push.ts (its wording, tags, urls and reply targets).
+ * last: a chat's newest message with words, as the web app's chat has it (its text and the agent's suggested replies;
+ * who: "you" when the person's), for an item's suggested replies.
  */
-export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()): Glance {
+export type LastSaid = (chat: string) => { who: "agent" | "you"; text?: string; suggests?: string[] } | null | undefined;
+export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now(), last: LastSaid = () => null): Glance {
+  // the chat's bubbles, as web/plugins/chat/suggest.ts suggestionOf shows them: the agent's newest words', none after
+  // the person wrote, none when Settings turned them off
+  const sugOn = suggestionsOn(snap.settings);
+  const suggestOf = (chat?: string) => {
+    if (!sugOn || !chat) return [];
+    const m = last(chat);
+    return m && m.who !== "you" ? suggestsOfMessage(m).slice(0, 5) : [];
+  };
   const places = new Map<string, any>((snap.places ?? []).map((p: any) => [p.id, p]));
   const spaceOf = (id?: string) => (id ? places.get(id) : null);
   const items: Item[] = [];
+  const textOf = (s: unknown) => { const text = fullText(s); return text ? { text } : {}; };
   const taskRow = (t: any) => {
     const sp = spaceOf(t.place);
     return { name: clip(t.name, 60), space: sp?.name ?? t.listName ?? "", machine: sp?.machine ?? null, line: clip(t.sub ?? t.report?.msg ?? t.summary ?? "", 80),
@@ -106,12 +153,12 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()):
   const waits = needsYou(snap, now);
   for (const w of waits) {
     const t = tasks.get(w.task);
-    if (w.type === "task") { items.push(taskItem(t, "needs", w.at || undefined)); continue; }
+    if (w.type === "task") { items.push({ ...taskItem(t, "needs", w.at || undefined), ...textOf(t.sub ?? t.report?.msg ?? t.summary) }); continue; }
     const pushed = alerts.get(w.key);
     const a: any = pushed ?? (w.need ? needAlert(snap, w.need) : { title: w.alert!.title, body: w.alert!.body, tag: w.key, ...(w.place ? { place: w.place, url: urlOf(w.place) } : {}) });
     const it: Item = { key: w.key, kind: "needs", type: w.type, tag: a.tag, title: clip(a.title, WATCH_TITLE), body: clip(a.body, WATCH_BODY),
       task: t.id, ...taskRow(t), ...(w.at ? { at: w.at } : {}), alert: !!pushed,
-      url: a.url ?? (a.place ?? w.place ? urlOf(a.place ?? w.place) : "./") };
+      url: a.url ?? (a.place ?? w.place ? urlOf(a.place ?? w.place) : "./"), ...textOf(w.need ? needText(w.need) : w.alert?.body ?? a.body) };
     if (a.accept) it.accept = a.accept;
     if (a.reply) it.reply = a.reply;
     // an agent's own alert from a chat: Reply writes to that agent
@@ -121,6 +168,9 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()):
       const choices = buttonChoices(n.question);
       if (choices.length) it.answer = { chat: n.chat, question: n.question.id, choices, ...(n.question.other && n.question.kind !== "Plan" ? { other: true } : {}) };
     }
+    const words = it.reply?.chat ?? (it.answer?.other ? it.answer.chat : undefined);
+    const sg = suggestOf(words);
+    if (sg.length) it.suggest = sg;
     items.push(it);
   }
   // a task in Needs you is in no other section
@@ -130,7 +180,7 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()):
     const t = tasks.get(key.slice(6));
     if (!t || waiting.has(t.id)) continue;
     items.push({ key, kind: "ready", type: "task", tag: a.tag, title: clip(a.title, WATCH_TITLE), body: clip(a.body, WATCH_BODY), task: t.id, ...taskRow(t), ...(t.at ? { at: t.at } : {}), alert: true,
-      url: a.url ?? urlOf(t.place, t.id), ...(a.accept ? { accept: a.accept } : {}) });
+      url: a.url ?? urlOf(t.place, t.id), ...(a.accept ? { accept: a.accept } : {}), ...textOf(t.summary ?? a.body) });
   }
   const start = today(now);
   for (const t of snap.tasks ?? []) {

@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 const dir = mkdtempSync(join(tmpdir(), "glance-"));
 process.env.SHEPHERDR_DATA = dir;
 const { Push, alertsOf } = await import("./push.ts");
-const { GlanceFeed, glanceOf, buttonChoices, openUrlOk, CALM_MS, NATIVE_GRACE_MS } = await import("./glance.ts");
+const { GlanceFeed, glanceOf, buttonChoices, openUrlOk, fullText, CALM_MS, NATIVE_GRACE_MS, TEXT_MAX } = await import("./glance.ts");
 const { Live } = await import("./live.ts");
 const { gate } = await import("./auth.ts");
 
@@ -63,6 +63,67 @@ test("a 3-choice question gives 3 buttons; a plan, a menu, a merge, a pick of se
   expect(buttonChoices(q({ choices: [{ label: "Yes" }, { label: "Yes, always" }, { label: "No, with a note" }, { label: "Skip" }], always: 1, noteRequiredFor: 2 })).map((c) => c.i)).toEqual([0, 3]);
   // a card that takes free words: Reply answers it as Other
   expect(doc(snapOf({ needs: [{ id: "q1", chat: "HERD-5/worker", place: "sp1", task: "HERD-5", question: q({ other: true }) }] })).items[0].answer.other).toBe(true);
+});
+
+/* ---------- full text and suggested replies ---------- */
+
+// a wait with no card: the agent's last words in full, Reply, and its chat's bubbles
+const waitSnap = (text: string, over: any = {}) => snapOf({ needs: [{ id: "attention", chat: "HERD-5/worker", place: "sp1", task: "HERD-5", at: NOW - 5000, text, reply: "m9" }], ...over });
+const lastOf = (m: any) => (chat: string) => (chat === "HERD-5/worker" ? m : null);
+
+test("a long question in full, plain, with the agent's three suggested replies in order", () => {
+  const text = `I looked at the **login** flow and the [retry logic](https://example.test/x).\n\n${"The token refresh races the session check. ".repeat(10)}\n\nShould I fix both in this task, or split the refresh into a task of its own?`;
+  const snap = waitSnap(text);
+  const g = glanceOf(snap, alertsOf(snap), NOW, lastOf({ who: "agent", text, suggests: ["Fix both here", "Split it", "status?"] }));
+  const it = g.items[0];
+  expect(it.reply).toEqual({ chat: "HERD-5/worker", to: "m9" });
+  expect(it.body.length).toBeLessThanOrEqual(80);
+  expect(it.text.startsWith("I looked at the login flow and the retry logic.\n\nThe token refresh")).toBe(true);
+  expect(it.text.endsWith("a task of its own?")).toBe(true);
+  expect(it.suggest).toEqual(["Fix both here", "Split it", "status?"]);
+  // working, ready and done rows carry neither
+  for (const i of g.items.filter((i) => i.kind === "working" || i.kind === "done")) { expect(i.text).toBeUndefined(); expect(i.suggest).toBeUndefined(); }
+  expect(g.format).toBe(1);
+});
+
+test("a numbered-options question with no bubbles of the agent's: one per option, as the web app's", () => {
+  const text = "Which layout?\n\n1. One card per provider (recommended)\n2. A single list\n3. Tabs: one per day\n4. Other";
+  const snap = waitSnap(text);
+  const g = glanceOf(snap, alertsOf(snap), NOW, lastOf({ who: "agent", text }));
+  expect(g.items[0].suggest).toEqual(["1. One card per provider", "2. A single list", "3. Tabs"]);
+  expect(g.items[0].text).toBe(text);
+});
+
+test("no suggested replies: none said, the person wrote last, Settings off, or a card that takes no words", () => {
+  const snap = waitSnap("Done looking. Want me to go on?");
+  const none = (last: any, s = snap) => glanceOf(s, alertsOf(s), NOW, last).items[0];
+  expect(none(lastOf({ who: "agent", text: "Done looking. Want me to go on?" })).suggest).toBeUndefined();
+  expect(none(lastOf({ who: "you", text: "go on", suggests: ["x"] })).suggest).toBeUndefined();
+  expect(none(() => null)).not.toHaveProperty("suggest");
+  const off = waitSnap("Go on?", { settings: [{ rows: [{ key: "agents.suggestions", value: "off" }] }] });
+  expect(none(lastOf({ who: "agent", text: "Go on?", suggests: ["Yes"] }), off).suggest).toBeUndefined();
+  // a card with buttons only (no Other): its question in full, no bubbles
+  const card = snapOf();
+  const it = glanceOf(card, alertsOf(card), NOW, lastOf({ who: "agent", text: "x", suggests: ["Yes"] })).items[0];
+  expect(it.text).toBe("Rerun CI on main?");
+  expect(it.suggest).toBeUndefined();
+  // with Other it takes words: the chat's bubbles come along
+  const other = snapOf({ needs: [{ id: "q1", chat: "HERD-5/worker", place: "sp1", task: "HERD-5", question: q({ other: true }) }] });
+  expect(glanceOf(other, alertsOf(other), NOW, lastOf({ who: "agent", text: "x", suggests: ["Yes", "No"] })).items[0].suggest).toEqual(["Yes", "No"]);
+  // five at most
+  expect(glanceOf(snap, alertsOf(snap), NOW, lastOf({ who: "agent", text: "x", suggests: ["a1", "a2", "a3", "a4", "a5", "a6"] })).items[0].suggest.length).toBeLessThanOrEqual(5);
+});
+
+test("the cap: at most 2000 characters, cut at a word with an ellipsis; a ready task's summary in full", () => {
+  const long = "word ".repeat(1000);
+  const snap = waitSnap(long);
+  const it = glanceOf(snap, alertsOf(snap), NOW).items[0];
+  expect(it.text.length).toBeLessThanOrEqual(TEXT_MAX);
+  expect(it.text.endsWith("word…")).toBe(true);
+  expect(fullText("a".repeat(2500)).length).toBe(TEXT_MAX);
+  const summary = `The login now retries once. ${"More detail. ".repeat(10)}`;
+  const ready = snapOf({ tasks: [{ id: "HERD-4", name: "Fix login", status: "ready", place: "sp1", at: NOW, summary }] });
+  expect(doc(ready).items.find((i) => i.kind === "ready").text).toBe(summary.trim());
 });
 
 test("an agent's own alert from a chat takes Reply; titles fit a watch line, bodies two", () => {

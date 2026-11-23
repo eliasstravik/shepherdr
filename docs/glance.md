@@ -93,12 +93,25 @@ Unchanged from the web push buttons (SHEP-243): `POST /api/action` with
       "answer": { "chat": "ELIA-53/worker", "question": "q1",
                   "choices": [{ "i": 0, "label": "Yes" }, { "i": 1, "label": "No" }],
                   "other": true },        // the card takes free words: Reply answers it as "Other"
-      "reply":  { "chat": "ELIA-53/worker" }          // also on an agent's own alert that has a chat
+      "reply":  { "chat": "ELIA-53/worker" },         // also on an agent's own alert that has a chat
+      "text": "Rerun CI on main?\n\nThe last run failed on a flaky test.",   // optional: what it asks or says in full
+      "suggest": ["Yes, rerun it", "No, leave it"]    // optional: the chat's suggested replies, in order
     }
   ],
   "unread": 2                      // chats with a new message not yet read: a Chat badge, not Needs you
 }
 ```
+
+Two optional fields (SHEP-443, no `format` bump: an older app ignores them):
+
+- `text`: what the item asks or says in full, as the web app's card has it, in plain text (Markdown's marks and link
+  targets off, paragraphs kept as `\n\n`), at most 2000 characters, cut at a word with `…`. A card's question (a
+  permission's command under it, a plan's words), a wait's last words from the agent, an agent's alert body, a Ready
+  task's summary, a Needs-you task's status line. Only on `needs` and `ready` items; `body` stays its 80-character line.
+- `suggest`: the suggested replies the web app shows as bubbles above that chat's box (the agent's `<hc suggest>`
+  lines, or one per option when its message ends with a numbered or lettered question; `web/shared/suggest.ts`), in
+  order, at most 5. Only on an item that takes words (`reply`, or `answer.other`), only when it has some: none once the
+  person wrote last, none when Settings › Agents › Suggested replies is off. Send one as a `reply` (or `other`).
 
 ## What it lists: what the app shows
 
