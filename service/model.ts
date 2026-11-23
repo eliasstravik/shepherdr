@@ -15,7 +15,7 @@ import * as T from "../core/tasks.js";
 import { FIND } from "../core/chat-log.js";
 import { isHelper, subagentsOf } from "../core/chat-view.js";
 // The core is plain JavaScript; its defaults read as narrow types to TypeScript.
-const { place, refOf, taskKey, autoPrefix, reportOf, ownReport, secondLine, leftOf, queueReason, machineOf } = T as any;
+const { place, refOf, taskKey, autoPrefix, reportOf, ownReport, secondLine, leftOf, queueReason, machineOf, inSpace } = T as any;
 import * as S from "../core/spaces.js";
 const { sidebarOf, lastAssistantOf, isUnread, inOrder, byMachineOrder, machineOrderOf } = S as any;
 
@@ -302,7 +302,7 @@ export class Model {
         // what its agent last said (core reportOf): working, and frozen while it
         // needs the person
         said: w?.text ? { text: w.text, done: w.done ?? null, left: w.left ?? null, paused: !!w.paused } : null,
-        machine: list.machine, folder: list.folder, slug: list.slug, id: task.id, list: list.name,
+        machine: list.machine, folder: list.folder, slug: list.slug, id: task.id, list: list.name, kind: list.kind ?? null,
         // the space whose Assistant started it (herdr-task keeps it): it is counted and listed there
         space: task.space ? (list.machine ? `${list.machine}/${task.space}` : task.space) : null,
         worker, archived: !!task.archived, pinned: pins.has(taskKey(list, task)),
@@ -335,8 +335,8 @@ export class Model {
     const spaces = byMachineOrder(inOrder(own, this.value("spaces-chat")?.order), machineOrderOf(this.value("spaces-chat"))).map((s: any, at: number) => {
       // the one its chat reads: live, else the latest that ended (a message to it starts it again: actions.ts)
       const k = lastAssistantOf(s, terminals as any[]);
-      // a task belongs to the space that started it, else to the space in its folder
-      const here = rows.filter((r) => !r.archived && (r.space ? r.space === s.id : (r.machine ?? null) === (s.machine ?? null) && r.folder === s.folder));
+      // a space's tasks (SHEP-325, the window's rule: core inSpace): the ones it started and the ones working in its folder
+      const here = rows.filter((r) => !r.archived && inSpace(s, r));
       return {
         ...s, at, icon: bar.icons[s.id] ?? null,
         // when its Assistant last changed state (its terminal's status time)

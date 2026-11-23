@@ -256,8 +256,57 @@ export const taskRef = (t: Task) => t.id.replace(/^.*:/, '')
 
 /** the tasks a view lists: every one from Everything, a space's own inside it */
 export function tasksIn(snap: Snapshot, placeId: string): Task[] {
-  return isEverything(snap, placeId) ? snap.tasks : snap.tasks.filter((t) => t.place === placeId)
+  return isEverything(snap, placeId) ? snap.tasks : snap.tasks.filter((t) => taskInSpace(t, placeId))
 }
+
+/** SHEP-325: a space's Tasks and its count hold what it started and what works in its folder (the window's rule) */
+export const taskInSpace = (t: Task, placeId: string) => t.place === placeId || !!t.also?.includes(placeId)
+
+/* ---------- where a task works (SHEP-325) ---------- */
+
+/** a task's folder as one key: its machine and folder */
+export const workKey = (t: Task) => (t.work ? `${t.on}:${t.work.folder}` : '')
+
+/** "shepherdr", "Home folder": the repo's or folder's name */
+export const workName = (t: Task) => (t.work ? (t.work.name === '~' ? 'Home folder' : folderName(t.work.name)) : '')
+
+/** what a task's tag says: where it works, and its machine only when there is more than one ("shepherdr · mac-mini") */
+export function workWords(snap: Snapshot, t: Task): string {
+  const name = workName(t)
+  if (!name) return ''
+  return snap.machines.length > 1 ? `${name} · ${machineLabel(snap, t.on)}` : name
+}
+
+export interface Repo {
+  key: string
+  name: string
+  folder: string
+  /** its folder as it shows (~/dev/shop) */
+  short: string
+  machine: string
+  repo: boolean
+  /** its tasks, archived ones left out */
+  tasks: Task[]
+}
+
+/** the repos and folders tasks work in, most tasks first (then by name); a repo's tag and Everything's filter use it */
+export function reposOf(snap: Snapshot): Repo[] {
+  const by = new Map<string, Repo>()
+  for (const t of snap.tasks) {
+    if (!t.work) continue
+    const k = workKey(t)
+    const r = by.get(k) ?? by.set(k, { key: k, name: workName(t), folder: t.work.folder, short: t.work.short || t.work.folder, machine: t.on, repo: t.work.repo, tasks: [] }).get(k)!
+    if (!t.archived) r.tasks.push(t)
+  }
+  return [...by.values()].sort((a, b) => b.tasks.length - a.tasks.length || a.name.localeCompare(b.name))
+}
+
+/** the space working in a repo's folder on its machine, if one does */
+export const spaceOnFolder = (snap: Snapshot, r: Pick<Repo, 'folder' | 'machine'>) =>
+  snap.places.find((p) => (!p.home || isEverything(snap, p.id)) && !p.archived && p.machine === r.machine && p.folder === r.folder)
+
+/** "Asked in #root": the space that asked for a task, in words */
+export const askedWords = (snap: Snapshot, t: Task) => (t.asked && snap.places.some((p) => p.id === t.asked) ? `Asked in ${spaceLabel(snap, t.asked)}` : '')
 
 /** Tasks › Now, grouped by what each task needs. Done newest first. */
 export function nowGroups(tasks: Task[]): { name: 'Needs you' | 'Working' | 'Up next' | 'Done' | 'Archived'; tasks: Task[] }[] {
@@ -276,7 +325,7 @@ export function nowGroups(tasks: Task[]): { name: 'Needs you' | 'Working' | 'Up 
  *  chat's agent when it asks. No space: everywhere. The same count decides the Tasks button's number. */
 export function needsCount(snap: Snapshot, placeId?: string): number {
   const all = !placeId || isEverything(snap, placeId)
-  const tasks = snap.tasks.filter((t) => (all || t.place === placeId) && ['ask', 'ready'].includes(tstate(t))).length
+  const tasks = snap.tasks.filter((t) => (all || taskInSpace(t, placeId)) && ['ask', 'ready'].includes(tstate(t))).length
   const chats = snap.places.filter((p) => p.needs && (all ? !p.home || isEverything(snap, p.id) : p.id === placeId)).length
   return tasks + chats
 }

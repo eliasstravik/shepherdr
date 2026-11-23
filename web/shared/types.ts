@@ -371,6 +371,13 @@ export interface Task {
   browser?: { ready: boolean; hint?: string }
   /** what its row says it is in (3.0's Tasks): the space working in its list's folder, else the list's name */
   listName?: string
+  /** SHEP-325: where it works, on its machine (`on`): its list's name (the repo's or folder's, ~ for the home folder),
+   *  its folder (`short`: as it shows, its machine's home as ~), and whether that folder is a git repo */
+  work?: { name: string; folder: string; short?: string; repo: boolean }
+  /** SHEP-325: the space whose Assistant asked for it (still there); its news and cards go to that chat */
+  asked?: string
+  /** SHEP-325: the other spaces whose Tasks hold it besides `place`: those working in its folder on its machine */
+  also?: string[]
 }
 
 /** An automation as a project's Tasks lists it: its name, when it runs, the task it adds */

@@ -379,3 +379,17 @@ textarea.cin{overflow-y:auto}
 .lsub{color:var(--muted);font-size:14px;line-height:20px}
 .lfile .btn{margin-top:8px}
 .lfile a.btn{color:inherit;text-decoration:none}
+
+/* SHEP-325: where a task works: its tag (a tap shows that repo's tasks), a repo's head in Everything's Tasks */
+.wtag{position:relative;display:inline-flex;align-items:center;gap:4px;max-width:100%;color:var(--muted);font-size:inherit;line-height:inherit;cursor:pointer;vertical-align:top}
+.wtag .i{flex:none;width:14px;height:14px}
+.wtag:hover{color:var(--fg)}
+.l2>.wtag{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-flex}
+@media (pointer:coarse){.wtag::after{content:"";position:absolute;inset:-8px -4px}}
+.status .wtag{color:var(--muted)}
+.card .s .wtag{color:inherit}
+.rhead{display:flex;align-items:center;gap:8px;padding:0 0 8px 8px}
+.rhead>.i{flex:none;color:var(--muted)}
+.rhead .n{flex:1;min-width:0}.rhead .l1{font-weight:600}
+.rhead .btn{flex:none}
+.asked{display:block;margin:-4px 8px 8px;color:var(--muted);font-size:var(--sec);line-height:var(--secl);text-align:left}

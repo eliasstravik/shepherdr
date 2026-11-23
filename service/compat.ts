@@ -340,6 +340,8 @@ export class Compat {
     // what its row says it is in, as the window's Tasks: the space working in its list's folder, else the list's name
     const placeName = (r: Row) => places.find((p) => spaces.find((s) => s.id === p.id && (s.machine ?? null) === (r.machine ?? null) && s.folder === r.folder))?.name ?? r.list ?? "";
     const placeOf = (r: Row) => (r.space && spaces.some((s) => s.id === r.space) ? r.space : spaces.find((s) => (s.machine ?? null) === (r.machine ?? null) && s.folder === r.folder)?.id ?? "");
+    // SHEP-325: the spaces working in its folder on its machine: their Tasks list it too (the window's rule, core inSpace)
+    const folderSpaces = (r: Row) => (r.folder ? spaces.filter((s) => (s.machine ?? null) === (r.machine ?? null) && s.folder === r.folder).map((s) => s.id) : []);
 
     const places: Place[] = spaces.map((s) => {
       const key = placeKey(s.id);
@@ -371,6 +373,12 @@ export class Compat {
       const t: Task = {
         id, name: r.title, status: SECTION[r.section] ?? "todo", place: placeOf(r), listName: placeName(r), age: r.started ? ago(r.started, false) : "",
         state: r.section, on: r.machine ?? host, created: "", ...(r.folder ? { taskFolder: r.folder } : {}),
+        // SHEP-325: where it works (its list: the repo's or folder's name), the space that asked for it, and the other
+        // spaces whose Tasks hold it
+        ...(r.folder ? { work: { name: r.list || base(r.folder) || r.folder, folder: r.folder, repo: r.kind === "repo",
+          short: r.machine ? SPc.tilde(r.folder) : r.folder === HOME ? "~" : r.folder.startsWith(HOME + "/") ? `~${r.folder.slice(HOME.length)}` : r.folder } } : {}),
+        ...(r.space && spaces.some((s) => s.id === r.space) ? { asked: r.space } : {}),
+        ...((also) => (also.length ? { also } : {}))(folderSpaces(r).filter((id) => id !== placeOf(r))),
         // its latest news (ms), as Jump orders tasks newest first
         at: Math.max(0, ...[r.done_at, r.ready_at, r.started].filter((x: unknown): x is number => typeof x === "number")),
         ...(r.sub ? { sub: r.sub } : {}),

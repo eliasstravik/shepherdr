@@ -3,18 +3,46 @@
 // Start task dialog for one not started yet, and a task's menu.
 import { useEffect, useState, type ReactNode } from 'react'
 import { PaneFrame, placeholderOf } from '@client/App.tsx'
-import { renameDialog } from '@client/list.tsx'
+import { newSpaceDialog, renameDialog } from '@client/list.tsx'
 import { definePlugin, getState, go, has, notice, openTask, registry, setUI, togglePane, tryAct, act, useSnap, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
 import { confirm, openDialog, openForm, openMenu } from '@client/overlay.tsx'
 import { AgentField, pickFor, type Pick } from '@client/picker.tsx'
 import { edge } from '@client/resize.ts'
-import { Btn, Cnt, cx, Empty, Hd, I, IB } from '@client/ui.tsx'
+import { Btn, Cnt, cx, Empty, Hd, I, IB, Row } from '@client/ui.tsx'
 import type { MergeEvidence, Snapshot, Task } from '@shared/types.ts'
-import { isEverything, machineLabel, needsCount, nowGroups, onBranch, placeDown, spaceLabel, spacesOf, etaOf, leftWords, statusWord, taskChat, taskLine, taskRef, taskWhen, tasksIn, tstate, whereWords } from '@shared/view.ts'
+import { askedWords, everything, isEverything, machineLabel, needsCount, nowGroups, onBranch, placeDown, reposOf, spaceLabel, spaceOnFolder, spacesOf, etaOf, leftWords, statusWord, taskChat, taskLine, taskRef, taskWhen, tasksIn, tstate, workKey, workName, workWords, type Repo } from '@shared/view.ts'
 import { DoneRow } from '@plugins/chat/cards.tsx'
 import { StatusIcon } from './icon.tsx'
 
 export { StatusIcon }
+
+/* ---------- where a task works (SHEP-325) ---------- */
+
+/** a repo's or folder's tasks: Everything's Tasks, filtered to it */
+export function showRepo(key: string) {
+  const snap = getState().snap
+  const ev = snap && everything(snap)?.id
+  if (!ev) return
+  if (getState().ui.at !== ev) go(ev)
+  setUI({ pane: 'tasks', task: null, wide: false, tab: 'Now', repo: key, drawer: false, search: false, settings: null })
+}
+
+/** a task's tag: where it works ("shepherdr", "shepherdr · mac-mini"); a tap shows that repo's tasks. In a row it is a
+ *  span (the row is the button), elsewhere a button. */
+export function WorkTag({ snap, t, inRow }: { snap: Snapshot; t: Task; inRow?: boolean }) {
+  const words = workWords(snap, t)
+  if (!words) return null
+  const go = (e: { stopPropagation: () => void }) => {
+    e.stopPropagation()
+    showRepo(workKey(t))
+  }
+  const label = `All tasks in ${workName(t)}`
+  return inRow ? (
+    <span className="wtag" role="link" aria-label={label} onClick={go}><I n="folder" />{words}</span>
+  ) : (
+    <button type="button" className="wtag" aria-label={label} onClick={go}><I n="folder" />{words}</button>
+  )
+}
 
 /* ---------- a task's menu ---------- */
 
@@ -53,6 +81,7 @@ export function taskMenu(anchor: Element, t: Task, where: 'row' | 'thread') {
       { icon: 'chat' as const, label: 'Open task', run: () => open(t) },
     ]),
     { icon: every ? 'layers' : 'hash', label: `Show in ${spaceLabel(snap, t.place)}`, run: () => go(t.place) },
+    ...(t.work ? [{ icon: 'folder' as const, label: `All tasks in ${workName(t)}`, run: () => showRepo(workKey(t)) }] : []),
     ...extra.filter((r) => r.label === 'Show screen'),
     ...(s === 'next' ? [{ icon: 'folder' as const, label: 'Move to', sub: spacesOf(snap).filter((p) => p.id !== t.place && !p.archived).map((p) => ({ label: `#${p.name}`, run: () => void tryAct({ type: 'task-move', chat, place: p.id }) })) }] : []),
     // from the menu it closes without merging: "Done · not merged" for a task on its own branch
@@ -163,7 +192,7 @@ export function ReviewCard({ t, ctx }: { t: Task; ctx: 'chat' | 'thread' }) {
   return (
     <div className="card" data-card={`review:${t.id}`}>
       {ctx === 'chat' && <span className="t tw"><StatusIcon t={t} time="none" />{t.name}</span>}
-      <span className="s">{where}</span>
+      <span className="s">{ctx === 'chat' && t.work && <><WorkTag snap={snap} t={t} /> · </>}{where}</span>
       <span>{t.summary ?? ev?.summary ?? 'Ready for you to look at.'}</span>
       {proof && Tile && <div className="atile"><Tile id={proof} /></div>}
       {foldWords && (
@@ -220,7 +249,8 @@ function taskCards(snap: Snapshot, thread: Thread): { key: string; at?: number; 
     const t = thread.task
     return [...(reviewing(t) ? [{ key: `review:${t.id}`, node: <ReviewCard t={t} ctx="thread" /> }] : []), ...(halted(t) ? [{ key: `stopped:${t.id}`, node: <StoppedCard t={t} /> }] : [])]
   }
-  const mine = tasksIn(snap, thread.place)
+  // cards stay in the chat that asked (SHEP-325): a space's Tasks also holds what works in its folder, its chat does not
+  const mine = tasksIn(snap, thread.place).filter((t) => isEverything(snap, thread.place) || t.place === thread.place)
   return [
     ...mine.filter(reviewing).map((t, i) => ({ key: `review:${t.id}`, at: snap.demo ? new Date().setHours(7, 30, 0, i + 1) : t.needsAt ?? t.needsAtWas, node: <ReviewCard t={t} ctx="chat" /> })),
     ...mine.filter(halted).map((t) => ({
@@ -263,10 +293,18 @@ function TaskTop({ task: t }: { task: Task }) {
       {strong ? <b className={w.tone === 'red' ? 'c-red' : `c-${w.tone}`}>{w.word}</b> : w.word}
       {left && <span>· {left}</span>}
       <span>· {taskRef(t)}</span>
-      <span>· {machineLabel(snap, t.on)}</span>
+      {t.work ? <span>· <WorkTag snap={snap} t={t} /></span> : <span>· {machineLabel(snap, t.on)}</span>}
       {t.pr && <span>· <a className="lk" href={t.pr.url} target="_blank" rel="noreferrer">PR #{t.pr.number}</a></span>}
     </div>
   )
+}
+
+/** the one quiet line under it: the space that asked for it, a tap opens that chat */
+function AskedIn({ snap, t }: { snap: Snapshot; t: Task }) {
+  const words = askedWords(snap, t)
+  if (!words || !t.asked) return null
+  const id = t.asked
+  return <button type="button" className="asked lk" onClick={() => go(id)}>{words}</button>
 }
 
 function TaskPane({ t }: { t: Task }) {
@@ -298,6 +336,7 @@ function TaskPane({ t }: { t: Task }) {
         ) : (
           <>
             <TaskTop task={t} />
+            <AskedIn snap={snap} t={t} />
             {Messages && <Messages thread={thread} />}
           </>
         )}
@@ -308,7 +347,7 @@ function TaskPane({ t }: { t: Task }) {
 
 /* ---------- the list ---------- */
 
-function TaskRow({ snap, t, inSpace }: { snap: Snapshot; t: Task; inSpace: boolean }) {
+function TaskRow({ snap, t, tag }: { snap: Snapshot; t: Task; tag: boolean }) {
   const cur = useUI((u) => u.task === t.id)
   const down = placeDown(snap, t.place)
   const s = tstate(t)
@@ -321,7 +360,7 @@ function TaskRow({ snap, t, inSpace }: { snap: Snapshot; t: Task; inSpace: boole
         <span className="n">
           <span className="l1">{t.name}</span>
           {sub && <span className="l2">{sub}</span>}
-          {!inSpace && <span className="l2">{whereWords(snap, t.place)}</span>}
+          {tag && t.work && <span className="l2"><WorkTag snap={snap} t={t} inRow /></span>}
         </span>
         {when && <span className="v">{when}</span>}
       </button>
@@ -330,13 +369,59 @@ function TaskRow({ snap, t, inSpace }: { snap: Snapshot; t: Task; inSpace: boole
   )
 }
 
+/** Everything's filter by repo (SHEP-325), on the same control as the list's filter: a menu with All and each repo
+ *  or folder tasks work in, the picked one checked */
+function repoMenu(anchor: Element, repos: Repo[]) {
+  const pick = (key: string | null) => () => setUI({ repo: key })
+  openMenu(
+    anchor,
+    (close) => (
+      <>
+        <div className="cap">Repo</div>
+        {[{ key: null, name: 'All', n: undefined as number | undefined }, ...repos.map((r) => ({ key: r.key as string | null, name: r.name, n: r.tasks.length }))].map((r) => {
+          const on = (getState().ui.repo ?? null) === r.key
+          return <Row key={r.key ?? ''} label={r.name} role="menuitemradio" value={on ? undefined : r.n ? String(r.n) : undefined} current={on} end={on ? <I n="check" /> : undefined} onClick={() => { close(); pick(r.key)() }} />
+        })}
+      </>
+    ),
+    { label: 'Filter tasks' },
+  )
+}
+
+/** a repo's tasks: its name, folder and machine, and its space, or "Make it a space" when none works there */
+function RepoHead({ snap, r }: { snap: Snapshot; r: Repo }) {
+  const sp = spaceOnFolder(snap, r)
+  const n = r.tasks.length
+  const facts = [r.short, snap.machines.length > 1 ? machineLabel(snap, r.machine) : '', `${n} ${n === 1 ? 'task' : 'tasks'}`].filter(Boolean).join(' · ')
+  return (
+    <div className="rhead">
+      <I n="folder" />
+      <span className="n">
+        <span className="l1">{r.name}</span>
+        <span className="l2">{facts}</span>
+      </span>
+      {sp ? (
+        <Btn onClick={() => go(sp.id)}>Open {spaceLabel(snap, sp.id)}</Btn>
+      ) : (
+        <Btn onClick={() => newSpaceDialog(r.machine, { name: r.name === 'Home folder' ? '' : r.name, folder: r.short })}>Make it a space</Btn>
+      )}
+      <IB icon="x" label="Show all tasks" onClick={() => setUI({ repo: null })} />
+    </div>
+  )
+}
+
 function Now({ snap, place }: { snap: Snapshot; place: string }) {
   const ui = useUI()
-  const inSpace = !isEverything(snap, place)
-  const groups = nowGroups(tasksIn(snap, place)).filter((g) => g.tasks.length)
-  if (!groups.length) return <Empty>No tasks yet. Ask in a chat to add one.</Empty>
+  const every = isEverything(snap, place)
+  const repos = every ? reposOf(snap) : []
+  const repo = every && ui.repo ? repos.find((r) => r.key === ui.repo) : undefined
+  const all = tasksIn(snap, place)
+  const groups = nowGroups(repo ? all.filter((t) => workKey(t) === repo.key) : all).filter((g) => g.tasks.length)
+  const top = repo && <RepoHead snap={snap} r={repo} />
+  if (!groups.length) return <>{top}<Empty>No tasks yet. Ask in a chat to add one.</Empty></>
   return (
     <>
+      {top}
       {groups.map((g) => {
         // Done and Archived start folded; the others open
         const o = ui.open[g.name] ?? !['Done', 'Archived'].includes(g.name)
@@ -347,7 +432,7 @@ function Now({ snap, place }: { snap: Snapshot; place: string }) {
               {g.name} · {g.tasks.length}
               <I n="down" c="s16" />
             </button>
-            {o && shown.map((t) => <TaskRow key={t.id} snap={snap} t={t} inSpace={inSpace} />)}
+            {o && shown.map((t) => <TaskRow key={t.id} snap={snap} t={t} tag={!repo} />)}
             {o && shown.length < g.tasks.length && (
               <button type="button" className="grp" onClick={() => setUI({ doneShown: ui.doneShown + 20 })}>Show more</button>
             )}
@@ -365,10 +450,16 @@ function TasksPane() {
   const t = ui.task && !ui.wide ? snap.tasks.find((x) => x.id === ui.task) : undefined
   if (t) return <TaskPane t={t} />
   const inSp = isEverything(snap, ui.at) ? '' : ` in ${spaceLabel(snap, ui.at)}`
+  const repos = isEverything(snap, ui.at) ? reposOf(snap) : []
   const Scheduled = has('schedules') ? registry.views.scheduled : undefined
   const tab = Scheduled ? ui.tab : 'Now'
   return (
-    <PaneFrame head={(sc) => <Hd title={`Tasks${inSp}`} pad={ui.phone ? 12 : 4} scrolled={sc}>{!ui.phone && <IB icon="x" label="Close" onClick={() => togglePane(null)} />}</Hd>}>
+    <PaneFrame head={(sc) => (
+      <Hd title={`Tasks${inSp}`} pad={ui.phone ? 12 : 4} scrolled={sc}>
+        {repos.length > 1 && <IB icon="filter" label="Filter tasks" aria-haspopup="menu" pressed={!!ui.repo} onClick={(e) => repoMenu(e.currentTarget, repos)} />}
+        {!ui.phone && <IB icon="x" label="Close" onClick={() => togglePane(null)} />}
+      </Hd>
+    )}>
       {Scheduled && (
         <div className="tabs" role="tablist">
           {(['Now', 'Scheduled'] as const).map((n) => (

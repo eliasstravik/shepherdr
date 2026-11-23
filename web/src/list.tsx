@@ -132,13 +132,14 @@ export function newGroupDialog(machine?: string, then?: (id: string) => void) {
   )
 }
 
-export function newSpaceDialog(machine?: string) {
+/** New space; from a repo's tasks (SHEP-325, "Make it a space") with its name and folder filled in */
+export function newSpaceDialog(machine?: string, pre?: { name: string; folder: string }) {
   openForm(
     function Form({ close }) {
       const snap = getState().snap!
-      const [name, setName] = useState('')
+      const [name, setName] = useState(pre?.name ?? '')
       const [m, setM] = useState(machine ?? snap.host)
-      const [folder, setFolder] = useState('')
+      const [folder, setFolder] = useState(pre?.folder ?? '')
       // it starts on Everything's choice for chats
       const [pick, setPick] = useState<Pick | null>(null)
       const [busy, setBusy] = useState(false)
