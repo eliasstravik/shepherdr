@@ -52,15 +52,22 @@ export async function replyInstead(io, addr, text) {
   return r;
 }
 
-// Claude Code's "send now" for a message it queued while working: Ctrl+Enter, only when its screen offers it
-// (pressed on an empty prompt it would do something else). Also a queued message's own Send now (#662), for one left
-// in its queue when the screen didn't offer it in time. -> whether it was pressed.
-export async function steerNow(io, addr) {
-  for (let i = 0; i < 4; i++) {
-    await io.sleep(i ? 300 : 150);
+// Claude Code's sign that a message waits in its own queue: "⎿  Queued · ctrl+enter to send now" under it (2.1.330 and
+// older, at any width) and "Press up to edit queued messages" in its box while any wait. Either one means its Ctrl+Enter
+// sends what is queued (never a half-typed draft: the box shows that placeholder only while it is empty).
+export const QUEUED = /ctrl\+enter to send now|press up to edit queued messages|^\s*⎿\s+Queued\b/im;
+// How long a send waits for that sign: the screen can take a moment to draw it, the more on a slow machine.
+export const STEER = { looks: 10, every: 250 };
+
+// Claude Code's "send now" for a message it queued while working: Ctrl+Enter, only while it works and its screen shows
+// a queued message (pressed on an empty prompt or a dialog it would do something else). Also a queued message's own
+// Send now (#662), for one left in its queue when the screen didn't show it in time. -> whether it was pressed.
+export async function steerNow(io, addr, opts = STEER) {
+  for (let i = 0; i < opts.looks; i++) {
+    await io.sleep(i ? opts.every : 150);
     const r = await io.hc(["read", addr, "--lines", "40"]).catch(() => null);
-    if (/ctrl\+enter to send now/i.test(r?.stdout ?? "")) { await io.hc(["keys", addr, "ctrl+enter"]); return true; }
     if (io.status() !== "working") return false;
+    if (QUEUED.test(r?.stdout ?? "")) { await io.hc(["keys", addr, "ctrl+enter"]); return true; }
   }
   return false;
 }

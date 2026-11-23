@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inputLine, sendBody, steerNow } from "./send.js";
+import { inputLine, sendBody, steerNow, QUEUED, STEER } from "./send.js";
 import { LOG, Conversation, records } from "./chat-log.js";
 
 // A Claude Code terminal as hc sees it: what its screen shows after each call.
@@ -104,6 +104,81 @@ test("Send now on a queued message presses Ctrl+Enter only while Claude Code off
   const idle = fake(false, "idle");
   expect(await steerNow(idle.io, "t1")).toBe(false);
   expect(idle.calls.length).toBe(1);
+});
+
+// SHEP-306: Claude Code 2.1.330's real screen right after a message went in mid-turn (hc read, 45 columns, as a phone)
+const QUEUED_2_1_330 = `● Counting 1 to 90 with 2-second pauses · 17s
+  ⎿  $ for i in $(seq 1 90); do echo $i;
+     sleep 2; done (18s · 10 lines)
+     (ctrl+b to run in background)
+❯ what number now?
+  ⎿  Queued · ctrl+enter to send now
+✻ Skedaddling… (19s · ↓ 162 tokens)
+  ⎿  Tip: Hit shift+tab to cycle between
+     manual mode, auto-accept edit mode, and
+     plan mode
+─────────────────────────────────────────────
+❯ Press up to edit queued messages
+─────────────────────────────────────────────
+  ⏵⏵ bypass permissions on · 3 shells · es…`;
+// the same agent working with nothing queued, a draft typed in its box
+const DRAFT = `✻ Skedaddling… (19s · ↓ 162 tokens)
+─────────────────────────────────────────────
+❯ half a thought
+─────────────────────────────────────────────
+  ⏵⏵ bypass permissions on · esc to interrupt`;
+
+function screens(list, status = () => "working") {
+  const calls = [];
+  let n = 0;
+  const io = {
+    sleep: async () => {},
+    status,
+    hc: async (args) => {
+      calls.push(args.join(" "));
+      return { code: 0, stdout: args[0] === "read" ? list[Math.min(n++, list.length - 1)] : "" };
+    },
+  };
+  return { io, calls };
+}
+
+test("a message sent to a working Claude Code 2.1.330 steers at once (its real screen)", async () => {
+  const s = screens([QUEUED_2_1_330]);
+  expect(await steerNow(s.io, "t1")).toBe(true);
+  expect(s.calls.filter((c) => c.startsWith("keys"))).toEqual(["keys t1 ctrl+enter"]);
+  // sendBody presses it after the send, once
+  const sent = screens([DRAFT.replace("half a thought", ""), QUEUED_2_1_330]);
+  sent.io.hc = ((hc) => async (args) => (args[0] === "send" ? { code: 0, stdout: '{"started":true}', stderr: "" } : hc(args)))(sent.io.hc);
+  expect((await sendBody(sent.io, "t1", "claude", "what number now?")).code).toBe(0);
+  expect(sent.calls.filter((c) => c === "keys t1 ctrl+enter").length).toBe(1);
+});
+
+test("its box's queued placeholder alone is enough (the hint's words cut or moved)", async () => {
+  const s = screens([QUEUED_2_1_330.replace("Queued · ctrl+enter to send now", "Queued")]);
+  expect(await steerNow(s.io, "t1")).toBe(true);
+  const box = screens(["● working\n────\n❯ Press up to edit queued messages\n────"]);
+  expect(await steerNow(box.io, "t1")).toBe(true);
+});
+
+test("a queued sign that shows late still steers, within its bound", async () => {
+  const late = screens([...Array(STEER.looks - 1).fill(DRAFT.replace("half a thought", "")), QUEUED_2_1_330]);
+  expect(await steerNow(late.io, "t1")).toBe(true);
+  // never: it gives up after its looks
+  const never = screens([DRAFT]);
+  expect(await steerNow(never.io, "t1")).toBe(false);
+  expect(never.calls.filter((c) => c.startsWith("read")).length).toBe(STEER.looks);
+});
+
+test("Ctrl+Enter is never pressed on a draft, a dialog or an idle agent", async () => {
+  const draft = screens([DRAFT]);
+  expect(await steerNow(draft.io, "t1")).toBe(false);
+  expect(draft.calls.some((c) => c.startsWith("keys"))).toBe(false);
+  // a dialog of its own open (blocked), even with a message in its queue: Ctrl+Enter could answer it
+  const asking = screens([QUEUED_2_1_330], () => "blocked");
+  expect(await steerNow(asking.io, "t1")).toBe(false);
+  expect(asking.calls.some((c) => c.startsWith("keys"))).toBe(false);
+  // a past message that once said "Queued" is not a queued sign: only a ⎿ line under a message is
+  expect(QUEUED.test("● I said Queued earlier")).toBe(false);
 });
 
 // SHEP-93: eleven pictures take Claude Code long to read: the box fills marker by marker, its Enter is lost

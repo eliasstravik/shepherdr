@@ -382,12 +382,12 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   const busy = !!chat?.working && !chat.finished
   const machine = snap.places.find((p) => p.id === thread.place)?.machine ?? snap.host
   const pick = pickOf(snap, chat, thread)
-  const go = () => {
+  // a message sent while the agent works goes in at once (it steers); only Ctrl/Cmd+Enter asks it to wait its turn
+  const go = (wait = false) => {
     const t = text.trim() || (!files?.length ? (sug?.text ?? '') : '')
     if (!t && !files?.length) return
     if (sug) spent.add(sug.id)
-    // a message sent while the agent works waits its turn
-    send(key, key, t, busy)
+    send(key, key, t, wait && busy)
     setText('')
   }
   const useSug = () => {
@@ -455,7 +455,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
             // Enter sends and Shift+Enter makes a new line, the same on phone and desktop
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
               e.preventDefault()
-              go()
+              go(e.ctrlKey || e.metaKey)
             }
           }}
         />
@@ -489,7 +489,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
             <I n="stop" c="s16" />
           </button>
         ) : (
-          <button type="button" className="send" aria-label="Send" onClick={go}>
+          <button type="button" className="send" aria-label="Send" onClick={() => go()}>
             <I n="send" c="s16" />
           </button>
         )}

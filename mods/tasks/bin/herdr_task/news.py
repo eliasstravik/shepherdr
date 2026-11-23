@@ -10,7 +10,7 @@ import subprocess
 import time
 from contextlib import contextmanager
 
-from .base import guard, hc_json, now, run, STORE
+from .base import guard, hc_json, now, QUEUED, run, STORE
 from .settings import bare
 from .agents import (
     agent_log, agent_running, asking, detail, from_person, live_agents, log_tail, said, starting, status_word,
@@ -323,11 +323,12 @@ def news_send(address, text, check=True):
     if is_codex(k):
         codex_settle(address, text)
     elif (k.get("labels") or {}).get("herdr.agent", "claude") == "claude" and status_word(k) == "working":
-        for i in range(4):
-            time.sleep(0.3 if i else 0.15)
+        for i in range(10):
+            time.sleep(0.25 if i else 0.15)
             screen = run(["hc", "read", address, "--lines", "40"]).stdout
-            if re.search(r"ctrl\+enter to send now", screen, re.I):
-                run(["hc", "keys", address, "ctrl+enter"])
+            if QUEUED.search(screen):
+                if status_word(hc_json("get", address) or {}) == "working":
+                    run(["hc", "keys", address, "ctrl+enter"])
                 break
     return True
 

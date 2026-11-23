@@ -7560,6 +7560,28 @@ class CodexBatch278(unittest.TestCase):
 
     CODEX = {"state": "live", "labels": {"herdr.agent": "codex"}, "status": {"app": "codex", "state": "working"}}
 
+    # ---- SHEP-306: Claude Code mid-turn steers (Ctrl+Enter) only on its queued sign, only while it works ----------------
+    CLAUDE = {"state": "live", "labels": {"herdr.agent": "claude"}, "status": {"app": "claude-code", "state": "working"}}
+    # Claude Code 2.1.330's real screen right after a message went in mid-turn (45 columns)
+    QUEUED_2_1_330 = ("❯ what number now?\n  ⎿  Queued · ctrl+enter to send now\n✻ Skedaddling… (19s · ↓ 162 tokens)\n"
+                      "─────────────────────────────────────────────\n❯ Press up to edit queued messages\n"
+                      "─────────────────────────────────────────────\n  ⏵⏵ bypass permissions on · esc to interrupt")
+    WORKING = "✻ Skedaddling… (19s)\n──────\n❯ \n──────\n  ⏵⏵ bypass permissions on · esc to interrupt"
+
+    def test_claude_mid_turn_steers_on_its_queued_sign(self):
+        sent = self.fake_hc(self.CLAUDE, [self.QUEUED_2_1_330])
+        self.assertTrue(self.news.news_send("t9", "Change of plan: stop"))
+        self.assertIn(["keys", "t9", "ctrl+enter"], sent)
+        # a sign that shows late (a slow machine) still gets its Ctrl+Enter
+        sent = self.fake_hc(self.CLAUDE, [self.WORKING] * 6 + ["❯ Press up to edit queued messages"])
+        self.assertTrue(self.news.news_send("t9", "Change of plan: stop"))
+        self.assertEqual(sent.count(["keys", "t9", "ctrl+enter"]), 1)
+
+    def test_claude_without_a_queued_message_gets_no_ctrl_enter(self):
+        sent = self.fake_hc(self.CLAUDE, [self.WORKING])
+        self.assertTrue(self.news.news_send("t9", "Change of plan: stop"))
+        self.assertFalse(any(a[0] == "keys" for a in sent))
+
     def test_nothing_is_pasted_into_a_working_codex(self):
         sent = self.fake_hc(self.CODEX, [""])
         self.assertFalse(self.news.news_send("t9", "Change of plan: stop"))

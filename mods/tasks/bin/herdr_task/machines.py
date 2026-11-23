@@ -25,7 +25,7 @@ import sys
 import threading
 import time
 
-from .base import ASK_HOME, OLD_SESSION, SESSION, SHARE, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, layout, now, PACKAGE, run, STORE, WHERE
+from .base import QUEUED, ASK_HOME, OLD_SESSION, SESSION, SHARE, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, layout, now, PACKAGE, run, STORE, WHERE
 from .news import news_send, send_or_hold, typing
 from .settings import TEMPLATES
 
@@ -1077,11 +1077,18 @@ def _deliver(names, hows, address, text):
         time.sleep(5)
     if there(["hc", "send", address, text]).returncode != 0:
         return False
-    for i in range(3):
+    for i in range(6):
         time.sleep(0.4)
-        if "ctrl+enter to send now" in there(["hc", "read", address, "--lines", "40"]).stdout.lower():
+        if not QUEUED.search(there(["hc", "read", address, "--lines", "40"]).stdout):
+            continue
+        # only while it works: on a dialog of its own Ctrl+Enter would answer it
+        try:
+            working = (json.loads(there(["hc", "get", address, "--json"]).stdout or "{}").get("status") or {}).get("state") == "working"
+        except ValueError:
+            working = False
+        if working:
             there(["hc", "keys", address, "ctrl+enter"])
-            break
+        break
     return True
 
 
