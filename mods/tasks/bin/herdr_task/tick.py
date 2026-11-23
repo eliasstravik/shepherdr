@@ -27,7 +27,7 @@ from .browsers import browser_pass
 from .output import progress_clock, say
 from .commands import back_to_work, begin, merge_failed, merge_now, merge_waits, MERGE_FAILED, workers
 from .news import news_pass
-from .ghnews import held_by_base, main_pass, pr_deliver, pr_news
+from .ghnews import held_by_base, main_pass, pr_deliver, pr_news, resting
 from .systemic import dropped, systemic_pass
 from .scheduler import SCHEDULER
 from .revive import record_pass
@@ -220,6 +220,13 @@ def facts(s, t, report):
         elif w:
             t.pop("fix_withdrawn")
             s.dirty = True
+        if problem and problem.startswith("It conflicts") and t["state"] == "ready":
+            if resting(s, t):
+                # #1357: a Ready task that conflicts with its base goes back to its resting agent at once (as
+                # herdr-task fix does by hand): Working again, its card saying it rebases only now it was asked.
+                report.setdefault("merge_failed", []).append({"task": s.ref(t), "why": problem, "to": merge_failed(s, t, problem)})
+                return
+            pr["checked"] = now() - PR_EVERY + PR_WAIT_EVERY  # its agent mid-turn or asking: looked at again soon
         if t["state"] in ("ready", "running") and problem != t.get("attention"):
             if problem:
                 t["attention"], t["attention_at"] = problem, now()
@@ -231,8 +238,9 @@ def facts(s, t, report):
                 t.pop("merge_queued", None)
                 # SHEP-320: a conflict says on its card what it collided with, whatever the merge setting (pr_news
                 # hands its agent the files)
-                why = (collision_reason(collision(s, t, fetch=True)) or
-                       f"Conflicts with {t.get('base') or 'main'}: its agent is rebasing") if problem.startswith("It conflicts") else None
+                # #1357: never "its agent is rebasing" here: only merge_failed() (above) says so, once it was asked
+                why = (collision_reason(collision(s, t, fetch=True), told=False) or
+                       f"Conflicts with {t.get('base') or 'main'}") if problem.startswith("It conflicts") else None
                 if why or t.get("auto_merge"):
                     # it was to merge by itself (or the person marked it as done): a failed merge, its agent's to
                     # fix (pr_news hands it the conflict or the failed check)

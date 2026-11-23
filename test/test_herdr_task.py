@@ -9527,15 +9527,28 @@ class ParallelCollisions(unittest.TestCase):
                             ("checks_since", lambda s, t, v: 0), ("expected_checks", lambda s, t, h: []),
                             ("held_by_base", lambda s, t, v: False)):
             self.patch(self.tick, name, value)
-        self.patch(self.ghnews, "resting", lambda s, t: {"address": "t9"})
+        rests = []
+        self.patch(self.ghnews, "resting", lambda s, t: rests[-1] if rests else None)
+        self.patch(self.tick, "resting", lambda s, t: rests[-1] if rests else None)
         self.patch(self.ghnews, "pr_comments", lambda repo, n: [])
         report = {"attention": [], "done": []}
+        # #1357: its agent mid-turn (just said ready): Needs you, the card naming what collided but never claiming
+        # its agent rebases, and looked at again soon
         self.tick.facts(self.store, b, report)  # no auto_merge: the person hasn't asked to merge it
-        self.assertEqual(b["attention"], "It conflicts with the base branch.")
+        self.assertEqual((b["state"], b["attention"]), ("ready", "It conflicts with the base branch."))
+        self.assertEqual(b["merge_failed"], "Conflicts with main after \"Task 1\" merged")
+        self.assertEqual(self.told, [])
+        self.assertLess(b["pr"]["checked"], self.tick.now() - self.tick.PR_EVERY + self.tick.PR_WAIT_EVERY + 1000)
+        # once it rests: handed back at once, Working, and only now "its agent is rebasing"
+        rests.append({"address": "t9"})
+        b["pr"]["checked"] = 0
+        self.tick.facts(self.store, b, report)
+        self.assertEqual(b["state"], "running")
+        self.assertNotIn("attention", b)
         self.assertEqual(b["merge_failed"], "Conflicts with main after \"Task 1\" merged: its agent is rebasing")
-        news = b["pr"]["news"]["text"]
-        self.assertIn("It conflicts with main: rebase onto main", news)
-        self.assertIn("Files that collide with origin/main: app.txt.", news)
+        self.assertIn("Files that collide with origin/main: app.txt.", self.told[-1])
+        self.assertIn("rebase task/2 onto origin/main", self.told[-1])
+        self.assertEqual(report["merge_failed"][-1]["task"], "SHEP-2")
 
     def test_a_merge_tells_working_tasks_that_now_collide_at_once(self):
         a, b, c = self.task(1, "A"), self.task(2, "B"), self.task(3, "C", name="other.txt")
