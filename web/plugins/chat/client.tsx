@@ -771,7 +771,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
           onClick={() => openPicker({ title: thread.task ? 'This task runs on' : 'This chat runs on', machine, pick, onChange: () => undefined, onClose: (now) => applyPick(key, pick, now, { agent: pickWords(now).agent }) })}
         />
         <span className="sp" />
-        {registry.boxButtons.map((b, i) => <b.View key={i} thread={thread} write={(t) => setText(text ? `${text.replace(/\s+$/, '')} ${t}` : t)} />)}
+        {registry.boxButtons.map((b, i) => <b.View key={i} thread={thread} setText={setText} />)}
         {stop ? (
           <button type="button" className="send" aria-label="Stop" onClick={() => void tryAct({ type: 'stop', chat: key })}>
             <I n="stop" c="s16" />

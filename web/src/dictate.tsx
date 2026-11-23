@@ -1,15 +1,16 @@
 // The mic in a message box (and in Feedback): dictation only. A voice call is the other thing (the wave button).
-// SHEP-314: while it records, the box's bottom row becomes the recording itself, the way ChatGPT's, Claude's and
-// WhatsApp's composers do it: Cancel on the left, a wave drawn from the microphone's real level and the time in the
-// middle, Done on the right where Send was. The words show above it as they are heard, the way Apple's dictation and
-// Wispr Flow write them, then "Writing it down" until they land in the box.
+// SHEP-334: while it listens, the composer itself is the dictation surface, the way ChatGPT's and Claude's mobile
+// composers and Wispr Flow do it: its bottom row becomes Cancel (an X that drops this dictation), a wave drawn from the
+// microphone's real level, and Done (a check, where Send was). No record dot, no timer, and no words while you talk:
+// the box says "Listening…" and keeps what you typed. On Done, a short "Writing it down…", then the clean text lands
+// at the cursor in one go. "Allow the microphone" shows only when the browser really asks (dictation.ts askWhen).
 // Every way it fails says why, there. Escape cancels; leaving the chat cancels.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { canDictate, clock, dictate, dictSample, SAY, type Dictation, type Heard } from './dictation.ts'
-import { IDLE, NOTHING, shownWords, step, type DictEvent, type DictState } from './dictstate.ts'
-import { has } from './kernel.ts'
+import { useEffect, useRef, useState } from 'react'
+import { canDictate, dictate, dictSample, SAY, type Dictation } from './dictation.ts'
+import { IDLE, insertAt, step, type DictEvent, type DictState } from './dictstate.ts'
+import { getState, has } from './kernel.ts'
 import { escapeFirst } from './overlay.tsx'
-import { I, IB } from './ui.tsx'
+import { I } from './ui.tsx'
 import { Wave } from './wave.tsx'
 import './dictate.css'
 
@@ -29,18 +30,31 @@ function useDictState(write: (text: string) => void) {
   return [s, dispatch] as const
 }
 
-export function DictateButton({ write, scope }: { write: (text: string) => void; scope?: string }) {
-  const [s, dispatch] = useDictState((text) => {
-    write(text)
-    landed.current = true
-  })
-  const [words, setWords] = useState<Heard>(NOTHING)
-  const live = useRef<Dictation | null>(null)
-  const surf = useRef<HTMLDivElement>(null)
+/** the person's own words for the writing to get right: their spaces' and machines' names */
+function ownWords(): string[] {
+  const snap = getState().snap
+  if (!snap) return []
+  return [...(snap.places ?? []).map((p) => p.name), ...(snap.machines ?? []).map((m) => m.name)].filter((w): w is string => typeof w === 'string')
+}
+
+/** what the box says while it is the dictation surface (when nothing was typed in it) */
+const SAYS: Partial<Record<DictState['k'], string>> = { starting: 'Starting…', asking: 'Waiting for the microphone…', on: 'Listening…', writing: 'Writing it down…' }
+
+/** setText: the box's whole new text (the words go in at its cursor, what was typed stays) */
+export function DictateButton({ setText, scope }: { setText: (value: string) => void; scope?: string }) {
   const mic = useRef<HTMLButtonElement>(null)
-  const landed = useRef(false)
-  const [, tick] = useState(0)
-  const said = useRef<HTMLDivElement>(null)
+  const surf = useRef<HTMLDivElement>(null)
+  const landed = useRef<number | null>(null)
+  // where the cursor was in the box when dictation started
+  const at = useRef<{ start: number; end: number } | null>(null)
+  const boxOf = () => (mic.current ?? surf.current)?.closest('.cbox')?.querySelector<HTMLTextAreaElement>('textarea') ?? null
+  const [s, dispatch] = useDictState((text) => {
+    const box = boxOf()
+    const r = insertAt(box?.value ?? '', at.current, text)
+    setText(r.value)
+    landed.current = r.caret
+  })
+  const live = useRef<Dictation | null>(null)
   const active = s.k !== 'idle'
 
   const cancel = () => {
@@ -51,12 +65,13 @@ export function DictateButton({ write, scope }: { write: (text: string) => void;
   }
   const start = () => {
     live.current?.cancel()
+    landed.current = null
+    const box = boxOf()
+    if (box && at.current === null) at.current = { start: box.selectionStart ?? box.value.length, end: box.selectionEnd ?? box.value.length }
     if (!canDictate()) {
       dispatch({ t: 'start' })
       return dispatch({ t: 'fail', why: 'This browser has no microphone to dictate with.' })
     }
-    setWords(NOTHING)
-    landed.current = false
     dispatch({ t: 'start' })
     const d = dictate(
       (text) => {
@@ -68,8 +83,8 @@ export function DictateButton({ write, scope }: { write: (text: string) => void;
         dispatch({ t: 'fail', why })
       },
       undefined,
-      (p) => dispatch({ t: 'phase', p, at: Date.now() }),
-      setWords,
+      (p) => dispatch({ t: 'phase', p }),
+      ownWords(),
     )
     live.current = d
   }
@@ -78,18 +93,6 @@ export function DictateButton({ write, scope }: { write: (text: string) => void;
   // gone (the box closed) or another chat's box: stop, write nothing
   useEffect(() => () => live.current?.cancel(), [])
   useEffect(() => () => cancel(), [scope])
-  // the browser's microphone question still open: say what it waits for
-  useEffect(() => {
-    if (s.k !== 'asking' || s.slow) return
-    const t = setTimeout(() => dispatch({ t: 'slow' }), 1200)
-    return () => clearTimeout(t)
-  }, [s])
-  // the time moves while it records
-  useEffect(() => {
-    if (s.k !== 'on') return
-    const t = setInterval(() => tick((n) => n + 1), 250)
-    return () => clearInterval(t)
-  }, [s.k])
   // Escape cancels (or closes the error), before anything else on the page hears it (a dialog it's in stays open)
   useEffect(() => {
     if (!active) return
@@ -101,28 +104,40 @@ export function DictateButton({ write, scope }: { write: (text: string) => void;
     escapeFirst.add(take)
     return () => void escapeFirst.delete(take)
   }, [active, s.k])
-  // focus: on the surface's main button while it shows (keyboard: Enter is Done), then back where it belongs
+  // the box is the surface meanwhile: it says what dictation is doing, and isn't typed into (the words go where its
+  // cursor was)
+  useEffect(() => {
+    const box = boxOf()
+    const cbox = box?.closest<HTMLElement>('.cbox')
+    if (!box || !cbox) return
+    if (active) cbox.dataset.dict = s.k
+    else delete cbox.dataset.dict
+    box.readOnly = active && s.k !== 'error'
+  }, [active, s.k])
+  useEffect(() => () => {
+    const box = boxOf()
+    const cbox = box?.closest<HTMLElement>('.cbox')
+    if (cbox) delete cbox.dataset.dict
+    if (box) box.readOnly = false
+  }, [])
+  // focus: on the surface's main button while it shows (keyboard: Enter is Done; a phone's keyboard steps aside),
+  // then back where it belongs
   const was = useRef(false)
   useEffect(() => {
     if (active && !was.current) surf.current?.querySelector<HTMLButtonElement>('[data-main]')?.focus({ preventScroll: true })
     if (!active && was.current) {
-      // the words landed: on a desktop, into the box to edit them; else back on the mic (no phone keyboard pops up)
-      const box = mic.current?.closest('.cbox')?.querySelector<HTMLTextAreaElement>('textarea')
-      if (landed.current && box && matchMedia('(pointer: fine)').matches) {
+      const box = boxOf()
+      const caret = landed.current
+      // the words landed: on a desktop, the cursor right after them to carry on; else back on the mic (no phone
+      // keyboard pops up)
+      if (caret !== null && box && matchMedia('(pointer: fine)').matches) {
         box.focus({ preventScroll: true })
-        box.setSelectionRange(box.value.length, box.value.length)
+        box.setSelectionRange(caret, caret)
       } else if (document.activeElement === document.body || !document.activeElement) mic.current?.focus({ preventScroll: true })
+      at.current = null
     }
     was.current = active
   }, [active])
-
-  // the newest words stay in view: scrolled to the end as they come, the older ones fading at the top
-  useLayoutEffect(() => {
-    const el = said.current
-    if (!el) return
-    el.scrollTop = el.scrollHeight
-    el.classList.toggle('more', el.scrollTop > 0)
-  }, [words, s.k])
 
   if (!has('voice')) return null
   if (!active)
@@ -132,61 +147,49 @@ export function DictateButton({ write, scope }: { write: (text: string) => void;
       </button>
     )
 
-  const shown = shownWords(words)
-  const heard = !!(shown.said || shown.partial)
+  const asking = s.k === 'asking'
   return (
     <div ref={surf} className={`dsurf ${s.k}`} role="group" aria-label="Dictation">
-      <div ref={said} className="dwords" aria-hidden={s.k !== 'error'}>
-        {s.k === 'error' ? (
-          <p className="derr" role="alert">
+      {s.k === 'error' ? (
+        <>
+          <button type="button" className="dbtn" aria-label="Close" onClick={() => dispatch({ t: 'dismiss' })}>
+            <I n="x" />
+          </button>
+          <p className="dsay err" role="alert">
             <I n="warn" c="s16" />
             <span>{s.why}</span>
           </p>
-        ) : s.k === 'asking' ? (
-          <p className="dhint">{s.slow ? SAY.asking : 'Starting the microphone…'}</p>
-        ) : heard ? (
-          <p className="dsaid">
-            {shown.said}
-            {shown.partial}
-          </p>
-        ) : (
-          <p className="dhint">{s.k === 'writing' ? 'Writing it down…' : 'Listening…'}</p>
-        )}
-      </div>
-      <div className="dctl">
-        {s.k === 'error' ? (
-          <>
-            <IB icon="x" label="Close" onClick={() => dispatch({ t: 'dismiss' })} />
-            <span className="sp" />
-            <button type="button" className="ddone" data-main onClick={start}>
+          <button type="button" className="dagain" data-main onClick={start}>
+            <I n="mic" c="s16" />
+            <span>Try again</span>
+          </button>
+        </>
+      ) : (
+        <>
+          <button type="button" className="dbtn" aria-label="Cancel dictation" onClick={cancel}>
+            <I n="x" />
+          </button>
+          {asking ? (
+            <p className="dsay">
               <I n="mic" c="s16" />
-              <span>Try again</span>
-            </button>
-          </>
-        ) : (
-          <>
-            <IB icon="x" label="Cancel dictation" onClick={cancel} />
+              <span>{SAY.asking}</span>
+            </p>
+          ) : (
             <Wave on={s.k === 'on'} sample={dictSample} />
-            <span className="dtime" aria-hidden>
-              <i className={`ddot${s.k === 'on' ? ' rec' : ''}`} />
-              {s.k === 'on' ? clock(Date.now() - s.since) : s.k === 'writing' ? clock(s.took) : '0:00'}
-            </span>
-            {s.k === 'writing' ? (
-              <button type="button" className="ddone wr" data-main aria-label="Writing it down" aria-disabled="true" onClick={() => undefined}>
-                <i className="dspin" aria-hidden />
-                <span>Writing</span>
-              </button>
-            ) : (
-              <button type="button" className="ddone" data-main aria-label="Done, write it down" disabled={s.k !== 'on'} onClick={done}>
-                <I n="check" c="s16" />
-                <span>Done</span>
-              </button>
-            )}
-          </>
-        )}
-      </div>
+          )}
+          {s.k === 'writing' ? (
+            <button type="button" className="ddone wr" data-main aria-label="Writing it down" aria-disabled="true" onClick={() => undefined}>
+              <i className="dspin" aria-hidden />
+            </button>
+          ) : (
+            <button type="button" className="ddone" data-main aria-label="Done" disabled={s.k !== 'on'} onClick={done}>
+              <I n="check" />
+            </button>
+          )}
+        </>
+      )}
       <span className="vh" role="status">
-        {s.k === 'asking' ? (s.slow ? SAY.asking : 'Starting the microphone') : s.k === 'on' ? 'Recording' : s.k === 'writing' ? 'Writing it down' : ''}
+        {s.k === 'error' ? '' : asking ? SAY.asking : (SAYS[s.k] ?? '')}
       </span>
     </div>
   )

@@ -38,8 +38,9 @@ export const cachedKey = (hub: Pick<Hub, "call">) => (cache ??= keyCache(() => k
 /** a refused key: found again next time */
 export const refused = (e: unknown) => { if (/\b401\b|invalid.*key|unauthori/i.test(String((e as Error)?.message ?? e))) cache?.forget(); };
 
-export async function dictate(hub: Pick<Hub, "call">, audio: Blob, fetchFn: typeof fetch = fetch, key = () => cachedKey(hub).get()): Promise<string> {
-  try { return await transcribe(audio, key, fetchFn, fileName(audio.type)); } catch (e) { refused(e); throw e; }
+/** words: the person's own (their spaces and machines, from the page; SHEP-334), so the writing gets them right */
+export async function dictate(hub: Pick<Hub, "call">, audio: Blob, fetchFn: typeof fetch = fetch, key = () => cachedKey(hub).get(), words: string[] = []): Promise<string> {
+  try { return await transcribe(audio, key, fetchFn, fileName(audio.type), words.slice(0, 50)); } catch (e) { refused(e); throw e; }
 }
 
 /** A single-use token for one live dictation from the page (it expires in minutes and opens one session only). */

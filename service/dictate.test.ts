@@ -39,6 +39,9 @@ describe("dictation with ElevenLabs", () => {
     expect(form.get("model_id")).toBe("scribe_v2");
     expect(form.get("tag_audio_events")).toBe("false");
     expect(form.has("language_code")).toBe(false); // found from the audio: English or Swedish
+    // SHEP-334: written, not word for word, and the app's own names spelled right
+    expect(form.get("no_verbatim")).toBe("true");
+    expect(form.getAll("keyterms")).toEqual(expect.arrayContaining(["Shepherdr", "herdr-core"]));
     const file = form.get("file") as File;
     expect(file.size).toBe(1000);
     expect(file.name).toBe("dictation.webm");
@@ -98,6 +101,16 @@ describe("dictation with ElevenLabs", () => {
 });
 
 // SHEP-63: the words are written live (a single-use token for the page), and the key is found once per service process
+test("SHEP-334: the person's words from the page go along, cut to what ElevenLabs takes", async () => {
+  const { key } = fromMain(JSON.stringify({ key: KEY, agent: "" }));
+  const el = elevenlabs(200, { text: "ok" });
+  await dictate(hub, audio(), el.f, key, ["vm-demo", "a<b", "x".repeat(30)]);
+  const kt = (el.sent[0].init.body as FormData).getAll("keyterms");
+  expect(kt).toContain("vm-demo");
+  expect(kt).not.toContain("a<b");
+  expect(kt.length).toBeLessThanOrEqual(50);
+});
+
 describe("live dictation and the kept key", () => {
   test("the key is looked up once, kept in memory, and found again after a while", async () => {
     let looked = 0, now = 0;

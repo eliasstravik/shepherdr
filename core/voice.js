@@ -556,12 +556,31 @@ export const MAX_AUDIO = 20 * 1024 * 1024;
 /** A failed key lookup (voiceKey's { error, why }) in dictation's words: no key → where to add it; else as it said. */
 export const dictateKeyError = (k) => k.why === "none" ? DICTATE_NO_KEY : k.error;
 
+/** The words dictation should know (SHEP-334): Shepherdr's own names, then the person's (their spaces and machines, from
+ *  the page). ElevenLabs biases the writing towards them ("keyterms"): Shepherdr, not "Shepherd or". At most 50 (the
+ *  realtime limit), each at most 20 characters and 5 words, none with < > { } [ ] \\ (ElevenLabs refuses those). */
+export const DICTATE_WORDS = ["Shepherdr", "Herdr", "herdr-core", "herdr-task", "herdr-browser", "herdr-artifact", "herdr-secret", "Claude", "Codex", "ElevenLabs", "repo", "worktree", "PR"];
+export function vocabulary(names = []) {
+  const seen = new Set(), out = [];
+  for (const raw of [...DICTATE_WORDS, ...names]) {
+    const w = String(raw ?? "").replace(/\s+/g, " ").trim();
+    if (!w || w.length > 20 || w.split(" ").length > 5 || /[<>{}\[\]\\]/.test(w) || seen.has(w.toLowerCase())) continue;
+    seen.add(w.toLowerCase());
+    out.push(w);
+    if (out.length >= 50) break;
+  }
+  return out;
+}
+
 /** The speech to text request: POST <API>/speech-to-text, multipart with the audio and the model; no language_code,
- *  so it finds the language itself; no audio events ("(laughter)"). */
-export function sttRequest(key, audio, filename = "dictation") {
+ *  so it finds the language itself; no audio events ("(laughter)"). SHEP-334: written, not word for word (no_verbatim:
+ *  no "um", "uh", stutters or false starts), and biased towards the person's words (keyterms, one field each). */
+export function sttRequest(key, audio, filename = "dictation", words = []) {
   const form = new FormData();
   form.append("model_id", STT_MODEL);
   form.append("tag_audio_events", "false");
+  form.append("no_verbatim", "true");
+  for (const w of vocabulary(words)) form.append("keyterms", w);
   form.append("file", audio, filename);
   return { url: `${API}/speech-to-text`, init: { method: "POST", body: form, redirect: "error", headers: { "xi-api-key": key } } };
 }
@@ -579,12 +598,12 @@ export function sttError(status, body) {
 
 /** Writes a recording down: its words ("" when nothing was said), or throws an Error in plain words.
  *  key(): voiceKey's answer (the caller's io); fetchFn: fetch (a test's stand-in). */
-export async function transcribe(audio, key, fetchFn = fetch, filename) {
+export async function transcribe(audio, key, fetchFn = fetch, filename, words = []) {
   if (!audio?.size) throw new Error("Nothing was recorded.");
   if (audio.size > MAX_AUDIO) throw new Error("That recording is too long.");
   const k = await key();
   if ("error" in k) throw new Error(dictateKeyError(k));
-  const { url, init } = sttRequest(k.key, audio, filename);
+  const { url, init } = sttRequest(k.key, audio, filename, words);
   let r;
   try { r = await fetchFn(url, { ...init, signal: AbortSignal.timeout(60000) }); }
   catch (e) { throw new Error(e?.name === "TimeoutError" ? "ElevenLabs didn't answer in time. Try again." : "Can't reach ElevenLabs. Check this machine's internet, then try again."); }
@@ -611,8 +630,14 @@ export const LIVE_TAIL = new Uint8Array(LIVE_RATE * 2 * 0.4);
 /** how long Done waits for the live words before it uploads the recording instead */
 export const LIVE_WAIT = 4000;
 
-/** The realtime socket's address: 16 kHz 16-bit PCM, commits only when asked (Done), the language found from the audio. */
-export const liveUrl = (token = "") => `wss://api.elevenlabs.io/v1/speech-to-text/realtime?model_id=${LIVE_MODEL}&audio_format=pcm_${LIVE_RATE}&commit_strategy=manual${token ? `&token=${encodeURIComponent(token)}` : ""}`;
+/** The realtime socket's address: 16 kHz 16-bit PCM, commits only when asked (Done), the language found from the audio,
+ *  written not word for word (no_verbatim) and biased towards the person's words (keyterms, one parameter each). */
+export const liveUrl = (token = "", words = []) => {
+  const q = new URLSearchParams({ model_id: LIVE_MODEL, audio_format: `pcm_${LIVE_RATE}`, commit_strategy: "manual", no_verbatim: "true" });
+  for (const w of vocabulary(words)) q.append("keyterms", w);
+  if (token) q.set("token", token);
+  return `wss://api.elevenlabs.io/v1/speech-to-text/realtime?${q}`;
+};
 
 /** A single-use token for one live session from a browser (the key stays on the service). */
 export const liveTokenRequest = (key) => ({ url: `${API}/single-use-token/realtime_scribe`, init: { method: "POST", redirect: "error", headers: { "xi-api-key": key } } });
@@ -655,6 +680,64 @@ export function liveWords() {
     shown: () => ({ said: said.join(" ").replace(/\s+/g, " ").trim(), partial }),
   };
 }
+
+/**
+ * Dictation's last clean-up (SHEP-334), after ElevenLabs' own (no_verbatim) and before the words land in the box: what
+ * it leaves is tidied the way a person writes it. Fillers still there ("um", "uh", "you know," at a sentence's start)
+ * and stutters ("the the") go; a spoken correction keeps only its final wording ("on Tuesday. No, wait, on Wednesday"
+ * → "on Wednesday", "scratch that" drops the sentence before it); a sentence starts with a capital and the text ends
+ * with a stop. Nothing is added, reworded or summarised: when a correction can't be placed, the words stay as they are.
+ */
+const FILLER = /(^|[\s,.;!?])(?:u+m+|u+h+m*|e+r+m+|h+m+|m+h+m+)(?=[\s,.;!?]|$)[,]?/giu;
+const CUE = /([,.;!?])\s+(no,?\s+wait|wait,?\s+no|no,?\s+sorry|or rather|scratch that)\b[,.]?\s*/iu;
+const SORRY = /(,)\s+(sorry)\b,?\s*/iu;
+const REPEAT_OK = new Set(["had", "that", "is", "do", "very", "really", "so", "no", "bye", "ha"]);
+export function tidyText(raw) {
+  let t = String(raw ?? "").replace(/\s+/g, " ").trim();
+  if (!t) return "";
+  t = t.replace(FILLER, "$1").replace(/(^|[.!?]\s+)you know,\s*/giu, "$1");
+  t = t.replace(/\b([\p{L}'-]+)(?:\s+\1\b)+/giu, (m, w) => (REPEAT_OK.has(w.toLowerCase()) ? m : w));
+  for (let i = 0; i < 5; i++) {
+    const m = CUE.exec(t) ?? SORRY.exec(t);
+    if (!m) break;
+    const before = t.slice(0, m.index), after = t.slice(m.index + m[0].length), cue = m[2].toLowerCase();
+    const fixed = corrected(before, after, cue);
+    if (fixed === null) break;
+    t = fixed;
+  }
+  t = t.replace(/\s+([,.;!?])/g, "$1").replace(/([,;])(?=[,.;!?])/g, "").replace(/^[,.;\s]+/, "").replace(/\s+/g, " ").trim();
+  t = t.replace(/(^|[.!?]\s+)(\p{Ll})/gu, (_, a, c) => a + c.toUpperCase());
+  if (/[\p{L}\p{N})"'”’]$/u.test(t)) t += ".";
+  return t;
+}
+
+/** a spoken correction applied: `before` (up to the cue) with its last words replaced by `after`'s first clause; null
+ *  when it can't be placed (then nothing changes) */
+function corrected(before, after, cue) {
+  if (!after.trim()) return null;
+  // the sentence the correction is about, and the rest before it
+  const cut = Math.max(before.lastIndexOf(". "), before.lastIndexOf("! "), before.lastIndexOf("? "));
+  const head = cut >= 0 ? before.slice(0, cut + 2) : "";
+  const said = cut >= 0 ? before.slice(cut + 2) : before;
+  if (cue === "scratch that") return `${head}${cap(after)}`;
+  // the correction's own clause (up to its first stop or comma); what follows it carries on
+  const end = after.search(/[,.;!?]/);
+  const fix = (end < 0 ? after : after.slice(0, end)).trim();
+  const rest = end < 0 ? "" : after.slice(end);
+  const fixWords = fix.split(" ").filter(Boolean);
+  if (!fixWords.length || fixWords.length > 8) return null;
+  const words = said.replace(/[,.;!?]+$/, "").split(" ").filter(Boolean);
+  // "on Tuesday … on Wednesday": back to where the correction's first word was said; else as many words as it has
+  const first = fixWords[0].toLowerCase();
+  let at = -1;
+  for (let i = words.length - 1; i >= Math.max(0, words.length - 8); i--) if (words[i].toLowerCase().replace(/[^\p{L}\p{N}'-]/gu, "") === first) { at = i; break; }
+  if (at < 0) at = words.length - fixWords.length;
+  if (at < 0 || (at === 0 && words.length > fixWords.length)) return null;
+  const kept = words.slice(0, at);
+  const line = [...kept, ...fixWords].join(" ");
+  return `${head}${at === 0 ? cap(line) : line}${rest}`;
+}
+const cap = (s) => s.replace(/^\p{Ll}/u, (c) => c.toUpperCase());
 
 /** 16-bit little-endian PCM bytes as base64 (no Buffer in a browser). */
 export function base64(bytes) {
