@@ -122,7 +122,7 @@ button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"])
 .chat .scroll,.chat>.foot{padding-inline:max(var(--gut),calc((100% - var(--chat-w,720px))/2))}
 .msgs{display:grid;grid-template-columns:minmax(0,1fr);gap:4px;justify-items:start;align-content:start;padding-block:8px 16px;font-size:16px;line-height:24px}
 .b{max-width:min(82%,560px);padding:6px 14px;border-radius:18px;background:var(--raised);overflow-wrap:anywhere;text-wrap:pretty}
-.b.mine{justify-self:end;background:var(--mine)}.gap{margin-top:12px}
+.b.mine{justify-self:end;background:var(--mine)}.gap{margin-top:8px}
 button.b{cursor:pointer}
 .time{justify-self:center;margin:12px 0 4px;color:var(--muted);font-size:12px;line-height:16px}
 .ref{display:inline-flex;align-items:center;gap:6px;margin-top:12px;color:var(--muted);font-size:14px;line-height:20px}
@@ -174,7 +174,7 @@ button.b{cursor:pointer}
 .bars{display:grid;gap:8px;padding:12px;border-radius:8px;background:var(--raised);color:var(--sub);font-size:var(--sec);line-height:var(--secl)}
 .bars i{display:block;width:var(--w);height:6px;border-radius:3px;background:var(--control2)}.bars i.g{background:var(--green)}
 .fold{display:inline-flex;align-items:center;gap:4px;color:var(--muted);font-size:var(--sec);line-height:var(--secl);justify-self:start}
-.fold.quiet{align-items:flex-start;max-width:92%;text-align:start;overflow-wrap:anywhere}.fold.quiet .i{flex:none;margin-top:calc((var(--secl) - 16px) / 2)}.fold.quiet .qc{width:16px;flex:none}
+.fold.quiet{align-items:flex-start;max-width:92%;text-align:start;overflow-wrap:anywhere}.fold.quiet .i{flex:none;margin-top:calc((var(--secl) - 16px) / 2)}.fold.quiet .qv{margin-inline-start:-4px}
 .fold.quiet .ql{min-width:0}.fold.quiet .qm{font-variant-numeric:tabular-nums;white-space:nowrap}.fold.quiet .qm::before{content:"·";margin-inline:4px;color:var(--muted)}
 .quietb{display:grid;gap:6px;max-width:min(92%,640px);max-height:min(50vh,360px);overflow:auto;overscroll-behavior:contain;margin-inline-start:20px;padding:8px 12px;border-radius:8px;background:var(--well);box-shadow:inset 0 0 0 1px var(--line);color:var(--sub);font-size:var(--sec);line-height:var(--secl)}
 .quietb .qw{margin:0}.quietb .qt{white-space:pre-wrap;overflow-wrap:anywhere}
@@ -517,8 +517,25 @@ textarea.cin{overflow-y:auto}
 /* touch (SHEP-317): what needs more than a token to give a finger its 44 px */
 @media(pointer:coarse){a.btn{position:relative}a.btn::before{content:"";position:absolute;left:50%;top:50%;width:max(100%,var(--hit));height:max(100%,var(--hit));transform:translate(-50%,-50%)}}
 .app.tap .emo{gap:0}.app.tap .emo button{min-width:var(--hit)}
-.app.tap .fold,.app.tap .ref{min-height:var(--row)}.app.tap .ref{margin-top:0}
+.app.tap :not(.msgs)>:is(.fold,.ref){min-height:var(--row)}.app.tap .ref{margin-top:0}
 /* Text gets the room there is (SHEP-356): a name or title wraps to a second line before it is cut, and is cut only where
    that second line ends too. Where it is still cut, a tap opens the thing that shows it whole. */
 .row.tk .l1,.row.tk .l2:not(.rline),.rowx[data-project]>.row>.n,.tile>.l1,.banner .n:not(button),.hd .ttl>.t1:only-child{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;overflow-wrap:anywhere}
 .rowx[data-project]>.row{padding-block:6px}.banner{padding-block:4px}.hd .ttl>.t1:only-child{line-height:20px}
+/* The chat's one rhythm and one left edge (SHEP-383). Rows (a turn's "Ran a command", a task's line, a settled card's
+   "Done and merged", news, messages between agents) share one icon column (16 px at the chat's edge) and one text
+   column 8 px after it, and 4 px of air above and below inside the row. Between any two things that differ (a bubble
+   and a row, a card and a bubble, one side and the other) there is 12 px; rows in a run sit 12 px apart text to text;
+   the last thing ends 12 px above the message box. On touch a row keeps its 44 px target as an invisible hit area, so
+   it no longer pushes its neighbours away. */
+.msgs{padding-bottom:12px}
+.msgs{position:relative}.msgs>.mend{position:absolute;bottom:0}
+.msgs>:is(.fold,.ref,.donerow){gap:8px;min-height:0;margin:0;padding-block:4px}
+.msgs>:is(.card,.wsign,.wrow){margin-top:0}
+.msgs>:not(.fold,.ref,.donerow,.time,.mend)+:is(.card,.wsign,.wrow),.msgs>.card+:not(.fold,.ref,.donerow,.time,.mend){margin-top:8px}
+.msgs>:not(.fold,.ref,.donerow,.time)+:is(.fold,.ref,.donerow),.msgs>:is(.fold,.ref,.donerow)+:not(.fold,.ref,.donerow,.time,.quietb,.files,.mend){margin-top:4px}
+.msgs>:is(.fold,.ref,.donerow):nth-last-child(2){margin-bottom:-4px}
+.msgs>.ref>.tring{width:16px}.msgs>.ref>.tring>.i{width:16px;height:16px}
+.msgs>.quietb,.msgs>.files{margin-inline-start:24px}
+.app.tap .msgs>:is(.fold,button.ref){position:relative}
+.app.tap .msgs>:is(.fold,button.ref)::after{content:"";position:absolute;inset:-8px 0}
