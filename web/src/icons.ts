@@ -2,6 +2,8 @@
 export const IC = {
   "info": "<circle cx=\"10\" cy=\"10\" r=\"7\"/><path d=\"M10 9v4.5M10 6.6v.1\"/>",
   "plus": "<path d=\"M10 4v12M4 10h12\"/>",
+  "image": "<rect x=\"3\" y=\"4\" width=\"14\" height=\"12\" rx=\"2\"/><circle cx=\"7.5\" cy=\"8.5\" r=\"1.25\"/><path d=\"m3.5 14.5 4.5-4 3 2.5 2-1.5 3.5 3\"/>",
+  "paste": "<path d=\"M7.5 4.5H5.5v12h9v-12h-2M7.5 3.5h5v2.5h-5z\"/>",
   "minus": "<path d=\"M4 10h12\"/>",
   "mic": "<rect x=\"7.5\" y=\"2.5\" width=\"5\" height=\"9\" rx=\"2.5\"/><path d=\"M4.5 9.5a5.5 5.5 0 0 0 11 0M10 15v2.5\"/>",
   "tab": "<path d=\"M3.5 10h10M10 6.5l3.5 3.5-3.5 3.5M16.5 5.5v9\"/>",

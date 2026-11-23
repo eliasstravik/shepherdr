@@ -39,6 +39,35 @@ const fit = (actions) => {
   return kept.slice(0, 1)
 }
 
+/* Share into Shepherdr (SHEP-345): Android's Share sheet POSTs pictures, files, words and links to ./share (the
+   manifest's share_target). They are kept here in Cache Storage under an id, and the app opens on ./?share=<id>, which
+   puts them in the message box of the chat you had open last (web/plugins/chat/share.ts). */
+const SHARED = 'shepherdr-share'
+const word = (v) => (typeof v === 'string' ? v.slice(0, 20000) : '')
+
+const keepShared = async (req) => {
+  const scope = self.registration.scope
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+  try {
+    const form = await req.formData()
+    const files = form.getAll('files').filter((f) => f && typeof f !== 'string' && f.size > 0)
+    const meta = { title: word(form.get('title')), text: word(form.get('text')), url: word(form.get('url')), files: files.map((f) => ({ name: f.name || '', type: f.type || '' })) }
+    const cache = await caches.open(SHARED)
+    // one share waits at a time: an older one never taken (the app was closed before it opened) goes
+    for (const k of await cache.keys()) await cache.delete(k)
+    for (const [i, f] of files.entries()) await cache.put(new URL(`share/${id}/${i}`, scope).href, new Response(f, { headers: { 'content-type': f.type || 'application/octet-stream' } }))
+    await cache.put(new URL(`share/${id}`, scope).href, new Response(JSON.stringify(meta), { headers: { 'content-type': 'application/json' } }))
+    return Response.redirect(new URL(`./?share=${id}`, scope).href, 303)
+  } catch {
+    return Response.redirect(new URL('./?share=lost', scope).href, 303)
+  }
+}
+
+self.addEventListener('fetch', (e) => {
+  const r = e.request
+  if (r.method === 'POST' && r.url.split('?')[0] === new URL('share', self.registration.scope).href) e.respondWith(keepShared(r))
+})
+
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()))
 

@@ -838,6 +838,9 @@ const server = Bun.serve<{ who: string }>({
       const there = host.hostLink();
       return there ? Response.redirect(there, 302) : new Response("Shepherdr's web app is served from another machine now.", { status: 404 });
     }
+    // Share into Shepherdr (SHEP-345): the app's service worker takes a share; one that reaches here came before the
+    // worker was up, and the app says to share it again (nothing is read, so no gate is needed)
+    if (path === "/share" && req.method === "POST") return new Response(null, { status: 303, headers: { location: "./?share=lost" } });
     const socket = path === "/api/ws" || path === "/api/terminal" || path === "/api/screen" || path === "/api/desktop" || path === "/api/voice";
     const viaTailnet = req.headers.has("tailscale-user-login");
     // the glance feed (SHEP-246) is read by the phone's own app: checked as a write (its origin, x-shepherdr: 1)
