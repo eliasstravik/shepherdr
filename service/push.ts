@@ -171,6 +171,8 @@ export class Push {
   visible = new Set<string>();
   /** a tailnet device whose own app shows the alerts now (the glance feed's native stream, SHEP-246): no web push */
   quiet: (node: string | undefined) => boolean = () => false;
+  /** a tailnet device with the app on screen now, whichever of its pages (live.ts looking, SHEP-338): no web push */
+  looking: (node: string | undefined) => boolean = () => false;
 
   constructor(private subject: () => string, private file = join(DATA, "push.json")) {
     try { this.subs = JSON.parse(readFileSync(this.file, "utf8")); } catch {}
@@ -257,7 +259,7 @@ export class Push {
   async send(alert: Record<string, unknown> & { topic?: string; place?: string }) {
     const payload = enc(JSON.stringify(alert));
     for (const s of [...this.subs]) {
-      if (this.visible.has(s.endpoint) || this.quiet(s.node) || !wants(s, alert)) continue;
+      if (this.visible.has(s.endpoint) || this.looking(s.node) || this.quiet(s.node) || !wants(s, alert)) continue;
       await this.deliver(s, payload);
     }
   }

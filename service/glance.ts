@@ -150,9 +150,12 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now()):
   const kept = items.slice(0, MAX_ITEMS);
   const unread = unreadChats(snap).length;
   const v = Bun.hash(JSON.stringify([GLANCE_FORMAT, counts, kept, unread])).toString(36);
-  const urgent = Bun.hash(JSON.stringify([GLANCE_FORMAT, counts, kept.filter((i) => i.alert).map((i) => [i.key, i.title, i.body])])).toString(36);
-  return { format: GLANCE_FORMAT, v, urgent, at: now, counts, order, groups, items: kept, unread };
+  return { format: GLANCE_FORMAT, v, urgent: urgentOf(counts, kept), at: now, counts, order, groups, items: kept, unread };
 }
+
+/** what notifies in a doc: its alerts, their words and the counts */
+const urgentOf = (counts: Counts, items: Item[]) =>
+  Bun.hash(JSON.stringify([GLANCE_FORMAT, counts, items.filter((i) => i.alert).map((i) => [i.key, i.title, i.body])])).toString(36);
 
 /** how long a device's web push stays quiet after its native stream dropped (a phone reconnecting) */
 export const NATIVE_GRACE_MS = 120_000;
@@ -180,6 +183,13 @@ export class GlanceFeed {
   private streams = new Set<Stream>();
   /** device -> its native streams open now, and when the last one closed */
   private native = new Map<string, { open: number; closed: number }>();
+  /** is device D's Shepherdr page on screen now (live.ts looking) */
+  looking: (device: string) => boolean = () => false;
+  /** device -> the alerts that came while its page was on screen (SHEP-338): its phone app hears them with alert false,
+   *  so it lists them but never notifies, then or after; they go when the alert does */
+  private seen = new Map<string, Set<string>>();
+  /** the alert keys of the doc before */
+  private keys: Set<string> | null = null;
 
   constructor(private clock: () => number = Date.now, ping = PING_MS) {
     if (ping > 0) (setInterval(() => this.ping(), ping) as any).unref?.();
@@ -188,12 +198,39 @@ export class GlanceFeed {
   /** a new doc: the streams hear it once if its `v` changed; at once if its `urgent` did, else at most once a minute
    *  (the latest then). True: sent now. */
   set(doc: Glance) {
+    this.mark(doc);
     this.doc = doc;
     if (doc.v === this.sent?.v) { this.hold(); return false; }
     const wait = this.sent && doc.urgent === this.sent.urgent ? this.sentAt + CALM_MS - this.clock() : 0;
     if (wait > 0) { this.later ??= setTimeout(() => { this.later = null; if (this.doc && this.doc.v !== this.sent?.v) this.send(this.doc); }, wait); return false; }
     this.send(doc);
     return true;
+  }
+
+  /** a new alert (a key the doc before didn't have) is seen on each phone-app device whose page is on screen now; the
+   *  first doc after a start marks nothing (what it lists was there before) */
+  private mark(doc: Glance) {
+    const now = new Set(doc.items.filter((i) => i.alert).map((i) => i.key));
+    const fresh = this.keys ? [...now].filter((k) => !this.keys!.has(k)) : [];
+    this.keys = now;
+    if (fresh.length) for (const d of this.native.keys()) {
+      if (!this.looking(d)) continue;
+      const s = this.seen.get(d) ?? new Set<string>();
+      for (const k of fresh) s.add(k);
+      this.seen.set(d, s);
+    }
+    for (const [d, s] of this.seen) {
+      for (const k of s) if (!now.has(k)) s.delete(k);
+      if (!s.size) this.seen.delete(d);
+    }
+  }
+
+  /** the doc as device D's phone app hears it: what came while its page was on screen notifies nothing there */
+  docFor(device: string | null | undefined, doc = this.doc): Glance | null {
+    const seen = device ? this.seen.get(device) : undefined;
+    if (!doc || !seen?.size || !doc.items.some((i) => i.alert && seen.has(i.key))) return doc;
+    const items = doc.items.map((i) => (i.alert && seen.has(i.key) ? { ...i, alert: false } : i));
+    return { ...doc, items, urgent: urgentOf(doc.counts, items) };
   }
 
   /** nothing waits to go: back where the streams already are */
@@ -204,7 +241,12 @@ export class GlanceFeed {
     this.sent = doc;
     this.sentAt = this.clock();
     const text = frame(doc);
-    for (const s of this.streams) s.send(text);
+    const own = new Map<string, string>();
+    for (const s of this.streams) {
+      if (!s.native || !s.device) { s.send(text); continue; }
+      if (!own.has(s.device)) { const d = this.docFor(s.device, doc)!; own.set(s.device, d === doc ? text : frame(d)); }
+      s.send(own.get(s.device)!);
+    }
   }
 
   ping() { for (const s of this.streams) s.send(": ping\n\n"); }
@@ -231,7 +273,8 @@ export class GlanceFeed {
         s = { device, native: native && !!device, send: (text) => { try { c.enqueue(enc.encode(text)); } catch { end(); } } };
         this.streams.add(s);
         if (s.native) { const n = this.native.get(device!) ?? { open: 0, closed: 0 }; n.open++; this.native.set(device!, n); }
-        c.enqueue(enc.encode(`retry: 5000\n\n${this.doc ? frame(this.doc) : ""}`));
+        const d = s.native ? this.docFor(device) : this.doc;
+        c.enqueue(enc.encode(`retry: 5000\n\n${d ? frame(d) : ""}`));
         signal?.addEventListener("abort", () => { end(); try { c.close(); } catch {} });
       },
       cancel: () => end(),
