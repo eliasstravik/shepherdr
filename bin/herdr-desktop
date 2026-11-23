@@ -15,20 +15,47 @@
 #   <name>.dused    touched by every agent command
 #   <name>.waits    it waits for the shared desktop (macOS)
 #   desktop.holder  who holds the shared desktop (macOS): its key; its time is its last command
-# --own: Shepherdr's own (the Screen): never refused, takes no turn.  --status: what is here, as JSON.
+# --own: Shepherdr's own (the Screen): never refused, takes no turn, installs nothing.
 # --own --up: makes sure the desktop can be shown and prints {"ok","port","display","own"} (or "why" it can't).
 # --own --state: the same, starting nothing.  --own --down: stops its own display.
-# agent-desktop: $HERDR_DESKTOP_BIN, else the PATH's. Driver: $HERDR_DESKTOP_DRIVER (own | shared), else by system.
+# Driver: $HERDR_DESKTOP_DRIVER (own | shared), else by system.
+#
+# agent-desktop itself (SHEP-346, as herdr-browser does agent-browser): $HERDR_DESKTOP_BIN (taken as it is), else any
+# 1.3.x from the pin on: Shepherdr's own copy in ~/.local/share/shepherdr/agent-desktop/<pin>/ (preferred once there),
+# else the PATH's. When there's none, an agent's first command installs it there: agent-desktop's own release archive
+# for this machine (github.com/vercel-labs/agent-desktop), checked against the pin's checksum (no npm, no sudo).
+# Install and update run --install too, and herdr-task machines sync runs it where it carries herdr-desktop. A failed
+# try isn't repeated for 10 minutes, except by --install.
+# --install  makes sure a working agent-desktop is here (installs it), and says what is still missing
+# --status   what's here, as JSON, installing nothing (shepherdr doctor): ok, the problem and the one fix; on a Mac
+#            also agent-desktop's permissions (Accessibility, Screen Recording) and Screen Sharing, which only the
+#            person can switch on there ("needs", in plain words)
+# --bin      the agent-desktop it runs, installing nothing
+
+PIN=1.3.1
+# The pinned release's archives (agent-desktop-v<pin>-<target>.tar.gz; its checksums.txt), by target: sha256.
+sha_for() {
+  case "$1" in
+    aarch64-apple-darwin) echo 9b7b7cfc74892eab46c2c85d6cb7dc4863bf8dab0a222cfcfb8ae4604c69c86c ;;
+    x86_64-apple-darwin) echo 469da10cfb68928c58caff88b92b30526e0ca895ac06bc86b7f533b1d9b309b3 ;;
+    aarch64-unknown-linux-gnu) echo 438990a703fbeb19775596c341c3701435e80adbfa1b2f64b82ff17567d5573b ;;
+    x86_64-unknown-linux-gnu) echo ca77b6b75034eeb12e537dd8c0a4f2a3424119253f38b7e6bd79ba0d2fef1264 ;;
+  esac
+}
 
 if [ -n "${SHEPHERDR_HOME:-}" ]; then shep_data="$SHEPHERDR_HOME/data"; shep_state="$SHEPHERDR_HOME/state"
 else shep_data="${XDG_DATA_HOME:-$HOME/.local/share}/shepherdr"; shep_state="${XDG_STATE_HOME:-$HOME/.local/state}/shepherdr"; fi
 if [ "$(cut -c1 "$shep_data/LAYOUT" 2>/dev/null)" = 2 ] && [ ! -e "$HOME/.herdr/.layout-rollback" ]; then root="$shep_state/browser"
 else root="$HOME/.herdr/browser"; fi
+# Shepherdr's own agent-desktop (always in its data folder, whatever the layout)
+addir="$shep_data/agent-desktop"
+mine="$addir/$PIN/agent-desktop"
+# the one command that fixes it, as the person can type it
+if [ "$(command -v herdr-desktop 2>/dev/null)" ]; then fix="herdr-desktop --install"; else fix="$0 --install"; fi
 
 json_str() { printf '%s' "$1" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()), end="")'; }
 driver=${HERDR_DESKTOP_DRIVER:-}
 if [ -z "$driver" ]; then if [ "$(uname -s)" = Darwin ]; then driver=shared; else driver=own; fi; fi
-bin=${HERDR_DESKTOP_BIN:-$(command -v agent-desktop 2>/dev/null)}
 have() { command -v "$1" >/dev/null 2>&1; }
 # What the live picture needs here, and what is missing ("" when nothing is).
 missing() {
@@ -41,21 +68,213 @@ port_open() { python3 -c 'import socket,sys
 try: socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=1).close()
 except Exception: sys.exit(1)' "$1" 2>/dev/null; }
 
+# Same major and minor as the pin, and not older: 1.3.1, 1.3.2… (1.4 may change what Herdr relies on).
+compatible() {
+  _v=${1%%[-+]*}
+  case "$_v" in [0-9]*.[0-9]*.[0-9]*) ;; *) return 1 ;; esac
+  case "$_v" in *[!0-9.]*|*.*.*.*) return 1 ;; esac
+  [ "${_v%.*}" = "${PIN%.*}" ] && [ "${_v##*.}" -ge "${PIN##*.}" ]
+}
+# Which agent-desktop. Sets bin, ver, from (env, shepherdr, path; "" when there's none).
+pick() {
+  ver=
+  if [ -n "${HERDR_DESKTOP_BIN:-}" ]; then bin=$HERDR_DESKTOP_BIN; from=env; return 0; fi
+  if [ -x "$mine" ]; then bin=$mine; from=shepherdr
+  else bin=$(command -v agent-desktop 2>/dev/null); from=path; fi
+  if [ -n "$bin" ]; then ver=$("$bin" --version 2>/dev/null | awk 'NR == 1 { print $NF }'); else from=; fi
+}
+usable() { [ -n "$bin" ] && { [ "$from" = env ] || compatible "$ver"; }; }
+
+# Puts agent-desktop $PIN's own release for this machine in $addir/$PIN. -> 0, or 1 with $why.
+install_mine() {
+  case "$(uname -s)" in
+    Darwin) _os=apple-darwin; _helper=agent-desktop-macos-helper ;;
+    Linux)
+      if (ldd --version 2>&1 || true) | grep -qi musl; then why="agent-desktop has no build for musl Linux (Alpine)"; return 1; fi
+      _os=unknown-linux-gnu; _helper=agent-desktop-linux-clipboard-owner ;;
+    *) why="agent-desktop has no build for $(uname -s)"; return 1 ;;
+  esac
+  case "$(uname -m)" in
+    x86_64|amd64) _arch=x86_64 ;;
+    arm64|aarch64) _arch=aarch64 ;;
+    *) why="agent-desktop has no build for $(uname -m)"; return 1 ;;
+  esac
+  _target=$_arch-$_os
+  _want=${HERDR_DESKTOP_SHA256:-$(sha_for "$_target")}
+  [ -n "$_want" ] || { why="agent-desktop has no build for $_target"; return 1; }
+  have curl || { why="curl isn't installed"; return 1; }
+  have tar || { why="tar isn't installed"; return 1; }
+  _url="${HERDR_DESKTOP_URL:-https://github.com/vercel-labs/agent-desktop/releases/download/v$PIN}/agent-desktop-v$PIN-$_target.tar.gz"
+  _tmp="$addir/.part.$$"
+  echo "herdr-desktop: downloading agent-desktop $PIN…" >&2
+  if ! _err=$(curl -fsSL --retry 2 --connect-timeout 15 --max-time 600 -o "$_tmp" "$_url" 2>&1); then
+    rm -f "${_tmp:?}"; why="couldn't download it (${_err:-no answer}; offline?)"; return 1
+  fi
+  _got=$( (sha256sum "$_tmp" 2>/dev/null || shasum -a 256 "$_tmp" 2>/dev/null) | awk '{ print $1 }')
+  if [ "$_got" != "$_want" ]; then
+    rm -f "${_tmp:?}"; why="the download isn't agent-desktop $PIN (its checksum differs)"; return 1
+  fi
+  # exactly the two files it should hold: agent-desktop and its helper
+  if [ "$(tar -tzf "$_tmp" 2>/dev/null | sort | tr '\n' ' ')" != "agent-desktop $_helper " ]; then
+    rm -f "${_tmp:?}"; why="the download isn't agent-desktop $PIN (it holds other files)"; return 1
+  fi
+  _stage="$addir/.stage.$$"
+  rm -rf "${_stage:?}"; mkdir -p "$_stage"
+  if ! tar -xzf "$_tmp" -C "$_stage" 2>/dev/null || [ ! -f "$_stage/agent-desktop" ]; then
+    rm -rf "${_stage:?}" "${_tmp:?}"; why="couldn't unpack it"; return 1
+  fi
+  rm -f "${_tmp:?}"
+  chmod 755 "$_stage/agent-desktop" "$_stage/$_helper"
+  rm -rf "${addir:?}/${PIN:?}"
+  mv "$_stage" "$addir/$PIN" || { rm -rf "${_stage:?}"; why="can't write to $addir"; return 1; }
+  # an older pin's copy: no longer used
+  for _d in "$addir"/*/; do
+    _dd=${_d%/}; [ -d "$_d" ] && [ "$_dd" != "$addir/$PIN" ] && rm -rf "${_dd:?}"
+  done
+  return 0
+}
+
+# Makes sure a usable agent-desktop is here; one at a time. -> 0, or 1 with $why (kept in .failed).
+ensure() {
+  why=
+  mkdir -p "$addir" 2>/dev/null || { why="can't write to $addir"; return 1; }
+  _n=0
+  until mkdir "$addir/.lock" 2>/dev/null; do
+    [ "$_n" = 0 ] && echo "herdr-desktop: another herdr-desktop is installing agent-desktop $PIN; waiting for it…" >&2
+    if [ -n "$(find "${addir:?}/.lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then rmdir "${addir:?}/.lock" 2>/dev/null; continue; fi
+    _n=$((_n + 1)); [ "$_n" -gt 600 ] && { why="another install is still running"; return 1; }
+    sleep 1
+  done
+  pick
+  _ok=0
+  if ! usable; then
+    echo "herdr-desktop: installing agent-desktop $PIN for Shepherdr into $addir (once)…" >&2
+    install_mine || _ok=1
+    if [ "$_ok" = 0 ]; then
+      pick
+      usable || { _ok=1; why="the agent-desktop it installed doesn't run here"; }
+    fi
+  fi
+  if [ "$_ok" = 0 ]; then rm -f "${addir:?}/.failed"; else printf '%s\n' "$why" > "${addir:?}/.failed"; fi
+  rmdir "${addir:?}/.lock" 2>/dev/null
+  return $_ok
+}
+
+# What's wrong with agent-desktop, and the one command that fixes it.
+problem() {
+  if [ -z "$bin" ]; then _what="agent-desktop isn't installed here"
+  else _what="Shepherdr runs agent-desktop $PIN (or a newer ${PIN%.*}.x); this machine has ${ver:-an unknown version} ($bin)"; fi
+  _why=
+  if [ -n "$why" ]; then _why=", and Shepherdr couldn't install it: $why"; fi
+  echo "herdr-desktop: $_what$_why. Fix it: $fix"
+}
+
+# A Mac: what only the person can switch on there. agent-desktop's own report (`agent-desktop permissions`:
+# data.accessibility, .screen_recording, .automation, each {"state": "granted" | "denied" | "not_required" | "unknown"}),
+# and Screen Sharing (port 5900) for the picture Shepherdr shows. Sets perms (JSON, or null), blocking (the first thing
+# without which the agent can't work, or "") and needs (each thing to switch on, one plain line each).
+mac_needs() {
+  perms=null; blocking=; needs=; _sharing=
+  [ "$driver" = shared ] || return 0
+  # Screen Sharing: off (nothing answers), nopw (it answers but offers no VNC password sign-in, RFB security type 2:
+  # "VNC viewers may control screen with password" is off), or on
+  _sharing=$(python3 -c 'import socket,sys
+try:
+    s = socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=2)
+except Exception:
+    print("off"); sys.exit(0)
+try:
+    s.settimeout(3)
+    ver = s.recv(12)
+    if not ver.startswith(b"RFB "):
+        print("off"); sys.exit(0)
+    if ver < b"RFB 003.007":
+        print("on"); sys.exit(0)
+    s.sendall(b"RFB 003.008\n")
+    n = s.recv(1)[0]
+    types = s.recv(n) if n else b""
+    print("on" if 2 in types else "nopw")
+except Exception:
+    print("on")
+finally:
+    s.close()' "${HERDR_DESKTOP_PORT:-5900}" 2>/dev/null)
+  _out=$( ("$bin" permissions 2>/dev/null || true) | python3 -c 'import json,sys
+sharing = sys.argv[1]
+try:
+    d = json.load(sys.stdin)["data"]
+    p = {k: (d.get(k) or {}).get("state") for k in ("accessibility", "screen_recording", "automation")}
+except Exception:
+    p = None
+print(json.dumps(p))
+needs = []
+if p is None:
+    needs.append("agent-desktop could not say which Mac permissions it has: at the Mac, run herdr-desktop permissions")
+else:
+    for k, name in (("accessibility", "Accessibility"), ("screen_recording", "Screen Recording")):
+        if p.get(k) not in ("granted", "not_required"):
+            needs.append(f"{name} is off for agent-desktop: at the Mac, open System Settings › Privacy & Security › {name} and "
+                         "switch on agent-desktop and the app your agents run in (herdr-desktop permissions --guide opens it there)")
+blocking = needs[0] if needs else ""
+if sharing == "off":
+    needs.append("Screen Sharing is off, so Shepherdr can not show this Mac screen: at the Mac, switch it on in "
+                 "System Settings › General › Sharing › Screen Sharing")
+elif sharing == "nopw":
+    needs.append("Screen Sharing has no VNC password, so Shepherdr can not show this Mac screen: at the Mac, open System "
+                 "Settings › General › Sharing, the i button beside Screen Sharing, switch on \"VNC viewers may control "
+                 "screen with password\" and set a password")
+print(blocking)
+print("\n".join(needs))' "$_sharing" 2>/dev/null)
+  perms=$(printf '%s\n' "$_out" | sed -n 1p); [ -n "$perms" ] || perms=null
+  blocking=$(printf '%s\n' "$_out" | sed -n 2p)
+  needs=$(printf '%s\n' "$_out" | sed -n '3,$p')
+  return 0
+}
+
 case "${1-}" in
   --help|-h|help)
     cat <<EOF
-herdr-desktop: your desktop, as the person sees it live in Shepherdr (agent-desktop on it).
+herdr-desktop: your desktop, as the person sees it live in Shepherdr (agent-desktop $PIN on it).
   herdr-desktop <agent-desktop command>   e.g. snapshot, click @e3, type @e5 "text", screenshot /abs/shot.png, launch <app>
   herdr-desktop hands "<what>"            a step only a person can do: ask for their hands
   herdr-desktop release                   a Mac's shared desktop: you are done with it, the next agent may use it
-  herdr-desktop --status                  what is here, as JSON
+  herdr-desktop --install                 install agent-desktop $PIN, saying what it found
+  herdr-desktop --status                  what is here and what is missing, as JSON
 EOF
-    if [ -n "$bin" ]; then echo; "$bin" --help 2>&1; else echo; echo "agent-desktop isn't installed here: npm install -g agent-desktop"; fi
+    pick
+    echo
+    if usable; then "$bin" --help 2>&1
+    else echo "agent-desktop $PIN isn't here yet (${ver:+this machine has $ver; }the first desktop command installs it, or run: $fix)."; fi
     exit 0 ;;
+  --install)
+    if ensure; then
+      echo "herdr-desktop: agent-desktop ${ver:-$PIN} is ready ($bin)."
+      m=$(missing); [ -z "$m" ] || echo "herdr-desktop: still missing here: $m (install it with the system's package manager)." >&2
+      mac_needs; [ -z "$needs" ] || printf '%s\n' "$needs" | sed 's/^/herdr-desktop: /' >&2
+      exit 0
+    fi
+    pick; problem >&2
+    exit 1 ;;
   --status)
+    pick; why=; perms=null; blocking=; needs=; _sharing=
+    [ -f "$addir/.failed" ] && why=$(cat "$addir/.failed")
     m=$(missing)
-    printf '{"ok":%s,"driver":"%s","bin":%s,"missing":%s}\n' "$([ -n "$bin" ] && [ -z "$m" ] && echo true || echo false)" \
-      "$driver" "$(json_str "$bin")" "$(json_str "$m")"
+    msg=; fx=
+    if ! usable; then msg=$(problem); fx=$fix
+    else
+      mac_needs
+      if [ -n "$m" ]; then msg="herdr-desktop: agent-desktop is here, but this machine still needs $m. Install it with the system's package manager"
+      elif [ -n "$blocking" ]; then msg="herdr-desktop: $blocking"; fx="herdr-desktop permissions --guide"; fi
+    fi
+    ok=false; [ -z "$msg" ] && ok=true
+    printf '{"ok":%s,"pin":"%s","accepts":"%s","driver":"%s","bin":%s,"version":%s,"from":%s,"failed":%s,"missing":%s,"permissions":%s,"screen_sharing":%s,"needs":%s,"problem":%s,"fix":%s}\n' \
+      "$ok" "$PIN" "$PIN to ${PIN%.*}.x" "$driver" "$(json_str "$bin")" "$(json_str "$ver")" "$(json_str "$from")" "$(json_str "$why")" \
+      "$(json_str "$m")" "$perms" "$(json_str "$_sharing")" "$(printf '%s' "$needs" | python3 -c 'import json,sys; print(json.dumps([l for l in sys.stdin.read().splitlines() if l]), end="")')" \
+      "$(json_str "$msg")" "$(json_str "$fx")"
+    exit 0 ;;
+  --bin)
+    pick
+    usable || exit 1
+    echo "$bin"
     exit 0 ;;
 esac
 
@@ -232,13 +451,21 @@ if [ "${1-}" = release ]; then
   exit 0
 fi
 
-if [ -z "$bin" ]; then
-  echo "herdr-desktop: agent-desktop isn't installed on this machine. Install it: npm install -g agent-desktop" >&2
-  exit 127
+# A usable agent-desktop. None yet: an agent's first command installs it (Shepherdr's own views only say so, they never
+# wait on a download), unless a try failed in the last 10 minutes.
+pick
+if ! usable; then
+  why=
+  [ -n "$(find "$addir/.failed" -mmin -10 2>/dev/null)" ] && why=$(cat "$addir/.failed")
+  if [ -z "$own" ] && [ -z "$why" ]; then
+    ensure
+    pick
+  fi
+  if ! usable; then problem >&2; exit 127; fi
 fi
-# What touches no desktop runs as agent-desktop itself.
+# What touches no desktop runs as agent-desktop itself (permissions too: a Mac's --guide is the person's, at the Mac).
 case "$verb" in
-  skills|version|help|mcp|sandbox|"") exec "$bin" "$@" ;;
+  skills|version|help|mcp|sandbox|permissions|"") exec "$bin" "$@" ;;
 esac
 
 if [ -z "$own" ]; then

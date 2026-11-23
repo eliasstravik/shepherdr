@@ -142,10 +142,14 @@ def manifest():
         # marks nothing.
         if secrets_main_here():
             touch.append({"path": ".herdr/secret-remote", "unless": ".herdr/vault.json", "unless_main": True})
+    ensure = []
     for helper in ("herdr-browser", "herdr-desktop"):
         p = _real(f".local/bin/{helper}")
         if p:
             add(f".local/bin/{helper}", _read(p), 0o755, [p])
+    # SHEP-346: agent-desktop where herdr-desktop goes (herdr-desktop --install there: its pinned release, checked)
+    if _real(".local/bin/herdr-desktop"):
+        ensure.append(".local/bin/herdr-desktop")
     # The chat's question-card hook (SHEP-139): a task worker's own hook (herdr-task _allow) runs it,
     # so a machine that only runs tasks asks on the card too. From Shepherdr's own install (<SHARE>/hooks),
     # else the copy a sync left here (this machine passes it on).
@@ -163,7 +167,7 @@ def manifest():
         h.update(f"{f['path']} {f['sha']} {f['mode']}\n".encode())
     for link in links:
         h.update(f"{link['path']} -> {link['target']}\n".encode())
-    return {"version": h.hexdigest()[:12], "files": files, "links": links, "touch": touch}
+    return {"version": h.hexdigest()[:12], "files": files, "links": links, "touch": touch, "ensure": ensure}
 
 
 # Runs on the other machine (python3, 3.8+), its input on stdin: checks or installs, then prints
@@ -269,6 +273,29 @@ for l in x["links"]:
         except Exception as e:
             st = "failed: " + str(e)
     out["links"][l["path"]] = st
+# What a helper there installs itself (SHEP-346: herdr-desktop's agent-desktop): "ready", "missing" (a check),
+# "installed" or "failed: <why>" (an install round). Never on the machine with the source: its own install does it.
+out["ensure"] = {}
+for e in ([] if source else x.get("ensure") or []):
+    p = P(e)
+    if not os.path.isfile(p):
+        continue
+    def helper(arg, t):
+        try:
+            r = subprocess.run(["sh", p, arg], stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, timeout=t)
+            return r.returncode, (r.stdout + b"\n" + r.stderr).decode(errors="replace")
+        except Exception as ex:
+            return 1, str(ex)
+    rc, said = helper("--bin", 30)
+    if rc == 0:
+        st = "ready"
+    elif x["op"] == "install":
+        rc, said = helper("--install", 600)
+        lines = [l for l in said.splitlines() if l.strip()]
+        st = "installed" if rc == 0 else "failed: " + (lines[-1] if lines else "it didn't say why").replace(os.path.basename(p) + ": ", "", 1)
+    else:
+        st = "missing"
+    out["ensure"][e] = st
 def main_here():
     # the record naming the machine that keeps the secrets ("shepherdr.secrets"), and this one's id
     # in Shepherdr's own session there (3.2), else the default one, where herdr-secret kept it before
@@ -348,15 +375,16 @@ def sync_machine(machine, m, op="install", force=False):
     """Checks or installs the tools on one machine: {machine, state, details, ...}; state is
     current, drift (some file isn't: details say which and why), failed or unreachable."""
     me = {"from": core_name(), "version": m["version"], "stamp": STAMP, "force": force, "links": m["links"], "touch": m["touch"],
-          "session": SESSION}
+          "session": SESSION, "ensure": m.get("ensure") or []}
     bare = lambda f: {k: v for k, v in f.items() if k != "data"}
     try:
         res = _remote_python(machine, INSTALL, {**me, "op": "check", "files": [bare(f) for f in m["files"]]}, timeout=60)
         state, details = _verdict(res)
-        if op == "install" and state not in ("current", "source"):
+        missing = [p for p, s in (res.get("ensure") or {}).items() if s == "missing"]
+        if op == "install" and (state not in ("current", "source") or (missing and state == "current")):
             need = {p for p, s in res["files"].items() if s in ("missing", "behind")}
             send = [{**bare(f), "data": base64.b64encode(f["data"]).decode()} if f["path"] in need else bare(f) for f in m["files"]]
-            res = _remote_python(machine, INSTALL, {**me, "op": "install", "files": send}, timeout=180)
+            res = _remote_python(machine, INSTALL, {**me, "op": "install", "files": send}, timeout=900 if missing else 180)
             state, details = _verdict(res)
             for f in m["files"]:
                 mark = {".local/bin/herdr-task": STORE, f"{ARTIFACT_HOME}/bin/herdr-artifact": WHERE.path("artifacts")}.get(f["path"])
@@ -364,9 +392,16 @@ def sync_machine(machine, m, op="install", force=False):
                     _mark(os.path.join(mark, ".remote", machine), hashlib.sha1(f["data"]).hexdigest())
     except Fail as e:
         return {"machine": machine, "state": "unreachable", "details": [str(e)], "version": m["version"]}
+    # what a helper installs itself: said, never the machine's state (an offline machine stays current, and says why)
+    ens = res.get("ensure") or {}
+    details = details + [f"{_ENSURED.get(p, os.path.basename(p))}: {s}" for p, s in sorted(ens.items()) if s not in ("ready", "installed")]
     return {"machine": machine, "state": state, "details": details, "version": m["version"], "installed": (res.get("stamp") or {}).get("version"),
             "os": res.get("os"), "python": res.get("python"),
-            "changed": sorted(p for p, s in {**res["files"], **res["links"]}.items() if s == "installed")}
+            "changed": sorted([p for p, s in {**res["files"], **res["links"]}.items() if s == "installed"] +
+                              [_ENSURED.get(p, p) for p, s in ens.items() if s == "installed"])}
+
+
+_ENSURED = {".local/bin/herdr-desktop": "agent-desktop"}
 
 
 def _mark(path, digest):

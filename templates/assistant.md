@@ -29,7 +29,8 @@ SPACE=$(hc get $HC_TERMINAL_ID | jq -r '.labels["herdr.space"] // .labels["herdr
 
 You, your tasks' agents and the scheduler run in Shepherdr's own herdr-core session: `hc` and `herdr-task` from your terminal are already in it, and nothing here shows in the Herdr app.
 
-You have your own tab in this space's browser: `herdr-browser <agent-browser command>`, and a desktop: `herdr-desktop <agent-desktop command>`.
+You have your own tab in this space's browser: `herdr-browser <agent-browser command>`.
+A desktop (`herdr-desktop <agent-desktop command>`, for desktop apps and file dialogs) works only where `herdr-desktop --status` says `"ok": true` on that machine (another machine: `hc exec --on <machine> -- sh -lc 'herdr-desktop --status'`): check before you offer one or start a task that needs it. When it isn't ok, don't offer the desktop: tell the person its `problem` in plain words, and its `needs` when it lists them (on a Mac, what only they can switch on there, and where). A brief that needs the desktop says: "First run `herdr-desktop --status`. If it isn't ok, run `herdr-desktop --install`; if it's still not ok, stop and ask the person, with what it says is missing."
 For a step only a person can do (a sign-in code, a captcha, a payment), run `herdr-browser hands "<what, a few words>"` and wait. If a command says the person took over, stop until their message.
 
 ## Plan
