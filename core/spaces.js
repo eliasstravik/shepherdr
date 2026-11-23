@@ -84,6 +84,24 @@ export function sharedNames(rows) {
   return new Set(rows.filter((r) => (count.get(key(r)) ?? 0) > 1).map((r) => r.id));
 }
 export const isHomeFolder = (path, home = null) => { const p = String(path ?? "").replace(/\/+$/, ""); return (!!home && p === home) || (HOME_AT.test(p) && !p.replace(HOME_AT, "")); };
+// A folder as one path, to compare two (SHEP-296): ~ is home, no trailing slash ("/" stays "/").
+/** @param {unknown} path @param {string | null} [home] */
+export const folderKey = (path, home = null) => {
+  let p = String(path ?? "").trim();
+  if (home && (p === "~" || p.startsWith("~/"))) p = home + p.slice(1);
+  return p.length > 1 ? p.replace(/\/+$/, "") || "/" : p;
+};
+/** @param {unknown} a @param {unknown} b @param {string | null} [home] */
+export const sameFolder = (a, b, home = null) => !!folderKey(a, home) && folderKey(a, home) === folderKey(b, home);
+// Everything: the root space, the serving machine's (machine null) one in its home folder. A store that holds two
+// there (SHEP-296: Everything removed, re-made, then a Home made by hand) always gets the same one, whatever the
+// list's order: the one with id "home" (as the service makes it), else the smallest id. spaces: [{ id, folder, machine }].
+export function everythingOf(spaces, home) {
+  const there = (Array.isArray(spaces) ? spaces : []).filter((s) => s && !s.machine && sameFolder(s.folder, home, home));
+  return there.find((s) => s.id === "home") ?? [...there].sort((a, b) => (String(a.id) < String(b.id) ? -1 : 1))[0] ?? null;
+}
+// What the service answers when Everything would be removed or archived (voice says its own).
+export const EVERYTHING_STAYS = "Everything is the root chat, so it can't be removed or archived.";
 export function spaceName(s, { at = s?.folder, repo = null, home = null, named = true } = {}) {
   if ((named && s?.name && s.name !== "~") || !at) return s?.name && s.name !== "~" ? s.name : "Home";
   return isHomeFolder(at, home) ? "Home" : repo ?? String(at).replace(/\/+$/, "").split("/").pop();

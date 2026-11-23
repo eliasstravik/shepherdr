@@ -122,6 +122,14 @@ export async function newSpace(hub: Hub, opts: { machine: string | null; path: s
   const home = (await homeOf(hub, machine)) ?? "";
   const abs = NS.pathOf(opts.path, home);
   if (!abs) throw new Error("Pick a folder.");
+  // one space per home folder (SHEP-296): this computer's is Everything, opened instead of a second; another
+  // machine's has its own already, so a second is refused in plain words
+  const had = (Array.isArray(opts.store.value("spaces")) ? opts.store.value("spaces") : []) as any[];
+  if (home && SP.sameFolder(abs, home, home)) {
+    const there = machine ? had.find((x) => x?.machine === machine && SP.sameFolder(x.folder, home, home)) : SP.everythingOf(had, home);
+    if (there && !machine) return { place: ownId(there), existed: true as const };
+    if (there) throw new Error(`The home folder on ${machine} has its space already. Pick another folder.`);
+  }
   const git = (args: string[]) => exec(hub, ["git", "-C", abs, ...args], machine);
   if ((await exec(hub, ["test", "-d", abs], machine)).code !== 0) {
     const r = await exec(hub, ["mkdir", "-p", "--", abs], machine);

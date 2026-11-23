@@ -591,7 +591,7 @@ export class Compat {
     for (const v of Array.isArray(voiceAnswers) ? voiceAnswers : []) {
       if (!v || typeof v.chat !== "string" || typeof v.text !== "string") continue;
       const row = this.rows.find((r) => `${taskId(r)}/worker` === v.chat);
-      const home = this.spaceList.find((s) => !s.machine && s.folder === HOME)?.id;
+      const home = SPc.everythingOf(this.spaceList, HOME)?.id;
       const rowSpace = row?.space || this.spaceList.find((s) => (s.machine ?? null) === (row?.machine ?? null) && s.folder === row?.folder)?.id;
       if (key === v.chat || (space && row && (rowSpace === space || home === space))) {
         const answer: Message = { id: `voice-answer:${v.id}`, who: "you", text: v.text, at: v.at, byVoice: true };

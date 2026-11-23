@@ -195,12 +195,12 @@ export class Model {
     // Everything: the root space, one agent in the home folder on the serving machine. Once this computer's spaces
     // are carried over and none of them is the home folder, it is made (its agent starts with its first message).
     const own: any[] = Array.isArray(this.doc().spaces) ? this.doc().spaces : [];
-    if (Array.isArray(done) && done.includes("") && !own.some((x) => !x.machine && x.folder === HOME)) {
+    if (Array.isArray(done) && done.includes("") && !S.everythingOf(own, HOME)) {
       this.carrying = true;
       try {
         await this.own.update((v) => {
           const list: any[] = Array.isArray(v.spaces) ? (v.spaces as any[]) : [];
-          return list.some((x) => !x.machine && x.folder === HOME) ? v : { ...v, spaces: [{ id: "home", name: "Home", folder: HOME, machine: null, at: Date.now() }, ...list] };
+          return S.everythingOf(list, HOME) ? v : { ...v, spaces: [{ id: "home", name: "Home", folder: HOME, machine: null, at: Date.now() }, ...list] };
         });
       } catch {} finally { this.carrying = false; }
     }

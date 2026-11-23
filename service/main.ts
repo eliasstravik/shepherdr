@@ -692,6 +692,10 @@ async function doAction(body: any): Promise<Response> {
       return json({ ok: true });
     } catch (err) { return json({ ok: false, error: (err as Error).message }); }
   }
+  // Everything is never removed or archived (SHEP-296): refused before any of its tasks is stopped
+  if ((body?.type === "space-remove" || (body?.type === "space-archive" && body.on !== false)) && typeof body.place === "string" && body.place === SPm.everythingOf(model.spaces, HOME)?.id) {
+    return json({ ok: false, error: SPm.EVERYTHING_STAYS });
+  }
   // archive a space (out of the list, its schedules stopped, nothing deleted) or bring it back
   if ((body?.type === "space-archive" || (body?.type === "space-remove" && body.stop)) && typeof body.place === "string") {
     // the working tasks there are stopped first (the confirmation named them)
@@ -980,6 +984,8 @@ const server = Bun.serve<{ who: string }>({
         // the page opens it once the sidebar has it: in the snapshot before the answer
         await model.waitSpace(made.place);
         // its agent didn't start: made, not a plain ok; the page opens it and says why (warning)
+        // the home folder here is Everything's (SHEP-296): it opens, said, never a second space there
+        if ("existed" in made) return json({ place: made.place, warning: "Your home folder is Everything's, so Everything is open now." });
         return json(made.error ? { place: made.place, ok: false, warning: made.error } : { place: made.place });
       } catch (err) { return json({ error: (err as Error).message }, 400); }
     }

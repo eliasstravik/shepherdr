@@ -90,3 +90,20 @@ test("the snapshot has the new space before the page is answered", async () => {
   expect(await m.waitSpace("vmb/sp9")).toBe(true);
   expect(put.spaces.spaces.map((s: any) => s.id)).toEqual(["vmb/sp1", "vmb/sp9"]);
 });
+
+test("New space in a home folder never makes a second space there (SHEP-296)", async () => {
+  writeFileSync(CALLS, "");
+  // this computer's home folder (as ~, ~/ or the path with a slash): Everything opens, nothing is added or started
+  const s = store();
+  s.d.spaces = [{ id: "sp1", name: "demo", folder: "/srv/demo", machine: null }, { id: "home", name: "Home", folder: process.env.HOME!, machine: null }];
+  for (const path of ["~", "~/", `${process.env.HOME}/`]) expect(await SP.newSpace(hub, { machine: null, path, store: s })).toEqual({ place: "home", existed: true });
+  expect(s.d.spaces.map((x: any) => x.id)).toEqual(["sp1", "home"]);
+  expect(existsSync(CALLS) ? readFileSync(CALLS, "utf8") : "").toBe("");
+  // another machine's home folder that has its space: refused in plain words
+  s.d.spaces.push({ id: "spv", name: "Home", folder: `${VMB}/`, machine: "vmb" });
+  await expect(SP.newSpace(hub, { machine: "vmb", path: "~", store: s })).rejects.toThrow("The home folder on vmb has its space already. Pick another folder.");
+  expect(s.d.spaces.length).toBe(3);
+  // a folder under home is still a new space
+  const { place } = await SP.newSpace(hub, { machine: "vmb", path: "~/crescendo/", store: s });
+  expect(s.d.spaces.map((x: any) => SP.ownId(x))).toEqual(["sp1", "home", "vmb/spv", place]);
+});
