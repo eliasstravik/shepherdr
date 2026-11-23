@@ -1,7 +1,7 @@
 /* Shepherdr's design system (3.2): tokens, sizes and classes. Desktop by default, phone under .app.phone. */
-:root{color-scheme:light;--canvas:#fff;--well:#fafafa;--raised:#f5f5f5;--overlay:#fff;--control:rgb(0 0 0/.05);--control2:rgb(0 0 0/.1);--fg:#0a0a0a;--sub:#404040;--muted:#737373;--line:rgb(0 0 0/.08);--line2:rgb(0 0 0/.12);--mine:#e5e5e5;--rx:#fff;--scrim:rgb(0 0 0/.3);--green:#15803d;--blue:#0369a1;--amber:#b45309;--red:#dc2626;--term:#0a0a0a;--shadow:0 8px 28px rgb(0 0 0/.14)}
-@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--canvas:#121212;--well:#0a0a0a;--raised:#1e1e1e;--overlay:#1f1f1f;--control:rgb(255 255 255/.1);--control2:rgb(255 255 255/.16);--fg:#fafafa;--sub:#d4d4d4;--muted:#a3a3a3;--line:rgb(255 255 255/.08);--line2:rgb(255 255 255/.12);--mine:rgb(255 255 255/.14);--rx:#262626;--scrim:rgb(0 0 0/.6);--green:#4ade80;--blue:#7dd3fc;--amber:#fbbf24;--red:#f87171;--shadow:0 0 0 0 transparent}}
-:root[data-theme="dark"]{color-scheme:dark;--canvas:#121212;--well:#0a0a0a;--raised:#1e1e1e;--overlay:#1f1f1f;--control:rgb(255 255 255/.1);--control2:rgb(255 255 255/.16);--fg:#fafafa;--sub:#d4d4d4;--muted:#a3a3a3;--line:rgb(255 255 255/.08);--line2:rgb(255 255 255/.12);--mine:rgb(255 255 255/.14);--rx:#262626;--scrim:rgb(0 0 0/.6);--green:#4ade80;--blue:#7dd3fc;--amber:#fbbf24;--red:#f87171;--shadow:0 0 0 0 transparent}
+:root{color-scheme:light;--canvas:#fff;--well:#fafafa;--raised:#f5f5f5;--overlay:#fff;--control:rgb(0 0 0/.05);--control2:rgb(0 0 0/.1);--fg:#0a0a0a;--sub:#404040;--muted:#737373;--line:rgb(0 0 0/.08);--line2:rgb(0 0 0/.12);--mine:#e5e5e5;--rx:#fff;--scrim:rgb(0 0 0/.3);--green:#15803d;--blue:#0369a1;--link:#1d4ed8;--amber:#b45309;--red:#dc2626;--term:#0a0a0a;--shadow:0 8px 28px rgb(0 0 0/.14)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--canvas:#121212;--well:#0a0a0a;--raised:#1e1e1e;--overlay:#1f1f1f;--control:rgb(255 255 255/.1);--control2:rgb(255 255 255/.16);--fg:#fafafa;--sub:#d4d4d4;--muted:#a3a3a3;--line:rgb(255 255 255/.08);--line2:rgb(255 255 255/.12);--mine:rgb(255 255 255/.14);--rx:#262626;--scrim:rgb(0 0 0/.6);--green:#4ade80;--blue:#7dd3fc;--link:#8ab4f8;--amber:#fbbf24;--red:#f87171;--shadow:0 0 0 0 transparent}}
+:root[data-theme="dark"]{color-scheme:dark;--canvas:#121212;--well:#0a0a0a;--raised:#1e1e1e;--overlay:#1f1f1f;--control:rgb(255 255 255/.1);--control2:rgb(255 255 255/.16);--fg:#fafafa;--sub:#d4d4d4;--muted:#a3a3a3;--line:rgb(255 255 255/.08);--line2:rgb(255 255 255/.12);--mine:rgb(255 255 255/.14);--rx:#262626;--scrim:rgb(0 0 0/.6);--green:#4ade80;--blue:#7dd3fc;--link:#8ab4f8;--amber:#fbbf24;--red:#f87171;--shadow:0 0 0 0 transparent}
 *{box-sizing:border-box}[hidden]{display:none!important}html{background:var(--canvas);-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
 body{margin:0;background:var(--canvas);color:var(--fg);font:16px/24px InterVariable,ui-sans-serif,system-ui,sans-serif;font-feature-settings:"cv02","cv03","cv04","cv11";-webkit-font-smoothing:antialiased}
 button,input{font:inherit;color:inherit;letter-spacing:inherit}
@@ -135,7 +135,13 @@ button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"])
 button.b{cursor:pointer}
 .time{justify-self:center;margin:12px 0 4px;color:var(--muted);font-size:12px;line-height:16px}
 .ref{display:inline-flex;align-items:center;gap:6px;margin-top:12px;color:var(--muted);font-size:14px;line-height:20px}
-.lk{text-decoration:underline;text-decoration-color:var(--line2);text-underline-offset:3px;cursor:pointer}
+/* a link in words (SHEP-439): one link blue, --link, on every bubble in both themes (at least 6:1 on its background,
+   test/link-color.test.ts checks), its own hue apart from --blue's sky and the amber and red of a status. Always
+   underlined, the line fainter until a hover; no visited colour; a press dims it, a focus ring in its own blue */
+.lk,.md a{color:var(--link);text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--link) 45%,transparent);text-decoration-thickness:1px;text-underline-offset:3px;border-radius:2px;cursor:pointer}
+.lk:hover,.md a:hover{text-decoration-color:currentColor}
+.lk:active,.md a:active{opacity:.6}
+.lk:focus-visible,.md a:focus-visible{outline-color:var(--link)}
 /* a message: its bubble slides right to reply (the Reply panel grows behind it), the quick bar sits on its open side */
 /* its one column never grows past the wrapper's cap (minmax(0,1fr), not auto), and the bubble and its chips stay inside
    it: a quote's one line (white-space:nowrap) would otherwise widen both to its full length, past the chat column */
@@ -242,7 +248,7 @@ button.b{cursor:pointer}
 .grp{display:flex;align-items:center;gap:4px;width:100%;height:var(--row);padding:0 8px;border-radius:8px;color:var(--muted);font-size:var(--sec);line-height:var(--secl)}
 .grp .i{transition:transform .15s}.grp[aria-expanded="false"] .i{transform:rotate(-90deg)}
 .status{display:flex;gap:6px;padding:0 8px 8px;font-size:14px;line-height:20px;white-space:nowrap;overflow:hidden}
-.status span{color:var(--muted)}.status .lk{color:var(--muted)}
+.status span{color:var(--muted)}.status .lk{color:var(--link)}
 .pane .msgs{padding-inline:8px}
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
 .tile{display:grid;gap:6px;padding:8px;border-radius:12px;min-width:0}.tile:hover{background:var(--control)}
@@ -527,7 +533,7 @@ textarea.cin{overflow-y:auto}
 .rhead>.i{flex:none;color:var(--muted)}
 .rhead .n{flex:1;min-width:0}.rhead .l1{font-weight:600}
 .rhead .btn{flex:none}
-.asked{display:block;margin:-4px 8px 8px;color:var(--muted);font-size:var(--sec);line-height:var(--secl);text-align:left}
+.asked{display:block;margin:-4px 8px 8px;font-size:var(--sec);line-height:var(--secl);text-align:left}
 /* the Tasks filter (SHEP-331): a multi-select menu that scrolls inside the screen, its ticks, the dot on its button,
    the chips of what is on */
 /* a menu's group (MenuGroup): its quiet name 8 px under the hairline before it, 4 px over its rows; the filter menus'
