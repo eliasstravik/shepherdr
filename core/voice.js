@@ -623,11 +623,11 @@ export const liveChunk = (b64, commit = false) => JSON.stringify({ message_type:
 /**
  * The words of a live session as they come: hear() each message from the socket, done() when Done's commit was sent.
  * hear answers "words" when Done's last words came (text() is all of it), "failed" when the session can't give them
- * (then upload the recording), else null. Each committed piece is kept in order; the partial ones only show progress.
+ * (then upload the recording), else null. Each committed piece is kept in order; the partial ones only show progress (shown(), SHEP-314).
  */
 export function liveWords() {
   const said = [];
-  let asked = false, over = null;
+  let asked = false, over = null, partial = "";
   return {
     done() { asked = true; },
     hear(raw) {
@@ -637,7 +637,12 @@ export function liveWords() {
       const t = String(m?.message_type ?? "");
       if (t === "committed_transcript") {
         if (typeof m.text === "string" && m.text.trim()) said.push(m.text.trim());
+        partial = "";
         if (asked) return (over = "words");
+        return null;
+      }
+      if (t === "partial_transcript") {
+        partial = typeof m.text === "string" ? m.text.replace(/\s+/g, " ").trim() : "";
         return null;
       }
       if (t === "session_started" || t.startsWith("partial_transcript") || t.startsWith("committed_transcript")) return null;
@@ -646,6 +651,8 @@ export function liveWords() {
       return null;
     },
     text: () => said.join(" ").replace(/\s+/g, " ").trim(),
+    /** what to show while you speak: the words kept so far, and the ones still being heard (they may change) */
+    shown: () => ({ said: said.join(" ").replace(/\s+/g, " ").trim(), partial }),
   };
 }
 

@@ -108,7 +108,16 @@ let tapUrl: string | null = null
 
 /** The live words' socket for one dictation: open() with a token, send() the microphone's 16 kHz samples (kept until it
  *  opens), finish() asks for the last words: their text, or null when they can't come (then upload the recording). */
-export function liveSession(token: Promise<string | null>, make: (url: string) => WebSocket = (u) => new WebSocket(u)) {
+export interface Heard {
+  /** the words kept so far */
+  said: string
+  /** the words still being heard (they may change) */
+  partial: string
+}
+
+export function liveSession(token: Promise<string | null>, make: (url: string) => WebSocket = (u) => new WebSocket(u),
+  /** the words so far, each time they change, while you speak (SHEP-314) */
+  onWords: (w: Heard) => void = () => undefined) {
   const words = liveWords()
   let ws: WebSocket | null = null
   let broken = false
@@ -125,6 +134,7 @@ export function liveSession(token: Promise<string | null>, make: (url: string) =
     ws.onopen = () => { for (const m of queue) ws?.send(m); queue = [] }
     ws.onmessage = (e) => {
       const r = words.hear(String(e.data))
+      if (r === null && !broken) onWords(words.shown())
       if (r === 'failed') fail()
       else if (r === 'words') { landed?.(words.text()); landed = null; try { ws?.close() } catch { /* gone */ } }
     }
@@ -195,7 +205,9 @@ export type Phase = 'asking' | 'on' | 'writing'
 export function dictate(end: (text: string | null) => void, fail: (why: string) => void = () => undefined,
   timing: (how: 'live' | 'upload', ms: number) => void = () => undefined,
   /** what the button shows: waiting for the microphone (its permission), recording, writing it down */
-  phase: (p: Phase) => void = () => undefined): Dictation {
+  phase: (p: Phase) => void = () => undefined,
+  /** the live words as they come (only while the live words work; the upload has none until Done) */
+  words: (w: Heard) => void = () => undefined): Dictation {
   current?.cancel()
   let state = 'on' as 'on' | 'finishing' | 'over'
   let mic: MediaStream | null = null
@@ -215,7 +227,7 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
   }
   let live: ReturnType<typeof liveSession> | null = null
   try {
-    live = typeof WebSocket !== 'undefined' ? liveSession(liveTokenFor()) : null
+    live = typeof WebSocket !== 'undefined' ? liveSession(liveTokenFor(), undefined, (w) => { if (state !== 'over') words(w) }) : null
   } catch {
     live = null
   }

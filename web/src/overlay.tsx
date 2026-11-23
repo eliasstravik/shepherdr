@@ -185,13 +185,18 @@ function Popover({ layer }: { layer: Layer }) {
   )
 }
 
+/** Escape's first takers, before the top layer closes: a dictation recording in a box (SHEP-314: Escape cancels it,
+ *  not the Feedback dialog it's in). Each returns true when it took the key. */
+export const escapeFirst = new Set<() => boolean>()
+
 /** the stack, drawn once by the shell */
 export function Layers() {
   const all = useSyncExternalStore(subscribe, () => layers)
   const phone = useUI((u) => u.phone)
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && closeTop()) {
+      if (e.key !== 'Escape' || e.isComposing) return
+      if ([...escapeFirst].some((f) => f()) || closeTop()) {
         e.preventDefault()
         e.stopPropagation()
       }

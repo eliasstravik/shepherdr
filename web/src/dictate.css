@@ -1,11 +1,33 @@
-/* The mic while it records (SHEP-307): a red pill with a pulsing dot, the time and how loud you are, so it can't be
-   missed; amber while the browser asks for the microphone; grey while the words are written down. */
-.ib.dict,.ib.dict:hover{width:auto;display:inline-flex;align-items:center;gap:6px;padding:0 10px 0 9px;border-radius:999px;color:var(--red);background:color-mix(in srgb,var(--red) 14%,transparent);font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
-.ib.dict .dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none;animation:dictp 1.2s ease-in-out infinite}
-.ib.dict .lv{display:inline-flex;align-items:center;gap:2px;height:16px}
-.ib.dict .lv i{width:3px;min-height:3px;border-radius:2px;background:currentColor;transition:height 90ms linear}
-.ib.dict.ask,.ib.dict.ask:hover{color:var(--amber);background:color-mix(in srgb,var(--amber) 14%,transparent)}
-.ib.dict.wr,.ib.dict.wr:hover{color:var(--sub);background:var(--control)}
-.ib.dict.wr .dot{animation-duration:.6s}
-@keyframes dictp{50%{opacity:.25}}
-@media(prefers-reduced-motion:reduce){.ib.dict .dot{animation:none}.ib.dict .lv i{transition:none}}
+/* Dictation (SHEP-314): while it records, the box's bottom row becomes the recording: Cancel, the wave and the time,
+   Done where Send was; the words as they're heard above it. Everything else in the row steps aside meanwhile. */
+.cbar:has(>.dsurf)>:not(.dsurf){display:none}
+.dsurf{position:relative;flex:1;display:grid;gap:2px;min-width:0;animation:fade .15s ease-out}
+
+/* the words: two lines kept for them from the start, so nothing jumps as they come; the newest stay in view (scrolled
+   down as they come, the older ones fading out at the top) */
+.dwords{height:calc(var(--uil) * 2);padding:0 10px;overflow:hidden;font-size:var(--ui);line-height:var(--uil);overflow-wrap:anywhere}
+.dwords.more{-webkit-mask-image:linear-gradient(transparent,#000 10px);mask-image:linear-gradient(transparent,#000 10px)}
+.dsaid{color:var(--fg)}.dhint{color:var(--muted)}
+.dsurf.error .dwords{height:auto;min-height:calc(var(--uil) * 2);padding-top:4px}
+.derr{display:flex;align-items:flex-start;gap:8px;color:var(--fg)}
+.derr .i{margin-top:calc((var(--uil) - 16px) / 2);color:var(--red)}
+
+/* the controls: Cancel, the wave, the time, Done */
+.dctl{display:flex;align-items:center;gap:8px;min-height:var(--btn)}
+.dwave{flex:1;min-width:0;height:24px;color:var(--fg)}
+.app.phone .dwave{height:28px}
+.dwave.off{color:var(--muted)}
+.dtime{display:inline-flex;align-items:center;gap:6px;min-width:5ch;color:var(--sub);font-size:var(--sec);line-height:var(--secl);font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ddot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.ddot.rec{background:var(--red);animation:calm 1.6s ease-in-out infinite}
+
+/* Done: the one filled button while it records (Send steps aside), labelled so it can't pass for Send */
+.ddone{display:inline-flex;align-items:center;gap:6px;height:var(--btn);padding:0 14px 0 10px;border-radius:999px;background:var(--fg);color:var(--canvas);font-size:var(--sec);line-height:var(--secl);font-weight:600;white-space:nowrap;flex:none}
+.ddone:disabled{opacity:.4;cursor:default}
+.ddone.wr{background:var(--control2);color:var(--sub);cursor:default}
+.dspin{width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;flex:none;animation:turn .8s linear infinite}
+@media(pointer:coarse){.ddone:not(:disabled):not(.wr):active{opacity:.6}}
+
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+
+@media(prefers-reduced-motion:reduce){.dsurf,.ddot.rec{animation:none}.dspin{animation:calm 2s ease-in-out infinite}}

@@ -45,6 +45,18 @@ describe('the live words', () => {
     f.say({ message_type: 'committed_transcript', text: 'cancel button.' })
     expect(await words).toBe('Add a cancel button.')
   })
+  test('the words show as they come: each partial and committed piece (SHEP-314)', async () => {
+    const f = fakeSocket()
+    const seen: { said: string; partial: string }[] = []
+    liveSession(Promise.resolve('tok'), f.make, (w) => seen.push(w))
+    await Bun.sleep(0)
+    f.open()
+    f.say({ message_type: 'session_started' })
+    f.say({ message_type: 'partial_transcript', text: 'Add a can' })
+    f.say({ message_type: 'committed_transcript', text: 'Add a cancel button.' })
+    expect(seen.at(-2)).toEqual({ said: '', partial: 'Add a can' })
+    expect(seen.at(-1)).toEqual({ said: 'Add a cancel button.', partial: '' })
+  })
   test('no token, a dropped socket or no answer in time: null, so the recording is uploaded', async () => {
     expect(await liveSession(Promise.resolve(null), fakeSocket().make).finish(50)).toBe(null)
     const f = fakeSocket()
