@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { DATA } from "./paths.ts";
 import * as CV from "../core/chat-view.js";
+import { spawn } from "./spawn.ts";
 
 /** no file served here runs as this app's page (an SVG or HTML opened in a tab of its own), nor is sniffed as one */
 export const SAFE = { "content-security-policy": "sandbox; default-src 'none'; img-src 'self' data:; media-src 'self'; style-src 'unsafe-inline'", "x-content-type-options": "nosniff" };
@@ -44,7 +45,7 @@ function has(tool: string) {
 }
 
 async function run(argv: string[], ms = 20_000) {
-  const p = Bun.spawn(argv, { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
+  const p = spawn(argv, { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
   const timer = setTimeout(() => p.kill(), ms);
   const code = await p.exited;
   clearTimeout(timer);

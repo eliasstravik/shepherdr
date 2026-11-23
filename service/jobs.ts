@@ -13,6 +13,7 @@ import { join } from "node:path";
 import type { Hub } from "./hub.ts";
 import type { Host } from "./host.ts";
 import { HOME, appHome, where, writable } from "./paths.ts";
+import { spawn } from "./spawn.ts";
 
 const asksDir = () => join(appHome(), "data", "chat-asks", "open");
 
@@ -24,7 +25,7 @@ function tool(name: string, inApp: string) {
 
 async function run(cmd: string[]) {
   try {
-    const p = Bun.spawn(cmd, { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
+    const p = spawn(cmd, { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
     return (await p.exited) === 0;
   } catch {
     return false;

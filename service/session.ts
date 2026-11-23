@@ -4,7 +4,8 @@
 // SHEPHERDR_SESSION names another (tests: a throwaway one; empty: herdr-core's default session).
 export const SESSION: string = process.env.SHEPHERDR_SESSION ?? "shepherdr";
 
-/** Every `hc` and `herdr-task` the service starts lands in Shepherdr's session: they inherit it from here. */
+/** process.env names the session too (node's child_process reads it). Bun.spawn doesn't pass a change made here to
+ *  its children (SHEP-294): every program the service starts goes through spawn.ts, which gives each the session. */
 export function useSession() {
   if (SESSION) process.env.HC_SESSION = SESSION;
   else delete process.env.HC_SESSION;

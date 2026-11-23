@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { DATA, HOME, where } from "./paths.ts";
 import { desktopRelay as relayDesktop, vnc, type Bytes, type DesktopDriver, type DesktopPage, type DesktopTarget } from "./desktop.ts";
+import { spawn } from "./spawn.ts";
 
 /** ten minutes without input hand a screen back by themselves (the plan's constant; the page counts the same) */
 export const HAND_BACK_MS = 10 * 60_000;
@@ -109,7 +110,7 @@ export function createScreens(deps: Deps) {
   const local = (w: Who | null): w is Who => !!w && !w.machine;
   const args = (w: Who) => (w.task ? ["--task", w.task, "--space", w.space] : ["--chat", "--space", w.space]);
   async function run(argv: string[], env: Record<string, string> = {}, ms = 120_000) {
-    const p = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore", env: { ...(deps.env ?? process.env), ...env } as Record<string, string> });
+    const p = spawn(argv, { stdout: "pipe", stderr: "pipe", stdin: "ignore", env: { ...(deps.env ?? process.env), ...env } as Record<string, string> });
     const timer = setTimeout(() => p.kill(), ms);
     const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
     await p.exited;

@@ -3,6 +3,7 @@
 // header itself. Linux reads the kernel's socket table; macOS asks netstat and ps. Only the exact connection counts (caller
 // 127.0.0.1:<port> to the service's 127.0.0.1:<service>, established); none, or more than one owner: not believed.
 import { existsSync, readFileSync } from "node:fs";
+import { spawnSync } from "./spawn.ts";
 
 const ME = process.getuid?.() ?? -1;
 const NETSTAT = ["/usr/sbin/netstat", "/usr/bin/netstat"].find((p) => existsSync(p)) ?? "netstat";
@@ -32,7 +33,7 @@ export function peerUid(port: number, service: number): number | null {
     const pids = darwinPids(port, service);
     for (const pid of pids) {
       let out = "";
-      try { out = Bun.spawnSync([PS, "-o", "uid=", "-p", String(pid)], { stdout: "pipe", stderr: "ignore" }).stdout.toString().trim(); } catch {}
+      try { out = spawnSync([PS, "-o", "uid=", "-p", String(pid)], { stdout: "pipe", stderr: "ignore" }).stdout.toString().trim(); } catch {}
       if (/^\d+$/.test(out)) uids.add(Number(out));
     }
     // the same process still holds it after ps answered (not one gone and its pid given to another)
@@ -48,7 +49,7 @@ export function darwinPids(port: number, service: number, text?: string): number
   if (text === undefined) {
     let code: number | null = null, err = "";
     try {
-      const r = Bun.spawnSync([NETSTAT, "-anv", "-p", "tcp"], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+      const r = spawnSync([NETSTAT, "-anv", "-p", "tcp"], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
       out = r.stdout.toString(); code = r.exitCode; err = r.stderr.toString();
     } catch (e) { err = (e as Error).message; }
     peerProblem = netstatProblem(out, code, err);

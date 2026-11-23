@@ -15,6 +15,7 @@ import * as V from "../core/voice.js";
 import { secretBin } from "./secrets.ts";
 import { voiceTool, lookHere, shown, type Ack, type Nav, type VoiceIO, type Where } from "./voice-tools.ts";
 import { hearing, type HearIO } from "./voice-hear.ts";
+import { spawn } from "./spawn.ts";
 export type { ChatView } from "./voice-hear.ts";
 
 const { API, opening, whereLine, envLines, apiError, voiceKey, ensureAgent, agentFile, toolWords, turnGate, hangUpGuard, closeWords, HUNG_UP, REFUSED } = V as any;
@@ -28,7 +29,7 @@ export function keyFor(hub: Pick<Hub, "call">) {
   return voiceKey({
     oldFile: () => envFile(join(secretsDir(), "elevenlabs.env")).ELEVENLABS_API_KEY || "",
     where: async () => {
-      const p = Bun.spawn([secretBin(), "where", "--json"], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+      const p = spawn([secretBin(), "where", "--json"], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
       const out = await new Response(p.stdout).text();
       return (await p.exited) === 0 ? JSON.parse(out) : null;
     },

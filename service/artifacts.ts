@@ -13,6 +13,7 @@ import { HOME, where } from "./paths.ts";
 import { SH } from "../core/paths.js";
 import type { Hub } from "./hub.ts";
 import { served } from "./media.ts";
+import { spawn } from "./spawn.ts";
 
 // Every registry on a machine, each followed by a record separator.
 const READ_ARTS = SH + 'cd "$SHEP_ARTIFACTS" 2>/dev/null || exit 0; for f in *.json .*.json; do [ -f "$f" ] && cat "$f" && printf "\\n\\036\\n"; done; true';
@@ -89,7 +90,7 @@ export type Art = { id: string; title: string; version: number; folder: string; 
   versions: { v: number; at: number; publisher?: string; note?: string; thumb?: boolean }[]; machine?: string; folderName?: string };
 
 async function run(args: string[]) {
-  const p = Bun.spawn([tool(), ...args], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const p = spawn([tool(), ...args], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
   return { code: await p.exited, out, err };
 }

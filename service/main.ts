@@ -9,6 +9,7 @@
 // Serve from (service/host.ts): one machine serves the web app and holds the shared data; on the others the service
 // reads and writes it there, keeps their settings in step (service/sync.ts) and doesn't share /shepherdr.
 import { useSession } from "./session.ts";
+import { spawn } from "./spawn.ts";
 useSession();
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, rmSync, watchFile } from "node:fs";
 import { join, normalize } from "node:path";
@@ -212,7 +213,7 @@ async function moveSecrets(machine: string | null) {
   model.rebuild();
   const cli = [join(HOME, ".local", "bin", "shepherdr"), join(ROOT, "bin", "shepherdr")].find(existsSync) ?? "shepherdr";
   try {
-    const p = Bun.spawn([cli, "secrets", "move-to", machine ?? "here", "--json"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+    const p = spawn([cli, "secrets", "move-to", machine ?? "here", "--json"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
     const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
     let r: any = null;
     try { r = JSON.parse(out.trim().split("\n").pop() ?? ""); } catch {}
@@ -469,7 +470,7 @@ async function serveFrom(machine: string | null) {
   void tailnet();
   const cli = [join(HOME, ".local", "bin", "shepherdr"), join(ROOT, "bin", "shepherdr")].find(existsSync) ?? "shepherdr";
   try {
-    const p = Bun.spawn([cli, "web", "serve-from", machine ?? "here", "--json"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+    const p = spawn([cli, "web", "serve-from", machine ?? "here", "--json"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
     const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
     if ((await p.exited) !== 0) throw new Error(err.trim().split("\n").pop()?.replace(/^shepherdr: /, "") || "The move didn't finish.");
     moving = null;
@@ -666,7 +667,7 @@ async function doAction(body: any): Promise<Response> {
     const at = scheduleOf(body.id);
     if (!at) return json({ ok: false, error: "That schedule isn't here any more." });
     const tool = async (args: string[]) => {
-      const p = Bun.spawn(["herdr-task", ...(at.machine ? ["--on", at.machine] : []), "auto", ...args, "--folder", at.folder, "--json"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+      const p = spawn(["herdr-task", ...(at.machine ? ["--on", at.machine] : []), "auto", ...args, "--folder", at.folder, "--json"], { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
       const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
       let j: any = null;
       try { j = JSON.parse(out); } catch {}
@@ -706,10 +707,10 @@ async function doAction(body: any): Promise<Response> {
       const stoppedWords = stopped.length ? ` ${stopped.map((t) => `“${t}”`).join(", ")} ${stopped.length === 1 ? "was" : "were"} stopped.` : "";
       if (failed.length) return json({ ok: false, error: `Couldn't stop ${failed.map((t) => `“${t}”`).join(", ")}. Nothing was ${body.type === "space-remove" ? "removed" : "archived"}.${stoppedWords} Try again.` });
       // an archived or removed space's schedules stop
-      const paused = await Bun.spawn(["herdr-task", ...(sp.machine ? ["--on", sp.machine] : []), "auto", "pause", "--space", bare, "--all", "--folder", sp.folder, "--json"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" }).exited.catch(() => 1);
+      const paused = await spawn(["herdr-task", ...(sp.machine ? ["--on", sp.machine] : []), "auto", "pause", "--space", bare, "--all", "--folder", sp.folder, "--json"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" }).exited.catch(() => 1);
       if (paused !== 0) return json({ ok: false, error: `Couldn't stop its schedules. Nothing was ${body.type === "space-remove" ? "removed" : "archived"}.${stoppedWords} Try again.` });
     } else if (sp && body.type === "space-archive") {
-      await Bun.spawn(["herdr-task", ...(sp.machine ? ["--on", sp.machine] : []), "auto", "resume", "--space", String(sp.id).split("/").pop()!, "--all", "--folder", sp.folder, "--json"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" }).exited.catch(() => null);
+      await spawn(["herdr-task", ...(sp.machine ? ["--on", sp.machine] : []), "auto", "resume", "--space", String(sp.id).split("/").pop()!, "--all", "--folder", sp.folder, "--json"], { stdout: "ignore", stderr: "ignore", stdin: "ignore" }).exited.catch(() => null);
     }
   }
   if (body?.type === "space-archive" && typeof body.place === "string") {
@@ -974,10 +975,12 @@ const server = Bun.serve<{ who: string }>({
         // the name typed and the agent picked in the New space dialog (none: named after its folder, on Settings' choice)
         const name = typeof b?.name === "string" && b.name.trim() ? b.name.trim().slice(0, 80) : undefined;
         const picked = pickFrom(b?.agent);
-        const place = await newSpace(hub, { machine, path: String(b?.path ?? ""), ...(name ? { name } : {}), makeRepo: !!b?.makeRepo, icon, store: compat.shared!, pick: picked ? () => picked : compat.assistantPick });
+        const made = await newSpace(hub, { machine, path: String(b?.path ?? ""), ...(name ? { name } : {}), makeRepo: !!b?.makeRepo, icon, store: compat.shared!, pick: picked ? () => picked : compat.assistantPick });
+        if (made.error) console.error(`new space ${made.place}: ${made.error}`);
         // the page opens it once the sidebar has it: in the snapshot before the answer
-        await model.waitSpace(place);
-        return json({ place });
+        await model.waitSpace(made.place);
+        // its agent didn't start: made, not a plain ok; the page opens it and says why (warning)
+        return json(made.error ? { place: made.place, ok: false, warning: made.error } : { place: made.place });
       } catch (err) { return json({ error: (err as Error).message }, 400); }
     }
     if (path === "/api/push/key") return json({ key: await push.key() });

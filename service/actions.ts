@@ -21,6 +21,7 @@ import { execTemplate, ownId, withoutSpace } from "./spaces.ts";
 import * as MA from "../core/machine-add.js";
 import { exec } from "./model.ts";
 import { FIND } from "../core/chat-log.js";
+import { spawn } from "./spawn.ts";
 
 const attachDir = () => join(appHome(), "data", "chat-attach");
 /** files in one message at most (the page says so before it sends: web/plugins/chat/client.tsx) */
@@ -151,8 +152,8 @@ export function firstWhenIdle(hub: Hub, addr: string, text: string, every = 2000
 
 async function run(cmd: string[]) {
   // a program that isn't there fails as any other: its code, not a throw
-  let p: ReturnType<typeof Bun.spawn<"ignore", "pipe", "pipe">>;
-  try { p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" }); }
+  let p: ReturnType<typeof spawn<"ignore", "pipe", "pipe">>;
+  try { p = spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" }); }
   catch (e) { return { code: 127, stdout: "", stderr: String(e) }; }
   const [stdout, stderr] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
   return { code: await p.exited, stdout, stderr };

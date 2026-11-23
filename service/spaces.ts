@@ -12,6 +12,7 @@ import * as SP from "../core/spaces.js";
 import { AGENT_PATH, cleanCommand } from "../core/clean-env.js";
 import { TEMPLATES_SH } from "../core/paths.js";
 import { argvFor, NAMES } from "../core/agents.js";
+import { spawn } from "./spawn.ts";
 
 /** A space's id as the app names it: another machine's is "<machine>/<id>". */
 export const ownId = (x: { id: string; machine?: string | null }) => (x.machine ? `${x.machine}/${x.id}` : x.id);
@@ -35,7 +36,7 @@ export function withoutSpace(bar: any, id: string) {
 
 async function run(cmd: string[]) {
   if (cmd[0] === "hc" && process.env.SHEPHERDR_HC) cmd = [process.env.SHEPHERDR_HC, ...cmd.slice(1)];
-  const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+  const p = spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
   const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
   return { code: await p.exited, out, err };
 }
@@ -113,7 +114,8 @@ export const shellWord = (a: string) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `'${St
 /** Makes a space at path on machine (null: here): a missing folder is made, makeRepo makes a folder outside git a repo
  *  (main, an empty first commit), it is named after where it is ("Home" at home, else its repo's or folder's name;
  *  unnamed: left to follow its folder), and `icon` is kept as the sidebar's Rename keeps it. It joins the list of
- *  spaces (shared "spaces") and its Assistant starts from the assistant template. Returns its id. */
+ *  spaces (shared "spaces") and its Assistant starts from the assistant template. Returns its id (place), with error
+ *  when its Assistant didn't start: the space is kept, and its first message starts one. */
 export async function newSpace(hub: Hub, opts: { machine: string | null; path: string; name?: string; unnamed?: boolean; makeRepo?: boolean; icon?: string | null; pick?: ((space: string) => any) | null; store: { value(k: string): any; set(k: string, v: unknown): Promise<unknown> } }) {
   const { machine } = opts;
   if (!opts.path || opts.path.includes("\0")) throw new Error("Pick a folder.");
@@ -140,8 +142,22 @@ export async function newSpace(hub: Hub, opts: { machine: string | null; path: s
   await opts.store.set("spaces", [...list, { id, name: opts.unnamed ? "" : name, folder: abs, machine, at: Date.now() }]);
   await iconOf(machine ? `${machine}/${id}` : id);
   const t = await execTemplate(hub, "assistant", machine, opts.pick?.(machine ? `${machine}/${id}` : id) ?? null);
-  await run(["hc", "run", "--bg", "--keep", "--no-parent", ...(machine ? ["--on", machine] : []), "--cwd", abs,
-    "--label", "herdr.role=coordinator", "--label", `herdr.coordinator.space=${id}`, "--label", `herdr.space=${id}`, t.name]);
+  const r = await run(["hc", "run", "--bg", "--keep", "--no-parent", ...(machine ? ["--on", machine] : []), "--cwd", abs,
+    "--label", "herdr.role=coordinator", "--label", `herdr.coordinator.space=${id}`, "--label", `herdr.space=${id}`, t.name]).catch((e) => ({ code: 127, out: "", err: String(e) }));
   t.done();
-  return machine ? `${machine}/${id}` : id;
+  const place = machine ? `${machine}/${id}` : id;
+  // its Assistant didn't start (SHEP-294): the space stays, and its chat starts one with its first message (actions.ts)
+  return r.code === 0 ? { place } : { place, error: notStarted(r) };
+}
+
+/** Why a new space's Assistant didn't start, in plain words: hc's own message (its JSON error, else its last line). */
+export function notStarted(r: { code: number; out: string; err: string }) {
+  const text = `${r.err}\n${r.out}`.trim();
+  let why = "";
+  for (const line of text.split("\n").reverse()) {
+    try { why = JSON.parse(line)?.error?.message ?? ""; } catch {}
+    if (why) break;
+  }
+  why ||= text.split("\n").pop()?.replace(/^(hc|error): /i, "") || `hc ended with code ${r.code}`;
+  return `The space is made, but its agent didn't start: ${why.replace(/\.$/, "")}. Send a message in the space to start it.`;
 }

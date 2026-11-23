@@ -1,5 +1,5 @@
 import { expect, test, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,7 +9,11 @@ import { join } from "node:path";
 const APP = mkdtempSync(join(tmpdir(), "shep-newspace-"));
 const BIN = join(APP, "bin"), CALLS = join(APP, "calls");
 mkdirSync(BIN);
-writeFileSync(join(BIN, "hc"), `#!/bin/sh\necho "$*" >> "${CALLS}"\necho '{"address":"t9"}'\n`, { mode: 0o755 });
+// with a FAIL file: refused as hc refuses a machine its session doesn't have (SHEP-294)
+const FAIL = join(APP, "fail");
+writeFileSync(join(BIN, "hc"), `#!/bin/sh\necho "$*" >> "${CALLS}"\necho "session=$HC_SESSION" >> "${CALLS}"
+if [ -e "${FAIL}" ]; then echo '{"error":{"kind":"machine_unknown","message":"unknown machine \\"vmb\\""}}'; exit 4; fi
+echo '{"address":"t9"}'\n`, { mode: 0o755 });
 // "vmb"'s home, on this disk: machine.exec runs there
 const VMB = join(APP, "vmb");
 mkdirSync(join(VMB, "crescendo"), { recursive: true });
@@ -36,7 +40,8 @@ const store = () => { const d: Record<string, any> = {}; return { d, value: (k: 
 
 test("a space made on another machine joins the list of spaces, named after its folder, with its icon and its Assistant", async () => {
   const s = store();
-  const place = await SP.newSpace(hub, { machine: "vmb", path: "~/crescendo", icon: "🎵", store: s });
+  const { place, error } = await SP.newSpace(hub, { machine: "vmb", path: "~/crescendo", icon: "🎵", store: s });
+  expect(error).toBeUndefined();
   expect(place).toMatch(/^vmb\/sp[0-9a-f]{32}$/);
   const id = place.slice(4);
   expect(s.d.spaces).toMatchObject([{ id, name: "crescendo", folder: `${VMB}/crescendo`, machine: "vmb" }]);
@@ -46,12 +51,28 @@ test("a space made on another machine joins the list of spaces, named after its 
   const call = readFileSync(CALLS, "utf8");
   expect(call).toContain(`run --bg --keep --no-parent --on vmb --cwd ${VMB}/crescendo --label herdr.role=coordinator --label herdr.coordinator.space=${id} --label herdr.space=${id}`);
   expect(existsSync(join(APP, "herdr-app-calls"))).toBe(false);
+  // in Shepherdr's own session, not herdr-core's default one (SHEP-294)
+  const { SESSION } = await import("./session.ts");
+  expect(call).toContain(`session=${SESSION}\n`);
+});
+
+test("its Assistant not starting is said in plain words, and the space stays for its first message to start one", async () => {
+  const s = store();
+  writeFileSync(FAIL, "");
+  try {
+    const made = await SP.newSpace(hub, { machine: "vmb", path: "~/crescendo", store: s });
+    expect(made.error).toBe('The space is made, but its agent didn\'t start: unknown machine "vmb". Send a message in the space to start it.');
+    expect(s.d.spaces.map((x: any) => SP.ownId(x))).toEqual([made.place]);
+  } finally { rmSync(FAIL); }
+  // hc's own last line, when it says no JSON
+  expect(SP.notStarted({ code: 1, out: "", err: "hc: no such template\n" })).toContain("didn't start: no such template.");
+  expect(SP.notStarted({ code: 2, out: "", err: "" })).toContain("didn't start: hc ended with code 2.");
 });
 
 test("a missing folder is made; one more space is added after the ones there", async () => {
   const s = store();
   s.d.spaces = [{ id: "sp1", name: "demo", folder: "/srv/demo", machine: null }];
-  const place = await SP.newSpace(hub, { machine: "vmb", path: "~/fresh/one", store: s });
+  const { place } = await SP.newSpace(hub, { machine: "vmb", path: "~/fresh/one", store: s });
   expect(existsSync(join(VMB, "fresh", "one"))).toBe(true);
   expect(s.d.spaces.map((x: any) => SP.ownId(x))).toEqual(["sp1", place]);
   await expect(SP.newSpace(hub, { machine: "vmb", path: "", store: s })).rejects.toThrow("Pick a folder.");

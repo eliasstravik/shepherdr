@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA, MOUNT } from "./paths.ts";
+import { spawn } from "./spawn.ts";
 
 export type Me = { login: string; name: string; dns: string; host: string };
 
@@ -35,7 +36,7 @@ export type Ran = { ok: boolean; out: string; err: string; timedOut?: boolean };
  *  consent link). What it printed before then is kept, so the link can be read. */
 export async function runCmd(cmd: string[], ms?: number): Promise<Ran> {
   try {
-    const p = Bun.spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+    const p = spawn(cmd, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
     let timedOut = false;
     const timer = ms ? setTimeout(() => { timedOut = true; try { p.kill("SIGKILL"); } catch {} }, ms) : null;
     const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);

@@ -474,13 +474,14 @@ export async function tryAct(a: { type: string } & Record<string, unknown>, done
 let noticeText: string | null = null
 let noticeTimer: ReturnType<typeof setTimeout> | null = null
 const noticeListeners = new Set<() => void>()
-export function notice(text: string) {
+/** ms: how long it stays (a longer one for words to read) */
+export function notice(text: string, ms = 2600) {
   noticeText = text
   if (noticeTimer) clearTimeout(noticeTimer)
   noticeTimer = setTimeout(() => {
     noticeText = null
     noticeListeners.forEach((l) => l())
-  }, 2600)
+  }, ms)
   noticeListeners.forEach((l) => l())
 }
 export const useNotice = () =>
