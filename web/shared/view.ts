@@ -235,12 +235,13 @@ export function leftShort(min: number | null | undefined): string {
 /** How a task's status icon draws (SHEP-321, as before 3.2.0: a ring filled by the % done its agent reports, the time
  *  left under it). `check`: finished (Ready for review, merging, Done). Otherwise the ring: `pct` its share done
  *  (0-100; null: none reported yet, an alive indeterminate ring while it works), `tone` its colour, `mark` the small
- *  sign that tells states apart without colour (needs you: the ring's inside softly tinted; stopped: a square; queued: a dashed ring). */
+ *  sign that tells states apart without colour (needs you: the ring's inside softly tinted; stopped: a square; not started, waiting for the person's Start: a dotted ring, as
+ *  Linear's Backlog; Up next and Scheduled are a plain empty ring, as its Todo). */
 export interface Ring {
   kind: 'check' | 'ring'
   tone: 'working' | 'ask' | 'red' | 'ready' | 'mute'
   pct: number | null
-  mark?: 'tint' | 'stop' | 'queued'
+  mark?: 'tint' | 'stop' | 'unstarted'
   /** the words a screen reader says for it */
   label: string
 }
@@ -255,8 +256,9 @@ export function ringOf(t: Task): Ring {
   if (t.stopped) return t.stopped.by === 'you' ? { kind: 'ring', tone: 'ask', pct, mark: 'stop', label: `Stopped by you${done}` } : { kind: 'ring', tone: 'red', pct, mark: 'stop', label: `Stopped${done}` }
   if (s === 'ask') return { kind: 'ring', tone: 'ask', pct, mark: 'tint', label: `Needs you${done}` }
   if (s === 'working') return { kind: 'ring', tone: 'working', pct, label: `Working${done}` }
-  // queued, scheduled or not started yet: an empty ring
-  return { kind: 'ring', tone: 'mute', pct: pct ?? 0, mark: 'queued', label: 'Up next' }
+  // added and waiting for the person's Start (SHEP-369): a dotted ring; queued or scheduled (starts by itself): a solid empty one
+  if (t.status === 'todo' && !t.agent && !t.started) return { kind: 'ring', tone: 'mute', pct: pct ?? 0, mark: 'unstarted', label: 'Not started' }
+  return { kind: 'ring', tone: 'mute', pct: pct ?? 0, label: 'Up next' }
 }
 
 /** the time at the right of a task's row: how long a Needs you row has waited for the person, how long ago a Done row

@@ -17,12 +17,12 @@ function wedge(pct: number): string {
 const MARK = {
   stop: '<rect class="mk" x="13.25" y="1.25" width="5.5" height="5.5" rx="1"/>',
   tint: '',
-  queued: '',
+  unstarted: '',
 }
 
 function ringSvg(r: Ring): string {
   if (r.kind === 'check') return '<circle cx="10" cy="10" r="7.25" fill="currentColor" stroke="none"/><path class="tk" d="m7 10.2 2 2 4-4.4"/>'
-  const ring = r.mark === 'queued' ? '<circle cx="10" cy="10" r="6.5" stroke-dasharray="1.5 3"/>' : '<circle cx="10" cy="10" r="6.5"/>'
+  const ring = r.mark === 'unstarted' ? '<circle cx="10" cy="10" r="6.5" stroke-dasharray="1.5 3"/>' : '<circle cx="10" cy="10" r="6.5"/>'
   // needs you: the ring's inside softly filled (SHEP-367: no dot outside the circle), so it reads apart from working without colour
   const tint = r.mark === 'tint' ? '<circle class="tn" cx="10" cy="10" r="6.5" fill="currentColor" stroke="none"/>' : ''
   return tint + ring + wedge(r.pct ?? 0) + (r.mark ? MARK[r.mark] : '')
@@ -31,7 +31,7 @@ function ringSvg(r: Ring): string {
 /**
  * A task's status icon, the one for every place it stands (SHEP-321; before 3.2.0 lib/dot.js and ui.tsx TaskDot): a
  * ring filled by the share done its agent reports, in every state that is not finished (yellow working, red needs
- * you softly filled inside, red stopped with a square, grey and dashed up next), with the time left short under it ("13m", "2h"); Ready, merging and Done
+ * you softly filled inside, red stopped with a square, grey and empty up next, grey and dotted when it waits for Start), with the time left short under it ("13m", "2h"); Ready, merging and Done
  * the green (Done: grey) check. Working with no % yet: the turning ring (a calm pulse with reduced motion). `time`:
  * under the icon (a row with a second line) or beside it (a one-line row); `dim`: its machine can't be reached.
  */
