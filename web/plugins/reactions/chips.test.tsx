@@ -37,13 +37,13 @@ test('a tap on yours takes it back; another emoji changes yours; the agent\'s al
   expect(chipLabel({ emoji: '👍', count: 2, mine: true, pending: false })).toContain('remove')
 })
 
-test('sizes: a pill that hugs its emoji with a 44 px tap area, a pop only with motion (measured in a real layout by test/test_reaction_chip.py)', () => {
+test('sizes: a pill that hugs its emoji with a 44 px tap area, on the top corner, a pop only with motion (measured in a real layout by test/test_reaction_chip.py)', () => {
   const css = readFileSync(new URL('../../src/ds.css', import.meta.url), 'utf8')
   const rule = (sel: string) => css.match(new RegExp(`(?:^|\\n|\\})${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\{([^}]*)\\}`))?.[1] ?? ''
   expect(rule('.rxc')).toContain('height:28px')
   expect(rule('.rxc')).toContain('flex:none')
   expect(rule('.rxs')).toContain('width:max-content')
-  expect(rule('.rxc::after')).toContain('inset:-13px -2px -8px') // 13 + 28 + 8 = 49: a bar just below may take a few
+  expect(rule('.rxc::after')).toContain('inset:-8px -5px') // 8 + 28 + 8 = 44
   expect(css).toMatch(/prefers-reduced-motion:reduce\)\{\.rxs>\.rxc\.rx-new\{animation:none\}/)
 })
 

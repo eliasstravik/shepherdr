@@ -1,15 +1,16 @@
 // Reactions, both ways: the agent reacts to some of your messages with one emoji by itself; you react from the quick
 // bar a tap on a message shows (its smiley), or from its menu (a row of your most used emoji, then + for every emoji,
-// with search). Each reaction is a small pill tucked over the bubble's bottom corner, as in WhatsApp and iMessage: the
-// emoji at about the text's size, a count when you both picked it, yours tinted; a tap on yours takes it back, a tap on
+// with search). Each reaction is a small pill pinned to the bubble's top corner that faces the middle of the chat, as
+// Claude Duet places it (top right for the agent's, top left for yours, straddling it): the emoji at about the text's size, a count when you both picked it, yours tinted; a tap on yours takes it back, a tap on
 // the agent's adds the same. You keep one reaction per message: picking another changes it. Your reaction reaches the
 // agent at once as a small message. Switched off: the row is gone (an agent's own reactions still show).
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { definePlugin, tryAct } from '@client/kernel.ts'
 import { openDialog, openMenu } from '@client/overlay.tsx'
 import { cx, I } from '@client/ui.tsx'
 import type { Chat, Message } from '@shared/types.ts'
 import { chipLabel, chipsOf, minesOf, togglesFor } from './chips.ts'
+import { fit } from './place.ts'
 import { loadEmoji, quickRow, remember, search, tone, withTone, type Group } from './emoji.ts'
 
 /** react to a message: the same emoji again takes it back, another one changes yours */
@@ -20,14 +21,27 @@ export function react(chat: string, msg: Message, emoji: string) {
   })()
 }
 
-/** the chips just under a message; one added while it is on screen pops in */
+/** the chips on a message's top corner; one added while it is on screen pops in */
 export function Chips({ msg, chat }: { msg: Message; chat: Chat }) {
   const chips = chipsOf(msg.reactions)
   const first = useRef<Set<string> | null>(null)
   first.current ??= new Set(chips.map((c) => c.emoji))
+  const box = useRef<HTMLDivElement>(null)
+  const sig = chips.map((c) => c.emoji + c.count).join()
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el) return
+    fit(el)
+    // the column or the bubble changing width (a panel opening, a message still arriving) moves the corner
+    const ro = new ResizeObserver(() => fit(el))
+    const col = el.closest('.msgs')
+    if (col) ro.observe(col)
+    if (el.parentElement) ro.observe(el.parentElement)
+    return () => ro.disconnect()
+  }, [sig])
   if (!chips.length) return null
   return (
-    <div className="rxs" role="group" aria-label="Reactions">
+    <div className="rxs" role="group" aria-label="Reactions" ref={box}>
       {chips.map((c) => (
         <button
           type="button"
