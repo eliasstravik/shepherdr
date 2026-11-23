@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.2.9
+
+Suggested replies give you one bubble per option when an agent asks you to pick.
+
+### The web app
+
+- When an agent asks a question with options, the suggested replies show one bubble per option, in order, up to five,
+  so you pick with one tap. A yes or no question gets both. A plain reply still shows at most three.
+
 ## 3.2.8
 
 Every space can have its own icon, every machine, this one too, gets a home space (~) that works like any space, and a
