@@ -18,7 +18,7 @@ import { Markdown } from './markdown.tsx'
 import { dropped, pasted } from './paste.ts'
 import { suggestionOf, suggestionsOn } from './suggest.ts'
 import { BoxThumb, openPreview, SentThumb, sourcesOf } from './thumbs.tsx'
-import { typing, working } from './typing.ts'
+import { signOf } from './typing.ts'
 
 export { fileUrl } from './thumbs.tsx'
 
@@ -321,14 +321,16 @@ const loading = new Set<string>()
 /** a task's id from its chat's key ("vm:SHOP-12/worker") */
 const taskIdOf = (snap: Snapshot, chatKey: string) => snap.tasks.find((t) => t.agent?.chat === chatKey)?.id ?? chatKey.replace(/\/[^/]+$/, '')
 
-/** the quiet line while the agent works, saying what it is doing */
-function WorkingTail({ chat }: { chat: Chat | undefined }) {
-  if (!chat || !working(chat)) return null
-  const now = chat.live?.now
+/** The working sign at the chat's end (SHEP-313), as Claude Duet shows its agent at work: three dots that rise in turn,
+ *  where its words will land, and gone the moment they do. Shepherdr's own form: no bubble around them (nothing the
+ *  agent wrote), and the step it is on beside them when Shepherdr knows it. */
+function WorkingSign({ chat }: { chat: Chat | undefined }) {
+  const sign = signOf(chat)
+  if (!sign) return null
   return (
-    <div className="ref" role="status">
-      <I n="working" c="s16 c-working" />
-      <span>{chat.doing || now?.doing || now?.title || 'Working'}</span>
+    <div className="wsign" role="status" aria-label={sign.step || 'Working'}>
+      <span className="wdots" aria-hidden="true"><i /><i /><i /></span>
+      {sign.step && <span className="wstep">{sign.step}</span>}
     </div>
   )
 }
@@ -348,11 +350,6 @@ function StoppedChat({ chat, thread }: { chat: Chat | undefined; thread: Thread 
       </div>
     </div>
   )
-}
-
-/** "…" while it writes */
-function TypingTail({ chat }: { chat: Chat | undefined }) {
-  return chat && !working(chat) && typing(chat) ? <p className="b gap" aria-label="Writing">…</p> : null
 }
 
 /* ---------- the message box ---------- */
@@ -513,7 +510,7 @@ export default definePlugin({
   setup(reg) {
     reg.views.messages = Messages
     reg.views.box = Box
-    reg.chatTail.push({ order: 10, View: WorkingTail }, { order: 15, View: StoppedChat }, { order: 95, View: TypingTail })
+    reg.chatTail.push({ order: 15, View: StoppedChat }, { order: 95, View: WorkingSign })
   },
 })
 
