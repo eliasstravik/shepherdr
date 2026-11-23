@@ -140,6 +140,8 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Version bumps are patch only (2.0.0 → 2.0.1) unless the human explicitly asks for a minor or major one.
 - A release starts only when main is green on GitHub, and runs the full suite itself (every check in
   [docs/develop.md](docs/develop.md)) before it ships.
+- Never open an issue or a pull request in another project's repo (Herdr's core, Claude Code, anything): when
+  something belongs elsewhere, tell the reporter where to report it.
 - From SHEP-238: headless Chrome with flags herdr-browser ignores (e.g. --autoplay-policy=no-user-gesture-required, fake mic): run ~/.agent-browser/browsers/chrome-*/chrome --headless=new --use-mock-keychain --password-store=basic --user-data-dir=<scratch> --screenshot/--dump-dom directly.
 - From SHEP-240: a second visible browser page on the dev VM: run ~/.agent-browser/browsers/chrome-*/chrome --headless=new --use-mock-keychain --password-store=basic --remote-debugging-port=<p> <url> in the background and screenshot over CDP (Page.captureScreenshot); herdr-browser's --headers don't reach WebSockets.
 - From SHEP-258: Codex's model list comes from its own catalog: npm i --prefix <scratch> @openai/codex@<ver> and run its codex debug models to see a newer CLI's models and service_tiers without touching the installed one.
