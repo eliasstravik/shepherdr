@@ -145,13 +145,15 @@ button.b{cursor:pointer}
 .qbtn{display:grid;place-items:center;width:max(var(--btn),var(--ib));height:max(var(--btn),var(--ib));border-radius:8px;color:var(--sub)}
 .qbtn:hover,.qbtn[aria-expanded="true"]{background:var(--control);color:var(--fg)}
 .qt{color:var(--muted);font-size:12px;line-height:16px;white-space:nowrap;font-variant-numeric:tabular-nums}
-/* reactions: chips on the bubble's lower edge, overlapping it as in WhatsApp and iMessage */
-.rxs{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:4px;margin-top:-8px;padding-inline:12px}
-.rxc{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:calc(var(--chip) + 8px);height:calc(var(--chip) - 4px);padding:0 8px;border-radius:999px;background:var(--overlay);box-shadow:0 0 0 2px var(--canvas),inset 0 0 0 1px var(--line2);color:var(--sub);font-size:13px;line-height:18px;font-weight:600;font-variant-numeric:tabular-nums}
+/* reactions: small chips just under the bubble, never over it, lined up with its inner edge (the right for yours, the
+   left for the agent's, from .bmv's justify-items); a quiet fill, no ring; the gap to the next message stays the list's */
+.rxs{position:relative;z-index:1;display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}.bw.mine .rxs{justify-content:flex-end}
+.rxc{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:4px;min-width:calc(var(--chip) + 8px);height:calc(var(--chip) - 4px);padding:0 8px;border-radius:999px;background:var(--control);color:var(--sub);font-size:13px;line-height:18px;font-weight:600;font-variant-numeric:tabular-nums}
 .rxc::after{content:"";position:absolute;inset:-8px -2px}
 .rxc .e{font-size:18px;line-height:1}
-.rxc:hover{background:var(--raised)}
-.rxc[aria-pressed="true"]{background:color-mix(in srgb,var(--blue) 16%,var(--overlay));box-shadow:0 0 0 2px var(--canvas),inset 0 0 0 1px color-mix(in srgb,var(--blue) 55%,transparent);color:var(--fg)}
+.rxc:hover{background:var(--control2)}
+.rxc[aria-pressed="true"]{background:color-mix(in srgb,var(--blue) 16%,transparent);color:var(--fg)}
+.rxc[aria-pressed="true"]:hover{background:color-mix(in srgb,var(--blue) 24%,transparent)}
 .rxc.pending{opacity:.6}
 .rxc.pop{animation:rxpop 280ms cubic-bezier(.25,1.12,.4,1)}
 @keyframes rxpop{0%{transform:scale(.3);opacity:0}60%{transform:scale(1.12);opacity:1}100%{transform:scale(1)}}
