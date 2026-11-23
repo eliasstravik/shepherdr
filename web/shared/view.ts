@@ -56,7 +56,7 @@ export const unreachable = (m: Machine | undefined) => !!m && m.status === 'off'
 export const staleLink = (why: string | undefined) => !!why && /a different core answers there/.test(why)
 /** what the Machines page says of such a link (herdr-task's words: machines.STALE_WORDS) */
 export const STALE_LINK = 'A different herdr-core answers there now (it was set up again since it was linked), so nothing gets through. ' +
-  'Run `herdr-task carry-over` on the computer that serves this app to link it again.'
+  'Run herdr-task carry-over on the computer that serves this app to link it again.'
 
 /** the machine a space is on can't be reached */
 export function placeDown(snap: Snapshot, id: string): Machine | undefined {
