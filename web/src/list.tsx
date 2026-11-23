@@ -12,6 +12,7 @@ import { Btn, Cnt, I, IB, Row } from './ui.tsx'
 import { copyText } from './copy.ts'
 import { DictateButton } from './dictate.tsx'
 import { press } from './drag.ts'
+import { swapRow } from './sides.ts'
 
 const FILTERS: Filter[] = ['Active', 'Archived', 'All']
 
@@ -259,13 +260,14 @@ export function folderMenu(anchor: Element, placeId: string) {
   openMenu(anchor, [copyFolder(f.full)], { label: 'Folder', top: () => <FolderTop f={f} /> })
 }
 
-/** A space's menu: from its name in the header and from its row's ⋯. Everything's has Switch to terminal and Settings. */
-export function spaceMenu(anchor: Element, placeId: string) {
+/** A space's menu: from its name in the header and from its row's ⋯. Everything's has Switch to terminal and Settings.
+ *  From the header beside a pane it also swaps the chat and the pane (SHEP-352). */
+export function spaceMenu(anchor: Element, placeId: string, head = false) {
   const snap = getState().snap
   const p = snap && placeOf(snap, placeId)
   if (!snap || !p) return
   // no folder here (SHEP-328): the header's folder chip shows it and copies it
-  const first = registry.spaceMenu.flatMap((m) => m.rows(p))
+  const first = [...registry.spaceMenu.flatMap((m) => m.rows(p)), ...(head ? swapRow(getState().ui) : [])]
   const line = first.length > 0
   if (isEverything(snap, p.id)) return openMenu(anchor, [...first, { icon: 'gear', label: 'Settings', line, run: () => openSettings('all') }], { label: 'Everything' })
   const mine = groupOf(snap, p.id)

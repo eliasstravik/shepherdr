@@ -17,7 +17,7 @@ Object.assign(globalThis, {
 const S = await import('./sides.ts')
 const { secondTap } = await import('./resize.ts')
 const { SidesRow } = await import('./settings.tsx')
-const { SwapButton } = await import('./App.tsx')
+const { readFileSync } = await import('node:fs')
 const { setUI } = await import('./kernel.ts')
 
 beforeEach(() => {
@@ -94,9 +94,27 @@ test('Settings says it in plain words, for the layout this device is in; a phone
   expect(renderToStaticMarkup(<SidesRow layout="phone" side="left" />)).toBe('')
 })
 
-test('the swap button says where the chat goes', () => {
-  expect(renderToStaticMarkup(<SwapButton side="left" />)).toContain('aria-label="Move the chat to the right"')
-  expect(renderToStaticMarkup(<SwapButton side="right" />)).toContain('aria-label="Move the chat to the left"')
+test('the chat header menu swaps the sides, and says where the chat goes', () => {
+  setUI({ phone: false, narrow: true })
+  const [row] = S.swapRow({ phone: false, pane: 'tasks' }, 'left')
+  expect(row?.label).toBe('Move the chat to the right')
+  expect(S.swapRow({ phone: false, pane: 'tasks' }, 'right')[0]?.label).toBe('Move the chat to the left')
+  row?.run?.()
+  expect(S.chatSide('tablet')).toBe('right')
+  // nothing to swap without a pane, nor on a phone
+  expect(S.swapRow({ phone: false, pane: null })).toEqual([])
+  expect(S.swapRow({ phone: true, pane: 'tasks' })).toEqual([])
+})
+
+test('the divider stays quiet: no button floats on it, and only a mouse hover lights it (SHEP-352)', () => {
+  const css = readFileSync(new URL('./ds.css', import.meta.url), 'utf8')
+  const app = readFileSync(new URL('./App.tsx', import.meta.url), 'utf8')
+  expect(css).not.toContain('.swp')
+  expect(app).not.toContain('SwapButton')
+  // a touch screen keeps :hover after a tap: the edge's hover line only for a fine pointer that hovers
+  const bare = css.replace(/@media \(hover:hover\) and \(pointer:fine\)\{[^\n]*\}\}/g, '')
+  expect(bare).not.toMatch(/\.rz:hover/)
+  expect(css).toMatch(/@media \(hover:hover\) and \(pointer:fine\)\{\.rz:hover::after/)
 })
 
 test('a double tap on the divider: two taps close in time and place on the same edge', () => {

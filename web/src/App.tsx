@@ -9,7 +9,7 @@ import { getState, openSettings, registry, setUI, sideHidden, togglePane, useNot
 import { folderMenu, List, spaceMenu } from './list.tsx'
 import { closeTop, Layers } from './overlay.tsx'
 import { edge } from './resize.ts'
-import { columnsOf, swapSides, useSides, type Side } from './sides.ts'
+import { columnsOf, swapSides, useSides } from './sides.ts'
 import { SettingsWindow } from './settings.tsx'
 import { cx, Empty, I, IB, useScrolled } from './ui.tsx'
 
@@ -52,7 +52,7 @@ function ChatHeader({ snap, thread, place, scrolled }: { snap: Snapshot; thread:
     <header className={cx('hd', scrolled && 'sc')}>
       {phone ? <IB icon="burger" label="Spaces" onClick={() => setUI({ drawer: true })} /> : hidden ? <IB icon="panel" label="Show the list" onClick={showList} /> : null}
       <div className="ttl">
-        <button type="button" className="tbtn" aria-haspopup="menu" onClick={(e) => spaceMenu(e.currentTarget, place.id)}>
+        <button type="button" className="tbtn" aria-haspopup="menu" onClick={(e) => spaceMenu(e.currentTarget, place.id, true)}>
           {!every && <I n="hash" c="s16" />}
           <span>{every ? 'Everything' : place.name}</span>
           <I n="down" c="s16 c-mute" />
@@ -180,15 +180,6 @@ function Bar({ snap }: { snap: Snapshot }) {
   )
 }
 
-/** SHEP-336: the button on the edge between the chat and the pane that swaps them */
-export function SwapButton({ side }: { side: Side }) {
-  return (
-    <button type="button" className="swp" aria-label={side === 'left' ? 'Move the chat to the right' : 'Move the chat to the left'} onClick={swapSides}>
-      <I n="swap" c="s16" />
-    </button>
-  )
-}
-
 function Toast() {
   const text = useNotice()
   return text ? <div className="toast" role="status">{text}</div> : null
@@ -246,7 +237,6 @@ export function App() {
           )}
           <div className="rz rzs" {...edge('side')} />
           <div className="rz rzp" {...edge('pane', swapSides)} />
-          {!ui.phone && ui.pane && <SwapButton side={swap ? 'right' : 'left'} />}
         </div>
         {ui.phone && <Bar snap={snap} />}
         <div className="layer">
