@@ -14,7 +14,7 @@ import { Btn, cx, Empty, I, IB, useGrow } from '@client/ui.tsx'
 import type { IconName } from '@client/icons.ts'
 import { isImage, isVideo } from '@shared/files.ts'
 import type { Chat, Message, Relay, Snapshot, Task, TaskBrief, TurnActivity } from '@shared/types.ts'
-import { isEverything, placeOf, statusWord, taskOf } from '@shared/view.ts'
+import { isEverything, placeOf, spaceLabel, statusWord, taskOf } from '@shared/view.ts'
 import { StatusIcon } from '@plugins/tasks/icon.tsx'
 import { DoneRow, QuestionCard, SecretCard } from './cards.tsx'
 import { briefFrom, deliveryWord, looksLong, startWords } from './brief.ts'
@@ -622,7 +622,7 @@ function Messages({ thread }: { thread: Thread }) {
   return (
     <>
       {empty && !thread.task && chat && (
-        <Empty title={every ? 'Welcome to Shepherdr' : `Nothing in #${placeOf(snap, thread.place)?.name ?? ''} yet`}>Tell me what you want done{every ? ', here or in a space.' : ' here.'}</Empty>
+        <Empty title={every ? 'Welcome to Shepherdr' : `Nothing in ${spaceLabel(snap, thread.place)} yet`}>Tell me what you want done{every ? ', here or in a space.' : ' here.'}</Empty>
       )}
       {out}
       {thread.task && <StartLine chat={chat} thread={thread} />}
@@ -967,7 +967,7 @@ export function AddButtons({ finger, onFiles }: { finger: boolean; onFiles: (f: 
 function SharedChip({ chat, thread }: { chat: string; thread: Thread }) {
   const snap = useSnap()!
   const t = thread.task
-  const where = t ? t.name : isEverything(snap, thread.place) ? 'Everything' : `#${placeOf(snap, thread.place)?.name ?? ''}`
+  const where = t ? t.name : spaceLabel(snap, thread.place)
   return (
     <span className="fchip shared">
       <I n="share" c="s16" />

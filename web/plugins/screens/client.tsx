@@ -15,7 +15,7 @@ import { DoneRow } from '@plugins/chat/cards.tsx'
 import { StatusIcon } from '@plugins/tasks/icon.tsx'
 import { shortUrl, toUrl, type BrowserDown, type BrowserUp } from '@shared/browser.ts'
 import type { Chat, ScreenInfo, Snapshot, Task } from '@shared/types.ts'
-import { isEverything, machineLabel, placeOf, taskOf, tasksIn, tstate } from '@shared/view.ts'
+import { isEverything, machineLabel, placeOf, spaceName, taskOf, tasksIn, tstate } from '@shared/view.ts'
 import { screenKey, screenRow } from './menu.ts'
 import { fit, keyEvent, modifiers, toPage, type Size } from '@plugins/browser/input.ts'
 import { browserPress, deskPress, enterDevice, keysymOf, leaveDevice, refit, wheelSteps, WHOLE, type Mods, type Pt, type View } from './full.ts'
@@ -516,7 +516,7 @@ function ScreenPane() {
   driveNow.current = drive
   const setScr = (p: Partial<ScreenAt>) => setUI({ scr: { ...scr, ...p } })
   const mach = machineLabel(snap, sc.d?.of ?? machine)
-  const sub = (kind === 'chat' ? `${place && !isEverything(snap, place) ? `#${placeOf(snap, place)?.name ?? ''}` : 'Everything'} on ${mach}` : kind === 'machine' ? '' : mach) + (src === 'd' ? `${kind === 'machine' ? '' : ' · '}${sc.d?.own ? 'its own desktop' : 'shared desktop'}` : '')
+  const sub = (kind === 'chat' ? `${place && !isEverything(snap, place) ? ((p) => (p ? (spaceName(snap, p) === '~' ? '~' : `#${p.name}`) : ''))(placeOf(snap, place)) : 'Everything'} on ${mach}` : kind === 'machine' ? '' : mach) + (src === 'd' ? `${kind === 'machine' ? '' : ' · '}${sc.d?.own ? 'its own desktop' : 'shared desktop'}` : '')
   const back = () => {
     if (kind === 'task') setUI({ pane: 'tasks', task: id })
     else if (kind === 'machine') { setUI({ pane: null }); openSettings('all', 'Machines') }

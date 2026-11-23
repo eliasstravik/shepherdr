@@ -122,14 +122,12 @@ export async function newSpace(hub: Hub, opts: { machine: string | null; path: s
   const home = (await homeOf(hub, machine)) ?? "";
   const abs = NS.pathOf(opts.path, home);
   if (!abs) throw new Error("Pick a folder.");
-  // one space per home folder (SHEP-296): this computer's is Everything, opened instead of a second; another
-  // machine's has its own already, so a second is refused in plain words
+  // one space per folder: a folder that has its space already opens that one instead of a second (SHEP-296). This
+  // computer's home folder is Everything's; another machine's is its home space, listed first under it as ~.
   const had = (Array.isArray(opts.store.value("spaces")) ? opts.store.value("spaces") : []) as any[];
-  if (home && SP.sameFolder(abs, home, home)) {
-    const there = machine ? had.find((x) => x?.machine === machine && SP.sameFolder(x.folder, home, home)) : SP.everythingOf(had, home);
-    if (there && !machine) return { place: ownId(there), existed: true as const };
-    if (there) throw new Error(`The home folder on ${machine} has its space already. Pick another folder.`);
-  }
+  const atHome = !!home && SP.sameFolder(abs, home, home);
+  const there = atHome && !machine ? SP.everythingOf(had, home) : had.find((x) => x && (x.machine ?? null) === machine && SP.sameFolder(x.folder, abs, home));
+  if (there) return { place: ownId(there), existed: true as const, home: atHome, name: String(there.name ?? "") };
   const git = (args: string[]) => exec(hub, ["git", "-C", abs, ...args], machine);
   if ((await exec(hub, ["test", "-d", abs], machine)).code !== 0) {
     const r = await exec(hub, ["mkdir", "-p", "--", abs], machine);
@@ -164,6 +162,13 @@ export async function newSpace(hub: Hub, opts: { machine: string | null; path: s
   // its Assistant didn't start (SHEP-294): the space stays, and its chat starts one with its first message (actions.ts)
   if (r.code !== 0) await keep();
   return r.code === 0 ? { place } : { place, error: notStarted(r) };
+}
+
+/** What New space says when the folder has its space already, and it opened that one instead */
+export function existedWords(made: { home?: boolean; name?: string }, machine: string | null) {
+  if (made.home && !machine) return "Everything already works in your home folder, so it's open now.";
+  if (made.home) return `${machine}'s home space (~) already works in that folder, so it's open now.`;
+  return `#${made.name || "that space"} already works in that folder, so it's open now.`;
 }
 
 /** Why a new space's Assistant didn't start, in plain words: hc's own message (its JSON error, else its last line). */

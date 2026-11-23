@@ -5,7 +5,7 @@
 // A sheet on a phone, a 560 px dialog on a desktop; an open list takes the form's place, with a back arrow.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { AgentPick, Catalog, CatalogAgent, CatalogModel, Snapshot } from '@shared/types.ts'
-import { everything, isEverything, machineLabel, machineOf, spacesOf, unreachable } from '@shared/view.ts'
+import { everything, isEverything, isHomeSpace, machineLabel, machineOf, spaceName, spacesOf, unreachable } from '@shared/view.ts'
 import { act, getState } from './kernel.ts'
 import { openDialog } from './overlay.tsx'
 import { Btn, I, IB, Logo, Row } from './ui.tsx'
@@ -437,7 +437,7 @@ function SpacePicker({ value, onPick, close }: { value: string; onPick: (place: 
   const row = (id: string, name: string, root: boolean, machine: string) => (
     <Row
       key={id}
-      icon={root ? 'layers' : 'hash'}
+      icon={root ? 'layers' : name === '~' ? 'folder' : 'hash'}
       label={name}
       value={root ? machineLabel(snap, machine) : undefined}
       current={value === id}
@@ -449,7 +449,7 @@ function SpacePicker({ value, onPick, close }: { value: string; onPick: (place: 
     />
   )
   const blocks = snap.machines
-    .map((m) => ({ m, list: spaces.filter((p) => p.machine === m.machine && hit(p.name, p.machine)) }))
+    .map((m) => ({ m, list: spaces.filter((p) => p.machine === m.machine && hit(spaceName(snap, p), p.machine)) }))
     .filter((b) => b.list.length)
   const evHit = ev && hit('Everything', ev.machine)
   return (
@@ -461,7 +461,7 @@ function SpacePicker({ value, onPick, close }: { value: string; onPick: (place: 
         {blocks.map((b) => (
           <div key={b.m.id} style={{ display: 'contents' }}>
             <div className="lab">{b.m.name}</div>
-            {b.list.map((p) => row(p.id, p.name, false, p.machine))}
+            {b.list.map((p) => row(p.id, spaceName(snap, p), false, p.machine))}
           </div>
         ))}
         {!evHit && !blocks.length && <p className="hint" style={{ padding: 8 }}>No space matches.</p>}
@@ -475,13 +475,13 @@ export function SpaceField({ value, onChange }: { value: string; onChange: (plac
   const snap = getState().snap!
   const p = snap.places.find((x) => x.id === value)
   const root = isEverything(snap, value)
-  const name = root ? 'Everything' : (p?.name ?? '')
+  const name = root ? 'Everything' : p ? spaceName(snap, p) : ''
   const mach = p ? machineLabel(snap, p.machine) : ''
   return (
     <div className="fld">
       <span>Space</span>
       <button type="button" className="fake" aria-label={`Space: ${name} on ${mach}. Change`} onClick={() => openDialog((close) => <SpacePicker value={value} onPick={onChange} close={close} />, { wide: true, bare: true, label: 'Space' })}>
-        <I n={root ? 'layers' : 'hash'} />
+        <I n={root ? 'layers' : p && isHomeSpace(snap, p) ? 'folder' : 'hash'} />
         <span className="n"><b>{name}</b> <span>{mach}</span></span>
         <I n="right" c="s16" />
       </button>

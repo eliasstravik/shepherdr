@@ -130,7 +130,7 @@ function ago(ms: number | undefined) {
 const label = (snap: Snapshot, id: string | null | undefined) => (id ? spaceLabel(snap, id) || snap.places.find((p) => p.id === id)?.name || "" : "");
 /** a task as it is said: by its title, never its id */
 const titled = (t: Task, n = 80) => `"${cut(t.name, n)}"`;
-/** the spaces the app lists: Everything, then every space (another machine's home folder is not one) */
+/** the spaces the app lists: Everything, then every space (each other machine's home space among them, shown as ~) */
 function appSpaces(snap: Snapshot): Place[] {
   const ev = everything(snap);
   return [...(ev ? [ev] : []), ...spacesOf(snap)];
@@ -381,7 +381,7 @@ function lookSpaces(snap: Snapshot) {
   const ev = everything(snap);
   if (ev) { const n = needsCount(snap); out.push(`Everything, the root chat${n ? `: ${n} ${n === 1 ? "needs" : "need"} you in all` : ""}.`); }
   for (const m of listOf(snap, "Active")) {
-    const rows = [...m.groups.flatMap((g) => g.spaces), ...m.spaces].map((p) => `#${p.name}${counts(p.id) ? `: ${counts(p.id)}` : ""}`);
+    const rows = [...(m.home ? [m.home] : []), ...m.groups.flatMap((g) => g.spaces), ...m.spaces].map((p) => `${p === m.home ? "its home space (~)" : `#${p.name}`}${counts(p.id) ? `: ${counts(p.id)}` : ""}`);
     if (rows.length) out.push(`On ${m.machine.name}${unreachable(m.machine) ? " (can't reach it)" : ""}: ${rows.join("; ")}.`);
   }
   const arch = spacesOf(snap).filter((p) => p.archived);

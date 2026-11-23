@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Snapshot, Task } from './types.ts'
-import { doneWords, etaOf, folderName, folderOf, headerWhere, leftShort, leftWords, listOf, needsCount, ringOf, nowGroups, statusWord, taskLine, taskWhen, tstate } from './view.ts'
+import { doneWords, etaOf, folderName, folderOf, headerWhere, leftShort, leftWords, listOf, needsCount, placeOf, ringOf, nowGroups, spaceLabel, spaceName, spacesOf, statusWord, taskLine, taskWhen, tstate } from './view.ts'
 
 const task = (x: Partial<Task>): Task => ({ id: 'T-1', name: 'A task', place: 'shop', status: 'work', state: 'work', on: 'mini', created: '', age: '', ...x })
 
@@ -86,7 +86,7 @@ test('the ring shows the share done in every unfinished state; Ready and Done sh
 const snap = (x: Partial<Snapshot>): Snapshot => ({ name: '', host: 'mini', user: '', places: [], machines: [], tasks: [], automations: {}, artifacts: [], asks: {}, needs: [], settings: [], ...x })
 const place = (id: string, machine: string, x = {}) => ({ id, name: id, machine, level: 0 as const, status: 'idle' as const, mode: 'regular' as const, chat: id, ...x })
 
-test('the list: machines as headings, groups first, home spaces left out, archived by the filter', () => {
+test("the list: machines as headings, another machine's home space first, groups next, archived by the filter", () => {
   const s = snap({
     everything: 'home',
     places: [place('home', 'mini', { home: true }), place('shop', 'mini'), place('blog', 'mini', { archived: true }), place('vmhome', 'vm', { home: true }), place('garden', 'vm')],
@@ -98,6 +98,15 @@ test('the list: machines as headings, groups first, home spaces left out, archiv
   expect(active[0]!.groups[0]!.spaces.map((p) => p.id)).toEqual(['shop'])
   expect(active[1]!.spaces.map((p) => p.id)).toEqual(['garden'])
   expect(active[1]!.warn).toBe("Can't reach")
+  // every machine's home space: vm's is its first row; mini's is Everything, never a row of its own
+  expect(active.map((m) => m.home?.id)).toEqual([undefined, 'vmhome'])
+  expect(listOf(s, 'All')[1]!.home?.id).toBe('vmhome')
+  expect(listOf(s, 'Archived')[1]!.home).toBeUndefined()
+  expect(spaceLabel(s, 'vmhome')).toBe('~ on vm')
+  expect(spaceLabel(s, 'home')).toBe('Everything')
+  expect(spaceName(s, s.places[3]!)).toBe('~')
+  expect(placeOf(s, 'vmhome')?.id).toBe('vmhome')
+  expect(spacesOf(s).map((p) => p.id)).toEqual(['shop', 'blog', 'vmhome', 'garden'])
   expect(listOf(s, 'Archived')[0]!.spaces.map((p) => p.id)).toEqual(['blog'])
   expect(listOf(s, 'All')[0]!.groups[0]!.spaces.map((p) => p.id)).toEqual(['shop', 'blog'])
 })

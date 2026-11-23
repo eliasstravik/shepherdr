@@ -59,7 +59,7 @@ import { Shows } from "./show.ts";
 import { dictate, liveToken, cachedKey, refused } from "./dictate.ts";
 import { readUsage } from "../core/voice.js";
 import { sh, exec } from "./model.ts";
-import { folders, newSpace, newSpaceInfo } from "./spaces.ts";
+import { existedWords, folders, newSpace, newSpaceInfo } from "./spaces.ts";
 import { kindOf } from "../core/chat-reader.js";
 import * as SL from "../core/slash.js";
 import * as SCORE from "../core/settings.js";
@@ -1001,8 +1001,8 @@ const server = Bun.serve<{ who: string }>({
         // the page opens it once the sidebar has it: in the snapshot before the answer
         await model.waitSpace(made.place);
         // its agent didn't start: made, not a plain ok; the page opens it and says why (warning)
-        // the home folder here is Everything's (SHEP-296): it opens, said, never a second space there
-        if ("existed" in made) return json({ place: made.place, warning: "Everything already works in your home folder, so it's open now." });
+        // a folder with its space already (SHEP-296): that one opens, said, never a second space there
+        if ("existed" in made) return json({ place: made.place, existed: true, warning: existedWords(made, machine) });
         return json(made.error ? { place: made.place, ok: false, warning: made.error } : { place: made.place });
       } catch (err) { return json({ error: (err as Error).message }, 400); }
     }
