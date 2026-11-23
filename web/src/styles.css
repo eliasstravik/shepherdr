@@ -170,3 +170,16 @@ button:disabled{opacity:.5;cursor:default}
 /* a newer web app (SHEP-337): a small pill under the header, one tap reloads onto it */
 .upchip{position:fixed;z-index:19;top:calc(var(--hd) + 8px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px 0 10px;border-radius:999px;background:var(--fg);color:var(--canvas);box-shadow:var(--shadow);font-size:13px;line-height:18px;white-space:nowrap}
 .upchip b{font-weight:600}
+
+/* a space's icon (web/src/space-icon.tsx): an emoji or a picture at the # glyph's size, a picture a small rounded square
+   with a hairline that reads on dark and light; its own button left of the Name field, the field's height */
+.sic{width:var(--ic);height:var(--ic);flex:none;display:inline-grid;place-items:center;font-size:calc(var(--ic) - 2px);line-height:1;overflow:hidden}
+.sic.pic{object-fit:cover;border-radius:4px;outline:1px solid var(--line2);outline-offset:-1px}
+.sic.s16{width:16px;height:16px;font-size:14px}
+.nwi{display:flex;gap:8px;align-items:center;justify-self:stretch}
+.nwi>.inp{flex:1;min-width:0}
+.sicb{flex:none;width:var(--field);height:var(--field);display:grid;place-items:center;border-radius:8px;background:var(--well);box-shadow:inset 0 0 0 1px var(--line2);color:var(--muted)}
+.sicb:hover{background:var(--control)}
+.sicb:focus-visible{box-shadow:inset 0 0 0 1px var(--muted)}
+.sicb .sic,.sicb .i{width:22px;height:22px;font-size:20px}
+.sicb .sic.pic{border-radius:6px}

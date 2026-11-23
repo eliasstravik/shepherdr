@@ -14,6 +14,7 @@ import * as AGa from "../core/agents.js";
 import { answerCodex } from "./codex-ask.ts";
 const { CHOICE_KEY, choiceOf, withChoice, speedOf } = AGa as any;
 import * as SP from "../core/spaces.js";
+import { iconValue } from "../core/space-icon.js";
 const { READ, assistantOf, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, withOrder, withMachineOrder, DELETED, deletedSection, withRestoredSection } = SP as any;
 import type { Compat } from "./compat.ts";
 import { noteFailed, once, wentIn } from "./send-once.ts";
@@ -437,6 +438,8 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
   if (b?.type === "rename" && typeof b.id === "string" && typeof b.name === "string" && sh) {
     const name = b.name.trim().slice(0, 80);
     const icon = typeof b.emoji === "string" ? b.emoji.slice(0, 16) || null : undefined;
+    // a space's icon may be a picture too (core/space-icon.js checks it); a group's or a machine's is an emoji
+    const spaceIcon = b.emoji === undefined ? undefined : iconValue(b.emoji);
     if (sec(b.id)) { await sh.set("spaces-chat", withSectionName(bar(), sec(b.id), name, icon)); return { ok: true }; }
     if (b.id.startsWith("m:")) {
       // a machine's own name and emoji in the sidebar (this computer is the snapshot's host)
@@ -445,7 +448,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       return { ok: true };
     }
     // a space: its icon in the sidebar's data, its name in the list of spaces (shared "spaces")
-    if (icon !== undefined) await sh.set("spaces-chat", withIcon(bar(), b.id, icon));
+    if (spaceIcon !== undefined) await sh.set("spaces-chat", withIcon(bar(), b.id, spaceIcon));
     // an empty name (unname) gives it back the name of where it is: its repo's, else its folder's (core spaceName)
     if (name || b.unname === true) {
       const own: any[] = Array.isArray(sh.value("spaces")) ? sh.value("spaces") : [];
