@@ -80,7 +80,7 @@ export interface FrameMeta {
 
 /** panel → server; input goes in only while you drive */
 export type BrowserUp =
-  | { type: 'input_mouse'; eventType: string; x: number; y: number; button?: string; clickCount?: number; deltaX?: number; deltaY?: number; modifiers?: number }
+  | { type: 'input_mouse'; eventType: string; x: number; y: number; button?: string; buttons?: number; clickCount?: number; deltaX?: number; deltaY?: number; modifiers?: number }
   | { type: 'input_keyboard'; eventType: string; key?: string; code?: string; text?: string; windowsVirtualKeyCode?: number; modifiers?: number }
   | { type: 'input_touch'; eventType: string; touchPoints: { x: number; y: number; id?: number }[]; modifiers?: number }
   | { type: 'text'; text: string }

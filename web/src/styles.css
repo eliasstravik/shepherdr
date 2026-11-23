@@ -83,6 +83,26 @@ div.b[data-menu]{cursor:pointer}
 .scr{touch-action:none}
 .scr.idle{aspect-ratio:16/10}
 .app.phone .scr.idle{aspect-ratio:4/3}
+/* the Screen view in full screen: the whole device (the visible part, above an on-screen keyboard), always dark like a
+   video, the picture zoomed by hand (its transform), a slim bar on top that hides, the key row under it */
+.scrfull{position:fixed;left:0;right:0;top:0;height:var(--app-h,100dvh);z-index:30;display:flex;flex-direction:column;background:#000;color:var(--fg);--fg:#fafafa;--canvas:#0a0a0a;--sub:#d4d4d4;--muted:#a3a3a3;--control:rgb(255 255 255/.12);--control2:rgb(255 255 255/.2);--well:rgb(255 255 255/.08);--line2:rgb(255 255 255/.16);--term:#0a0a0a}
+.fbox{position:relative;flex:1;min-height:0;overflow:hidden}
+.scr.full{position:absolute;inset:0;border-radius:0;background:none;box-shadow:none;transform-origin:0 0;overflow:visible}
+.scr.full canvas{width:auto;height:auto}
+.scr.full.drive{box-shadow:none}
+.fsurf{position:absolute;inset:0;z-index:1;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.fbar{position:absolute;z-index:2;left:0;right:0;top:0;display:flex;align-items:center;gap:4px;padding:calc(4px + env(safe-area-inset-top)) calc(8px + env(safe-area-inset-right)) 4px calc(8px + env(safe-area-inset-left));background:rgb(10 10 10/.82);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px)}
+.fbar .ft{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--sec);line-height:var(--secl);color:var(--sub)}
+.fbar .addr{flex:1;min-width:0;margin:0}
+.fbar .addr .inp{height:var(--btns)}
+.fpill{position:absolute;z-index:2;top:calc(8px + env(safe-area-inset-top));right:calc(8px + env(safe-area-inset-right));display:flex;gap:2px;padding:2px;border-radius:999px;background:rgb(10 10 10/.7);animation:fpill .6s ease 2.5s forwards}
+.fpill .ib{border-radius:999px}
+.fpill:focus-within{animation:none}
+@keyframes fpill{to{opacity:.4}}
+@media(prefers-reduced-motion:reduce){.fpill{animation-duration:0s}}
+.fkeys{padding-bottom:calc(8px + env(safe-area-inset-bottom))}
+.fkeys button[aria-pressed="true"]{background:rgb(255 255 255/.3)}
+.ftype{position:absolute;left:0;bottom:0;width:1px;height:1px;opacity:0;border:0;padding:0;font-size:16px;caret-color:transparent}
 /* why a desktop can't be shown: its own line, the steps that fix it, a button (SHEP-347) */
 .desk-why{position:absolute;inset:0;padding:24px;align-content:center}
 .desk-why.flow{position:relative;inset:auto;min-height:240px}

@@ -18,6 +18,12 @@ import type { Chat, ScreenInfo, Snapshot, Task } from '@shared/types.ts'
 import { isEverything, machineLabel, placeOf, taskOf, tasksIn, tstate } from '@shared/view.ts'
 import { screenKey, screenRow } from './menu.ts'
 import { fit, keyEvent, modifiers, toPage, type Size } from '@plugins/browser/input.ts'
+import { browserPress, deskPress, enterDevice, keysymOf, leaveDevice, refit, wheelSteps, WHOLE, type Mods, type Pt, type View } from './full.ts'
+import { coarse, FullBar, KeyRow, pasteFrom, Surface, TypeBox, type Remote } from './fullview.tsx'
+
+/** the picture in full screen: how it is zoomed and moved, in a box this size */
+type Full = { view: View; box: Size } | null
+const zoomed = (f: Full): React.CSSProperties | undefined => (f ? { transform: `translate(${f.view.x}px, ${f.view.y}px) scale(${f.view.z})` } : undefined)
 
 type State = Extract<BrowserDown, { type: 'state' }>
 const RETRY_MS = 10_000
@@ -88,7 +94,7 @@ function useLink(key: string, onFrame: (data: string, width: number) => void) {
 
 /** The page as the agent's browser draws it: the latest frame wins. Driving, your clicks, keys and touches go to it;
  *  on a phone, tapping it brings up the phone's own keyboard. */
-function BrowserView({ k, drive, ring, send, state, onFrameRef }: { k: string; drive: boolean; ring: boolean; send: (m: BrowserUp) => void; state: State | null; onFrameRef: React.MutableRefObject<(data: string, width: number) => void> }) {
+function BrowserView({ k, drive, ring, send, state, onFrameRef, full, remoteRef }: { k: string; drive: boolean; ring: boolean; send: (m: BrowserUp) => void; state: State | null; onFrameRef: React.MutableRefObject<(data: string, width: number) => void>; full: Full; remoteRef: React.MutableRefObject<Remote | null> }) {
   const canvas = useRef<HTMLCanvasElement>(null)
   const typed = useRef<HTMLInputElement>(null)
   const phone = useUI((u) => u.phone)
@@ -97,12 +103,17 @@ function BrowserView({ k, drive, ring, send, state, onFrameRef }: { k: string; d
   const busy = useRef(false)
   const next = useRef<{ data: string; width: number } | null>(null)
   const [has, setHas] = useState(false)
+  const pageNow = useRef(page)
+  pageNow.current = page
+  const zoom = useRef(1)
+  zoom.current = full?.view.z ?? 1
 
   const draw = useCallback(() => {
     const c = canvas.current
     const b = bitmap.current
     if (!c || !b) return
-    const dpr = devicePixelRatio || 1
+    // zoomed in full screen: drawn sharper, as far as the picture has pixels
+    const dpr = (devicePixelRatio || 1) * Math.min(zoom.current, 3)
     // the box takes the picture's own shape, whatever size the pane has
     c.style.aspectRatio = `${b.width} / ${b.height}`
     const w = c.clientWidth
@@ -148,6 +159,30 @@ function BrowserView({ k, drive, ring, send, state, onFrameRef }: { k: string; d
     return () => ro.disconnect()
   }, [draw])
   useEffect(() => setHas(false), [k])
+  useEffect(draw, [full?.view.z, draw])
+  // full screen drives the page through this: a tap a click, a drag a drag, keys and text
+  useEffect(() => {
+    let held: 'left' | 'right' = 'left'
+    const m = (eventType: string, at: Pt, more: Partial<Extract<BrowserUp, { type: 'input_mouse' }>> = {}) => send({ type: 'input_mouse', eventType, x: Math.round(at.x), y: Math.round(at.y), button: 'none', clickCount: 0, ...more })
+    remoteRef.current = {
+      pic: () => (has ? pageNow.current : null),
+      act: (a) => {
+        if (a.t === 'hover') return m('mouseMoved', a.at)
+        if (a.t === 'down') { held = a.button; return m('mousePressed', a.at, { button: a.button, clickCount: a.count ?? 1, buttons: a.button === 'right' ? 2 : 1 }) }
+        if (a.t === 'move') return m('mouseMoved', a.at, { button: held, buttons: held === 'right' ? 2 : 1 })
+        if (a.t === 'up') return m('mouseReleased', a.at, { button: a.button, clickCount: a.count ?? 1 })
+        if (a.t === 'scroll') return m('mouseWheel', a.at, { deltaX: a.dx, deltaY: a.dy })
+        if (a.t === 'click') {
+          m('mouseMoved', a.at)
+          m('mousePressed', a.at, { button: a.button, clickCount: a.count, buttons: a.button === 'right' ? 2 : 1 })
+          m('mouseReleased', a.at, { button: a.button, clickCount: a.count })
+        }
+      },
+      press: (key, mods) => browserPress(key, mods).forEach(send),
+      text: (text) => send({ type: 'text', text }),
+    }
+    return () => { remoteRef.current = null }
+  }, [send, has])
 
   const at = (e: { clientX: number; clientY: number }) => {
     const c = canvas.current!
@@ -165,12 +200,13 @@ function BrowserView({ k, drive, ring, send, state, onFrameRef }: { k: string; d
     if (eventType === 'touchEnd' && phone) typed.current?.focus({ preventScroll: true })
   }
   const blank = !has && !state?.url
+  const r = full ? fit(full.box, page) : null
   return (
-    <div className={cx('scr', ring && 'drive', blank && 'idle')} tabIndex={drive ? 0 : -1} onKeyDown={(e) => { if (!drive || e.target !== e.currentTarget) return; const k1 = keyEvent(e.nativeEvent, 'keyDown'); if (k1) { e.preventDefault(); send(k1) } }} onKeyUp={(e) => { if (!drive || e.target !== e.currentTarget) return; const k1 = keyEvent(e.nativeEvent, 'keyUp'); if (k1) send(k1) }}>
+    <div className={cx('scr', ring && 'drive', blank && 'idle', full && 'full')} style={zoomed(full)} tabIndex={drive ? 0 : -1} onKeyDown={(e) => { if (!drive || e.target !== e.currentTarget) return; const k1 = keyEvent(e.nativeEvent, 'keyDown'); if (k1) { e.preventDefault(); send(k1) } }} onKeyUp={(e) => { if (!drive || e.target !== e.currentTarget) return; const k1 = keyEvent(e.nativeEvent, 'keyUp'); if (k1) send(k1) }}>
       <canvas
         ref={canvas}
         aria-label={drive ? 'Live view. Click and type' : 'Live view'}
-        style={{ display: blank ? 'none' : 'block' }}
+        style={{ display: blank ? 'none' : 'block', ...(r ? { position: 'absolute', left: r.x, top: r.y, width: r.w, height: r.h } : {}) }}
         onMouseDown={(e) => { e.currentTarget.parentElement?.focus(); mouse('mousePressed', e) }}
         onMouseUp={(e) => mouse('mouseReleased', e)}
         onMouseMove={(e) => e.buttons && mouse('mouseMoved', e, { button: 'none' })}
@@ -183,8 +219,8 @@ function BrowserView({ k, drive, ring, send, state, onFrameRef }: { k: string; d
       {/* why there is no page to show (its machine can't be reached, its tool isn't there), in its own line */}
       {blank && state?.error && <div className="empty desk-why" role="status"><b>{state.error}</b><span>Shepherdr looks again by itself.</span></div>}
       {/* a phone's own keyboard types into the page through this box */}
-      {drive && phone && <input ref={typed} aria-label="Type into the page" autoCapitalize="off" autoCorrect="off" style={{ position: 'absolute', opacity: 0, width: 1, height: 1, bottom: 0 }} onChange={(e) => { const t = e.target.value; e.target.value = ''; if (t) send({ type: 'text', text: t }) }} onKeyDown={(e) => { const k1 = e.key.length > 1 ? keyEvent(e.nativeEvent, 'keyDown') : null; if (k1) send(k1) }} />}
-      {!drive && <button type="button" className="veil" aria-label="Live view. Take over to click and type" onClick={() => notice('Take over to click and type')} />}
+      {drive && phone && !full && <input ref={typed} aria-label="Type into the page" autoCapitalize="off" autoCorrect="off" style={{ position: 'absolute', opacity: 0, width: 1, height: 1, bottom: 0 }} onChange={(e) => { const t = e.target.value; e.target.value = ''; if (t) send({ type: 'text', text: t }) }} onKeyDown={(e) => { const k1 = e.key.length > 1 ? keyEvent(e.nativeEvent, 'keyDown') : null; if (k1) send(k1) }} />}
+      {!drive && !full && <button type="button" className="veil" aria-label="Live view. Take over to click and type" onClick={() => notice('Take over to click and type')} />}
     </div>
   )
 }
@@ -232,11 +268,49 @@ function fixOf(code: string, onMac: string): { steps?: string[]; fix?: 'password
   }
 }
 
+/** what full screen drives on a desktop: pointer events straight to the screen client's link, in the remote's own px
+ *  (noVNC's own mouse handling reads its canvas, which full screen zooms), wheel steps for a scroll, and X keys */
+type Rfb = import('@novnc/novnc').default & { _fbWidth?: number; _fbHeight?: number; _sock?: unknown; _rfbConnectionState?: string; _viewOnly?: boolean }
+function deskRemote(r: Rfb): Remote {
+  let mask = 0
+  let carry: Pt = { x: 0, y: 0 }
+  const send = (at: Pt, m: number) => {
+    const msgs = (r.constructor as unknown as { messages?: { pointerEvent(sock: unknown, x: number, y: number, mask: number): void } }).messages
+    if (r._rfbConnectionState !== 'connected' || r._viewOnly || !msgs) return
+    msgs.pointerEvent(r._sock, Math.max(0, Math.round(at.x)), Math.max(0, Math.round(at.y)), m)
+  }
+  const bit = (b: 'left' | 'right') => (b === 'right' ? 4 : 1)
+  return {
+    pic: () => (r._fbWidth && r._fbHeight ? { w: r._fbWidth, h: r._fbHeight } : null),
+    act: (a) => {
+      if (a.t === 'hover' || a.t === 'move') return send(a.at, mask)
+      if (a.t === 'down') return send(a.at, (mask |= bit(a.button)))
+      if (a.t === 'up') return send(a.at, (mask &= ~bit(a.button)))
+      if (a.t === 'click') {
+        send(a.at, 0)
+        for (let i = 0; i < a.count; i++) { send(a.at, bit(a.button)); send(a.at, 0) }
+        mask = 0
+        return
+      }
+      if (a.t === 'scroll') {
+        const s = wheelSteps(carry, a.dx, a.dy)
+        carry = s.carry
+        // buttons 4 and 5 scroll up and down, 6 and 7 left and right
+        const step = (b: number, n: number) => { for (let i = 0; i < n; i++) { send(a.at, mask | b); send(a.at, mask) } }
+        step(s.y > 0 ? 16 : 8, Math.abs(s.y))
+        step(s.x > 0 ? 64 : 32, Math.abs(s.x))
+      }
+    },
+    press: (key, mods) => deskPress(key, mods).forEach(([sym, code, down]) => r.sendKey(sym, code, down)),
+    text: (t) => { for (const ch of t) ch === '\n' ? r.sendKey(0xff0d, 'Enter') : r.sendKey(keysymOf(ch), null) },
+  }
+}
+
 /** A desktop, drawn by a screen client (VNC) through Shepherdr's own connection. On a phone: pinch to zoom, drag to
  *  pan, tap to click, long-press to right-click, and a keyboard button with the extra keys. Before it connects, the
  *  service says whether it can be shown: its own display is started when it has none ("Starting the desktop…"), and
  *  a reason it can't gets its own line with what fixes it. It connects again by itself when the display comes back. */
-function DesktopView({ k, drive, ring, apiRef, busy, onMac }: { k: string; drive: boolean; ring: boolean; apiRef: React.MutableRefObject<{ paste(t: string): void; shot(): string | null } | null>; busy?: string; onMac: string }) {
+function DesktopView({ k, drive, ring, apiRef, busy, onMac, full, remoteRef }: { k: string; drive: boolean; ring: boolean; apiRef: React.MutableRefObject<{ paste(t: string): void; shot(): string | null } | null>; busy?: string; onMac: string; full: Full; remoteRef: React.MutableRefObject<Remote | null> }) {
   const snap = useSnap()
   const host = useRef<HTMLDivElement>(null)
   const typed = useRef<HTMLInputElement>(null)
@@ -271,13 +345,14 @@ function DesktopView({ k, drive, ring, apiRef, busy, onMac }: { k: string; drive
       r.addEventListener('connect', () => setStatus('live'))
       // the display went (or never came): ask why, and connect again once it is back
       r.addEventListener('disconnect', () => {
-        if (rfb.current === r) { rfb.current = null; apiRef.current = null }
+        if (rfb.current === r) { rfb.current = null; apiRef.current = null; remoteRef.current = null }
         if (gone) return
         setStatus('opening')
         later(() => void check(), 1000)
       })
       rfb.current = r
       apiRef.current = { paste: (t) => r.clipboardPasteFrom(t), shot: () => { try { return r.toDataURL('image/png') } catch { return null } } }
+      remoteRef.current = deskRemote(r)
     })
     setStatus('opening')
     void check()
@@ -287,6 +362,7 @@ function DesktopView({ k, drive, ring, apiRef, busy, onMac }: { k: string; drive
       rfb.current?.disconnect()
       rfb.current = null
       apiRef.current = null
+      remoteRef.current = null
     }
   }, [k, tries, held])
   useEffect(() => {
@@ -299,7 +375,7 @@ function DesktopView({ k, drive, ring, apiRef, busy, onMac }: { k: string; drive
   const KEYS: [string, number, string][] = [['esc', 0xff1b, 'Escape'], ['tab', 0xff09, 'Tab'], ['←', 0xff51, 'ArrowLeft'], ['↑', 0xff52, 'ArrowUp'], ['↓', 0xff54, 'ArrowDown'], ['→', 0xff53, 'ArrowRight']]
   return (
     <>
-      <div className={cx('scr', ring && 'drive')} style={{ aspectRatio: held || (failed && failed.code !== 'starting') ? undefined : phone ? '4/3' : '16/10' }}>
+      <div className={cx('scr', ring && 'drive', full && 'full')} style={full ? zoomed(full) : { aspectRatio: held || (failed && failed.code !== 'starting') ? undefined : phone ? '4/3' : '16/10' }}>
         <div ref={host} style={{ position: 'absolute', inset: 0 }} />
         {held ? (
           <div className="empty desk-why flow" role="status">
@@ -323,9 +399,9 @@ function DesktopView({ k, drive, ring, apiRef, busy, onMac }: { k: string; drive
             </div>
           </div>
         ) : null}
-        {!drive && status === 'live' && <button type="button" className="veil" aria-label="Live view. Take over to click and type" onClick={() => notice('Take over to click and type')} />}
+        {!drive && !full && status === 'live' && <button type="button" className="veil" aria-label="Live view. Take over to click and type" onClick={() => notice('Take over to click and type')} />}
       </div>
-      {drive && phone && status === 'live' && (
+      {drive && phone && !full && status === 'live' && (
         <div className="keys" style={{ background: 'none', padding: '8px 0 0' }}>
           <button type="button" aria-label="Keyboard" style={{ background: 'var(--control)', color: 'var(--fg)' }} onClick={() => typed.current?.focus()}><I n="term" c="s16" /></button>
           {KEYS.map(([l, sym, code]) => <button type="button" key={code} aria-label={`${code} key`} style={{ background: 'var(--control)', color: 'var(--fg)' }} onClick={() => rfb.current?.sendKey(sym, code)}>{l}</button>)}
@@ -350,6 +426,82 @@ function ScreenPane() {
   const [addr, setAddr] = useState<string | null>(null)
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => setAddr(null), [scr?.key, state?.url])
+
+  // full screen: the picture fills the device, zoomed by hand; the keyboard types into it
+  const full = ui.scrFull && !!scr
+  const remote = useRef<Remote | null>(null)
+  const driveNow = useRef(false)
+  // what the full screen's touches and keys reach: nothing remote until Take over
+  const gate = useRef<Remote>({
+    pic: () => remote.current?.pic() ?? null,
+    act: (a) => { if (driveNow.current) remote.current?.act(a) },
+    press: (k1, m) => { if (driveNow.current) remote.current?.press(k1, m) },
+    text: (t) => { if (driveNow.current) remote.current?.text(t) },
+  })
+  const boxEl = useRef<HTMLDivElement>(null)
+  const typing = useRef<HTMLInputElement>(null)
+  const spot = useRef<Pt | null>(null)
+  const device = useRef(false)
+  const [box, setBox] = useState<Size>({ w: 0, h: 0 })
+  const [view, setView] = useState<View>(WHOLE)
+  const [barOn, setBarOn] = useState(true)
+  const [kb, setKb] = useState(false)
+  const [rowOn, setRowOn] = useState(false)
+  const [armed, setArmed] = useState<Mods>({})
+  useEffect(() => setView(WHOLE), [scr?.key, scr?.src])
+  // turned: the whole picture again; the keyboard came or went: the same size, the spot last touched in view
+  useLayoutEffect(() => {
+    const el = boxEl.current
+    if (!full || !el) return
+    let was: Size = { w: 0, h: 0 }
+    const ro = new ResizeObserver(() => {
+      const now = { w: el.clientWidth, h: el.clientHeight }
+      const pic = gate.current.pic()
+      setView((v) => (pic ? refit(v, was, now, pic, spot.current) : WHOLE))
+      was = now
+      setBox(now)
+    })
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [full])
+  const leaveFull = () => {
+    const st = history.state as { step?: { scrFull?: boolean } } | null
+    if (st?.step?.scrFull) history.back()
+    else setUI({ scrFull: false })
+  }
+  const enterFull = () => {
+    setUI({ scrFull: true })
+    setBarOn(true)
+    // the browser's own full screen where it allows it; a real keyboard's Esc and shortcuts then reach the screen
+    void enterDevice().then((ok) => {
+      device.current = ok
+      const kl = (navigator as Navigator & { keyboard?: { lock?: () => Promise<void> } }).keyboard
+      if (ok && !coarse()) kl?.lock?.().catch(() => undefined)
+    })
+  }
+  useEffect(() => {
+    if (full) {
+      // a computer's keyboard types into the screen at once; a phone's comes up with the keyboard button
+      if (!coarse()) setTimeout(() => typing.current?.focus({ preventScroll: true }), 0)
+      // the browser's full screen ended (Esc, the system's Back): the view leaves it too
+      const off = () => {
+        if (document.fullscreenElement || !device.current) return
+        device.current = false
+        if (getState().ui.scrFull) leaveFull()
+      }
+      document.addEventListener('fullscreenchange', off)
+      return () => document.removeEventListener('fullscreenchange', off)
+    }
+    device.current = false
+    ;(navigator as Navigator & { keyboard?: { unlock?: () => void } }).keyboard?.unlock?.()
+    void leaveDevice()
+    setKb(false)
+    setRowOn(false)
+    setArmed({})
+    setView(WHOLE)
+  }, [full])
+  // the Screen view closed while full: full screen goes with it
+  useEffect(() => () => { if (getState().ui.scrFull) setUI({ scrFull: false }) }, [])
   if (!snap || !scr) return null
   const k = scr.key
   const sc = infoOf(snap, k)
@@ -361,6 +513,7 @@ function ScreenPane() {
   const isIdle = !sc.active && !hands && !busy
   const driving = scr.drive || state?.driver === 'you'
   const drive = driving || isIdle
+  driveNow.current = drive
   const setScr = (p: Partial<ScreenAt>) => setUI({ scr: { ...scr, ...p } })
   const mach = machineLabel(snap, sc.d?.of ?? machine)
   const sub = (kind === 'chat' ? `${place && !isEverything(snap, place) ? `#${placeOf(snap, place)?.name ?? ''}` : 'Everything'} on ${mach}` : kind === 'machine' ? '' : mach) + (src === 'd' ? `${kind === 'machine' ? '' : ' · '}${sc.d?.own ? 'its own desktop' : 'shared desktop'}` : '')
@@ -399,6 +552,7 @@ function ScreenPane() {
   }
   const menu = (anchor: Element) =>
     openMenu(anchor, [
+      { icon: 'expand', label: 'Full screen', run: enterFull },
       { icon: 'ext', label: 'Open in a new tab', run: () => void window.open(`?pane=screen&screen=${encodeURIComponent(k)}`, '_blank', 'noopener') },
       { icon: 'copy', label: 'Paste from your clipboard', run: () => void navigator.clipboard?.readText().then((text) => { if (!drive) return notice('Take over to paste'); if (src === 'd') desk.current?.paste(text); else send({ type: 'text', text }); notice('Pasted') }).catch(() => notice('This browser did not let Shepherdr read your clipboard.')) },
       // a site that refuses an automated browser: the same address in a normal browser on that agent's desktop
@@ -406,10 +560,12 @@ function ScreenPane() {
       { icon: 'doc', label: kind === 'task' ? 'Save a screenshot to the task' : 'Save a screenshot', run: () => void shot() },
     ])
   const url = addr ?? shortUrl(state?.url ?? sc.b?.url ?? '')
+  const fullAt: Full = full && box.w ? { view, box } : null
   return (
     <PaneFrame
       head={(scd) => (
         <Hd back={kind === 'task' || ph ? { label: kind === 'task' ? 'Back to the task' : 'Back', run: back } : undefined} title={t ? t.name : kind === 'chat' ? 'Screen' : mach} sub={sub} pad={kind === 'task' || ph ? undefined : 4} scrolled={scd}>
+          <IB icon="expand" label="Full screen" onClick={enterFull} />
           <IB icon="dots" label="More" aria-haspopup="menu" onClick={(e) => menu(e.currentTarget)} />
           {!ph && <IB icon="x" label="Close" onClick={() => togglePane(null)} />}
         </Hd>
@@ -439,8 +595,40 @@ function ScreenPane() {
           <input className="inp" name="addr" aria-label="Address" placeholder="Search or type an address" value={url} autoComplete="off" autoCapitalize="off" enterKeyHint="go" disabled={!drive} onChange={(e) => setAddr(e.target.value)} onKeyDown={(e) => { if (e.key !== 'Enter' || !url.trim()) return; send({ type: 'go', url: toUrl(url) }); bump(); e.currentTarget.blur() }} />
         </div>
       )}
-      <div onPointerDown={bump} onKeyDown={bump}>
-        {snap.demo ? <DemoPicture key={`${k}:${src}`} k={k} drive={drive} desktop={src === 'd'} idle={isIdle && src === 'b'} onContinued={() => setAddr('billing.example.com/invoices')} /> : src === 'b' ? <BrowserView k={k} drive={drive} ring={driving} send={send} state={state} onFrameRef={frame} /> : <DesktopView k={k} drive={drive} ring={driving} apiRef={desk} busy={sc.d?.busy} onMac={sc.d?.own === false && machine !== snap.host ? mach : 'the Mac'} />}
+      {/* the same picture in the pane and in full screen (never connected again): full screen only wraps it */}
+      <div className={full ? 'scrfull' : undefined} onPointerDown={bump} onKeyDown={bump}>
+        <div ref={boxEl} className={full ? 'fbox' : undefined}>
+          {snap.demo ? <DemoPicture key={`${k}:${src}`} k={k} drive={drive} desktop={src === 'd'} idle={isIdle && src === 'b'} onContinued={() => setAddr('billing.example.com/invoices')} /> : src === 'b' ? <BrowserView k={k} drive={drive} ring={driving} send={send} state={state} onFrameRef={frame} full={fullAt} remoteRef={remote} /> : <DesktopView k={k} drive={drive} ring={driving} apiRef={desk} busy={sc.d?.busy} onMac={sc.d?.own === false && machine !== snap.host ? mach : 'the Mac'} full={fullAt} remoteRef={remote} />}
+          {full && !snap.demo ? <Surface remote={gate} drive={drive} view={view} setView={setView} box={box} spot={spot} typing={typing} onBlocked={() => { setBarOn(true); notice('Take over to click and type') }} /> : null}
+          {full ? (
+            <FullBar
+              shown={barOn}
+              setShown={setBarOn}
+              close={leaveFull}
+              title={t ? t.name : src === 'b' ? shortUrl(state?.url ?? '') : mach}
+              addr={src === 'b' ? (
+                <div className="addr faddr">
+                  <IB icon="reload" label="Reload" onClick={() => send({ type: 'reload' })} />
+                  <input className="inp" name="faddr" aria-label="Address" placeholder="Search or type an address" value={url} autoComplete="off" autoCapitalize="off" enterKeyHint="go" disabled={!drive} onChange={(e) => setAddr(e.target.value)} onKeyDown={(e) => { if (e.key !== 'Enter' || !url.trim()) return; send({ type: 'go', url: toUrl(url) }); bump(); e.currentTarget.blur() }} />
+                </div>
+              ) : undefined}
+              canType={drive}
+              kb={coarse() ? kb : rowOn}
+              keyboard={() => {
+                if (!coarse()) { setRowOn(!rowOn); typing.current?.focus({ preventScroll: true }); return }
+                if (kb) typing.current?.blur()
+                else typing.current?.focus({ preventScroll: true })
+              }}
+              driving={driving}
+              hands={hands}
+              idle={isIdle}
+              take={take}
+              handBack={() => handBack()}
+            />
+          ) : null}
+        </div>
+        {full && drive && (coarse() ? kb : rowOn) ? <KeyRow remote={gate} armed={armed} setArmed={setArmed} desk={src === 'd'} mac={sc.d?.own === false} paste={() => pasteFrom(gate)} /> : null}
+        {full && drive ? <TypeBox remote={gate} armed={armed} setArmed={setArmed} onFocus={setKb} inputRef={typing} /> : null}
       </div>
     </PaneFrame>
   )
