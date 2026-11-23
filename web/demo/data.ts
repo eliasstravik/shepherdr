@@ -202,6 +202,12 @@ const LONG_BRIEF = [
 
 const byPay = { ref: 'SHOP-14', title: 'Switch payment provider', chat: 'SHOP-14/worker' }
 const byPhoto = { ref: 'GARDEN-4', title: 'Photo upload', chat: 'vm:GARDEN-4/worker' }
+/** a message between agents (SHEP-368): one quiet row, in the sender's chat ("to") and the receiver's ("from") */
+const relay = (dir: 'to' | 'from', name: string, text: string, at: number, x: Partial<NonNullable<Message['relay']>> = {}): Message =>
+  ({ id: `m${++n}`, who: dir === 'to' ? 'agent' : 'you', text, at, brief: { label: `Message ${dir} ${name}` }, relay: { dir, name, ...x } })
+const LONG_NOTE = 'The supplier quotes are in. Short version: the second supplier is cheapest per unit but ships in six weeks; the first ships in one.\n\n' +
+  'Before the checkout change merges, can you check whether the bigger button still fits the order summary on the smallest phones? The last change pushed the total below the fold on a 360 px screen, and people missed it.\n\n' +
+  'Nothing else needs you today. I will tell you here when the quotes task is ready.'
 const chat = (key: string, messages: Message[], agent: Chat['agent'], x: Partial<Chat> = {}): Chat => ({ key, messages, cli: agent?.kind ?? 'claude', top: true, agent, ...x })
 const sonnet = { kind: 'claude', model: 'sonnet', modelLabel: 'Sonnet 5.5', effort: 'medium' }
 const opus = { kind: 'claude', model: 'opus', modelLabel: 'Opus 5.5', effort: 'high' }
@@ -218,6 +224,10 @@ export const chats: Record<string, Chat> = Object.fromEntries(
       a('Added Bigger checkout button on phones to #shop and started it.', { at: today(9, 12), reactions: [{ emoji: '🎉', by: 'me' }] }),
       did(today(9, 12), [['run', 'herdr-task add', '"Bigger checkout button on phones"'], ['run', 'herdr-task start', '"Bigger checkout button on phones"']]),
       a("I'll tell you here when it's ready.", { at: today(9, 13), reactions: [{ emoji: '👍', by: 'me' }] }),
+      relay('to', '#root on vm', 'Can you check the disk on the vm? A task there said it is nearly full.', today(9, 14), { how: 'assistant', state: 'delivered' }),
+      relay('from', '#shop', LONG_NOTE, today(9, 20), { files: ['supplier-quotes-november.pdf'] }),
+      relay('to', '#garden-app on vm', 'The photo task waits on a library. Pillow is fine to install.', today(9, 22), { how: 'assistant', state: 'waiting', why: 'the person is writing to it' }),
+      relay('to', 'Assistant on studio', 'Is the site build green again?', today(9, 23), { how: 'assistant', state: 'failed', why: "studio can't be reached" }),
       { id: `m${++n}`, who: 'agent', news: { task: 'SHOP-14', ref: 'SHOP-14', mark: 'needs', what: '', text: "Which provider should I switch to, Stripe or Adyen? I'd go with Stripe." } },
       ask('q-pay', '', byPay, ['Stripe', 'Adyen']),
       { id: `m${++n}`, who: 'agent', news: { task: 'vm:GARDEN-4', ref: 'GARDEN-4', mark: 'needs', what: '', text: 'I need an image library to resize the photos.' } },
@@ -231,7 +241,11 @@ export const chats: Record<string, Chat> = Object.fromEntries(
       // links to the app itself, as `herdr-artifact link` prints them: they open in the app (SHEP-339)
       a('The quotes are compared: [Supplier quotes compared](APP/?artifact=a-quotes). Its task: [Compare supplier quotes](APP/?task=NOTES-4). The [shop space](APP/?place=p:mac-mini:shop). The suppliers\' own site: [example.com](https://example.com/).', { suggest: 'Show me what needs me' }),
     ], sonnet),
-    chat(P.shop, [a('I made a mock-up of the new checkout. Have a look.'), { id: `m${++n}`, who: 'agent', artifact: { id: 'a-mock', v: 3 } }, a('Started SHOP-15, added from Everything.'), { id: `m${++n}`, who: 'agent', news: { task: 'SHOP-14', ref: 'SHOP-14', mark: 'needs', what: '', text: "Which provider should I switch to, Stripe or Adyen? I'd go with Stripe." } }, ask('q-pay', '', byPay, ['Stripe', 'Adyen']), a('SHOP-16 started on its schedule in #shop. It found 3 packages behind and is updating them.', { suggest: 'How is the checkout button going?' })], sonnet),
+    chat(P.shop, [relay('from', 'Everything', LONG_NOTE, today(9, 20) - 2 * min), relay('to', 'Everything', LONG_NOTE, today(9, 20), { how: 'assistant', state: 'delivered' }),
+      relay('to', 'Bigger checkout button on phones', 'Keep the total above the fold on a 360 px screen too.', today(9, 25), { how: 'reply', state: 'delivered' }),
+      relay('from', 'Bigger checkout button on phones', 'Done: the total stays above the fold at 360 px. Screenshot in my chat.', today(9, 40)),
+      relay('to', 'Faster product search', 'Fix what keeps its pull request from merging.', today(9, 41), { how: 'fix', state: 'waiting', why: 'its agent stopped; it goes to its next one' }),
+      a('I made a mock-up of the new checkout. Have a look.'), { id: `m${++n}`, who: 'agent', artifact: { id: 'a-mock', v: 3 } }, a('Started SHOP-15, added from Everything.'), { id: `m${++n}`, who: 'agent', news: { task: 'SHOP-14', ref: 'SHOP-14', mark: 'needs', what: '', text: "Which provider should I switch to, Stripe or Adyen? I'd go with Stripe." } }, ask('q-pay', '', byPay, ['Stripe', 'Adyen']), a('SHOP-16 started on its schedule in #shop. It found 3 packages behind and is updating them.', { suggest: 'How is the checkout button going?' })], sonnet),
     // working, nothing written yet: the working sign alone (SHEP-313)
     chat(P.blog, [a('To see it yourself, run this in the blog folder:\n\n```\nbun run dev\n```'), me('The link to the archive is broken too. Can you fix it?', { reactions: [{ emoji: '👍', by: 'both' }] })], sonnet, { working: true, doing: "Running python3 - <<'EOF' p='web/src/archive.ts'" }),
     chat(P.notes, [], sonnet),
@@ -242,7 +256,7 @@ export const chats: Record<string, Chat> = Object.fromEntries(
     chat('NOTES-4/worker', [a('I read the three quotes in your notes folder and wrote up a comparison.')], opus),
     chat('vm:GARDEN-4/worker', permQ().map((x, i) => (i ? x : { ...x, suggest: 'Allow it once' })), opus),
     chat('SHOP-17/worker', [a("I'm downloading October's invoices. The billing portal sent a sign-in code to your phone, so I need you for this one step.")], opus),
-    chat('SHOP-15/worker', [brief('Bigger checkout button on phones', LONG_BRIEF, 'read', NOW - 10 * min), a('Started. Making the checkout button full width on phones.'), did(NOW - 8 * min, [['read', 'Read checkout.css', ''], ['edit', 'Edit checkout.css', '+6 −2'], ['run', 'Run bun test', 'passed'], ['edit', 'Edit checkout.test.ts', '+12']], 'Ran 4 commands · edited 2 files'), a('Changing the button now. About 10 minutes left.', { suggest: 'Show me a screenshot when it is done' })], opus, { working: true, doing: "Running python3 - <<'EOF' p='web/checkout.css'", live: { id: 'live', at: NOW, rows: [], steps: 0 } }),
+    chat('SHOP-15/worker', [brief('Bigger checkout button on phones', LONG_BRIEF, 'read', NOW - 10 * min), a('Started. Making the checkout button full width on phones.'), relay('from', 'Assistant', 'Keep the total above the fold on a 360 px screen too.', NOW - 9 * min), did(NOW - 8 * min, [['read', 'Read checkout.css', ''], ['edit', 'Edit checkout.css', '+6 −2'], ['run', 'Run bun test', 'passed'], ['edit', 'Edit checkout.test.ts', '+12']], 'Ran 4 commands · edited 2 files'), relay('to', 'Assistant', 'Done: the total stays above the fold at 360 px. Screenshot in my chat.', NOW - 2 * min, { how: 'hc', state: 'delivered' }), a('Changing the button now. About 10 minutes left.', { suggest: 'Show me a screenshot when it is done' })], opus, { working: true, doing: "Running python3 - <<'EOF' p='web/checkout.css'", live: { id: 'live', at: NOW, rows: [], steps: 0 } }),
     // its agent just started: the brief sent, not taken in yet, and words for it starting
     chat('SHOP-19/worker', [brief('Product page reviews', 'Show the three newest reviews under each product, with their stars. A product with none says "No reviews yet."', 'sent', NOW - min)], opus),
     // queued: no agent yet, its brief waits to be sent

@@ -87,8 +87,10 @@ const stepRow = (s: any, i: number) => ({ key: `${s.id ?? i}`, kind: STEP[s.kind
 export async function activity(reader: any, id: string): Promise<ActivityAnswer> {
   const x = (reader?.conv?.items ?? []).find((i: any) => i.id === id && i.kind === "tools");
   if (!x) return { error: "That turn isn't in the chat any more." };
-  const outs: Map<string, string> = await reader.results?.(x.steps).catch(() => new Map()) ?? new Map();
-  return { steps: x.steps.map((s: any, i: number) => ({ id: `${s.id ?? i}`, kind: STEP[s.kind] ?? "other", tool: s.kind, at: 0, end: 1, title: s.line, doing: s.line, target: "", ...(outs.has(s.id) ? { out: outs.get(s.id) } : {}) })) };
+  // (a call that only sent a message is that message's own row: not here)
+  const steps = x.steps.filter((s: any) => !s.relay);
+  const outs: Map<string, string> = await reader.results?.(steps).catch(() => new Map()) ?? new Map();
+  return { steps: steps.map((s: any, i: number) => ({ id: `${s.id ?? i}`, kind: STEP[s.kind] ?? "other", tool: s.kind, at: 0, end: 1, title: s.line, doing: s.line, target: "", ...(outs.has(s.id) ? { out: outs.get(s.id) } : {}) })) };
 }
 
 /** An artifact (herdr-artifact list) as 2.1's: its versions newest first, which space it belongs to (its folder's,
@@ -525,6 +527,12 @@ export class Compat {
     // who this chat's own agent is when it sends one ("Assistant → SHEP-4")
     const taskLabel = String(t?.labels?.["herdr.task"] ?? "");
     const peers = { machineName: (m: string) => this.machineNames.get(m) ?? null, here: machine ?? here };
+    // a reply or a fix the chat's agent sent a task, by its id ("4", "#4", "SHOP-4"): that task's title
+    const taskTitle = (id: string) => {
+      const v = String(id ?? "").replace(/^#/, "").toLowerCase();
+      const is = (r: any) => String(r.ref ?? "").toLowerCase() === v || String(r.id ?? "") === v;
+      return (spaceRows.find(is) ?? this.rows.find(is))?.title ?? null;
+    };
     const self = selfName({ assistant: key.startsWith("p:"), task: taskLabel ? workerOf.get(this.chats.get(key) ?? "") ?? (/^[a-z]+-\d+$/i.test(taskLabel) ? "Task" : null) : null, kind: reader.kind });
     const news = space ? newsTimeline(items, new Map(spaceRows.map((r) => [r.ref, { ...r, status: r.section }])), { start: reader.start }) : [];
     const newsLine = (e: any): Message => {
@@ -574,7 +582,11 @@ export class Compat {
         briefShown = true;
       } else if (brief) {
         const restart = /^<restart>/.test(x.text ?? "");
-        messages.push({ id: x.id, who: "you", at: x.at, text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, brief: { label: brief, ...(restart ? { bare: true } : {}), ...(x.from ? { from: fromName(x, sender, peers) } : {}) } });
+        // another agent's message: its row says who sent it, opening to its words and the files it came with
+        const from = x.from ? fromName(x, sender, peers) : null;
+        const files = (x.paths ?? []).map((f: string) => f.split("/").pop());
+        messages.push({ id: x.id, who: "you", at: x.at, text: restart ? x.text.replace(/<\/?restart>/g, "") : x.from ? unsigned(x.text) : x.text, brief: { label: brief, ...(restart ? { bare: true } : {}), ...(from ? { from } : {}) },
+          ...(from ? { relay: { dir: "from", name: from, ...(files.length ? { files } : {}) } } : {}) } as Message);
       } else if (x.kind === "user" && (x.text || x.paths?.length || x.images)) {
         const sentCid = sends.length && !x.from ? sentAs(sends, x, takenSends) : undefined;
         const cid = sentCid ? { cid: sentCid } : {};
@@ -598,8 +610,9 @@ export class Compat {
       }
       else if (x.kind === "sent" && x.text) {
         // a message it sent another agent: "Assistant → SHEP-4", a quiet row that opens to its words
-        const to = sentTo(x, (a: string) => sender(a, ""));
-        messages.push({ id: x.id, who: "agent", at: x.at, text: unsigned(x.text), brief: { label: `Message to ${to}`, from: self, to } });
+        const to = sentTo(x, (a: string) => sender(a, ""), taskTitle);
+        messages.push({ id: x.id, who: "agent", at: x.at, text: unsigned(x.text), brief: { label: `Message to ${to}`, from: self, to },
+          relay: { dir: "to", name: to, how: x.how, ...(x.state ? { state: x.state } : {}), ...(x.why ? { why: x.why } : {}) } } as Message);
       }
       else if (x.kind === "agent" && x.text) {
         // the pictures and videos it put in its words (core/chat-view.js mediaIn), each right under them as a file of
@@ -629,8 +642,11 @@ export class Compat {
         else if (Date.now() - (x.at ?? 0) < 180000) messages.push({ id: x.id, who: "agent", at: x.at, publishing: true });
       } else if (x.kind === "tools" && x.steps?.length) {
         // 3.0's tools row: one quiet line ("Ran a command"), opening to each step's line and what it printed
-        const rows = x.steps.map(stepRow);
-        messages.push({ id: x.id, who: "agent", at, activity: { id: x.id, at, end: at, rows, steps: x.steps.length, summary: summary(x.steps) } });
+        // a call that only sent another agent a message is that message's own row, not a command here too
+        const steps = x.steps.filter((s: any) => !s.relay);
+        if (!steps.length) continue;
+        const rows = steps.map(stepRow);
+        messages.push({ id: x.id, who: "agent", at, activity: { id: x.id, at, end: at, rows, steps: steps.length, summary: summary(steps) } });
       }
     }
     while (mi < made.length) messages.push(newsLine(made[mi++]));

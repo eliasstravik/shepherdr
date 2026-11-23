@@ -630,6 +630,12 @@ export interface Message {
    *  from: who sent it ("Reviewer", "Assistant on m3"), only on a message from another agent, drawn as a message;
    *  to: whom, on a message this chat's own agent sent another (from is then itself: "Assistant" → "SHEP-4") */
   brief?: { label: string; bare?: boolean; from?: string; to?: string }
+  /** a message between agents (SHEP-368), as one quiet row that opens to its words (text): to whom this chat's agent
+   *  sent it (dir "to": "Message to #root on vm-demo", "Message to Fix login") or who sent it here (dir "from").
+   *  how: what sent it (hc, assistant, reply, fix); state: whether it got there, once its sender's command said
+   *  (delivered; waiting: held for later, as the person is writing to it or its agent stopped; failed: not delivered,
+   *  why in words); files: the names of the files it came with */
+  relay?: Relay
   /** a task's brief, the first message of its chat (SHEP-330): what its agent was given, from the moment the task exists */
   taskBrief?: TaskBrief
   /** 3.0's task news line in an Assistant's chat (core/chat-view.js newsWords): its mark, what happened, the rest;
@@ -649,6 +655,16 @@ export interface Message {
   /** the tasks your message mentions (#HAT-1), as 3.0's chips under it: a press opens the task */
   mentions?: { task: string; ref: string; title: string }[]
   at?: number
+}
+
+/** a message between agents, drawn as one quiet row (Message.relay) */
+export interface Relay {
+  dir: 'to' | 'from'
+  name: string
+  how?: 'hc' | 'assistant' | 'reply' | 'fix'
+  state?: 'delivered' | 'waiting' | 'failed'
+  why?: string
+  files?: string[]
 }
 
 /** a secret an agent asked for by name: the human types or pastes it in a masked box, for one of the levels offered;
