@@ -40,8 +40,8 @@ export function folderOf(snap: Snapshot, p: Pick<Place, 'machine' | 'where' | 'f
   return { short, full: p.folder || short, machine: p.machine && p.machine !== snap.host ? machineLabel(snap, p.machine) : null }
 }
 
-/** a folder as it shows, in words where it would be a lone symbol (SHEP-316): ~ is Home folder, / is Root folder */
-export const folderName = (path: string) => (path === '~' ? 'Home folder' : path === '/' || path === '' ? 'Root folder' : path)
+/** a folder as it shows: its path as it is, ~ for the home folder and / for the root, never a made-up name */
+export const folderName = (path: string) => path || '/'
 export const machineLabel = (snap: Snapshot, key: string) => machineOf(snap, key)?.name ?? key
 
 /** a machine the serving one can't reach now */
@@ -273,8 +273,8 @@ export const taskInSpace = (t: Task, placeId: string) => t.place === placeId || 
 /** a task's folder as one key: its machine and folder */
 export const workKey = (t: Task) => (t.work ? `${t.on}:${t.work.folder}` : '')
 
-/** "shepherdr", "Home folder": the repo's or folder's name */
-export const workName = (t: Task) => (t.work ? (t.work.name === '~' ? 'Home folder' : folderName(t.work.name)) : '')
+/** "shepherdr", "~", "~/notes": a repo by its name, any other folder by its path */
+export const workName = (t: Task) => (t.work ? (t.work.repo ? t.work.name : folderName(t.work.short || t.work.name)) : '')
 
 /** what a task's tag says: where it works, and its machine only when there is more than one ("shepherdr · mac-mini") */
 export function workWords(snap: Snapshot, t: Task): string {

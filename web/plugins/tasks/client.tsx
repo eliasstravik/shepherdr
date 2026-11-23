@@ -456,7 +456,7 @@ function TaskRow({ snap, t, tag }: { snap: Snapshot; t: Task; tag: boolean }) {
 function RepoHead({ snap, r }: { snap: Snapshot; r: Repo }) {
   const sp = spaceOnFolder(snap, r)
   const n = r.tasks.length
-  const facts = [r.short, snap.machines.length > 1 ? machineLabel(snap, r.machine) : '', `${n} ${n === 1 ? 'task' : 'tasks'}`].filter(Boolean).join(' · ')
+  const facts = [r.short !== r.name ? r.short : '', snap.machines.length > 1 ? machineLabel(snap, r.machine) : '', `${n} ${n === 1 ? 'task' : 'tasks'}`].filter(Boolean).join(' · ')
   return (
     <div className="rhead">
       <I n="folder" />
@@ -467,7 +467,7 @@ function RepoHead({ snap, r }: { snap: Snapshot; r: Repo }) {
       {sp ? (
         <Btn onClick={() => go(sp.id)}>Open {spaceLabel(snap, sp.id)}</Btn>
       ) : (
-        <Btn onClick={() => newSpaceDialog(r.machine, { name: r.name === 'Home folder' ? '' : r.name, folder: r.short })}>Make it a space</Btn>
+        <Btn onClick={() => newSpaceDialog(r.machine, { name: r.repo ? r.name : '', folder: r.short })}>Make it a space</Btn>
       )}
       <IB icon="x" label="Show all tasks" onClick={() => setTF((x) => ({ ...x, repo: [] }))} />
     </div>

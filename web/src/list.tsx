@@ -4,7 +4,7 @@
 // Archive, Remove, Feedback).
 import { useState } from 'react'
 import type { Snapshot } from '@shared/types.ts'
-import { everything, folderName, folderOf, groupOf, isEverything, listOf, machineLabel, needsCount, placeDown, placeOf, tasksIn, tstate, unreachable, type ListMachine, type Space } from '@shared/view.ts'
+import { everything, folderOf, groupOf, isEverything, listOf, machineLabel, needsCount, placeDown, placeOf, tasksIn, tstate, unreachable, type ListMachine, type Space } from '@shared/view.ts'
 import { act, getState, go, notice, openSettings, registry, setUI, shownOn, tryAct, useUI, type Filter, type MenuRow } from './kernel.ts'
 import { confirm, openDialog, openForm, openMenu } from './overlay.tsx'
 import { AgentField, MachineField, pickFor, type Pick } from './picker.tsx'
@@ -232,16 +232,15 @@ export function feedbackDialog() {
   )
 }
 
-/** A space's whole folder, set like a menu row (SHEP-302): Home folder / Root folder in words, the path beneath, and
+/** A space's whole folder, set like a menu row (SHEP-302): its whole path, and
  *  its machine when it is another (SHEP-316) */
 function FolderTop({ f }: { f: { short: string; full: string; machine: string | null } }) {
-  const name = folderName(f.short === '/' ? '/' : f.short)
-  const under = [name !== f.short && f.full !== '/' ? f.full : '', f.machine ? `on ${f.machine}` : ''].filter(Boolean).join(' ')
+  const under = f.machine ? `on ${f.machine}` : ''
   return (
     <div className="fwhere">
       <I n="folder" />
       <span className="n">
-        <span className="l1">{name === f.short ? f.full : name}</span>
+        <span className="l1">{f.full}</span>
         {under && <span className="l2">{under}</span>}
       </span>
     </div>

@@ -121,9 +121,10 @@ test("a space's folder: home as ~, the whole path, another machine named (SHEP-3
   expect(folderOf(snap, { machine: 'vm-c', where: '~/x' }).machine).toBe('vm-c')
 })
 
-test('a lone ~ or / is said in words (SHEP-316)', () => {
-  expect(folderName('~')).toBe('Home folder')
-  expect(folderName('/')).toBe('Root folder')
+test('a folder shows as its path, never a made-up name', () => {
+  expect(folderName('~')).toBe('~')
+  expect(folderName('/')).toBe('/')
+  expect(folderName('')).toBe('/')
   expect(folderName('~/dev/shop')).toBe('~/dev/shop')
   expect(folderName('/srv/app')).toBe('/srv/app')
 })
