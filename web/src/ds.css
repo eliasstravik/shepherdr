@@ -12,7 +12,7 @@ input:focus-visible,textarea:focus-visible{outline:0}
 /* a press on a touch screen: no browser box and no text picked up by a long press; the app's own states show it */
 button,[role="tab"],summary,.lk{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 @media(pointer:coarse){
-  .tab:active,.seg button:active,.pt:active,.vbtn:active,.send:active,.grp:active,.fold:active,.keys button:active,.fchip button:active,.tg:active,.banner>button.n:active,.thumb:active,button.ref:active,.lk:active,a.pic:active,a.fchip:active,.atb:active,.arm:active{opacity:.6}
+  .tab:active,.seg button:active,.pt:active,.vbtn:active,.send:active,.grp:active,.fold:active,.keys button:active,.fchip button:active,.tg:active,.banner>button.n:active,.thumb:active,button.ref:active,.lk:active,a.pic:active,a.fchip:active,.atb:active,.arm:active,.swp:active{opacity:.6}
 }
 p,h2,h3{margin:0}small{font-size:inherit}
 
@@ -75,6 +75,9 @@ button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"])
 .col{display:flex;flex-direction:column;min-width:0}.scroll{flex:1;min-height:0}.foot{flex:none}
 .side{display:flex;flex-direction:column;gap:1px;padding:8px;border-right:1px solid var(--line);min-width:0}
 .pane{border-left:1px solid var(--line)}.app.phone .pane{border-left:0}
+/* SHEP-336: the chat swapped to the right of the pane; the list stays at the far left */
+.shell.swap.has-pane{grid-template-columns:var(--side-w,240px) var(--pane-w,380px) minmax(0,1fr)}.shell.swap.noside.has-pane{grid-template-columns:var(--pane-w,380px) minmax(0,1fr)}
+.shell.swap .pane{border-left:0;border-right:1px solid var(--line)}
 .hd{display:flex;align-items:center;gap:4px;height:var(--hd);padding:0 12px;flex:none;min-width:0}
 .hd{border-bottom:1px solid transparent}.hd.sc{border-bottom-color:var(--line)}
 .ttl{flex:1;min-width:0;padding:0 4px}
@@ -222,6 +225,14 @@ h3+.srow,.hint+.srow,.banner+.srow{border-top:0}
 .rz:hover::after,.rz.on::after{background:var(--muted)}
 .app:not(.phone) .shell:not(.noside) .rzs{display:block;left:calc(var(--side-w,240px) - 6px)}
 .app:not(.phone) .shell.has-pane .rzp{display:block;right:calc(var(--pane-w,380px) - 6px)}
+.app:not(.phone) .shell.swap.has-pane .rzp{right:auto;left:calc(var(--side-w,240px) + var(--pane-w,380px) - 6px)}
+.app:not(.phone) .shell.swap.noside.has-pane .rzp{left:calc(var(--pane-w,380px) - 6px)}
+/* the swap button sits on the edge between the chat and the pane, halfway down */
+.swp{display:none;position:absolute;top:50%;z-index:16;place-items:center;width:var(--ib);height:var(--ib);margin-top:calc(var(--ib)/-2);border-radius:50%;background:var(--canvas);box-shadow:inset 0 0 0 1px var(--line2);color:var(--muted)}
+.swp:hover{background:var(--raised);color:var(--fg)}
+.app:not(.phone) .shell.has-pane .swp{display:grid;right:calc(var(--pane-w,380px) - var(--ib)/2)}
+.app:not(.phone) .shell.swap.has-pane .swp{right:auto;left:calc(var(--side-w,240px) + var(--pane-w,380px) - var(--ib)/2)}
+.app:not(.phone) .shell.swap.noside.has-pane .swp{left:calc(var(--pane-w,380px) - var(--ib)/2)}
 .rzh{height:8px;margin-top:-4px;cursor:row-resize;touch-action:none;position:relative;z-index:15}
 .rzh:hover,.rzh.on{background:var(--control2)}
 

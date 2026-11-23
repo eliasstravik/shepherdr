@@ -12,6 +12,7 @@ import { notice, registry, setUI, tryAct, useUI } from './kernel.ts'
 import { openDialog, openForm } from './overlay.tsx'
 import { openPicker, pickFor, sayPick, useCatalog, type Role } from './picker.tsx'
 import { MOTIONS, setPref, THEMES, usePrefs, WIDTHS } from './prefs.ts'
+import { setChatSide, useSides, type Layout, type Side } from './sides.ts'
 import { Btn, cx, I, IB, Meter, Row, Seg, Tgl } from './ui.tsx'
 
 const ALL: [string, IconName][] = [['General', 'gear'], ['Agents', 'agent'], ['Tasks', 'tasks'], ['Secrets', 'key'], ['Machines', 'server'], ['Usage', 'gauge'], ['Plugins', 'plug']]
@@ -50,8 +51,22 @@ function levelOf(c: Config, place: string): { lv: LevelConfig; own: (k: string) 
   return { lv: sp ?? c.all, own: (k) => !!sp?.own.includes(k) }
 }
 
+const SIDES: [Side, string][] = [['left', 'Chat on the left'], ['right', 'Chat on the right']]
+
+/** SHEP-336: which side the chat is on beside a pane, for this device in the layout it is in now. A phone has no
+ *  split, so no row. */
+export function SidesRow({ layout, side }: { layout: Layout; side: Side }) {
+  if (layout === 'phone') return null
+  return (
+    <SRow label="Sides" wrap>
+      <Seg label="Sides" values={SIDES.map((x) => x[1])} value={SIDES.find((x) => x[0] === side)![1]} onChange={(v) => setChatSide(layout, SIDES.find((x) => x[1] === v)![0])} />
+    </SRow>
+  )
+}
+
 function General() {
   const p = usePrefs()
+  const sides = useSides()
   const { now, read } = useDeviceAlerts()
   const run = async (f: () => Promise<string | void>) => {
     try {
@@ -69,6 +84,7 @@ function General() {
       <SRow label="Theme"><Seg label="Theme" values={THEMES} value={p.theme} onChange={(v) => setPref('theme', v)} /></SRow>
       <SRow label="Chat width" wrap><Seg label="Chat width" values={WIDTHS} value={p.width} onChange={(v) => setPref('width', v)} /></SRow>
       <SRow label="Motion"><Seg label="Motion" values={MOTIONS} value={p.motion} onChange={(v) => setPref('motion', v)} /></SRow>
+      <SidesRow {...sides} />
       <h3>Notifications</h3>
       {now && now.state !== 'on' && (
         <div className="banner" style={{ margin: '0 0 4px' }}>

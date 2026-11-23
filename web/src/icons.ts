@@ -21,6 +21,7 @@ export const IC = {
   "wave": "<path d=\"M3 9v2M6.5 6.5v7M10 4v12M13.5 6.5v7M17 9v2\"/>",
   "search": "<circle cx=\"9\" cy=\"9\" r=\"5\"/><path d=\"m13 13 3.5 3.5\"/>",
   "filter": "<path d=\"M4 6h12M6.5 10h7M9 14h2\"/>",
+  "swap": "<path d=\"M3.5 7h12M12.5 4l3 3-3 3M16.5 13h-12M7.5 10l-3 3 3 3\"/>",
   "panel": "<rect x=\"3\" y=\"4\" width=\"14\" height=\"12\" rx=\"2\"/><path d=\"M7.5 4v12\"/>",
   "layers": "<path d=\"M10 3 3 6.5 10 10l7-3.5L10 3ZM3 10l7 3.5 7-3.5M3 13.5 10 17l7-3.5\"/>",
   "hash": "<path d=\"M7.5 3.5 6 16.5M13.5 3.5 12 16.5M3.5 7.5h13M3 12.5h13\"/>",
