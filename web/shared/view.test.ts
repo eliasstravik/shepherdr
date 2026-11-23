@@ -66,7 +66,7 @@ test('the ring shows the share done in every unfinished state; Ready and Done sh
   const r = (x: Partial<Task>) => ringOf(task(x))
   expect(r({ status: 'work', report: { msg: '', progress: 40 } })).toMatchObject({ kind: 'ring', tone: 'working', pct: 40 })
   expect(r({ status: 'work' })).toMatchObject({ kind: 'ring', tone: 'working', pct: null })
-  expect(r({ status: 'need', report: { msg: '', progress: 70, paused: true } })).toMatchObject({ kind: 'ring', tone: 'ask', pct: 70, mark: 'dot' })
+  expect(r({ status: 'need', report: { msg: '', progress: 70, paused: true } })).toMatchObject({ kind: 'ring', tone: 'ask', pct: 70, mark: 'tint' })
   expect(r({ status: 'need', stopped: { by: 'error' }, report: { msg: '', progress: 30 } })).toMatchObject({ kind: 'ring', tone: 'red', pct: 30, mark: 'stop' })
   expect(r({ status: 'todo', stopped: { by: 'you' }, report: { msg: '', progress: 55 } })).toMatchObject({ kind: 'ring', tone: 'ask', pct: 55, mark: 'stop' })
   expect(r({ status: 'queued' })).toMatchObject({ kind: 'ring', tone: 'mute', pct: 0, mark: 'queued' })
