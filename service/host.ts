@@ -101,7 +101,8 @@ export class Host {
   }
 
   /** Moves names from this machine's words to the host's, and back. */
-  toHost() { return renamer(this.node(), this.hostNode); }
+  // keep: what the host can't name goes there as "@<id>", not dropped (the shared document, service/store.ts)
+  toHost(keep = false) { return renamer(this.node(), this.hostNode, keep); }
   fromHost() { return renamer(this.hostNode, this.node()); }
 
   /** Where the web app is: this machine's link, or the host's. */

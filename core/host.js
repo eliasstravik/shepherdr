@@ -10,7 +10,8 @@
 //   another machine reads the host's to know its names.
 // - Names are each machine's own: the laptop calls the mini "mac-mini", the mini calls the laptop "m3", and the shared
 //   data names spaces and machines that way ("mac-mini/sp1" there is "sp1" here). relocate() moves a value from one
-//   machine's names to another's through the ids; what the other machine can't name is left out, and keepForeign()
+//   machine's names to another's through the ids; what the other machine can't name is left out (or, for the host's
+//   shared document, kept as "@<id>"), and keepForeign()
 //   keeps what only the host knows when a change comes back.
 // Shared core: the source is core/host.js; bin/sync-shared copies it into the mods in lib/COPIES.
 
@@ -34,15 +35,18 @@ export const nodeAlive = (n, now = Date.now()) => Boolean(n?.id && now - (Number
 
 /**
  * A machine name in `from`'s words to `to`'s: null is a machine's own. from and to: { id, links: { name: id } }.
- * undefined: `to` doesn't link that machine.
+ * undefined: `to` doesn't link that machine. keep: such a machine is named "@<its id>" instead, so the host keeps a
+ * writer's data it can't name (a writer the host has no link back to lost its sidebar sections, #1371); "@<id>" names
+ * always read back as that machine.
  */
-export function renamer(from, to) {
+export function renamer(from, to, keep = false) {
   return (name) => {
-    const id = name === null || name === undefined || name === "" || name === "local" ? from?.id : from?.links?.[name];
+    const id = name === null || name === undefined || name === "" || name === "local" ? from?.id
+      : typeof name === "string" && name.startsWith("@") ? name.slice(1) : from?.links?.[name];
     if (!id || !to?.id) return undefined;
     if (id === to.id) return null;
     const hit = Object.entries(to.links ?? {}).find(([, v]) => v === id);
-    return hit ? hit[0] : undefined;
+    return hit ? hit[0] : keep ? `@${id}` : undefined;
   };
 }
 
