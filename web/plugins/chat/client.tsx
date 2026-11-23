@@ -129,11 +129,18 @@ export function RelayRow({ r, text, at, startOpen = false }: { r: Relay; text: s
 }
 
 /** the line naming the task above messages that came from it */
+/** a quiet "how it closed" line's words: what closed and how ("Fix login · Run: npm test · Allowed"); none when it
+ *  has no words (a bare "Ended" says nothing) or is the same as the line right above it */
+export function endedLine(text: string, above: string): string | null {
+  const line = text.trim()
+  return line && line !== above.trim() ? line : null
+}
+
 function TaskRef({ id, title, t }: { id: string; title: string; t?: Task }) {
   return (
     <button type="button" className="ref" onClick={() => setUI({ task: id, pane: 'tasks', wide: false })}>
       {t ? <StatusIcon t={t} time="side" /> : <I n="chat" c="s16" />}
-      {title}
+      <span className="rt">{title}</span>
     </button>
   )
 }
@@ -571,6 +578,8 @@ function Messages({ thread }: { thread: Thread }) {
   let lastAt = 0
   /** the task the last line named: its next message or card needs no second line */
   let lastRef = ''
+  /** the last quiet "how it closed" line, so a twin right under it doesn't show */
+  let lastEnded = ''
   // the app's own cards (a review, a stopped agent), each where it came up among the messages
   const cards = registry.chatCards.flatMap((c) => c.cards(snap, thread)).sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity))
   const cardsUntil = (at: number) => {
@@ -578,6 +587,7 @@ function Messages({ thread }: { thread: Thread }) {
       const c = cards.shift()!
       out.push(<Fragment key={`c:${c.key}`}>{c.node}</Fragment>)
       prev = 'a'
+      lastEnded = ''
     }
   }
   const stub: Chat = chat ?? { key: thread.chat, messages: [], cli: '' }
@@ -624,7 +634,12 @@ function Messages({ thread }: { thread: Thread }) {
     // when its agent was started again, earlier messages stay, above a thin "New session" line
     else if (m.brief && thread.task && !/new session/i.test(m.brief.label)) continue
     else if (m.brief) out.push(/new session/i.test(m.brief.label) ? <div key={k} className="time" role="separator">New session</div> : <div key={k} className="ref"><I n="note" c="s16" /><span>{m.brief.label}</span></div>)
-    else if (m.ended) out.push(<DoneRow key={k}>{m.text ?? 'Ended'}</DoneRow>)
+    // what closed and how ("Fix login · Run: npm test · Allowed"); the same line twice in a row shows once
+    else if (m.ended !== undefined) {
+      const line = endedLine(m.ended, lastEnded)
+      if (!line) continue
+      out.push(<DoneRow key={k}>{line}</DoneRow>)
+    }
     else if (m.error) out.push(<div key={k} className="ref c-red"><I n="warn" c="s16" /><span>{m.text}</span></div>)
     else if (m.file) out.push(<FileRow key={k} msg={m} chat={stub} gap={gap} />)
     else if (m.text) {
@@ -635,6 +650,7 @@ function Messages({ thread }: { thread: Thread }) {
     // In the fictional shop conversation the review follows the mock-up, before the later task messages.
     if (snap.demo && !thread.task && m.artifact?.id === 'a-mock') cardsUntil(Infinity)
     if (!m.activity) prev = who
+    lastEnded = m.ended ?? ''
   }
   const empty = !rows.length && (!chat || chat.fresh || chat.notice === 'none' || chat.top !== false)
   const every = isEverything(snap, thread.place)

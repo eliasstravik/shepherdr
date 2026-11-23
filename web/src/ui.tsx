@@ -118,7 +118,10 @@ export const Meter = ({ pct }: { pct: number }) => (
 const LOGOS: Record<string, string> = Object.fromEntries(Object.entries({ claude: 'claude', codex: 'codex', opencode: 'opencode', pi: 'pi', droid: 'droid', amp: 'amp', cline: 'cline', 'copilot-cli': 'copilot', 'cursor-agent': 'cursor', 'gemini-cli': 'gemini', goose: 'goose', 'grok-build': 'grok', 'kilo-code': 'kilocode', kiro: 'kiro', 'qwen-code': 'qwen' }).map(([id, icon]) => [id, `agents/${icon}.svg`]))
 export function Logo({ agent, name }: { agent: string; name?: string }) {
   const src = LOGOS[agent]
-  if (src) return <span className={cx('logo img', agent === 'pi' && 'pi')} aria-hidden="true"><img src={src} alt="" /></span>
+  // a logo that can't load leaves nothing, never an empty square's gap (the message box's + then the model)
+  const [lost, setLost] = useState<string | null>(null)
+  if (src && lost === src) return null
+  if (src) return <span className={cx('logo img', agent === 'pi' && 'pi')} aria-hidden="true"><img src={src} alt="" onError={() => setLost(src)} /></span>
   const n = (name ?? agent).trim()
   const mark = n.includes(' ') ? n.split(/\s+/).map((w) => w[0]).join('').slice(0, 2) : n.slice(0, 2)
   return <span className="logo" aria-hidden="true">{mark.charAt(0).toUpperCase() + mark.slice(1)}</span>
