@@ -2801,6 +2801,23 @@ class TimeLeft(unittest.TestCase):
         self.assertIn(templates.WORKER_MD_BEFORE_OFTEN, templates.OLD_WORKERS)
         self.assertNotEqual(templates.WORKER_MD_BEFORE_OFTEN, templates.WORKER_MD)
 
+    def test_the_time_left_comes_from_the_clock_in_agent_time(self):
+        """SHEP-361: the system prompt and the brief's footer have the agent note the clock, work --left
+        out from its own pace, in its own working time; an unedited earlier template gets today's words."""
+        from herdr_task import templates
+        with open(os.path.join(BIN, "herdr_task", "launch.py")) as f:
+            launch = f.read()
+        with open(os.path.join(ROOT, "templates", "worker.md")) as f:
+            worker = f.read()
+        for words in (templates.WORKER_MD, worker, launch):
+            self.assertIn("date +%s", words)
+            self.assertIn("x (100 - done) / done", words)
+            self.assertIn("never a person's", words)
+            self.assertIn("by as much as you were off", words)
+        self.assertIn("worked 12 min, 40% done: about 18m left", templates.WORKER_MD)
+        self.assertIn(templates.WORKER_MD_BEFORE_CLOCK, templates.OLD_WORKERS)
+        self.assertNotEqual(templates.WORKER_MD_BEFORE_CLOCK, templates.WORKER_MD)
+
 
 class ReviewAsAHelperAgent(unittest.TestCase):
     """SHEP-54: workers run their review as an interactive hc child people see, never headless; an
