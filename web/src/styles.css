@@ -183,3 +183,9 @@ button:disabled{opacity:.5;cursor:default}
 .sicb:focus-visible{box-shadow:inset 0 0 0 1px var(--muted)}
 .sicb .sic,.sicb .i{width:22px;height:22px;font-size:20px}
 .sicb .sic.pic{border-radius:6px}
+/* a link on a terminal's screen: an underline in its own layer over the text, in the link colour; every link quietly on
+   a touch screen, the one under the mouse on a desktop. The terminal is dark in both themes: so is its link colour. */
+.tlinks{--blue:#7dd3fc;position:absolute;inset:0;pointer-events:none;z-index:5}
+.tlinks i{position:absolute;border-bottom:1px solid color-mix(in srgb,var(--blue) 45%,transparent)}
+.tlinks i.on{border-bottom-color:var(--blue)}
+.tlcap{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;max-width:320px}

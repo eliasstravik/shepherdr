@@ -235,7 +235,7 @@ Bun.serve<Sock['data'], never>({
         // a stand-in terminal: it shows a prompt and echoes what is typed; nothing runs
         const m = JSON.parse(String(raw)) as { type: string; id: number; text?: string; keys?: string[] }
         const say = (t: string) => ws.send(new TextEncoder().encode(t))
-        if (m.type === 'open') { ws.send(JSON.stringify({ type: 'size', cols: 100, rows: 12 })); say('sam@mac-mini shop % ') }
+        if (m.type === 'open') { ws.send(JSON.stringify({ type: 'size', cols: 100, rows: 12 })); say(TERM_LINKS + 'sam@mac-mini shop % ') }
         else if (m.type === 'text') say(m.text ?? '')
         else if (m.type === 'keys' && m.keys?.includes('enter')) say("\r\n(this demo doesn't run commands)\r\nsam@mac-mini shop % ")
         ws.send(JSON.stringify({ type: 'ack', id: m.id }))
@@ -252,5 +252,16 @@ Bun.serve<Sock['data'], never>({
     },
   },
 })
+/** what the stand-in terminal shows first: links of each kind, a sign-in address broken over three lines at its 100
+ *  columns as Claude Code does, one the program marks (OSC 8) and a file: one that is only copied */
+const SIGN_IN = 'https://claude.ai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fconsole.anthropic.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_key+user%3Aprofile&state=Zx9_-kq'
+const osc8 = (url: string, text: string) => `\x1b]8;;${url}\x07${text}\x1b]8;;\x07`
+const TERM_LINKS = [
+  'Browser didn\'t open? Use the url below to sign in:',
+  ...(SIGN_IN.match(/.{1,100}/g) ?? []),
+  '',
+  `Docs (see https://example.com/docs/getting-started).  ${osc8('https://example.com/changelog', 'What\'s new')}  ${osc8('file:///home/sam/shop/notes.md', 'notes.md')}`,
+  '',
+].join('\r\n')
 console.log(`demo on http://127.0.0.1:${port}/`)
 void config

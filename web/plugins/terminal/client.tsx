@@ -7,13 +7,50 @@
 // and the arrows.
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { PaneFrame } from '@client/App.tsx'
-import { definePlugin, getState, openTask, setUI, useSnap, useUI, type Thread } from '@client/kernel.ts'
+import { definePlugin, getState, notice, openTask, setUI, useSnap, useUI, type Thread } from '@client/kernel.ts'
 import { Btn, Hd, I, IB } from '@client/ui.tsx'
+import { openMenu } from '@client/overlay.tsx'
+import { copyText } from '@client/copy.ts'
 import type { Chat, Task } from '@shared/types.ts'
 import { machineLabel, placeOf, taskChat, taskOf, tasksIn, tstate } from '@shared/view.ts'
 import { fitGrid, following, footTop, LINE, linesFor, shrinkTo, showKeys } from './fit.ts'
 import { spaceTermRow, switchView, taskTermRow, toggleSpaceTerm, viewRow } from './menu.ts'
 import { connectTerminal, streamInput } from './stream.ts'
+import { linkLayer, type LinkLayer } from './linklayer.ts'
+import { opens, type Link } from './links.ts'
+
+/** a web page opens the way a chat's link does: a new tab (the outside browser in the Android app), or in the app
+ *  when it is this app's own (kernel.ts catches it) */
+function openUrl(url: string) {
+  const a = document.createElement('a')
+  a.href = url
+  a.target = '_blank'
+  a.rel = 'noopener noreferrer'
+  a.hidden = true
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+}
+
+let spot: HTMLElement | null = null
+/** a link's menu, at the link: Open (a web page only) and Copy link, the address on top */
+function linkMenu(link: Link, at: DOMRect | null) {
+  spot?.remove()
+  spot = document.createElement('span')
+  const r = at ?? new DOMRect(16, 16, 0, 0)
+  spot.style.cssText = `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;pointer-events:none`
+  document.body.appendChild(spot)
+  openMenu(spot, [
+    ...(opens(link.url) ? [{ icon: 'ext' as const, label: 'Open', run: () => openUrl(link.url) }] : []),
+    { icon: 'copy' as const, label: 'Copy link', run: () => void copyText(link.url).then((ok) => ok && notice('Copied')) },
+  ], { top: () => <div className="cap tlcap">{link.url}</div>, label: 'Link' })
+}
+
+/** a tap or a click on a link: a web page opens; any other kind (file: and the rest) only offers its copy */
+const follow = (link: Link, at: DOMRect | null) => (opens(link.url) ? openUrl(link.url) : linkMenu(link, at))
+
+/** a finger held this long on a link opens its menu */
+const HOLD = 500
 
 const KEYMAP: Record<string, string> = { Enter: 'enter', Escape: 'esc', Tab: 'tab', Backspace: 'backspace', Delete: 'delete', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Home: 'home', End: 'end', PageUp: 'pageup', PageDown: 'pagedown' }
 
@@ -63,6 +100,10 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
   const host = useRef<HTMLDivElement>(null)
   const cap = useRef<HTMLInputElement>(null)
   const xt = useRef<import('@xterm/xterm').Terminal | null>(null)
+  const links = useRef<LinkLayer | null>(null)
+  const coarseRef = useRef(coarse)
+  coarseRef.current = coarse
+  const press = useRef<{ link: Link; x: number; y: number; held: boolean; timer: ReturnType<typeof setTimeout> } | null>(null)
   const scrolling = useRef({ carry: 0, x: 0, y: 0 })
   const [status, setStatus] = useState('Opening the terminal…')
   const [ctrl, setCtrl] = useState(false)
@@ -145,6 +186,7 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
       // keys go to the terminal on its machine through the box over it; xterm only draws
       term.attachCustomKeyEventHandler(() => false)
       term.open(host.current)
+      links.current = linkLayer(term, () => coarseRef.current)
       if (term.textarea) {
         term.textarea.readOnly = true
         term.textarea.tabIndex = -1
@@ -180,6 +222,8 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
       el?.removeEventListener('scroll', scrolled)
       ro.disconnect()
       link?.close()
+      links.current?.dispose()
+      links.current = null
       term?.dispose()
       xt.current = null
     }
@@ -195,6 +239,12 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
     const [n, rest] = linesFor(scrolling.current.carry, dy, (t.options.fontSize ?? 13) * LINE)
     scrolling.current.carry = rest
     if (n) t.scrollLines(n)
+  }
+  useEffect(() => links.current?.redraw(), [coarse])
+  const linkAt = (e: { clientX: number; clientY: number }) => links.current?.at(e.clientX, e.clientY) ?? null
+  const unpress = () => {
+    if (press.current) clearTimeout(press.current.timer)
+    press.current = null
   }
   const sendKey = (k: string) => {
     streamInput(stream, { type: 'keys', keys: [k] })
@@ -218,11 +268,61 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
           spellCheck={false}
           enterKeyHint="send"
           onWheel={(e) => scrollBy(e.deltaMode === 1 ? e.deltaX * 16 : e.deltaX, e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY)}
-          onTouchStart={(e) => {
-            scrolling.current = { carry: 0, x: e.touches[0].clientX, y: e.touches[0].clientY }
+          // a link: a click opens it (never focusing the box, so no keys and no keyboard), the mouse over it underlines
+          // it, a right click or a held finger opens its menu
+          onMouseMove={(e) => {
+            const l = linkAt(e)
+            links.current?.hover(l)
+            e.currentTarget.style.cursor = l ? 'pointer' : ''
           }}
+          onMouseLeave={() => links.current?.hover(null)}
+          onMouseDown={(e) => {
+            if (e.button === 0 && linkAt(e)) e.preventDefault()
+          }}
+          onClick={(e) => {
+            const l = linkAt(e)
+            if (!l) return
+            e.preventDefault()
+            follow(l, links.current?.rect(l) ?? null)
+          }}
+          onContextMenu={(e) => {
+            const l = press.current?.link ?? linkAt(e)
+            if (!l) return
+            e.preventDefault()
+            if (press.current?.held) return
+            if (press.current) press.current.held = true
+            linkMenu(l, links.current?.rect(l) ?? null)
+          }}
+          onTouchStart={(e) => {
+            const t = e.touches[0]
+            scrolling.current = { carry: 0, x: t.clientX, y: t.clientY }
+            unpress()
+            const l = e.touches.length === 1 ? linkAt(t) : null
+            if (l)
+              press.current = {
+                link: l,
+                x: t.clientX,
+                y: t.clientY,
+                held: false,
+                timer: setTimeout(() => {
+                  if (!press.current) return
+                  press.current.held = true
+                  linkMenu(l, links.current?.rect(l) ?? null)
+                }, HOLD),
+              }
+          }}
+          onTouchEnd={(e) => {
+            const p = press.current
+            if (!p) return
+            unpress()
+            // the tap is the link's alone: no click, no focus, no keyboard
+            e.preventDefault()
+            if (!p.held) follow(p.link, links.current?.rect(p.link) ?? null)
+          }}
+          onTouchCancel={unpress}
           onTouchMove={(e) => {
             const { clientX: x, clientY: y } = e.touches[0]
+            if (press.current && Math.hypot(x - press.current.x, y - press.current.y) > 10) unpress()
             scrollBy(scrolling.current.x - x, scrolling.current.y - y)
             scrolling.current.x = x
             scrolling.current.y = y
