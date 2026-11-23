@@ -1,12 +1,16 @@
 // A web page's live terminal (2.1's terminal bridge, on this service's herdr-core link): one watch-only attach per
 // socket. herdr-core sends every stream the same bytes, drawn for the terminal's own size, and a full attach moves
-// that size for the agent and every viewer, so a page never says a size: it's told the terminal's, before a first
-// paint at that size, and again whenever something else moves it. Typed text alone needs a full attach, at the size
-// the terminal already has, so it moves nothing; it ends 2 s after the last key. Input lost to a disconnect is
-// never replayed.
+// that size for the agent and every viewer. A page asks for the size that fits its pane (a `resize` message): the
+// bridge then holds a full attach at that size for as long as the page watches, and herdr-core puts the terminal
+// back to the size it had (the next viewer's, or its own) when that attach ends, so an agent's terminal is only
+// page-shaped while someone looks at it here. The page is told the terminal's size before a first paint at that size,
+// and again whenever something else moves it. Typed text alone needs a full attach, at the size the terminal already
+// has, so it moves nothing; without a resize it ends 2 s after the last key. Input lost to a disconnect is never
+// replayed.
 import type { Hub } from "./hub.ts";
 
-type Stream = { input(b: Uint8Array): void; close(): void };
+type Stream = { input(b: Uint8Array): void; resize(cols: number, rows: number): void; close(): void };
+type Typist = { stream: Stream; cols: number; rows: number };
 
 // The key names a web page sends (web/plugins/terminal) as the bytes a keyboard types for them. Typed text and keys go
 // down the same typing stream, so they arrive in the order they were sent. herdr-core holds a terminal.keys call until
@@ -32,11 +36,11 @@ export function keyBytes(keys: string[]): string | null {
 }
 type Socket = { send(data: Uint8Array | string): void; close(): void; buffered(): number };
 
-/** own: your own shell (service/shells.ts). The page is its only viewer, so the terminal takes the page's size
- *  (a `resize` message); an agent's terminal keeps its own size whoever watches. */
+/** own: your own shell (service/shells.ts). Either takes the page's size while the page watches; an agent's goes back
+ *  to its own size when the page leaves (herdr-core does that when the full attach closes). */
 export function terminalBridge(hub: Hub, address: string, ws: Socket, own = false) {
-  let ended = false, opened = false, pending = 0, last = 0, repainting = false, watches = 0;
-  let stream: Stream | undefined, typist: { stream: Stream; cols: number; rows: number } | undefined;
+  let ended = false, opened = false, pending = 0, last = 0, repainting = false, watches = 0, sized = false;
+  let stream: Stream | undefined, typist: Typist | undefined;
   let shown: { cols: number; rows: number } | undefined, idle: ReturnType<typeof setTimeout> | undefined;
   let chain = Promise.resolve();
   const first = hub.terminals.get(address);
@@ -68,15 +72,15 @@ export function terminalBridge(hub: Hub, address: string, ws: Socket, own = fals
 
   async function type(bytes: Uint8Array) {
     const { cols, rows } = live()!;
-    if (own && typist) { typist.stream.input(bytes); return; }
+    if ((own || sized) && typist) { typist.stream.input(bytes); return; }
     if (typist?.cols !== cols || typist.rows !== rows) {
       stopTyping();
       const core = await hub.core();
-      const mine: NonNullable<typeof typist> = { cols, rows, stream: await core.attach(address, { data() {}, close() { if (typist === mine) typist = undefined; } }, cols, rows) };
+      const mine: Typist = { cols, rows, stream: await core.attach(address, { data() {}, close() { if (typist === mine) typist = undefined; } }, cols, rows) };
       typist = mine;
     }
     typist.stream.input(bytes);
-    clearTimeout(idle); if (!own) idle = setTimeout(stopTyping, 2000);
+    clearTimeout(idle); if (!own && !sized) idle = setTimeout(stopTyping, 2000);
   }
 
   return {
@@ -96,14 +100,21 @@ export function terminalBridge(hub: Hub, address: string, ws: Socket, own = fals
           const bytes = keyBytes(m.keys);
           if (bytes !== null) await type(new TextEncoder().encode(bytes));
           else await hub.call("terminal.keys", { terminal: address, keys: m.keys });
-        } else if (m.type === "resize" && own && Number.isSafeInteger(m.cols) && Number.isSafeInteger(m.rows) && m.cols >= 20 && m.cols <= 400 && m.rows >= 5 && m.rows <= 200) {
-          // attached as the one who types, at the page's size: the program is told its new size
-          stopTyping();
-          const core = await hub.core();
-          const mine: NonNullable<typeof typist> = { cols: m.cols, rows: m.rows, stream: await core.attach(address, { data() {}, close() { if (typist === mine) typist = undefined; } }, m.cols, m.rows) };
-          typist = mine;
-          (mine.stream as any).resize?.(m.cols, m.rows);
+        } else if (m.type === "resize" && Number.isSafeInteger(m.cols) && Number.isSafeInteger(m.rows) && m.cols >= 20 && m.cols <= 400 && m.rows >= 5 && m.rows <= 200) {
+          // attached as the one who types, at the page's size: the program is told its new size, and it keeps that
+          // size until this page leaves (the attach stays open, also for an agent's terminal). A new size moves the
+          // same attach, so the program never sees its old size in between.
+          sized = true;
           clearTimeout(idle);
+          if (typist) {
+            typist.stream.resize(m.cols, m.rows);
+            typist.cols = m.cols; typist.rows = m.rows;
+          } else {
+            const core = await hub.core();
+            const mine: Typist = { cols: m.cols, rows: m.rows, stream: await core.attach(address, { data() {}, close() { if (typist === mine) typist = undefined; } }, m.cols, m.rows) };
+            if (ended) { mine.stream.close(); return; }
+            typist = mine;
+          }
           await new Promise((r) => setTimeout(r, 60));
           if (moved()) await watch();
         } else if (m.type !== "resize") return fail();
