@@ -425,6 +425,9 @@ def main():
             c.add_argument("--agent")
             c.add_argument("--space", help="the space its tasks start in (default: yours)")
             c.add_argument("--parent", help="its tasks' agents' parent (default: you)")
+            c.add_argument("--may-update-shepherdr", dest="may_update", metavar="on|off",
+                           help="its runs may update Shepherdr here (`herdr-task update-shepherdr`): only the person sets it, "
+                                "never from a task's terminal")
             c.add_argument("--set", action="append", metavar="KEY=VALUE",
                            help="a setting for each task it adds, as add --set: review=on|off, review.rounds=1..10, proof=on|off, "
                                 "merge=..., ... (\"\": Settings' again)")
@@ -552,6 +555,17 @@ def main():
     c.add_argument("id")
     c.add_argument("--folder")
     c.set_defaults(fn=lambda a: __import__("herdr_task.after_accept", fromlist=["cmd_after_accept"]).cmd_after_accept(a), json=False)
+    c = cmd("update-shepherdr", lambda a: __import__("herdr_task.self_update", fromlist=["x"]).cmd_update_shepherdr(a),
+            "a schedule's run updates Shepherdr on this machine, outside its terminal, if the person let that schedule; "
+            "waits and says how it went (exit 0: updated, 1: failed, 75: still running)")
+    c.add_argument("--status", action="store_true", help="only how its last update went")
+    c.add_argument("--no-wait", action="store_true", help="start it and don't wait")
+    c.add_argument("--root", help=argparse.SUPPRESS)
+    c = sub.add_parser("_update-shepherdr")  # the update a schedule's run asked for, in its own process session (self_update.py)
+    c.add_argument("id")
+    c.add_argument("--folder")
+    c.add_argument("--root")
+    c.set_defaults(fn=lambda a: __import__("herdr_task.self_update", fromlist=["x"]).cmd_run(a), json=False)
     c = sub.add_parser("_disk-top")  # what fills a disk that holds new tasks, found in the background (queues.disk_top)
     c.add_argument("path")
     c.set_defaults(fn=lambda a: __import__("herdr_task.queues", fromlist=["cmd_disk_top"]).cmd_disk_top(a), json=False)

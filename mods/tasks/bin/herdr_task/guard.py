@@ -103,7 +103,10 @@ shepherdr_check() {
   done
   case "$cmd" in
     install|update|uninstall|migrate)
-      [ -z "$root$dry" ] && refuse "\`shepherdr $cmd\` would change the live install (use --root <scratch> for a try)" ;;
+      if [ -z "$root$dry" ]; then
+        [ "$cmd" = update ] && echo "A schedule the person let update Shepherdr asks for it with \`herdr-task update-shepherdr <its task>\`." >&2
+        refuse "\`shepherdr $cmd\` would change the live install (use --root <scratch> for a try)"
+      fi ;;
     web|secrets)
       case " $* " in *" status "*|*" where "*) ;; *) refuse "\`shepherdr $cmd\` would reconfigure the live Shepherdr" ;; esac ;;
   esac
