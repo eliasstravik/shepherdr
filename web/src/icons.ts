@@ -48,7 +48,7 @@ export const IC = {
   "ask": "<circle cx=\"10\" cy=\"10\" r=\"6.5\"/><path d=\"M10 3.5a6.5 6.5 0 0 1 0 13Z\" fill=\"currentColor\" stroke=\"none\"/>",
   "ready": "<circle cx=\"10\" cy=\"10\" r=\"6.5\"/><path d=\"m7 10.2 2 2 4-4.4\"/>",
   "working": "<circle cx=\"10\" cy=\"10\" r=\"6.5\" opacity=\".35\"/><path d=\"M10 3.5a6.5 6.5 0 0 1 6.5 6.5\"/>",
-  "next": "<circle cx=\"10\" cy=\"10\" r=\"6.5\" stroke-dasharray=\"1.5 3\"/>",
+  "next": "<circle cx=\"10\" cy=\"10\" r=\"6.5\"/>",
   "bolt": "<path d=\"M11.5 2 4.5 11.5h4.2L7.7 18l7.8-10h-4.6l.6-6Z\" fill=\"currentColor\" stroke=\"none\"/>",
   "pin": "<path d=\"M7 3.5h6l-1 5 2.5 2.5h-9L8 8.5l-1-5ZM10 11v5.5\"/>",
   "ext": "<path d=\"M11 4h5v5M16 4l-7 7M8 5H4.5v10.5H15V12\"/>",
