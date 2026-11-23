@@ -1,5 +1,50 @@
 # Changelog
 
+## 3.2.1
+
+Fixes for 3.2.0, found on a Mac mini that serves the web app with machines linked to it, and a smoother app on a
+phone.
+
+### Agents and spaces
+
+- Everything Shepherdr starts (Assistants, tasks, helpers) lands in Shepherdr's own session, not herdr-core's
+  default one. The service's launchd plist or systemd unit says which session, an update writes it, and `shepherdr
+  doctor` fails a unit without it.
+- A new space whose Assistant didn't start still opens, with a notice saying why.
+- A message to a space whose Assistant ended starts it again on its own conversation and delivers the message once.
+- A message typed while an agent works goes in at once, as in 3.1. Ctrl/Cmd+Enter still holds it for the end of the
+  turn.
+- Everything can't be removed or archived. New space in this computer's home folder opens Everything, and a second
+  space in another machine's home folder is refused.
+- The message box names the model the Assistant really runs, also before its chat has loaded, and keeps the model
+  picked in New space when its Assistant didn't start.
+
+### The update and carry-over
+
+- `shepherdr update` stops the running service before any file changes and starts it again after, also when the
+  install fails halfway.
+- Carry-over moves Shepherdr's agents left in the default session (an Assistant, a task's agent) into Shepherdr's,
+  each on its own conversation once it's idle; a busy one waits and is named. The update runs it until none is left,
+  and `shepherdr doctor` names any still there.
+- Carry-over changes the records of who keeps the secrets and who serves the web app to each machine's id in the new
+  session, here and on linked machines, and repairs the ones 3.2.0 left naming old ids. `shepherdr doctor` says when
+  one names a machine none knows, and how to fix it.
+
+### The web app
+
+- No square focus outline inside the message box; it shows focus with its own quiet border.
+- No blue flash when pressing things on a phone; buttons fade a little while pressed instead.
+- The warnings line above the chat can always be closed, stays closed over a reload, and comes back only for a new
+  warning.
+- Each space's folder shows under its name in the list and search, in the open space's header, and whole at the top
+  of its menu with Copy folder path.
+- The Working ring turns everywhere it shows; with reduced motion it pulses slowly.
+- Dictation writes the words on a phone: when the live result is empty it uploads the recording instead, and says why
+  when it can't ("Nothing was heard", a blocked microphone). While it records, the mic is a red pill with the time.
+- On a phone, the keyboard stays open in New space and every other dialog with fields.
+- Attachments are square thumbnails in one row, with remove, upload and failed states. A tap opens a full-screen
+  preview, in the message box and in sent messages.
+
 ## 3.2.0
 
 Shepherdr is now one web app, on phone, tablet and desktop, private on your tailnet. The Herdr-window layout and its
