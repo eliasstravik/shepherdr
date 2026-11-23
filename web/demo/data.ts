@@ -82,7 +82,7 @@ export const catalog = (machine: string): Catalog => ({
   ],
 })
 
-export function snapshot(mode: 'normal' | 'empty' | 'down' = 'normal'): Snapshot {
+export function snapshot(mode: 'normal' | 'empty' | 'down' | 'more' = 'normal'): Snapshot {
   const empty = mode === 'empty'
   const down = mode === 'down'
   return {
@@ -105,7 +105,7 @@ export function snapshot(mode: 'normal' | 'empty' | 'down' = 'normal'): Snapshot
     needs: [],
     settings: [],
     config,
-    warnings: empty ? [] : down ? [{ id: 'm:vm', kind: 'machine', text: "Can't reach vm · last seen 14:02" }] : [{ id: 'u:claude', kind: 'usage', text: "You've used 76% of this week's Claude plan" }, { id: 'm:vm', kind: 'machine', text: 'vm: disk nearly full' }],
+    warnings: empty ? [] : down ? [{ id: 'm:vm', kind: 'machine', text: "Can't reach vm · last seen 14:02" }] : [{ id: 'u:claude', kind: 'usage', text: "You've used 76% of this week's Claude plan" }, { id: 'm:vm', kind: 'machine', text: 'vm: disk nearly full' }, ...(mode === 'more' ? [{ id: 'u:codex', kind: 'usage' as const, text: "You've used 81% of your Codex plan" }] : [])],
     screens: empty ? {} : {
       'task:SHOP-17': { b: { url: 'https://billing.example.com/login' }, d: { of: 'mac-mini', own: false, busy: 'Bigger checkout button on phones' }, active: true, driver: 'agent', hands: { what: 'Enter the sign-in code' } },
       'task:SHOP-15': { b: { url: 'http://localhost:3000/checkout' }, d: { of: 'mac-mini', own: false }, active: true, driver: 'agent' },

@@ -225,8 +225,8 @@ export interface UI {
   voiced: string | null
   /** the artifacts grid's search box: null is closed */
   artq: string | null
-  /** the warnings line was dismissed (until tomorrow, or a new warning): the day, and what it said */
-  banner: { day: string; what: string } | null
+  /** the warnings line was closed: the ids of the warnings it held ("a|b"), until one that isn't among them shows */
+  banner: { what: string } | null
 }
 
 interface State {
@@ -310,7 +310,7 @@ let state: State = {
 
 const listeners = new Set<() => void>()
 const emit = () => listeners.forEach((l) => l())
-const subscribe = (l: () => void) => {
+export const subscribe = (l: () => void) => {
   listeners.add(l)
   return () => void listeners.delete(l)
 }
