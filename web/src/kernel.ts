@@ -5,6 +5,7 @@ import { useSyncExternalStore, type FC, type ReactNode } from 'react'
 import { buildId } from '@shared/build.ts'
 import type { Action, Chat, Message, ReplyQuote, ServerEvent, Snapshot, Task, UpdateStatus } from '@shared/types.ts'
 import { everything, placeOf, taskChat, taskOf, type Space } from '@shared/view.ts'
+import { clean, NO_FILTER, type TaskFilter } from '@shared/task-filter.ts'
 import type { IconName } from './icons.ts'
 import { OPEN_WITHIN, PONG_WITHIN, retryIn, SAY_LOST_AFTER } from './link.ts'
 import { expire, loadOutbox, prune, saveOutbox, settle, type Outgoing } from './outbox.ts'
@@ -184,8 +185,6 @@ export interface UI {
   /** the open artifact has the middle column */
   artWide: boolean
   tab: 'Now' | 'Scheduled'
-  /** SHEP-325: Everything's Tasks shows one repo's or folder's tasks (its key: machine and folder), none: all */
-  repo: string | null
   /** the phone's list of spaces is out */
   drawer: boolean
   /** the list is hidden (desktop) */
@@ -207,6 +206,8 @@ export interface UI {
   shut: Record<string, boolean>
   /** how many Done tasks show */
   doneShown: number
+  /** the Tasks panel's filter (SHEP-331): nothing picked shows every task everywhere; kept on this device */
+  tf: TaskFilter
   /** a voice call is on */
   call: boolean
   callMuted: boolean
@@ -255,7 +256,7 @@ function store(key: string, v: unknown) {
 }
 
 /** kept on this device across visits */
-const KEPT: (keyof UI)[] = ['sideOff', 'filter', 'shut', 'banner', 'term']
+const KEPT: (keyof UI)[] = ['sideOff', 'filter', 'shut', 'banner', 'term', 'tf']
 const params = new URLSearchParams(typeof location === 'undefined' ? '' : location.search)
 export const launchHref = typeof location === 'undefined' ? '' : location.href
 
@@ -277,7 +278,6 @@ let state: State = {
     artV: null,
     artWide: false,
     tab: 'Now',
-    repo: null,
     drawer: false,
     sideOff: false,
     filter: 'Active',
@@ -291,6 +291,7 @@ let state: State = {
     open: {},
     shut: {},
     doneShown: 20,
+    tf: NO_FILTER,
     call: false,
     callMuted: false,
     files: {},
@@ -303,6 +304,8 @@ let state: State = {
     ...stored<Partial<UI>>('shepherdr.ui', {}),
   },
 }
+// a filter kept from an older build, or left half-written: whatever is off counts as nothing picked
+state.ui.tf = clean(state.ui.tf)
 
 const listeners = new Set<() => void>()
 const emit = () => listeners.forEach((l) => l())
@@ -699,8 +702,6 @@ export function go(place: string) {
     wide: false,
     artWide: false,
     search: false,
-    // another space: Everything's repo filter is dropped (SHEP-325)
-    ...(place !== ui.at ? { repo: null } : {}),
     // another space: the open task goes with the one it was opened in
     ...(ui.phone ? { pane: null, task: null, art: null } : { task: null }),
     ...(ui.pane === 'screen' && ui.scr ? (ui.scr.key.startsWith('chat:') ? { scr: { key: `chat:${place}`, src: 'b' as const, drive: false } } : { pane: null }) : {}),

@@ -1,6 +1,7 @@
 // Tasks: the pane with Now (Needs you, Working, Up next, Done, Archived) and Scheduled, a task opened as a thread
 // (back, title, Terminal, Screen, its menu, expand, its own reply box), the review card wherever it comes up, the
-// Start task dialog for one not started yet, and a task's menu.
+// Start task dialog for one not started yet, and a task's menu. Now lists every task everywhere unless its filter says
+// otherwise (SHEP-331): a filter button in the header, the choices that are on as chips under it.
 import { useEffect, useState, type ReactNode } from 'react'
 import { PaneFrame, placeholderOf } from '@client/App.tsx'
 import { newSpaceDialog, renameDialog } from '@client/list.tsx'
@@ -10,21 +11,19 @@ import { AgentField, pickFor, type Pick } from '@client/picker.tsx'
 import { edge } from '@client/resize.ts'
 import { Btn, Cnt, cx, Empty, Hd, I, IB, Row } from '@client/ui.tsx'
 import type { MergeEvidence, Snapshot, Task } from '@shared/types.ts'
-import { askedWords, everything, isEverything, machineLabel, needsCount, nowGroups, onBranch, placeDown, reposOf, spaceLabel, spaceOnFolder, spacesOf, etaOf, leftWords, statusWord, taskChat, taskLine, taskRef, taskWhen, tasksIn, tstate, workKey, workName, workWords, type Repo } from '@shared/view.ts'
+import { askedWords, isEverything, machineLabel, nowGroups, onBranch, placeDown, reposOf, spaceLabel, spaceOnFolder, spacesOf, etaOf, leftWords, statusWord, taskChat, taskLine, taskRef, taskWhen, tasksIn, tstate, workKey, workName, workWords, type Repo } from '@shared/view.ts'
 import { DoneRow } from '@plugins/chat/cards.tsx'
 import { StatusIcon } from './icon.tsx'
+import { chipsOf, choices, clean, filterCount, filterOn, filterTasks, hereOn, NO_FILTER, toggle, type GroupKey, type TaskFilter } from '@shared/task-filter.ts'
 
 export { StatusIcon }
 
 /* ---------- where a task works (SHEP-325) ---------- */
 
-/** a repo's or folder's tasks: Everything's Tasks, filtered to it */
+/** a repo's or folder's tasks: the Tasks panel with its filter on that repo (SHEP-331: one filter; its other picks
+ *  stay, but not a space, which would hide the rest of the repo) */
 export function showRepo(key: string) {
-  const snap = getState().snap
-  const ev = snap && everything(snap)?.id
-  if (!ev) return
-  if (getState().ui.at !== ev) go(ev)
-  setUI({ pane: 'tasks', task: null, wide: false, tab: 'Now', repo: key, drawer: false, search: false, settings: null })
+  setUI((ui) => ({ pane: 'tasks', task: null, wide: false, tab: 'Now', tf: { ...clean(ui.tf), repo: [key], space: [], here: false }, drawer: false, search: false, settings: null }))
 }
 
 /** a task's tag: where it works ("shepherdr", "shepherdr · mac-mini"); a tap shows that repo's tasks. In a row it is a
@@ -370,25 +369,6 @@ function TaskRow({ snap, t, tag }: { snap: Snapshot; t: Task; tag: boolean }) {
   )
 }
 
-/** Everything's filter by repo (SHEP-325), on the same control as the list's filter: a menu with All and each repo
- *  or folder tasks work in, the picked one checked */
-function repoMenu(anchor: Element, repos: Repo[]) {
-  const pick = (key: string | null) => () => setUI({ repo: key })
-  openMenu(
-    anchor,
-    (close) => (
-      <>
-        <div className="cap">Repo</div>
-        {[{ key: null, name: 'All', n: undefined as number | undefined }, ...repos.map((r) => ({ key: r.key as string | null, name: r.name, n: r.tasks.length }))].map((r) => {
-          const on = (getState().ui.repo ?? null) === r.key
-          return <Row key={r.key ?? ''} label={r.name} role="menuitemradio" value={on ? undefined : r.n ? String(r.n) : undefined} current={on} end={on ? <I n="check" /> : undefined} onClick={() => { close(); pick(r.key)() }} />
-        })}
-      </>
-    ),
-    { label: 'Filter tasks' },
-  )
-}
-
 /** a repo's tasks: its name, folder and machine, and its space, or "Make it a space" when none works there */
 function RepoHead({ snap, r }: { snap: Snapshot; r: Repo }) {
   const sp = spaceOnFolder(snap, r)
@@ -406,20 +386,29 @@ function RepoHead({ snap, r }: { snap: Snapshot; r: Repo }) {
       ) : (
         <Btn onClick={() => newSpaceDialog(r.machine, { name: r.name === 'Home folder' ? '' : r.name, folder: r.short })}>Make it a space</Btn>
       )}
-      <IB icon="x" label="Show all tasks" onClick={() => setUI({ repo: null })} />
+      <IB icon="x" label="Show all tasks" onClick={() => setTF((x) => ({ ...x, repo: [] }))} />
     </div>
   )
 }
 
 function Now({ snap, place }: { snap: Snapshot; place: string }) {
   const ui = useUI()
-  const every = isEverything(snap, place)
-  const repos = every ? reposOf(snap) : []
-  const repo = every && ui.repo ? repos.find((r) => r.key === ui.repo) : undefined
-  const all = tasksIn(snap, place)
-  const groups = nowGroups(repo ? all.filter((t) => workKey(t) === repo.key) : all).filter((g) => g.tasks.length)
+  const f = ui.tf
+  // one repo picked: its head on top (its space, or Make it a space), and the rows leave out its tag
+  const repo = f.repo.length === 1 ? reposOf(snap).find((r) => r.key === f.repo[0]) : undefined
   const top = repo && <RepoHead snap={snap} r={repo} />
-  if (!groups.length) return <>{top}<Empty>No tasks yet. Ask in a chat to add one.</Empty></>
+  const groups = nowGroups(filterTasks(snap, f, place)).filter((g) => g.tasks.length)
+  if (!groups.length)
+    return snap.tasks.length ? (
+      <>
+        {top}
+        <Empty title="No tasks match">
+          <Btn onClick={() => setUI({ tf: NO_FILTER })}>Clear filter</Btn>
+        </Empty>
+      </>
+    ) : (
+      <Empty>No tasks yet. Ask in a chat to add one.</Empty>
+    )
   return (
     <>
       {top}
@@ -444,23 +433,106 @@ function Now({ snap, place }: { snap: Snapshot; place: string }) {
   )
 }
 
+/* ---------- the filter ---------- */
+
+const setTF = (f: (tf: TaskFilter) => TaskFilter) => setUI((ui) => ({ tf: f(clean(ui.tf)) }))
+
+/** a box in a multi-select row: ticked when the choice is on */
+const Tick = ({ on }: { on: boolean }) => <span className={cx('cbx', on && 'on')} aria-hidden="true">{on && <I n="check" />}</span>
+
+/** the menu (a sheet on a phone): the quick choices, then State, Machine and Space, each a multi-select; it stays open
+ *  while you pick. A long Space list gets a search box. */
+function FilterMenu() {
+  const snap = useSnap()
+  const f = useUI((u) => u.tf)
+  const at = useUI((u) => u.at)
+  const [qs, setQs] = useState<Record<string, string>>({})
+  if (!snap) return null
+  const inSpace = !!at && !isEverything(snap, at)
+  const check = (label: string, on: boolean, run: () => void, value?: string) => (
+    <Row key={label} lead={<Tick on={on} />} label={label} value={value} role="menuitemcheckbox" aria-checked={on} onClick={run} />
+  )
+  const group = (key: GroupKey, name: string) => {
+    const all = choices(snap, key, f)
+    if (all.length < 2 && !f[key].length) return null
+    const many = (key === 'space' || key === 'repo') && all.length > 8
+    const q = qs[key] ?? ''
+    const shown = many && q ? all.filter((c) => `${c.label} ${c.machine ?? ''}`.toLowerCase().includes(q.toLowerCase())) : all
+    const machines = new Set(snap.machines.map((m) => m.machine)).size > 1
+    return (
+      <div key={key} style={{ display: 'contents' }}>
+        <hr />
+        <div className="cap">{name}</div>
+        {many && <input className="inp tfq" name={`${key}-search`} aria-label={key === 'space' ? 'Find a space' : 'Find a repo'} placeholder={key === 'space' ? 'Find a space' : 'Find a repo'} value={q} onChange={(e) => setQs({ ...qs, [key]: e.target.value })} />}
+        {shown.map((c) => check(c.label, f[key].includes(c.id), () => setTF((x) => toggle(x, key, c.id)), key === 'space' || key === 'repo' ? (machines ? c.machine : '') : String(c.n)))}
+      </div>
+    )
+  }
+  return (
+    <div className="tfm">
+      {inSpace && check(`${spaceLabel(snap, at)} only`, f.here, () => setTF((x) => ({ ...x, here: !x.here })))}
+      {check('Hide done', f.hideDone, () => setTF((x) => ({ ...x, hideDone: !x.hideDone, state: x.hideDone ? x.state : x.state.filter((s) => s !== 'done' && s !== 'archived') })))}
+      {filterOn(snap, f, at) && <Row icon="x" label="Clear" role="menuitem" onClick={() => setUI({ tf: NO_FILTER })} />}
+      {group('state', 'State')}
+      {group('machine', 'Machine')}
+      {group('space', 'Space')}
+      {group('repo', 'Repo')}
+    </div>
+  )
+}
+
+/** the filter button: the sidebar's, with a dot while a filter is on */
+function FilterButton() {
+  const snap = useSnap()
+  const f = useUI((u) => u.tf)
+  const at = useUI((u) => u.at)
+  const on = !!snap && filterOn(snap, f, at)
+  return (
+    <IB icon="filter" label={on ? 'Filter tasks (on)' : 'Filter tasks'} aria-haspopup="menu" data-marks="" onClick={(e) => openMenu(e.currentTarget, () => <FilterMenu />, { label: 'Filter tasks' })}>
+      {on && <span className="fdot" />}
+    </IB>
+  )
+}
+
+/** the choices that are on, each taken off by its ✕ */
+function Chips({ snap }: { snap: Snapshot }) {
+  const f = useUI((u) => u.tf)
+  const at = useUI((u) => u.at)
+  const chips = chipsOf(snap, f, at)
+  if (!chips.length) return null
+  return (
+    <div className="fchips tfc" role="list" aria-label="Filters on">
+      {chips.map((c) => (
+        <span key={c.key} className="fchip" role="listitem">
+          <I n={c.icon} c="s16" />
+          <span className="tfl">{c.label}</span>
+          <button type="button" aria-label={`Remove ${c.label}`} onClick={() => setTF(c.off)}><I n="x" c="s16" /></button>
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function TasksPane() {
   const snap = useSnap()
   const ui = useUI()
   if (!snap) return null
   const t = ui.task && !ui.wide ? snap.tasks.find((x) => x.id === ui.task) : undefined
   if (t) return <TaskPane t={t} />
-  const inSp = isEverything(snap, ui.at) ? '' : ` in ${spaceLabel(snap, ui.at)}`
-  const repos = isEverything(snap, ui.at) ? reposOf(snap) : []
   const Scheduled = has('schedules') ? registry.views.scheduled : undefined
   const tab = Scheduled ? ui.tab : 'Now'
+  const now = tab === 'Now' || !Scheduled
+  // the schedules keep their space's own; the filter is Now's
+  const inSp = now || isEverything(snap, ui.at) ? '' : ` in ${spaceLabel(snap, ui.at)}`
   return (
-    <PaneFrame head={(sc) => (
-      <Hd title={`Tasks${inSp}`} pad={ui.phone ? 12 : 4} scrolled={sc}>
-        {repos.length > 1 && <IB icon="filter" label="Filter tasks" aria-haspopup="menu" pressed={!!ui.repo} onClick={(e) => repoMenu(e.currentTarget, repos)} />}
-        {!ui.phone && <IB icon="x" label="Close" onClick={() => togglePane(null)} />}
-      </Hd>
-    )}>
+    <PaneFrame
+      head={(sc) => (
+        <Hd title={`Tasks${inSp}`} pad={ui.phone ? 12 : 4} scrolled={sc}>
+          {now && <FilterButton />}
+          {!ui.phone && <IB icon="x" label="Close" onClick={() => togglePane(null)} />}
+        </Hd>
+      )}
+    >
       {Scheduled && (
         <div className="tabs" role="tablist">
           {(['Now', 'Scheduled'] as const).map((n) => (
@@ -468,7 +540,8 @@ function TasksPane() {
           ))}
         </div>
       )}
-      {tab === 'Now' || !Scheduled ? <Now snap={snap} place={ui.at} /> : <Scheduled place={ui.at} />}
+      {now && <Chips snap={snap} />}
+      {now ? <Now snap={snap} place={ui.at} /> : <Scheduled place={ui.at} />}
     </PaneFrame>
   )
 }
@@ -477,9 +550,10 @@ function TasksButton() {
   const snap = useSnap()
   const on = useUI((u) => u.pane === 'tasks')
   const at = useUI((u) => u.at)
+  const tf = useUI((u) => u.tf)
   return (
     <IB icon="tasks" label="Tasks" pressed={on} onClick={() => togglePane('tasks')}>
-      {snap && <Cnt n={needsCount(snap, at)} />}
+      {snap && <Cnt n={filterCount(snap, tf, at)} />}
     </IB>
   )
 }
@@ -488,7 +562,7 @@ export default definePlugin({
   name: 'tasks',
   setup(reg) {
     reg.header.push({ order: 30, View: TasksButton })
-    reg.bar.push({ order: 10, pane: 'tasks', label: 'Tasks', icon: 'tasks', count: (snap, place) => needsCount(snap, place) })
+    reg.bar.push({ order: 10, pane: 'tasks', label: 'Tasks', icon: 'tasks', count: (snap, place) => filterCount(snap, getState().ui.tf, place) })
     reg.panes.push({ id: 'tasks', View: TasksPane })
     reg.views.taskHead = TaskHead
     reg.views.taskTop = TaskTop
