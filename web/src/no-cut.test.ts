@@ -23,12 +23,14 @@ test("the chat header's space name has all the room its buttons leave: no cap be
 })
 
 test("a task row's title and its line under it wrap to two lines before they are cut, in the panel, on cards and on a phone", () => {
-  for (const sel of ['.row.tk .l1', '.row.tk .l2:not(.rline)', '.rowx[data-project]>.row>.n', '.tile>.l1', '.banner .n', '.hd .ttl>.t1:only-child']) {
+  for (const sel of ['.row.tk .l1', '.row.tk .l2:not(.rline)', '.rowx[data-project]>.row>.n', '.tile>.l1', '.banner .n:not(button)', '.hd .ttl>.t1:only-child']) {
     expect(rule(sel)).toContain('-webkit-line-clamp:2')
     expect(rule(sel)).toContain('white-space:normal')
   }
   // a chat banner grows to its two lines
   expect(rule('.banner')).toContain('min-height:max(40px,var(--row))')
+  // its whole-banner button still fills it, top to bottom (a tap anywhere on it)
+  expect(rule('.banner>button.n')).toContain('align-self:stretch')
 })
 
 const task = (x: Partial<Task>): Task => ({ id: 'T-1', name: 'Release', place: 'shop', status: 'queued', state: 'queued', on: 'mini', created: '', age: '', ...x })
