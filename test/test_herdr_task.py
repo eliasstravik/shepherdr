@@ -923,6 +923,29 @@ class BackToWork(unittest.TestCase):
         with open(ghnews.__file__) as f:
             self.assertIn("add one small fix-forward task at once", f.read())
 
+    def test_later_rounds_review_only_the_new_change(self):
+        """#1116: a later review round reviews only what changed since the last reviewed commit, its reviewer splits
+        must-fix from follow-up, and only must-fix findings cost a round; unedited old templates get today's."""
+        from unittest import mock
+        from herdr_task import templates
+        with open(os.path.join(ROOT, "templates", "worker.md")) as f:
+            worker = f.read()
+        with open(os.path.join(ROOT, "templates", "reviewer.md")) as f:
+            reviewer = f.read()
+        for words in (templates.WORKER_MD, worker):
+            self.assertIn(templates.DELTA_RULE, words)
+            self.assertIn(templates.MUST_RULE, words)
+            self.assertNotIn("the diff against the base branch and", words)
+        for words in (templates.REVIEWER_MD, reviewer):
+            self.assertIn(templates.REVIEWER_DELTA_RULE, words)
+            self.assertIn(templates.REVIEWER_MUST_RULE, words)
+            self.assertNotIn(templates.REVIEWER_DELTA_OLD, words)
+        self.assertIn(templates.WORKER_MD_BEFORE_DELTA, templates.OLD_WORKERS)
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(templates, "TEMPLATES", d):
+            with open(os.path.join(d, "reviewer.md"), "w") as f:
+                f.write(templates.TEMPLATE_HEADS["reviewer"] + templates.REVIEWER_MD_BEFORE_DELTA)
+            self.assertEqual(templates.instructions("reviewer"), templates.REVIEWER_MD.strip())
+
     # A merge that failed once (t75: "GraphQL: Something went wrong") never blocks the next Accept, and a pull
     # request merged meanwhile (by hand) makes the task done.
     def merging(self, views, merges):
