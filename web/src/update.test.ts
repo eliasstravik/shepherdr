@@ -31,3 +31,10 @@ describe('a newer web app (SHEP-337)', () => {
     expect(mayRetry(null, 'assets/old.js', 2000)).toBe(true)
   })
 })
+
+test('a release is a new build even when the screen code is the same (SHEP-337)', async () => {
+  const { buildId } = await import('@shared/build.ts')
+  const page = (v: string) => `<meta name="shepherdr-version" content="${v}"><script src="./assets/index-a.js"></script>`
+  expect(buildId(page('3.2.2'))).not.toBe(buildId(page('3.2.3')))
+  expect(buildId(page('3.2.2'))).toBe('assets/index-a.js v3.2.2')
+})
