@@ -129,7 +129,7 @@ const LONG_NAMES: Record<string, string> = {
 const longDay = (s: Snapshot): Snapshot => ({
   ...s,
   places: s.places.map((p) => (p.id === P.shop ? { ...p, name: 'shop-storefront-and-checkout' } : p)),
-  tasks: s.tasks.map((t) => ({ ...t, ...(LONG_NAMES[t.id] ? { name: LONG_NAMES[t.id] } : {}), ...(t.id === 'BLOG-9' ? { afterTitle: 'Fix typo on the About page', afterMore: 5 } : {}) })),
+  tasks: s.tasks.map((t) => ({ ...t, ...(LONG_NAMES[t.id] ? { name: LONG_NAMES[t.id] } : {}), ...(t.id === 'BLOG-9' ? { afterTitle: LONG_NAMES['SHOP-12'], afterMore: 5 } : {}) })),
   artifacts: s.artifacts.map((a: any, i: number) => (i === 0 ? { ...a, title: `${a.title}: the whole story, with every screenshot and the numbers behind it` } : a)),
 })
 
