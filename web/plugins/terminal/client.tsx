@@ -2,13 +2,15 @@
 // bottom, below the message box (the whole screen on a phone); Ctrl+` toggles it; a task has one too, in its folder.
 // It keeps running when the drawer is closed. An agent's own terminal is tucked in a menu: "Switch to terminal" swaps
 // a chat for the same session's live terminal, with a bar on top to switch back. Every terminal is a real one you
-// type straight into; on a phone a row of keys sits under it: esc, tab, ctrl and the arrows.
-import { useEffect, useMemo, useRef, useState } from 'react'
+// type straight into, sized to its pane; on a phone or any touch screen a row of keys sits under it: esc, tab, ctrl
+// and the arrows.
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { PaneFrame } from '@client/App.tsx'
 import { definePlugin, getState, setUI, useSnap, useUI, type Thread } from '@client/kernel.ts'
 import { Btn, Hd, I, IB } from '@client/ui.tsx'
 import type { Chat, Task } from '@shared/types.ts'
 import { machineLabel, placeOf, taskChat, taskOf, tasksIn, tstate } from '@shared/view.ts'
+import { fitGrid, LINE, linesFor, shrinkTo, showKeys } from './fit.ts'
 import { connectTerminal, streamInput } from './stream.ts'
 
 const KEYMAP: Record<string, string> = { Enter: 'enter', Escape: 'esc', Tab: 'tab', Backspace: 'backspace', Delete: 'delete', ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Home: 'home', End: 'end', PageUp: 'pageup', PageDown: 'pagedown' }
@@ -35,13 +37,27 @@ function cellOf(family: string) {
 }
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace'
 
-/** A real terminal (xterm.js) you type straight into. It is drawn at the terminal's own size, so nothing wraps: the
- *  font shrinks to fit the width down to 8 px, then the screen pans sideways. */
+const COARSE = '(any-pointer: coarse)'
+const onCoarse = (f: () => void) => {
+  if (typeof matchMedia !== 'function') return () => {}
+  const q = matchMedia(COARSE)
+  q.addEventListener('change', f)
+  return () => q.removeEventListener('change', f)
+}
+/** a touch screen anywhere on this device */
+const useCoarse = () => useSyncExternalStore(onCoarse, () => typeof matchMedia === 'function' && matchMedia(COARSE).matches, () => false)
+
+/** A real terminal (xterm.js) you type straight into. It asks for the size of its pane, so lines wrap at the pane's
+ *  edge (an agent's terminal goes back to its own size when you leave); when something else holds it at another
+ *  size, the font shrinks to fit, down to 8 px. It opens at the latest output and stays there, unless you scroll up. */
 function Term({ stream, fill }: { stream: string; fill?: boolean }) {
   const phone = useUI((u) => u.phone)
+  const coarse = useCoarse()
   const box = useRef<HTMLDivElement>(null)
   const host = useRef<HTMLDivElement>(null)
   const cap = useRef<HTMLInputElement>(null)
+  const xt = useRef<import('@xterm/xterm').Terminal | null>(null)
+  const scrolling = useRef({ carry: 0, y: 0 })
   const [status, setStatus] = useState('Opening the terminal…')
   const [ctrl, setCtrl] = useState(false)
   const ctrlRef = useRef(false)
@@ -51,28 +67,33 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
     let gone = false
     let term: import('@xterm/xterm').Terminal | null = null
     let link: { close(): void } | null = null
-    let cols = 80
-    const own = stream.startsWith('sh:')
-    let asked = ''
+    let cols = 80, rows = 24
+    let asked = '', wanted = '', opened = false, follow = true
+    let later: ReturnType<typeof setTimeout> | undefined
     const fit = () => {
       if (!term || !box.current) return
-      const w = box.current.clientWidth - 16
-      if (own) {
-        // your own terminal takes the drawer's size: as many columns and rows as fit at the normal font
-        const c = Math.max(20, Math.floor(w / (13 * cellOf(MONO))))
-        const r = Math.max(5, Math.floor((box.current.clientHeight - 16) / (13 * 1.25)))
-        if (`${c}x${r}` !== asked && opened) {
-          asked = `${c}x${r}`
-          streamInput(stream, { type: 'resize', cols: c, rows: r })
-        }
-        return
+      // the box less its padding (16 left, 8 top and bottom) and room for the scrollbar
+      const w = box.current.clientWidth - 16 - 12
+      const h = box.current.clientHeight - 16
+      if (w <= 0 || h <= 0) return
+      const cell = cellOf(MONO)
+      const want = fitGrid(w, h, cell)
+      const key = `${want.cols}x${want.rows}`
+      if (opened && key !== asked && key !== wanted) {
+        // a drag, a rotation or the keyboard sends many sizes: ask for the last one
+        wanted = key
+        clearTimeout(later)
+        later = setTimeout(() => {
+          asked = key
+          streamInput(stream, { type: 'resize', ...want })
+        }, asked ? 150 : 0)
       }
-      term.options.fontSize = Math.max(8, Math.min(13, Math.floor((w / (cols * cellOf(MONO))) * 4) / 4))
+      term.options.fontSize = shrinkTo(w, h, cols, rows, cell)
+      if (follow) term.scrollToBottom()
     }
-    let opened = false
     void Promise.all([import('@xterm/xterm'), import('@xterm/addon-unicode11')]).then(([{ Terminal }, { Unicode11Addon }]) => {
       if (gone || !host.current) return
-      term = new Terminal({ cols: 80, rows: 24, scrollback: 2000, disableStdin: true, cursorBlink: true, fontFamily: MONO, fontSize: 13, lineHeight: 1.25, allowProposedApi: true, theme: { background: '#0a0a0a', foreground: '#d4d4d4', cursor: '#d4d4d4', selectionBackground: 'rgb(255 255 255 / 0.25)' } })
+      term = xt.current = new Terminal({ cols: 80, rows: 24, scrollback: 2000, disableStdin: true, cursorBlink: true, fontFamily: MONO, fontSize: 13, lineHeight: LINE, allowProposedApi: true, theme: { background: '#0a0a0a', foreground: '#d4d4d4', cursor: '#d4d4d4', selectionBackground: 'rgb(255 255 255 / 0.25)' } })
       term.loadAddon(new Unicode11Addon())
       term.unicode.activeVersion = '11'
       // keys go to the terminal on its machine through the box over it; xterm only draws
@@ -82,12 +103,22 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
         term.textarea.readOnly = true
         term.textarea.tabIndex = -1
       }
+      // at the latest output unless you scrolled up; back at the bottom, it follows again
+      term.onScroll(() => {
+        const b = term!.buffer.active
+        follow = b.viewportY >= b.baseY
+      })
       link = connectTerminal(
         stream,
         (bytes, done) => term!.write(bytes, done),
-        () => term!.reset(),
+        () => {
+          term!.reset()
+          follow = true
+          asked = wanted = ''
+        },
         (c, r) => {
           cols = c
+          rows = r
           term!.resize(c, r)
           opened = true
           fit()
@@ -100,12 +131,22 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
     if (box.current) ro.observe(box.current)
     return () => {
       gone = true
+      clearTimeout(later)
       ro.disconnect()
       link?.close()
       term?.dispose()
+      xt.current = null
     }
   }, [stream])
 
+  /** scroll the terminal's history by px (down is positive), a whole line at a time */
+  const scrollBy = (px: number) => {
+    const t = xt.current
+    if (!t) return
+    const [n, rest] = linesFor(scrolling.current.carry, px, (t.options.fontSize ?? 13) * LINE)
+    scrolling.current.carry = rest
+    if (n) t.scrollLines(n)
+  }
   const sendKey = (k: string) => {
     streamInput(stream, { type: 'keys', keys: [k] })
     cap.current?.focus()
@@ -127,6 +168,15 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
           autoCorrect="off"
           spellCheck={false}
           enterKeyHint="send"
+          onWheel={(e) => scrollBy(e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY)}
+          onTouchStart={(e) => {
+            scrolling.current = { carry: 0, y: e.touches[0].clientY }
+          }}
+          onTouchMove={(e) => {
+            const y = e.touches[0].clientY
+            scrollBy(scrolling.current.y - y)
+            scrolling.current.y = y
+          }}
           onKeyDown={(e) => {
             // the app's own keys pass: Ctrl+` closes the drawer, Ctrl+K searches
             if ((e.ctrlKey || e.metaKey) && (e.key === '`' || e.key.toLowerCase() === 'k')) return
@@ -154,11 +204,12 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
           }}
         />
       </div>
-      {phone && (
+      {showKeys(phone, coarse) && (
         <div className="keys">
           {([['esc', 'esc'], ['tab', 'tab']] as const).map(([l, k]) => <button type="button" key={l} aria-label={`${l} key`} onClick={() => sendKey(k)}>{l}</button>)}
           <button type="button" aria-label="ctrl key" aria-pressed={ctrl} style={ctrl ? { background: 'rgb(255 255 255/.3)' } : undefined} onClick={() => { setCtrl(!ctrl); cap.current?.focus() }}>ctrl</button>
           {([['←', 'left'], ['↑', 'up'], ['↓', 'down'], ['→', 'right']] as const).map(([l, k]) => <button type="button" key={k} aria-label={`${k} arrow key`} onClick={() => sendKey(k)}>{l}</button>)}
+          <button type="button" aria-label="enter key" onClick={() => sendKey('enter')}>↵</button>
         </div>
       )}
     </>

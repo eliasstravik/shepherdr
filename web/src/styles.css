@@ -58,11 +58,15 @@ div.b[data-menu]{cursor:pointer}
 .b.jump{box-shadow:0 0 0 2px var(--fg)}
 
 /* a real terminal (xterm) in the dark drawer */
-.termbox{position:relative;height:var(--term-h,170px);min-height:0;padding:8px 0 8px 16px;background:var(--term);overflow:auto hidden}
+.termbox{position:relative;height:var(--term-h,170px);min-height:0;padding:8px 0 8px 16px;background:var(--term);overflow:auto}
 .termbox.fill{flex:1;height:auto;min-height:240px}
 .termbox .xterm{height:100%}
 .termbox .xterm-viewport{background:transparent!important}
-.msgs>.tw{justify-self:stretch;display:flex;flex-direction:column;min-height:320px;border-radius:8px;overflow:hidden;background:var(--term)}
+/* an agent's terminal fills the chat's place exactly: it scrolls its own history, the chat around it doesn't */
+.scroll:has(>.msgs>.tw){overflow:hidden}
+.msgs:has(>.tw){height:100%;grid-template-rows:auto minmax(0,1fr) auto}
+.msgs>.tw{justify-self:stretch;display:flex;flex-direction:column;min-height:0;border-radius:8px;overflow:hidden;background:var(--term)}
+.msgs>.keys{justify-self:stretch;border-radius:8px;margin-top:4px}
 .msgs>.tw .termbox{flex:1;height:auto}
 .pane .scroll>.tdr .termbox{flex:1;height:auto}
 .tcap{caret-color:transparent}
