@@ -810,11 +810,13 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   )
 }
 
-/** + and, for a finger, the photo button (SHEP-345): photos open Android's photo picker straight away, newest first
- *  (accept image/*); + opens files (on a phone or tablet a menu first: Paste image, Files) */
+/** + and, for a finger, the photo button (SHEP-345): it opens Android's photo picker straight away, newest first, and
+ *  one tap on a picture attaches it (one at a time: picking several needs an Add tap more, measured on Android 15). + opens
+ *  files; on a phone or tablet a menu first: Paste image, Photos (several at once), Files */
 export function AddButtons({ finger, onFiles, paste }: { finger: boolean; onFiles: (f: File[]) => void; paste: () => void }) {
   const pickFile = useRef<HTMLInputElement>(null)
   const pickPhoto = useRef<HTMLInputElement>(null)
+  const pickPhotos = useRef<HTMLInputElement>(null)
   const take = (e: { target: HTMLInputElement }) => {
     onFiles([...(e.target.files ?? [])])
     e.target.value = ''
@@ -825,6 +827,7 @@ export function AddButtons({ finger, onFiles, paste }: { finger: boolean; onFile
           e.currentTarget,
           [
             { icon: 'paste', label: 'Paste image', run: paste },
+            { icon: 'image', label: 'Photos', run: () => pickPhotos.current?.click() },
             { icon: 'doc', label: 'Files', run: () => pickFile.current?.click() },
           ],
           { label: 'Add' },
@@ -837,7 +840,8 @@ export function AddButtons({ finger, onFiles, paste }: { finger: boolean; onFile
       {finger && (
         <>
           <IB icon="image" label="Add photos" onClick={() => pickPhoto.current?.click()} />
-          <input ref={pickPhoto} type="file" accept="image/*" multiple hidden data-photos="" onChange={take} />
+          <input ref={pickPhoto} type="file" accept="image/*" hidden data-photo="" onChange={take} />
+          <input ref={pickPhotos} type="file" accept="image/*" multiple hidden data-photos="" onChange={take} />
         </>
       )}
     </>

@@ -38,9 +38,12 @@ test('a copied picture is known again by its mark, so one pasted or put away is 
   expect(await markOf(pic(5))).not.toBe(await markOf(pic(6)))
 })
 
-test('the photo button: on a phone an image-only picker that takes several; + then offers Paste image and Files', () => {
+test('the photo button: on a phone an image-only picker where one tap attaches; + has Photos for several', () => {
   const phone = renderToStaticMarkup(<AddButtons finger onFiles={() => undefined} paste={() => undefined} />)
   expect(phone).toContain('aria-label="Add photos"')
+  // the button's: one picture, so a tap on it in Android's picker attaches it (no Add tap)
+  expect(phone).toMatch(/<input type="file" accept="image\/\*" hidden="" data-photo=""/)
+  // + › Photos: several at once
   expect(phone).toMatch(/<input type="file" accept="image\/\*" multiple="" hidden="" data-photos=""/)
   expect(phone).toContain('aria-label="Add"')
   // a desktop: + opens files straight away, no photo button

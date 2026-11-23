@@ -328,7 +328,9 @@ button.fake .n span,button.fake>.i{color:var(--muted)}
 /* SHEP-345: what a share put in the box (Shared to #space, Change) and a copied picture to paste */
 .fchip.shared .where{max-width:min(240px,46vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .fchip button.chg{display:block;color:var(--fg);font-weight:600}
-.fchip button.clipgo{display:inline-flex;align-items:center;gap:6px;color:var(--fg)}.fchip img.pic{object-fit:cover;object-position:top}
+.fchip button.clipgo{display:inline-flex;align-items:center;gap:6px;color:var(--fg)}
+/* a chip in the message box holds its own buttons: they sit over the bigger touch area a finger gets (.fchip::after) */
+.cbox .fchip>button{position:relative;z-index:1;align-self:stretch}.fchip img.pic{object-fit:cover;object-position:top}
 textarea.cin{display:block;height:max(44px,var(--row));min-height:max(44px,var(--row));padding:10px 16px;resize:none;overflow:hidden;font-family:inherit;color:inherit}
 .tw{position:relative}
 .tcap{position:absolute;inset:0;width:100%;height:100%;opacity:0;border:0;background:none;font-size:16px;cursor:text;touch-action:none}
