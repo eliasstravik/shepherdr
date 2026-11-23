@@ -16,10 +16,9 @@ const rule = (sel: string) => css.split('}').filter((r) => r.split('{')[0]!.spli
 
 test("the chat header's space name has all the room its buttons leave: no cap beside an empty title", () => {
   expect(css).not.toMatch(/\.ttl>\.tbtn\{[^}]*max-width:60%/)
-  expect(rule('.ttl>.tbtn')).toContain('flex:0 1 auto')
-  // with a folder chip beside it, the chip gives way first
-  expect(rule('.ttl>.fchip')).toMatch(/flex-shrink:(\d+)/)
-  expect(Number(/flex-shrink:(\d+)/.exec(rule('.ttl>.fchip'))![1])).toBeGreaterThan(10)
+  // it never shrinks for the folder beside it (SHEP-360), only to the header's own width; the folder gives way
+  expect(rule('.ttl>.tbtn')).toContain('flex:none;max-width:100%')
+  expect(rule('.hpath')).toContain('min-width:44px')
 })
 
 test("a task row's title and its line under it wrap to two lines before they are cut, in the panel, on cards and on a phone", () => {

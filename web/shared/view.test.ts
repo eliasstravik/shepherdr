@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Snapshot, Task } from './types.ts'
-import { doneWords, etaOf, folderName, folderOf, leftShort, leftWords, listOf, needsCount, ringOf, nowGroups, statusWord, taskLine, taskWhen, tstate } from './view.ts'
+import { doneWords, etaOf, folderName, folderOf, headerWhere, leftShort, leftWords, listOf, needsCount, ringOf, nowGroups, statusWord, taskLine, taskWhen, tstate } from './view.ts'
 
 const task = (x: Partial<Task>): Task => ({ id: 'T-1', name: 'A task', place: 'shop', status: 'work', state: 'work', on: 'mini', created: '', age: '', ...x })
 
@@ -127,4 +127,20 @@ test('a folder shows as its path, never a made-up name', () => {
   expect(folderName('')).toBe('/')
   expect(folderName('~/dev/shop')).toBe('~/dev/shop')
   expect(folderName('/srv/app')).toBe('/srv/app')
+})
+
+test("a chat header's where: the folder, the machine only when it adds something, Everything too (SHEP-360)", () => {
+  const snap = { host: 'mini', everything: 'ev', places: [{ id: 'ev', machine: 'mini', home: true }], machines: [{ id: 'm:mini', machine: 'mini', name: 'Mac mini', status: 'idle' }, { id: 'm:vm-b', machine: 'vm-b', name: 'Build box', status: 'idle' }] } as unknown as Snapshot
+  // a named space here: its path alone, cut from its start when long
+  expect(headerWhere(snap, { id: 'shop', machine: 'mini', where: '~/dev/shop', folder: '/Users/sam/dev/shop' })).toEqual({ path: '~/dev/shop', cut: true, full: '/Users/sam/dev/shop', machine: null })
+  // on another machine: that machine
+  expect(headerWhere(snap, { id: 'x', machine: 'vm-b', where: '~/clients/acme/shop', folder: '/home/sam/clients/acme/shop' })).toMatchObject({ path: '~/clients/acme/shop', machine: 'Build box' })
+  // the root: / as it is, never cut
+  expect(headerWhere(snap, { id: 'r', machine: 'vm-b', where: '/', folder: '/' })).toEqual({ path: '/', cut: false, full: '/', machine: 'Build box' })
+  // Everything: ~ as it is, with the machine whose home it is
+  expect(headerWhere(snap, { id: 'ev', machine: 'mini', where: '~', folder: '/Users/sam' })).toEqual({ path: '~', cut: false, full: '/Users/sam', machine: 'Mac mini' })
+  // Everything from a service that sends no folder still says it
+  expect(headerWhere(snap, { id: 'ev', machine: 'mini' })).toEqual({ path: '~', cut: false, full: '~', machine: 'Mac mini' })
+  // another space with no folder: nothing
+  expect(headerWhere(snap, { id: 'y', machine: 'mini' })).toBeNull()
 })

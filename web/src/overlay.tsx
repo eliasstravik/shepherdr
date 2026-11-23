@@ -68,7 +68,7 @@ export function openMenu(anchor: Element | null, rows: MenuRow[] | ((close: () =
   for (const l of layers.filter((x) => x.kind === 'menu')) close(l.id)
   const id = seq++
   // the space's name and the filter show they are open; a row's ⋯ stays as it is
-  if (anchor?.matches('.tbtn, .fchip, [data-marks]')) anchor.setAttribute('aria-expanded', 'true')
+  if (anchor?.matches('.tbtn, .hpath, [data-marks]')) anchor.setAttribute('aria-expanded', 'true')
   layers = [...layers, { id, kind: 'menu', anchor, label: opts.label, float: opts.float, within: opts.within, render: (done) => (typeof rows === 'function' ? rows(done) : <MenuRows rows={rows} close={done} cap={opts.cap} top={opts.top?.(done)} />) }]
   emit()
 }

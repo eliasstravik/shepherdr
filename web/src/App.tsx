@@ -4,9 +4,10 @@
 // places; the layout itself is the design system's (ds.css).
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import type { Snapshot } from '@shared/types.ts'
-import { downWords, folderName, folderOf, isEverything, needsCount, placeDown, placeOf, taskOf, type Space } from '@shared/view.ts'
+import { downWords, isEverything, needsCount, placeDown, placeOf, taskOf, type Space } from '@shared/view.ts'
 import { getState, openSettings, registry, setUI, sideHidden, togglePane, useNotice, useSnap, useUI, type Thread } from './kernel.ts'
-import { folderMenu, List, spaceMenu } from './list.tsx'
+import { List, spaceMenu } from './list.tsx'
+import { HeaderPath } from './where.tsx'
 import { closeTop, Layers } from './overlay.tsx'
 import { edge } from './resize.ts'
 import { columnsOf, swapSides, useSides } from './sides.ts'
@@ -27,21 +28,6 @@ export function placeholderOf(snap: Snapshot, thread: Thread): string {
   return isEverything(snap, thread.place) ? 'Message Shepherdr' : `Message #${placeOf(snap, thread.place)?.name ?? ''}`
 }
 
-/** The open space's folder beside its name (SHEP-316): a quiet chip, the path as it is (~, /), its machine
- *  when it is another; a long path gives way from its start. A tap shows the whole path with Copy. */
-function FolderChip({ snap, place }: { snap: Snapshot; place: Space }) {
-  const f = folderOf(snap, place)
-  if (!f.short) return null
-  const name = folderName(f.short)
-  return (
-    <button type="button" className="fchip" aria-haspopup="menu" aria-label={`Folder: ${f.full}${f.machine ? ` on ${f.machine}` : ''}`} onClick={(e) => folderMenu(e.currentTarget, place.id)}>
-      <I n="folder" c="s16" />
-      <span className={cx('fct', name === f.short && 'cut')}><bdi>{name}</bdi></span>
-      {f.machine && <span className="fcm">{f.machine}</span>}
-    </button>
-  )
-}
-
 function ChatHeader({ snap, thread, place, scrolled }: { snap: Snapshot; thread: Thread; place: Space; scrolled: boolean }) {
   const phone = useUI((u) => u.phone)
   const hidden = useUI(sideHidden)
@@ -57,7 +43,7 @@ function ChatHeader({ snap, thread, place, scrolled }: { snap: Snapshot; thread:
           <span>{every ? 'Everything' : place.name}</span>
           <I n="down" c="s16 c-mute" />
         </button>
-        {!every && <FolderChip snap={snap} place={place} />}
+        <HeaderPath snap={snap} place={place} />
       </div>
       {registry.header.filter((h) => !phone || h.phone).map((h, i) => <h.View key={i} thread={thread} />)}
     </header>
