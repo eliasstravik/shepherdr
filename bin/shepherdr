@@ -46,6 +46,8 @@ herdr-task from sending them to other machines until `shepherdr doctor` finds th
 From 3.1 (the Herdr-window layout and its mods): one switch. The update waits while tasks are working (it says which;
 --force switches anyway), then takes out what 3.1 put in the Herdr app (its mods, layout, lib/, core/, bin/, keys and
 hooks; a file you changed is backed up first), leaves your data alone and converts old artifacts to pages once.
+A window that ran 3.1's views gets a notice in each one's place (herdr/window-notice: Shepherdr lives in the web app),
+also on a later update of a machine 3.2.0-3.2.2 switched; `shepherdr window --remove` takes them out.
 
 Shepherdr's own data (tasks, artifacts, settings, secrets, browsers, the service's files) lives in its
 own folders: ~/.config/shepherdr, ~/.local/share/shepherdr, ~/.local/state/shepherdr, ~/.cache/shepherdr
