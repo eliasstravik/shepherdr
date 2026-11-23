@@ -1,13 +1,14 @@
 // The mic in a message box (and in Feedback): dictation only. A voice call is the other thing (the wave button).
 // SHEP-314: while it records, the box's bottom row becomes the recording itself, the way ChatGPT's, Claude's and
 // WhatsApp's composers do it: Cancel on the left, a wave drawn from the microphone's real level and the time in the
-// middle, Done on the right where Send was. The words show above it as they are heard, the way Apple's dictation and
-// Wispr Flow write them, then "Writing it down" until they land in the box.
-// Every way it fails says why, there. Escape cancels; leaving the chat cancels.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { canDictate, clock, dictate, dictSample, SAY, type Dictation, type Heard } from './dictation.ts'
-import { IDLE, NOTHING, shownWords, step, type DictEvent, type DictState } from './dictstate.ts'
-import { has } from './kernel.ts'
+// middle, Done on the right where Send was. SHEP-334: that row is all it shows. No "Listening…" and no words while you
+// talk; on Done the clean text lands at the box's cursor in one go, what was typed stays. "Allow the microphone" shows
+// only when the browser really asks (dictation.ts askWhen). Every way it fails says why, there. Escape cancels;
+// leaving the chat cancels.
+import { useEffect, useRef, useState } from 'react'
+import { canDictate, clock, dictate, dictSample, SAY, warmMic, type Dictation } from './dictation.ts'
+import { IDLE, insertAt, step, type DictEvent, type DictState } from './dictstate.ts'
+import { getState, has } from './kernel.ts'
 import { escapeFirst } from './overlay.tsx'
 import { I, IB } from './ui.tsx'
 import { Wave } from './wave.tsx'
@@ -29,18 +30,37 @@ function useDictState(write: (text: string) => void) {
   return [s, dispatch] as const
 }
 
-export function DictateButton({ write, scope }: { write: (text: string) => void; scope?: string }) {
-  const [s, dispatch] = useDictState((text) => {
-    write(text)
-    landed.current = true
-  })
-  const [words, setWords] = useState<Heard>(NOTHING)
-  const live = useRef<Dictation | null>(null)
-  const surf = useRef<HTMLDivElement>(null)
+/** the person's own words for the writing to get right: their spaces' and machines' names */
+function ownWords(): string[] {
+  const snap = getState().snap
+  if (!snap) return []
+  return [...(snap.places ?? []).map((p) => p.name), ...(snap.machines ?? []).map((m) => m.name)].filter((w): w is string => typeof w === 'string')
+}
+
+/** The box's cursor, read as the mic is pressed (before the press takes the focus): only while the box is being
+ *  typed in; else null, and the words go at its end (a box restored from a draft says its cursor is at 0). */
+export function cursorOf(box: HTMLTextAreaElement | null): { start: number; end: number } | null {
+  if (!box || document.activeElement !== box) return null
+  return { start: box.selectionStart ?? box.value.length, end: box.selectionEnd ?? box.value.length }
+}
+
+/** setText: the box's whole new text (the words go in at its cursor, what was typed stays) */
+export function DictateButton({ setText, scope }: { setText: (value: string) => void; scope?: string }) {
   const mic = useRef<HTMLButtonElement>(null)
-  const landed = useRef(false)
+  const surf = useRef<HTMLDivElement>(null)
+  const landed = useRef<number | null>(null)
+  // where the cursor was in the box when dictation started (null: the box wasn't being typed in, so at its end)
+  const at = useRef<{ start: number; end: number } | null>(null)
+  const pressed = useRef<{ start: number; end: number } | null | undefined>(undefined)
+  const boxOf = () => (mic.current ?? surf.current)?.closest('.cbox')?.querySelector<HTMLTextAreaElement>('textarea') ?? null
+  const [s, dispatch] = useDictState((text) => {
+    const box = boxOf()
+    const r = insertAt(box?.value ?? '', at.current, text)
+    setText(r.value)
+    landed.current = r.caret
+  })
+  const live = useRef<Dictation | null>(null)
   const [, tick] = useState(0)
-  const said = useRef<HTMLDivElement>(null)
   const active = s.k !== 'idle'
 
   const cancel = () => {
@@ -51,12 +71,14 @@ export function DictateButton({ write, scope }: { write: (text: string) => void;
   }
   const start = () => {
     live.current?.cancel()
+    landed.current = null
+    // a fresh dictation: the cursor as it was when the mic was pressed; Try again keeps the first one's
+    if (s.k === 'idle') at.current = pressed.current ?? null
+    pressed.current = undefined
     if (!canDictate()) {
       dispatch({ t: 'start' })
       return dispatch({ t: 'fail', why: 'This browser has no microphone to dictate with.' })
     }
-    setWords(NOTHING)
-    landed.current = false
     dispatch({ t: 'start' })
     const d = dictate(
       (text) => {
@@ -69,7 +91,7 @@ export function DictateButton({ write, scope }: { write: (text: string) => void;
       },
       undefined,
       (p) => dispatch({ t: 'phase', p, at: Date.now() }),
-      setWords,
+      ownWords(),
     )
     live.current = d
   }
@@ -78,12 +100,6 @@ export function DictateButton({ write, scope }: { write: (text: string) => void;
   // gone (the box closed) or another chat's box: stop, write nothing
   useEffect(() => () => live.current?.cancel(), [])
   useEffect(() => () => cancel(), [scope])
-  // the browser's microphone question still open: say what it waits for
-  useEffect(() => {
-    if (s.k !== 'asking' || s.slow) return
-    const t = setTimeout(() => dispatch({ t: 'slow' }), 1200)
-    return () => clearTimeout(t)
-  }, [s])
   // the time moves while it records
   useEffect(() => {
     if (s.k !== 'on') return
@@ -101,58 +117,57 @@ export function DictateButton({ write, scope }: { write: (text: string) => void;
     escapeFirst.add(take)
     return () => void escapeFirst.delete(take)
   }, [active, s.k])
-  // focus: on the surface's main button while it shows (keyboard: Enter is Done), then back where it belongs
+  // the box isn't typed into meanwhile: the words go where its cursor was, and what was typed stays as it is
+  useEffect(() => {
+    const box = boxOf()
+    if (box) box.readOnly = active && s.k !== 'error'
+  }, [active, s.k])
+  useEffect(() => () => {
+    const box = boxOf()
+    if (box) box.readOnly = false
+  }, [])
+  // focus: on the surface's main button while it shows (keyboard: Enter is Done; a phone's keyboard steps aside),
+  // then back where it belongs
   const was = useRef(false)
   useEffect(() => {
     if (active && !was.current) surf.current?.querySelector<HTMLButtonElement>('[data-main]')?.focus({ preventScroll: true })
     if (!active && was.current) {
-      // the words landed: on a desktop, into the box to edit them; else back on the mic (no phone keyboard pops up)
-      const box = mic.current?.closest('.cbox')?.querySelector<HTMLTextAreaElement>('textarea')
-      if (landed.current && box && matchMedia('(pointer: fine)').matches) {
+      const box = boxOf()
+      const caret = landed.current
+      // the words landed: on a desktop, the cursor right after them to carry on; else back on the mic (no phone
+      // keyboard pops up)
+      if (caret !== null && box && matchMedia('(pointer: fine)').matches) {
         box.focus({ preventScroll: true })
-        box.setSelectionRange(box.value.length, box.value.length)
+        box.setSelectionRange(caret, caret)
       } else if (document.activeElement === document.body || !document.activeElement) mic.current?.focus({ preventScroll: true })
+      at.current = null
     }
     was.current = active
   }, [active])
 
-  // the newest words stay in view: scrolled to the end as they come, the older ones fading at the top
-  useLayoutEffect(() => {
-    const el = said.current
-    if (!el) return
-    el.scrollTop = el.scrollHeight
-    el.classList.toggle('more', el.scrollTop > 0)
-  }, [words, s.k])
-
   if (!has('voice')) return null
   if (!active)
     return (
-      <button ref={mic} type="button" className="ib" aria-label="Dictate" onClick={start}>
+      <button ref={mic} type="button" className="ib" aria-label="Dictate" onPointerDown={() => { pressed.current = cursorOf(boxOf()); warmMic() }} onClick={start}>
         <I n="mic" />
       </button>
     )
 
-  const shown = shownWords(words)
-  const heard = !!(shown.said || shown.partial)
   return (
     <div ref={surf} className={`dsurf ${s.k}`} role="group" aria-label="Dictation">
-      <div ref={said} className="dwords" aria-hidden={s.k !== 'error'}>
-        {s.k === 'error' ? (
-          <p className="derr" role="alert">
-            <I n="warn" c="s16" />
-            <span>{s.why}</span>
-          </p>
-        ) : s.k === 'asking' ? (
-          <p className="dhint">{s.slow ? SAY.asking : 'Starting the microphone…'}</p>
-        ) : heard ? (
-          <p className="dsaid">
-            {shown.said}
-            {shown.partial}
-          </p>
-        ) : (
-          <p className="dhint">{s.k === 'writing' ? 'Writing it down…' : 'Listening…'}</p>
-        )}
-      </div>
+      {/* only words that need reading: why it didn't work, or the browser really asking for the microphone */}
+      {(s.k === 'error' || s.k === 'asking') && (
+        <div className="dwords">
+          {s.k === 'error' ? (
+            <p className="derr" role="alert">
+              <I n="warn" c="s16" />
+              <span>{s.why}</span>
+            </p>
+          ) : (
+            <p className="dhint">{SAY.asking}</p>
+          )}
+        </div>
+      )}
       <div className="dctl">
         {s.k === 'error' ? (
           <>
@@ -186,7 +201,7 @@ export function DictateButton({ write, scope }: { write: (text: string) => void;
         )}
       </div>
       <span className="vh" role="status">
-        {s.k === 'asking' ? (s.slow ? SAY.asking : 'Starting the microphone') : s.k === 'on' ? 'Recording' : s.k === 'writing' ? 'Writing it down' : ''}
+        {s.k === 'asking' ? SAY.asking : s.k === 'on' ? 'Recording' : s.k === 'writing' ? 'Writing it down' : ''}
       </span>
     </div>
   )

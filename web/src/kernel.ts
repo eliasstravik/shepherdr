@@ -112,7 +112,7 @@ export interface Registry {
   /** above the message box (the warnings line) */
   aboveBox: { order: number; View: FC<{ thread: Thread }> }[]
   /** in the message box's bar, before Send (the mic) */
-  boxButtons: { order: number; View: FC<{ thread: Thread; write: (text: string) => void }> }[]
+  boxButtons: { order: number; View: FC<{ thread: Thread; setText: (value: string) => void }> }[]
   /** under a column, below its message box (your own terminal) */
   drawer: { when: (ui: UI, thread: Thread) => boolean; View: FC<{ thread: Thread }> }[]
   /** the list's brand row, before Search */

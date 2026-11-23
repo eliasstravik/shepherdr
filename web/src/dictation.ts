@@ -1,13 +1,14 @@
-// Talk to type: the microphone records while a meter on it draws the wave, and the words are written as you speak
-// (ElevenLabs' realtime speech to text, core/voice.js liveWords, with a single-use token from the service): on Done the
-// microphone stops at once and the last words land a moment later. If the live words can't come, the recording (kept
-// meanwhile) goes to the service to be written down (ElevenLabs speech to text, as the window's dictation), also when
-// they come back empty (afterDone). The words go into the box to edit; cancel drops it, also while it's writing. When
-// no words come, the mic says why (SAY), never nothing.
+// Talk to type (SHEP-334): the microphone records while a meter on it draws the wave; nothing is written while you
+// speak. Underneath, the words are already being written (ElevenLabs' realtime speech to text, core/voice.js liveWords,
+// with a single-use token from the service), never shown: on Done the microphone stops at once and the clean text lands
+// a moment later, in one go (ElevenLabs drops "um"s and false starts, tidyText the rest). If the live words can't come,
+// the recording (kept meanwhile) goes to the service to be written down instead, also when they come back empty
+// (afterDone); only one of the two ever writes. Cancel drops it, also while it's writing. When no words come, the mic
+// says why (SAY), never nothing.
 import * as V from '@core/voice.js'
 import { levelOf, meter, TALKING, type Sample } from './meter.ts'
 
-const { liveUrl, liveChunk, liveWords, base64, to16k, LIVE_TAIL, LIVE_WAIT } = V as any
+const { liveUrl, liveChunk, liveWords, base64, to16k, tidyText, LIVE_TAIL, LIVE_WAIT } = V as any
 
 export interface Dictation {
   /** stop listening; the words still on their way come in, then the end callback gets them all */
@@ -19,14 +20,14 @@ export interface Dictation {
 let current: Dictation | null = null
 let level: AnalyserNode | null = null
 
-export function canDictate() {
-  return typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
-}
-
-/** the time recorded, m:ss (the mic's pill while it records) */
+/** the time recorded, m:ss (the bottom row's time while it records) */
 export const clock = (ms: number) => {
   const s = Math.max(0, Math.floor(ms / 1000))
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
+export function canDictate() {
+  return typeof MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia
 }
 
 /** for the wave: how loud you are right now */
@@ -77,7 +78,8 @@ export function micError(e: unknown): string {
 
 type Written = { text: string } | { error: string }
 
-/** After Done: the live words when they came and say something, else the recording uploaded and written down; words
+/** After Done: the live words when they came and say something, else the recording uploaded and written down, either
+ *  tidied (tidyText); words
  *  or why not, never nothing. An empty live answer is not taken as the result: on a phone whose microphone tap gave the
  *  live session no audio, it answered with no words, and the recording that had the words was never sent (SHEP-307).
  *  `live` is null when the live words can't come at all; null back means it was cancelled meanwhile. */
@@ -89,15 +91,16 @@ export async function afterDone(
 ): Promise<Written | null> {
   const said = live ? await live().catch(() => null) : null
   if (over()) return null
-  if (said?.trim()) {
+  const clean = (t: string): string => tidyText(t)
+  if (clean(said ?? '')) {
     timing('live')
-    return { text: said.trim() }
+    return { text: clean(said!) }
   }
   const r = await upload().catch(() => heard(0, ''))
   if (over()) return null
   timing('upload')
   if ('error' in r) return r
-  return r.text.trim() ? { text: r.text.trim() } : { error: SAY.silence }
+  return clean(r.text) ? { text: clean(r.text) } : { error: SAY.silence }
 }
 
 /** the audio worklet that hands the page the microphone's samples (for the live words), as a module from a blob */
@@ -107,18 +110,10 @@ const TAP = `registerProcessor('shepherdr-tap', class extends AudioWorkletProces
 let tapUrl: string | null = null
 
 /** The live words' socket for one dictation: open() with a token, send() the microphone's 16 kHz samples (kept until it
- *  opens), finish() asks for the last words: their text, or null when they can't come (then upload the recording). */
-export interface Heard {
-  /** the words kept so far */
-  said: string
-  /** the words still being heard (they may change) */
-  partial: string
-}
-
-export function liveSession(token: Promise<string | null>, make: (url: string) => WebSocket = (u) => new WebSocket(u),
-  /** the words so far, each time they change, while you speak (SHEP-314) */
-  onWords: (w: Heard) => void = () => undefined) {
-  const words = liveWords()
+ *  opens), finish() asks for the last words: their text, or null when they can't come (then upload the recording). The
+ *  words heard meanwhile are never shown (SHEP-334: a word-for-word line while you talk is not dictation). */
+export function liveSession(token: Promise<string | null>, make: (url: string) => WebSocket = (u) => new WebSocket(u), words: string[] = []) {
+  const heard = liveWords()
   let ws: WebSocket | null = null
   let broken = false
   let queue: string[] = []
@@ -127,16 +122,15 @@ export function liveSession(token: Promise<string | null>, make: (url: string) =
   token.then((t) => {
     if (!t || broken) return fail()
     try {
-      ws = make(liveUrl(t))
+      ws = make(liveUrl(t, words))
     } catch {
       return fail()
     }
     ws.onopen = () => { for (const m of queue) ws?.send(m); queue = [] }
     ws.onmessage = (e) => {
-      const r = words.hear(String(e.data))
-      if (r === null && !broken) onWords(words.shown())
+      const r = heard.hear(String(e.data))
       if (r === 'failed') fail()
-      else if (r === 'words') { landed?.(words.text()); landed = null; try { ws?.close() } catch { /* gone */ } }
+      else if (r === 'words') { landed?.(heard.text()); landed = null; try { ws?.close() } catch { /* gone */ } }
     }
     // closed before Done's words came (the network, ElevenLabs' limits): the recording is uploaded instead
     ws.onerror = () => fail()
@@ -151,12 +145,52 @@ export function liveSession(token: Promise<string | null>, make: (url: string) =
       return new Promise((res) => {
         const t = setTimeout(() => { landed = null; fail(); res(null) }, wait)
         landed = (text) => { clearTimeout(t); res(text) }
-        words.done()
+        heard.done()
         send(liveChunk(base64(LIVE_TAIL), true))
       })
     },
     close() { landed = null; broken = true; queue = []; try { ws?.close() } catch { /* gone */ } },
   }
+}
+
+/** SHEP-334: what the microphone is asked for. The browser's noise suppression and echo cancellation gate the quiet
+ *  start of speech (the first syllables came out clipped), and dictation plays nothing to cancel: off. Its gain stays. */
+export const MIC: MediaTrackConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: true }
+
+/** SHEP-334: the live words are taken only when they heard the whole recording. Their tap starts after the recording
+ *  (its audio module loads, a phone's audio waits to resume), so the opening words could be missing from them while
+ *  the recording has them: then the recording is written down instead. liveSecs: the audio the live words got;
+ *  recSecs: the recording's length; slack: what a tap's start may lag without losing a word. */
+export const LIVE_SLACK = 0.3
+export function wholeLive(liveSecs: number, recSecs: number, slack = LIVE_SLACK): boolean {
+  return liveSecs > 0 && liveSecs >= recSecs - slack
+}
+
+/** how long the microphone stays on after Done, so the last word said as Done is tapped still gets in */
+export const TAIL_KEEP = 250
+
+/** how long a microphone asked for on the mic's press (warmMic) waits for the tap that uses it */
+const WARM_KEEP = 1500
+let early: { at: number; stream: Promise<MediaStream> } | null = null
+
+/** SHEP-334: the microphone is asked for as the finger lands on the mic (pointerdown), not when it lifts (click), so it
+ *  is on that much sooner: people start talking at once. Unused within WARM_KEEP (a scroll, not a tap), it stops. The
+ *  microphone isn't kept on between dictations: a phone would show its recording sign all the time. */
+export function warmMic() {
+  if (!canDictate() || (early && performance.now() - early.at < WARM_KEEP)) return
+  let stream: Promise<MediaStream>
+  try {
+    stream = navigator.mediaDevices.getUserMedia({ audio: MIC })
+  } catch {
+    return
+  }
+  stream.catch(() => undefined)
+  const mine = (early = { at: performance.now(), stream })
+  setTimeout(() => {
+    if (early !== mine) return
+    early = null
+    stream.then((st) => st.getTracks().forEach((t) => t.stop()), () => undefined)
+  }, WARM_KEEP)
 }
 
 /** how long Done waits for the recording to be written down before it says so */
@@ -186,6 +220,36 @@ async function running(c: AudioContext): Promise<boolean> {
   return c.state === 'running'
 }
 
+/** how long the microphone may take to answer before, with no way to ask the browser, the page says it is asking */
+export const ASK_WAIT = 1200
+
+/** The microphone's permission, where the browser can say it without asking (navigator.permissions): 'granted',
+ *  'prompt' or 'denied'; null where it can't (then only a slow answer means the browser is asking). */
+export async function micPermission(): Promise<PermissionState | null> {
+  try {
+    const p = await navigator.permissions?.query({ name: 'microphone' as PermissionName })
+    return p?.state ?? null
+  } catch {
+    return null
+  }
+}
+
+/** SHEP-334: "Allow the microphone" only when the browser really asks. It once showed on every press, though the
+ *  microphone was allowed long ago (the pill said "Allow mic" until the first audio). With a permission state: at once
+ *  when it is 'prompt' or 'denied', never when 'granted'. Without one: only if the microphone hasn't answered after
+ *  `wait`. `answered` says whether it has; `ask` shows it. Returns a stop for the wait. */
+export function askWhen(perm: Promise<PermissionState | null>, answered: () => boolean, ask: () => void, wait = ASK_WAIT): () => void {
+  let t: ReturnType<typeof setTimeout> | null = null
+  let stopped = false
+  void perm.then((p) => {
+    if (stopped || answered()) return
+    if (p === 'prompt' || p === 'denied') return ask()
+    if (p === 'granted') return
+    t = setTimeout(() => { if (!stopped && !answered()) ask() }, wait)
+  }, () => undefined)
+  return () => { stopped = true; if (t) clearTimeout(t) }
+}
+
 /** a single-use token for the live words (null: not now; the recording is uploaded at Done instead) */
 async function liveTokenFor(): Promise<string | null> {
   try {
@@ -199,15 +263,17 @@ async function liveTokenFor(): Promise<string | null> {
 
 /** Starts listening. `end` gets what was heard when it finishes, or null when cancelled; `fail` why it didn't work. Shepherdr 3: the phone records,
  *  the service has ElevenLabs write it down (the window's dictation, the same words on every phone browser).
- *  `timing` (tests, the proof) hears each step after Done: 'live' or 'upload' and how many ms Done to words took. */
+ *  `timing` (tests, the proof) hears each step after Done: 'live' or 'upload' and how many ms Done to words took.
+ *  Phases: 'asking' only when the browser really asks for the microphone (askWhen), 'on' from the first audio,
+ *  'writing' after Done. Before 'on' the surface is neutral: starting. */
 export type Phase = 'asking' | 'on' | 'writing'
 
 export function dictate(end: (text: string | null) => void, fail: (why: string) => void = () => undefined,
   timing: (how: 'live' | 'upload', ms: number) => void = () => undefined,
-  /** what the button shows: waiting for the microphone (its permission), recording, writing it down */
+  /** what the surface shows: the browser asking for the microphone, listening, writing it down */
   phase: (p: Phase) => void = () => undefined,
-  /** the live words as they come (only while the live words work; the upload has none until Done) */
-  words: (w: Heard) => void = () => undefined): Dictation {
+  /** the person's own words (spaces, machines): the writing is biased towards them (core/voice.js vocabulary) */
+  words: string[] = []): Dictation {
   current?.cancel()
   let state = 'on' as 'on' | 'finishing' | 'over'
   let mic: MediaStream | null = null
@@ -218,6 +284,8 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
   const chunks: Blob[] = []
   // the microphone's 16 kHz samples not sent yet (sent about every 100 ms, and the rest at Done); tapped: all of them
   let pending: Uint8Array[] = [], size = 0, tapped = 0
+  // when the recording started (the live words must cover it all: wholeLive), and whether the microphone is still on
+  let recAt = 0, hearing = true
   const flush = () => {
     if (!size) return
     const all = new Uint8Array(size); let at = 0
@@ -227,21 +295,36 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
   }
   let live: ReturnType<typeof liveSession> | null = null
   try {
-    live = typeof WebSocket !== 'undefined' ? liveSession(liveTokenFor(), undefined, (w) => { if (state !== 'over') words(w) }) : null
+    live = typeof WebSocket !== 'undefined' ? liveSession(liveTokenFor(), undefined, words) : null
   } catch {
     live = null
   }
+  // the live words' audio module loads now, while the browser opens the microphone, not after (SHEP-334: the tap that
+  // started late missed the opening words)
+  let loaded: Promise<void> | null = null
+  try {
+    if (live && ctx?.audioWorklet) {
+      tapUrl ??= URL.createObjectURL(new Blob([TAP], { type: 'text/javascript' }))
+      loaded = ctx.audioWorklet.addModule(tapUrl)
+      loaded.catch(() => undefined)
+    }
+  } catch {
+    loaded = null
+  }
   // the microphone and the wave stop as soon as you're done: only the writing is left
   const quiet = () => {
+    hearing = false
     mic?.getTracks().forEach((t) => t.stop())
     ctx?.close().catch(() => undefined)
     ctx = null
     level = null
   }
   const over = () => state === 'over'
+  let stopAsk = () => undefined as void
   const close = (text: string | null) => {
     if (over()) return
     state = 'over'
+    stopAsk()
     quiet()
     live?.close()
     upload?.abort()
@@ -268,7 +351,8 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
     let slow = false
     const t = setTimeout(() => { slow = true; a.abort() }, UPLOAD_WAIT)
     try {
-      const x = await fetch('api/dictate', { method: 'POST', body: audio, signal: a.signal, headers: { 'x-shepherdr': '1', 'content-type': audio.type } })
+      const q = words.length ? `?${new URLSearchParams(words.map((w) => ['word', w]))}` : ''
+      const x = await fetch(`api/dictate${q}`, { method: 'POST', body: audio, signal: a.signal, headers: { 'x-shepherdr': '1', 'content-type': audio.type } })
       return heard(x.status, await x.text())
     } catch {
       return slow ? { error: SAY.slow } : heard(0, '')
@@ -284,16 +368,22 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
       if (!rec || rec.state === 'inactive') return failed(mic ? SAY.empty : SAY.notYet)
       phase('writing')
       const done = performance.now()
-      const audio = recording()
-      flush()
-      quiet()
-      // live words only when the tap gave the session audio; else (a phone's silent tap) straight to the upload
-      const said = live && !live.broken && tapped > 0 ? () => live!.finish() : null
-      void afterDone(said, async () => uploaded(await audio), over, (how) => timing(how, performance.now() - done)).then((r) => {
-        if (!r) return
-        if ('error' in r) failed(r.error)
-        else close(r.text)
-      })
+      // the microphone hears a moment more (the last word as Done is tapped), then stops
+      setTimeout(() => {
+        if (over()) return
+        const recSecs = (performance.now() - recAt) / 1000
+        const audio = recording()
+        flush()
+        quiet()
+        // live words only when they heard the whole recording; else (a tap that started late, a phone's silent tap)
+        // the recording, which has it all, is written down
+        const said = live && !live.broken && wholeLive(tapped / (16000 * 2), recSecs) ? () => live!.finish() : null
+        void afterDone(said, async () => uploaded(await audio), over, (how) => timing(how, performance.now() - done)).then((r) => {
+          if (!r) return
+          if ('error' in r) failed(r.error)
+          else close(r.text)
+        })
+      }, TAIL_KEEP)
     },
     cancel() {
       if (state === 'over') return
@@ -302,19 +392,26 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
     },
   }
   current = self
-  phase('asking')
-  const asked = navigator.mediaDevices?.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
+  // the microphone asked for as the mic was pressed (warmMic), else now
+  const warm = early && performance.now() - early.at < WARM_KEEP ? early.stream : null
+  early = null
+  const asked = warm ?? navigator.mediaDevices?.getUserMedia({ audio: MIC })
   if (!asked) {
     failed(SAY.noMic)
     return self
   }
+  let answered = false
+  stopAsk = askWhen(micPermission(), () => answered || state !== 'on', () => phase('asking'))
   asked
     .then(async (stream) => {
+      answered = true
+      stopAsk()
       if (state !== 'on') return stream.getTracks().forEach((t) => t.stop())
       mic = stream
       rec = new MediaRecorder(stream)
       rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
       rec.start(1000)
+      recAt = performance.now()
       phase('on')
       // the recording runs whatever the audio below does: it is what Done uploads when the live words can't come
       const c = ctx
@@ -323,31 +420,34 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
         const src = c.createMediaStreamSource(stream)
         level = meter(c)
         src.connect(level)
+        // the live words: the microphone's samples, 16 kHz, to the socket as they come (kept until it opens), the tap
+        // joined before the audio is made to run, so it hears from the first sample the audio gives
+        if (live && loaded) {
+          await loaded
+          if (state !== 'on' || ctx !== c) return
+          const tap = new AudioWorkletNode(c, 'shepherdr-tap')
+          const down = to16k(c.sampleRate)
+          tap.port.onmessage = (e) => {
+            if (!hearing || over()) return
+            const pcm: Uint8Array = down(e.data as Float32Array)
+            pending.push(pcm); size += pcm.length; tapped += pcm.length
+            if (size >= 3200) flush()
+          }
+          src.connect(tap)
+          // pulled by the graph on every browser, silent
+          const mute = c.createGain()
+          mute.gain.value = 0
+          tap.connect(mute).connect(c.destination)
+        } else live?.close()
         await running(c)
-        if (state !== 'on' || ctx !== c) return
-        // the live words: the microphone's samples, 16 kHz, to the socket as they come
-        if (!live || !c.audioWorklet) return live?.close()
-        tapUrl ??= URL.createObjectURL(new Blob([TAP], { type: 'text/javascript' }))
-        await c.audioWorklet.addModule(tapUrl)
-        if (state !== 'on' || ctx !== c) return
-        const tap = new AudioWorkletNode(c, 'shepherdr-tap')
-        const down = to16k(c.sampleRate)
-        tap.port.onmessage = (e) => {
-          if (state !== 'on') return
-          const pcm: Uint8Array = down(e.data as Float32Array)
-          pending.push(pcm); size += pcm.length; tapped += pcm.length
-          if (size >= 3200) flush()
-        }
-        src.connect(tap)
-        // pulled by the graph on every browser, silent
-        const mute = c.createGain()
-        mute.gain.value = 0
-        tap.connect(mute).connect(c.destination)
       } catch {
         // no wave or live words (a failed worklet): Done uploads the recording
         live?.close()
       }
     })
-    .catch((e) => failed(micError(e)))
+    .catch((e) => {
+      answered = true
+      failed(micError(e))
+    })
   return self
 }

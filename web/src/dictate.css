@@ -1,14 +1,12 @@
 /* Dictation (SHEP-314): while it records, the box's bottom row becomes the recording: Cancel, the wave and the time,
-   Done where Send was; the words as they're heard above it. Everything else in the row steps aside meanwhile. */
+   Done where Send was. Everything else in the row steps aside meanwhile. SHEP-334: no words above it while you talk
+   (no "Listening…", no live words); only an error, or the browser really asking for the microphone, says something. */
 .cbar:has(>.dsurf)>:not(.dsurf){display:none}
 .dsurf{position:relative;flex:1;display:grid;gap:2px;min-width:0;animation:fade .15s ease-out}
 
-/* the words: two lines kept for them from the start, so nothing jumps as they come; the newest stay in view (scrolled
-   down as they come, the older ones fading out at the top) */
-.dwords{height:calc(var(--uil) * 2);padding:0 10px;overflow:hidden;font-size:var(--ui);line-height:var(--uil);overflow-wrap:anywhere}
-.dwords.more{-webkit-mask-image:linear-gradient(transparent,#000 10px);mask-image:linear-gradient(transparent,#000 10px)}
-.dsaid{color:var(--fg)}.dhint{color:var(--muted)}
-.dsurf.error .dwords{height:auto;min-height:calc(var(--uil) * 2);padding-top:4px}
+/* the words, only when something must be read: an error, or the browser asking for the microphone */
+.dwords{padding:4px 10px 0;font-size:var(--ui);line-height:var(--uil);overflow-wrap:anywhere}
+.dhint{color:var(--muted)}
 .derr{display:flex;align-items:flex-start;gap:8px;color:var(--fg)}
 .derr .i{margin-top:calc((var(--uil) - 16px) / 2);color:var(--red)}
 

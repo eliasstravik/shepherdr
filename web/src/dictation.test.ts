@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { afterDone, clock, heard, liveSession, micError, SAY } from './dictation.ts'
+import { afterDone, askWhen, heard, liveSession, micError, MIC, SAY, wholeLive } from './dictation.ts'
 
 // SHEP-10: a failed transcription used to come back as no words at all, so nothing landed in the box and nothing said why
 describe('what the service answered to a recording', () => {
@@ -45,17 +45,17 @@ describe('the live words', () => {
     f.say({ message_type: 'committed_transcript', text: 'cancel button.' })
     expect(await words).toBe('Add a cancel button.')
   })
-  test('the words show as they come: each partial and committed piece (SHEP-314)', async () => {
+  test('3: nothing is shown while you speak; the socket asks for written text with the person’s words (SHEP-334)', async () => {
     const f = fakeSocket()
-    const seen: { said: string; partial: string }[] = []
-    liveSession(Promise.resolve('tok'), f.make, (w) => seen.push(w))
+    const live = liveSession(Promise.resolve('tok'), f.make, ['root', 'vm-demo'])
     await Bun.sleep(0)
     f.open()
-    f.say({ message_type: 'session_started' })
+    const u = new URL(f.s.url)
+    expect(u.searchParams.get('no_verbatim')).toBe('true')
+    expect(u.searchParams.getAll('keyterms')).toEqual(expect.arrayContaining(['Shepherdr', 'herdr-core', 'root', 'vm-demo']))
+    // partials only run underneath: the session has no way to show them
     f.say({ message_type: 'partial_transcript', text: 'Add a can' })
-    f.say({ message_type: 'committed_transcript', text: 'Add a cancel button.' })
-    expect(seen.at(-2)).toEqual({ said: '', partial: 'Add a can' })
-    expect(seen.at(-1)).toEqual({ said: 'Add a cancel button.', partial: '' })
+    expect(Object.keys(live)).not.toContain('words')
   })
   test('no token, a dropped socket or no answer in time: null, so the recording is uploaded', async () => {
     expect(await liveSession(Promise.resolve(null), fakeSocket().make).finish(50)).toBe(null)
@@ -98,9 +98,9 @@ describe('after Done', () => {
     }
   })
   test('no live words, a failed or a thrown live session: the upload', async () => {
-    expect(await afterDone(null, upload({ text: 'a' }).f)).toEqual({ text: 'a' })
-    expect(await afterDone(async () => null, upload({ text: 'b' }).f)).toEqual({ text: 'b' })
-    expect(await afterDone(() => Promise.reject(new Error('socket')), upload({ text: 'c' }).f)).toEqual({ text: 'c' })
+    expect(await afterDone(null, upload({ text: 'a' }).f)).toEqual({ text: 'A.' })
+    expect(await afterDone(async () => null, upload({ text: 'b' }).f)).toEqual({ text: 'B.' })
+    expect(await afterDone(() => Promise.reject(new Error('socket')), upload({ text: 'c' }).f)).toEqual({ text: 'C.' })
   })
   test('an empty final result says nothing was heard, never nothing at all', async () => {
     expect(await afterDone(async () => '', upload({ text: '' }).f)).toEqual({ error: SAY.silence })
@@ -110,6 +110,18 @@ describe('after Done', () => {
     const key = 'Dictation needs an ElevenLabs key in Settings › Secrets.'
     expect(await afterDone(async () => '', upload({ error: key }).f)).toEqual({ error: key })
     expect(await afterDone(null, () => Promise.reject(new Error('x')))).toEqual({ error: SAY.unreached })
+  })
+  test('4: the words come back clean, whichever way they came (SHEP-334)', async () => {
+    const said = 'so um I think the the button is too small. No, wait, the box'
+    expect(await afterDone(async () => said, upload({ text: 'x' }).f)).toEqual({ text: 'So I think the box.' })
+    expect(await afterDone(null, upload({ text: 'uh send it to Anna, sorry, Bob' }).f)).toEqual({ text: 'Send it to Bob.' })
+    // only fillers: nothing was heard, never an empty box
+    expect(await afterDone(async () => 'um', upload({ text: 'uh' }).f)).toEqual({ error: SAY.silence })
+  })
+  test('5: live words and the upload can both answer, but only one writes', async () => {
+    const u = upload({ text: 'From the upload.' })
+    expect(await afterDone(async () => 'From the live words.', u.f)).toEqual({ text: 'From the live words.' })
+    expect(u.calls.length).toBe(0)
   })
   test('cancelled meanwhile: nothing comes back and nothing is uploaded', async () => {
     let over = false
@@ -121,7 +133,7 @@ describe('after Done', () => {
     const make = () => { const s: any = { readyState: 1, send() {}, close() {} }; setTimeout(() => s.onopen?.(), 0); return s as WebSocket }
     const live = liveSession(Promise.resolve('tok'), make)
     await Bun.sleep(5)
-    expect(await afterDone(() => live.finish(30), upload({ text: 'late' }).f)).toEqual({ text: 'late' })
+    expect(await afterDone(() => live.finish(30), upload({ text: 'late' }).f)).toEqual({ text: 'Late.' })
   })
   test('a WebSocket that throws ends the live session at once, so the recording is uploaded', async () => {
     const live = liveSession(Promise.resolve('tok'), () => { throw new Error('SecurityError') })
@@ -149,8 +161,65 @@ describe("the mic's failures, in plain words", () => {
   })
 })
 
-test("the recording's time on the mic", () => {
-  expect(clock(0)).toBe('0:00')
-  expect(clock(7_900)).toBe('0:07')
-  expect(clock(83_000)).toBe('1:23')
+// SHEP-334: "it first always shows Allow mic for some reason. I believe I have allowed it."
+describe('1: "Allow the microphone" only when the browser really asks', () => {
+  const watch = (perm: PermissionState | null, answeredAfter: number | null, wait = 40) => {
+    let asked = -1
+    const t0 = Date.now()
+    const answered = () => answeredAfter !== null && Date.now() - t0 >= answeredAfter
+    askWhen(Promise.resolve(perm), answered, () => { asked = Date.now() - t0 }, wait)
+    return () => asked
+  }
+  test('allowed: never, however slow the microphone is', async () => {
+    const asked = watch('granted', null)
+    await Bun.sleep(80)
+    expect(asked()).toBe(-1)
+  })
+  test('not yet allowed or blocked: at once', async () => {
+    for (const p of ['prompt', 'denied'] as const) {
+      const asked = watch(p, null)
+      await Bun.sleep(5)
+      expect(asked()).toBeGreaterThanOrEqual(0)
+      expect(asked()).toBeLessThan(30)
+    }
+  })
+  test('a browser that can’t say: only when the microphone hasn’t answered after a moment', async () => {
+    const fast = watch(null, 10)
+    await Bun.sleep(80)
+    expect(fast()).toBe(-1)
+    const slow = watch(null, null)
+    await Bun.sleep(80)
+    expect(slow()).toBeGreaterThanOrEqual(40)
+  })
+  test('stopped (the microphone answered, or cancelled): never', async () => {
+    let asked = false
+    const stop = askWhen(Promise.resolve(null), () => false, () => { asked = true }, 20)
+    stop()
+    await Bun.sleep(50)
+    expect(asked).toBe(false)
+  })
+})
+
+// SHEP-334: "in the beginning, it loses some words". The live words' tap started after the recording (its audio module
+// loaded and a phone's audio resumed only once the microphone was on), so speech from 0 ms reached the recording but not
+// the live words, and Done took the live words.
+describe('the opening words are never lost', () => {
+  test('a clip that starts speaking at 0 ms: live words that missed its start are not taken; the recording is', async () => {
+    // 5 s recorded from the first sample; the tap joined 0.8 s late and heard 4.2 s
+    expect(wholeLive(4.2, 5.0)).toBe(false)
+    const u = { calls: 0 }
+    const said = wholeLive(4.2, 5.0) ? async () => 'we should send this to the repo.' : null
+    const r = await afterDone(said, async () => { u.calls++; return { text: 'So I think we should send this to the repo.' } })
+    expect(r).toEqual({ text: 'So I think we should send this to the repo.' })
+    expect(u.calls).toBe(1)
+  })
+  test('live words that heard it all are taken (fast), within a tap’s small lag', () => {
+    expect(wholeLive(5.0, 5.0)).toBe(true)
+    expect(wholeLive(4.8, 5.0)).toBe(true)
+    expect(wholeLive(0, 0.1)).toBe(false)
+  })
+  test('the microphone isn’t gated: no noise suppression or echo cancellation to clip the first syllables', () => {
+    expect(MIC.noiseSuppression).toBe(false)
+    expect(MIC.echoCancellation).toBe(false)
+  })
 })

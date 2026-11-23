@@ -217,7 +217,7 @@ export function feedbackDialog() {
             <textarea className="cin fb" name="fb" rows={4} aria-label="Your feedback" placeholder="What should be better?" value={text} onChange={(e) => setText(e.target.value)} />
             <div className="cbar">
               <span className="sp" />
-              <DictateButton write={(t) => setText((was) => (was ? `${was.replace(/\s+$/, '')} ${t}` : t))} />
+              <DictateButton setText={setText} />
             </div>
           </div>
           <p>This is sent as a message to Shepherdr in Everything, which files it as an issue on Shepherdr's GitHub repository.</p>

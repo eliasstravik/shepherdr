@@ -941,7 +941,7 @@ const server = Bun.serve<{ who: string }>({
       return json({ path: join(dir, name), name: f.name });
     }
     if (path === "/api/dictate" && req.method === "POST") {
-      try { return json({ text: await dictate(hub, await req.blob()) }); } catch (err) { return json({ error: (err as Error).message }, 400); }
+      try { return json({ text: await dictate(hub, await req.blob(), fetch, undefined, url.searchParams.getAll("word")) }); } catch (err) { return json({ error: (err as Error).message }, 400); }
     }
     // live dictation: a single-use token as the page starts recording (the words are written while it records)
     if (path === "/api/dictate/live" && req.method === "POST") {
