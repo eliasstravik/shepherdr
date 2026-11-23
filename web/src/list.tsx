@@ -365,7 +365,10 @@ function MachineHead({ snap, m }: { snap: Snapshot; m: ListMachine }) {
       ) : (
         <span className="mn">{label}</span>
       )}
-      <IB icon="filter" label={`Show which spaces on ${machine.name}`} aria-haspopup="menu" data-marks="" pressed={filter !== 'Active'} onClick={(e) => filterMenu(e.currentTarget, key, machine.name, archived)} />
+      {/* the Tasks panel's filter button: a dot while it is on */}
+      <IB icon="filter" label={`Show which spaces on ${machine.name}${filter !== 'Active' ? ' (on)' : ''}`} aria-haspopup="menu" data-marks="" onClick={(e) => filterMenu(e.currentTarget, key, machine.name, archived)}>
+        {filter !== 'Active' && <span className="fdot" />}
+      </IB>
       <IB
         icon="plus"
         label={`New space on ${machine.name}`}
