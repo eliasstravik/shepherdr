@@ -148,7 +148,13 @@ ROW_RULE = ("with what you're doing now (at most 30 characters, so a phone's tas
 WAIT_ROW_OLD = 'at most 40 characters, e.g. "Needs a go to screenshot the menu")'
 WAIT_ROW_RULE = ('at most 30 characters, as it shows uncut on a phone, e.g. "Needs a go for a screenshot", not "Waiting for '
                  'the person to say whether I can take the window")')
-WORKER_MD = WORKER_MD_BEFORE_ROW.replace(ROW_OLD, ROW_RULE).replace(WAIT_ROW_OLD, WAIT_ROW_RULE)
+WORKER_MD_BEFORE_TESTS = WORKER_MD_BEFORE_ROW.replace(ROW_OLD, ROW_RULE).replace(WAIT_ROW_OLD, WAIT_ROW_RULE)
+# Since a task runs targeted tests before ready: the full suite belongs to main (GitHub's run) and the release.
+TESTS_OLD = LIVE_ANCHOR
+TESTS_RULE = ("- Before you say you're done, run only the tests for what you touched (the test files for its area, plus a "
+              "type check or build if your change could break one), not the whole suite: the full suite belongs to main "
+              "and the release.\n")
+WORKER_MD = WORKER_MD_BEFORE_TESTS.replace(TESTS_OLD, TESTS_RULE)
 
 REVIEWER_MD_BEFORE_SUBAGENT = """You review one Herdr task's work before it can merge. Read only: never edit files, commit or push.
 - Read the task, then the diff of its branch against its base, and run the project's checks.
@@ -185,7 +191,7 @@ OLD_WORKER_READY = """You work on one Herdr task. Stay within the task's scope a
 - When the work is finished, run the `herdr-task ready` command given at the end of your brief, with a short summary. That puts the task in Ready for the person, who accepts it. Never mark a task done yourself.
 """
 OLD_WORKER_MD = OLD_WORKER_READY.split("- When the work is finished")[0]
-OLD_WORKERS = (WORKER_MD_BEFORE_ROW, WORKER_MD_BEFORE_CLOCK, WORKER_MD_BEFORE_LIVE, WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
+OLD_WORKERS = (WORKER_MD_BEFORE_TESTS, WORKER_MD_BEFORE_ROW, WORKER_MD_BEFORE_CLOCK, WORKER_MD_BEFORE_LIVE, WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
 
 
 TEMPLATE_HEADS = {

@@ -906,6 +906,23 @@ class BackToWork(unittest.TestCase):
         with open(ghnews.__file__) as f:
             self.assertIn("ask the person with your CLI's question tool", f.read())
 
+    def test_targeted_tests_before_ready(self):
+        """A task runs the tests for what it touched; the full suite belongs to main and the release."""
+        from herdr_task import ghnews, templates
+        with open(os.path.join(ROOT, "templates", "worker.md")) as f:
+            worker = f.read()
+        for words in (templates.WORKER_MD, worker):
+            self.assertIn(templates.TESTS_RULE, words)
+            self.assertNotIn(templates.TESTS_OLD, words)
+            self.assertIn(templates.LIVE_RULE, words)
+        self.assertIn(templates.WORKER_MD_BEFORE_TESTS, templates.OLD_WORKERS)  # an unedited old one gets today's
+        with open(os.path.join(ROOT, "templates", "assistant.md")) as f:
+            assistant = f.read()
+        self.assertIn("never the whole suite; the full suite belongs to main", assistant)
+        self.assertIn("add one small fix-forward task at once", assistant)
+        with open(ghnews.__file__) as f:
+            self.assertIn("add one small fix-forward task at once", f.read())
+
     # A merge that failed once (t75: "GraphQL: Something went wrong") never blocks the next Accept, and a pull
     # request merged meanwhile (by hand) makes the task done.
     def merging(self, views, merges):

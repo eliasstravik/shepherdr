@@ -10,8 +10,10 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
   name the throwaway session on every command (`HC_SESSION=<throwaway> hc ...`) and use a throwaway HOME (SHEP-323;
   `herdr_task/guard.py` refuses the rest from a task's terminal). `SHEPHERDR_REAL_CORE=1` runs `test/test_guard.py`'s
   real throwaway-core repro.
-- Quick checks are fine here (seconds): `bin/sync-shared --check`, `python3 -m unittest discover -s test` and the
-  `node --check` loop in [docs/develop.md](docs/develop.md). The installer tests use throwaway roots only.
+- A task runs only the tests for what it touched before ready (the test files for its area, plus `bunx tsc` or a
+  build if its change could break one), never the whole suite: the full suite belongs to main (GitHub's run after
+  each merge) and the release. Quick ones are fine here (seconds): `bin/sync-shared --check`, one `test/test_*.py`,
+  the `node --check` loop in [docs/develop.md](docs/develop.md). The installer tests use throwaway roots only.
 - Shell checks: plain `bash -n` is the real one. Dash (`sh -n` here) misses bash-only parse errors that macOS's bash 3.2
   hits, so run `bash -n` on every script.
 - Installer tests run from `test/`: `cd test && python3 -m unittest test_install`. To run an older installer copy for a
@@ -136,6 +138,8 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 - Never cut a new release (version bump, tag, GitHub release, publish) without asking the human first and getting a
   yes.
 - Version bumps are patch only (2.0.0 → 2.0.1) unless the human explicitly asks for a minor or major one.
+- A release starts only when main is green on GitHub, and runs the full suite itself (every check in
+  [docs/develop.md](docs/develop.md)) before it ships.
 - From SHEP-238: headless Chrome with flags herdr-browser ignores (e.g. --autoplay-policy=no-user-gesture-required, fake mic): run ~/.agent-browser/browsers/chrome-*/chrome --headless=new --user-data-dir=<scratch> --screenshot/--dump-dom directly.
 - From SHEP-240: a second visible browser page on the dev VM: run ~/.agent-browser/browsers/chrome-*/chrome --headless=new --remote-debugging-port=<p> <url> in the background and screenshot over CDP (Page.captureScreenshot); herdr-browser's --headers don't reach WebSockets.
 - From SHEP-258: Codex's model list comes from its own catalog: npm i --prefix <scratch> @openai/codex@<ver> and run its codex debug models to see a newer CLI's models and service_tiers without touching the installed one.
