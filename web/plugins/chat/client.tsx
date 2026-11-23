@@ -749,7 +749,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   const reply = useUI((u) => u.reply[key])
   const phone = useUI((u) => u.phone)
   const ref = useRef<HTMLTextAreaElement>(null)
-  // a finger (a phone, a tablet): a photo button beside +, and + opens a menu with Paste image (SHEP-345)
+  // a finger (a phone, a tablet): + opens a menu with Photos, Paste image and Files
   const finger = useMemo(touch, [])
   const [copied, copiedDone] = useCopiedPicture(finger)
   const shared = useLanded() === key
@@ -896,13 +896,12 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   )
 }
 
-/** + and, for a finger, the photo button (SHEP-345): it opens Android's photo picker straight away, newest first, and
- *  one tap on a picture attaches it (one at a time: picking several needs an Add tap more, measured on Android 15). + opens
- *  files; on a phone or tablet a menu first: Paste image, Photos (several at once), Files */
+/** +: on a desktop it opens files; on a phone or tablet a menu first: Photos, Paste image, Files. Photos opens Android's
+ *  photo picker straight away, newest first, and one tap on a picture attaches it (one at a time: picking several needs an
+ *  Add tap more, measured on Android 15); Files takes several pictures at once */
 export function AddButtons({ finger, onFiles, paste }: { finger: boolean; onFiles: (f: File[]) => void; paste: () => void }) {
   const pickFile = useRef<HTMLInputElement>(null)
   const pickPhoto = useRef<HTMLInputElement>(null)
-  const pickPhotos = useRef<HTMLInputElement>(null)
   const take = (e: { target: HTMLInputElement }) => {
     onFiles([...(e.target.files ?? [])])
     e.target.value = ''
@@ -912,8 +911,8 @@ export function AddButtons({ finger, onFiles, paste }: { finger: boolean; onFile
       ? openMenu(
           e.currentTarget,
           [
+            { icon: 'image', label: 'Photos', run: () => pickPhoto.current?.click() },
             { icon: 'paste', label: 'Paste image', run: paste },
-            { icon: 'image', label: 'Photos', run: () => pickPhotos.current?.click() },
             { icon: 'doc', label: 'Files', run: () => pickFile.current?.click() },
           ],
           { label: 'Add' },
@@ -923,13 +922,7 @@ export function AddButtons({ finger, onFiles, paste }: { finger: boolean; onFile
     <>
       <IB icon="plus" label={finger ? 'Add' : 'Add files'} onClick={plus} />
       <input ref={pickFile} type="file" multiple hidden onChange={take} />
-      {finger && (
-        <>
-          <IB icon="image" label="Add photos" onClick={() => pickPhoto.current?.click()} />
-          <input ref={pickPhoto} type="file" accept="image/*" hidden data-photo="" onChange={take} />
-          <input ref={pickPhotos} type="file" accept="image/*" multiple hidden data-photos="" onChange={take} />
-        </>
-      )}
+      {finger && <input ref={pickPhoto} type="file" accept="image/*" hidden data-photo="" onChange={take} />}
     </>
   )
 }

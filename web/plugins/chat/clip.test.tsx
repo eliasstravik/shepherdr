@@ -1,5 +1,5 @@
-// SHEP-345: a picture on the clipboard and the photo button. "Paste image" reads the clipboard only when tapped; the
-// photo button opens the phone's photo picker (an image-only file input, several at once).
+// SHEP-345: a picture on the clipboard and + › Photos. "Paste image" reads the clipboard only when tapped; the
+// Photos item opens the phone's photo picker (an image-only file input, one tap attaches).
 import { expect, mock, test } from 'bun:test'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { imagesOf, markOf, pasteImages } from './clip.ts'
@@ -40,17 +40,16 @@ test('a copied picture is known again by its mark, so one pasted or put away is 
   expect(await markOf(pic(5))).not.toBe(await markOf(pic(6)))
 })
 
-test('the photo button: on a phone an image-only picker where one tap attaches; + has Photos for several', () => {
+test('no photo button: on a phone + is the only button, and its Photos opens an image-only picker where one tap attaches', () => {
   const phone = renderToStaticMarkup(<AddButtons finger onFiles={() => undefined} paste={() => undefined} />)
-  expect(phone).toContain('aria-label="Add photos"')
-  // the button's: one picture, so a tap on it in Android's picker attaches it (no Add tap)
-  expect(phone).toMatch(/<input type="file" accept="image\/\*" hidden="" data-photo=""/)
-  // + › Photos: several at once
-  expect(phone).toMatch(/<input type="file" accept="image\/\*" multiple="" hidden="" data-photos=""/)
+  expect(phone).not.toContain('Add photos')
+  expect(phone.match(/<button/g)?.length).toBe(1)
   expect(phone).toContain('aria-label="Add"')
-  // a desktop: + opens files straight away, no photo button
+  // + › Photos: one picture, so a tap on it in Android's picker attaches it (no Add tap)
+  expect(phone).toMatch(/<input type="file" accept="image\/\*" hidden="" data-photo=""/)
+  expect(phone).not.toContain('data-photos')
+  // a desktop: + opens files straight away
   const desk = renderToStaticMarkup(<AddButtons finger={false} onFiles={() => undefined} paste={() => undefined} />)
-  expect(desk).not.toContain('Add photos')
   expect(desk).toContain('aria-label="Add files"')
   expect(desk).not.toContain('accept=')
 })
