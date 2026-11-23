@@ -41,7 +41,7 @@ async function share(form: FormData, url = `${SCOPE}share`) {
     skipWaiting: () => undefined,
   }
   vm.runInContext(SRC, vm.createContext({ self, caches, URL, Response, Request, Promise, JSON, Math, Date, Array }))
-  let answer: Promise<Response> | null = null
+  let answer = null as Promise<Response> | null
   listeners.fetch({ request: new Request(url, { method: 'POST', body: form }), respondWith: (p: Promise<Response>) => (answer = p) })
   return { answer: answer ? await answer : null, caches }
 }

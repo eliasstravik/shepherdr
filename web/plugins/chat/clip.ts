@@ -65,8 +65,10 @@ async function allowed(): Promise<boolean> {
 }
 
 /** a copied picture not offered before, looked for when the app comes on screen, only where reading needs no prompt */
-export function useCopiedPicture(on: boolean): [{ file: File; mark: string } | null, () => void] {
-  const [got, setGot] = useState<{ file: File; mark: string } | null>(null)
+export function useCopiedPicture(on: boolean): [{ file: File; mark: string; url: string } | null, () => void] {
+  const [got, setGot] = useState<{ file: File; mark: string; url: string } | null>(null)
+  // its small picture on the chip: let go of the old one when it changes
+  useEffect(() => () => void (got?.url && URL.revokeObjectURL(got.url)), [got])
   useEffect(() => {
     if (!on || typeof navigator === 'undefined' || !navigator.clipboard?.read) return
     let live = true
@@ -76,7 +78,8 @@ export function useCopiedPicture(on: boolean): [{ file: File; mark: string } | n
       if (!live) return
       if (!('files' in r)) return setGot(null)
       const mark = await markOf(r.files[0])
-      setGot(mark === seen() ? null : { file: r.files[0], mark })
+      if (mark === seen()) return setGot(null)
+      setGot((was) => (was?.mark === mark ? was : { file: r.files[0], mark, url: URL.createObjectURL(r.files[0]) }))
     }
     const soon = () => void look().catch(() => undefined)
     soon()

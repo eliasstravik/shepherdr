@@ -56,6 +56,8 @@ try {
 } catch {
   /* no storage here */
 }
+/** the task open when the app was last on screen: a share opens the app on ./?share=<id>, which has no task in it */
+const launchTask = lastTask
 
 /** keep which task is open, so a share later lands in it (the space is kept already, as shepherdr.at) */
 export function watchLastChat() {
@@ -134,11 +136,14 @@ export async function landLaunchShare(href = launchHref) {
   }
   if (!shared) return
   const s = shared
+  // once: going to its task redraws the app, which calls this again before it is done
+  let done = false
   const put = () => {
     const { snap, ui } = getState()
-    if (!snap) return false
-    const to = landingChat(snap, ui.at, lastTask)
+    if (done || !snap) return done
+    const to = landingChat(snap, ui.at, launchTask)
     if (!to) return false
+    done = true
     if (to.task) openTask(to.task)
     land(to.key, s)
     return true

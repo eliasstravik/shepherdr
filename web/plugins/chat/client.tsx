@@ -722,7 +722,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
           {copied && (
             <span className="fchip">
               <button type="button" className="clipgo" onClick={() => { attach(key, key, [copied.file]); copiedDone() }}>
-                <I n="paste" c="s16" />
+                <img className="pic" src={copied.url} alt="" />
                 <span>Paste copied picture</span>
               </button>
               <button type="button" aria-label="Not now" onClick={copiedDone}><I n="x" c="s16" /></button>
