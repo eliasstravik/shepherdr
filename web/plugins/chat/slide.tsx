@@ -143,7 +143,7 @@ export function replyToTask(t: Pick<Task, 'id' | 'name'>) {
     ...(ui.phone && ui.pane ? { pane: null, task: null } : {}),
   }))
   // the box may only show once the chat is back in front
-  const focus = () => globalThis.document?.querySelector<HTMLTextAreaElement>(`textarea[data-box="${attr(key)}"]`)?.focus()
+  const focus = () => globalThis.document?.querySelector?.<HTMLTextAreaElement>(`textarea[data-box="${attr(key)}"]`)?.focus?.()
   if (ui.wide || (ui.phone && ui.pane)) setTimeout(focus, 60)
   else focus()
 }
