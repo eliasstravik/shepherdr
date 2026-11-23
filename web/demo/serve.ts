@@ -180,7 +180,9 @@ Bun.serve<Sock['data'], never>({
     // a picture beside a page's index.html
     const pic = /^\/api\/artifacts\/[^/]+\/page\/pic(\d)\.jpg$/.exec(path)
     if (pic) return new Response(Bun.file(shotFile(Number(pic[1]) % 2 ? 'SHOP-17' : '')), { headers: { 'content-type': 'image/jpeg' } })
-    if (m?.[2] === 'thumb') return new Response(thumb(decodeURIComponent(m[1]!), url.searchParams.has('dark')), { headers: { 'content-type': 'image/svg+xml' } })
+    // ?case=nopics: no page has its picture (a machine with no browser): each tile shows its first lines instead
+    if (m?.[2] === 'thumb' && /(?:^|;\s*)demo-case=nopics/.test(req.headers.get('cookie') ?? '')) return new Response('no picture', { status: 404, headers: { 'cache-control': 'no-store' } })
+    if (m?.[2] === 'thumb') return new Response(thumb(decodeURIComponent(m[1]!), url.searchParams.has('dark')), { headers: { 'content-type': 'image/svg+xml', 'cache-control': 'no-store' } })
     if (m) return new Response(page(decodeURIComponent(m[1]!)), { headers: { 'content-type': 'text/html; charset=utf-8', 'content-security-policy': "sandbox allow-scripts allow-forms" } })
     if (path.startsWith('/api/')) return new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } })
     // The fictional day starts over when the demo is reloaded.

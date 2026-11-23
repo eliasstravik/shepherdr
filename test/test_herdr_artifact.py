@@ -165,6 +165,29 @@ class Publish(Base):
         self.assertFalse(b["thumb"])
         self.assertEqual([bool(x.get("thumb")) for x in b["versions"]], [True, False])
 
+    def test_a_new_version_gets_its_own_picture_in_a_folder_that_is_not_a_repo(self):
+        # SHEP-344: version 2 of a page (an index.html with PNGs beside it), kept for a plain folder
+        self.assertFalse(os.path.exists(os.path.join(self.folder, ".git")))
+        taken = []
+
+        def fake(folder):
+            taken.append(open(os.path.join(folder, "index.html")).read())
+            tmp = tempfile.mkdtemp(dir=self.dir)
+            out = {"dir": tmp}
+            for n in (A.THUMB, A.THUMB_DARK):
+                out[n] = os.path.join(tmp, n)
+                A.png_write(out[n], 2, 2, 3, [bytearray([len(taken)] * 6)] * 2)
+            return out
+        with mock.patch.object(A, "shoot", fake):
+            a = self.publish(self.page("one", body="<h1>One</h1>"), title="Research")
+            b = self.publish(self.page("two", body="<h1>Two</h1><img src='a.png'>", **{"a.png": "PNG"}), id=a["id"], folder=None)
+        self.assertEqual(b["version"], 2)
+        self.assertTrue(b["thumb"] and all(x["thumb"] for x in b["versions"]))
+        self.assertIn("Two", taken[1])
+        with open(os.path.join(self.files(a["id"], 1), A.THUMB), "rb") as f1, open(os.path.join(self.files(a["id"], 2), A.THUMB), "rb") as f2:
+            self.assertNotEqual(f1.read(), f2.read())  # its own picture, not version 1's
+        self.assertIn("a.png", os.listdir(self.files(a["id"], 2)))
+
     @unittest.skipUnless(REAL_CHROME, "no Chrome for Testing on this machine")
     def test_a_real_browser_takes_the_page_light_and_dark(self):
         d = self.page(body="<style>:root{color-scheme:light dark}</style><h1>Hello</h1><img src='a.svg'>",
