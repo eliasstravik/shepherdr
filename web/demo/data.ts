@@ -200,6 +200,10 @@ export const chats: Record<string, Chat> = Object.fromEntries(
       ask('q-pil', 'Run a command', byPhoto, ['Allow once', 'Decline'], { command: 'pip install pillow' }),
       a('Dependency check started on its schedule in #shop. It found 3 packages behind and is updating them.'),
       me('And the sale plan, APP/?artifact=a-plan, still good?'),
+      // a reply that quotes a long message, with a short answer: the quote truncates inside the bubble (SHEP-353)
+      me('Use /ui to fix', { reply: { text: 'Dependency check started on its schedule in #shop. It found 3 packages behind and is updating them. Supercalifragilisticexpialidociouslylongwordwithoutanybreaks', who: 'agent' }, reactions: [{ emoji: '👍', by: 'them' }] }),
+      me('Pinned to https://example.com/releases/2026/november/checkout-redesign-final-final-v2-with-the-bigger-button and Pneumonoultramicroscopicsilicovolcanoconiosis too', { reactions: [{ emoji: '🎉', by: 'both' }] }),
+      a('Noted: https://example.com/releases/2026/november/checkout-redesign-final-final-v2-with-the-bigger-button is the one, and Pneumonoultramicroscopicsilicovolcanoconiosis stays.', { reactions: [{ emoji: '👍', by: 'me' }] }),
       // links to the app itself, as `herdr-artifact link` prints them: they open in the app (SHEP-339)
       a('The quotes are compared: [Supplier quotes compared](APP/?artifact=a-quotes). Its task: [Compare supplier quotes](APP/?task=NOTES-4). The [shop space](APP/?place=p:mac-mini:shop). The suppliers\' own site: [example.com](https://example.com/).', { suggest: 'Show me what needs me' }),
     ], sonnet),
