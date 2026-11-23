@@ -6,6 +6,7 @@
 // captions, nothing in a chat; what it did shows as the usual cards. The mic inside the message box is dictation only.
 import { useEffect, useState } from 'react'
 import { DictateButton } from '@client/dictate.tsx'
+import type { Sample } from '@client/meter.ts'
 import { definePlugin, getState, go, launchHref, notice, openArtifact, openSettings, openTask, setUI, tryAct, useStore, useUI, type Thread } from '@client/kernel.ts'
 import { closeTop as closeLayer } from '@client/overlay.tsx'
 import { I, IB } from '@client/ui.tsx'
@@ -166,7 +167,17 @@ function usePhase() {
 
 /** the call's mark, from its live phase */
 function CallMark({ phone }: { phone: boolean }) {
-  return <CallMarkView phone={phone} phase={usePhase()} muted={useUI((u) => u.callMuted)} sample={callSample} />
+  const phase = usePhase()
+  const demo = useStore((s) => !!s.snap?.demo)
+  return <CallMarkView phone={phone} phase={demo ? 'listening' : phase} muted={useUI((u) => u.callMuted)} sample={demo ? demoSample : callSample} />
+}
+
+/** the demo's call has no audio: a made-up voice, you then the agent in turns, so its wave moves as a real one does */
+function demoSample(): Sample {
+  const t = performance.now() / 1000
+  const who = Math.floor(t / 3) % 2 ? 'agent' : 'you'
+  const words = Math.max(0, Math.sin(t * 9) * Math.sin(t * 2.3)) * (t % 3 < 2.4 ? 1 : 0)
+  return { level: words * (who === 'agent' || !getState().ui.callMuted ? 0.6 : 0), who: words > 0.05 ? who : null }
 }
 
 function CallButtons({ phone }: { phone: boolean }) {
