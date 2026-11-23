@@ -210,6 +210,8 @@ export interface UI {
   /** chats switched to their agent's own terminal */
   aterm: Record<string, boolean>
   scr: ScreenAt | null
+  /** the Screen view fills the device: a step of its own, so the system's Back leaves it */
+  scrFull: boolean
   /** repo: on Everywhere's Tasks page, the repo whose task settings it shows (Config.repos key, SHEP-335); none: Everywhere's */
   settings: { scope: string; sec: string | null; repo?: string | null } | null
   search: boolean
@@ -302,6 +304,7 @@ let state: State = {
     termTask: false,
     aterm: {},
     scr: null,
+    scrFull: false,
     settings: null,
     search: false,
     open: {},
@@ -333,7 +336,7 @@ export const subscribe = (l: () => void) => {
 export const getState = () => state
 
 /** what makes a step in the browser's history: Back closes a task, a pane, the settings */
-const STEPS: (keyof UI)[] = ['at', 'pane', 'task', 'art', 'wide', 'artWide', 'settings', 'drawer', 'search']
+const STEPS: (keyof UI)[] = ['at', 'pane', 'task', 'art', 'wide', 'artWide', 'scrFull', 'settings', 'drawer', 'search']
 
 export function setUI(patch: Partial<UI> | ((ui: UI) => Partial<UI>)) {
   const p = typeof patch === 'function' ? patch(state.ui) : patch
@@ -407,8 +410,8 @@ if (typeof window !== 'undefined')
 
 /* ---------- the address bar and Back ---------- */
 
-type Step = Pick<UI, 'at' | 'pane' | 'task' | 'art' | 'wide' | 'artWide' | 'settings' | 'drawer' | 'search'>
-const stepOf = (ui: UI): Step => ({ at: ui.at, pane: ui.pane, task: ui.task, art: ui.art, wide: ui.wide, artWide: ui.artWide, settings: ui.settings, drawer: ui.drawer, search: ui.search })
+type Step = Pick<UI, 'at' | 'pane' | 'task' | 'art' | 'wide' | 'artWide' | 'scrFull' | 'settings' | 'drawer' | 'search'>
+const stepOf = (ui: UI): Step => ({ at: ui.at, pane: ui.pane, task: ui.task, art: ui.art, wide: ui.wide, artWide: ui.artWide, scrFull: ui.scrFull, settings: ui.settings, drawer: ui.drawer, search: ui.search })
 
 function urlOf(s: Step) {
   const q = new URLSearchParams()
@@ -434,13 +437,13 @@ function writeUrl(replace: boolean) {
   if (deeper) history.pushState({ shep: 2, step }, '', urlOf(step))
   else history.replaceState({ shep: 2, step }, '', urlOf(step))
 }
-const depth = (s: Step) => (s.drawer || s.search ? 1 : 0) + (s.settings ? 1 + (s.settings.sec ? 1 : 0) : 0) + (s.pane ? 1 : 0) + (s.task || s.art ? 1 : 0) + (s.wide || s.artWide ? 1 : 0)
+const depth = (s: Step) => (s.drawer || s.search ? 1 : 0) + (s.settings ? 1 + (s.settings.sec ? 1 : 0) : 0) + (s.pane ? 1 : 0) + (s.task || s.art ? 1 : 0) + (s.wide || s.artWide ? 1 : 0) + (s.scrFull && s.pane === 'screen' ? 1 : 0)
 
 if (typeof window !== 'undefined') {
   addEventListener('popstate', (e) => {
     const st = (e as PopStateEvent).state as { shep?: number; step?: Step } | null
     const q = new URLSearchParams(location.search)
-    const step: Partial<Step> = st?.shep === 2 && st.step ? st.step : { at: q.get('place') ?? state.ui.at, task: q.get('task'), art: q.get('artifact'), pane: paneOfUrl(q), wide: false, artWide: false, settings: null, drawer: false, search: false }
+    const step: Partial<Step> = st?.shep === 2 && st.step ? st.step : { at: q.get('place') ?? state.ui.at, task: q.get('task'), art: q.get('artifact'), pane: paneOfUrl(q), wide: false, artWide: false, scrFull: false, settings: null, drawer: false, search: false }
     state = { ...state, ui: { ...state.ui, ...step } }
     written = JSON.stringify(stepOf(state.ui))
     stayOnShown()
@@ -473,6 +476,7 @@ export function openLink(href: string, step = false) {
       pane: art ? 'artifacts' : task ? 'tasks' : pane && pane !== 'screen' ? pane : state.ui.phone ? null : state.ui.pane,
       wide: false,
       artWide: false,
+      scrFull: false,
       jump: q.get('focus'),
     })
   } finally {

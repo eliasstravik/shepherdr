@@ -71,6 +71,8 @@ export const IC = {
   "merged": "<circle cx=\"6\" cy=\"5\" r=\"1.75\"/><circle cx=\"6\" cy=\"15\" r=\"1.75\"/><circle cx=\"14\" cy=\"11\" r=\"1.75\"/><path d=\"M6 6.75v6.5M6.4 6.9c1.1 2.4 3.6 4.1 5.85 4.1\"/>",
   "checking": "<circle cx=\"10\" cy=\"10\" r=\"3.25\"/>",
   "agent": "<rect x=\"4\" y=\"6\" width=\"12\" height=\"9\" rx=\"2\"/><path d=\"M10 3.5V6M7.5 10v.2M12.5 10v.2\"/>",
+  "keyboard": "<rect x=\"2.5\" y=\"5\" width=\"15\" height=\"10\" rx=\"2\"/><path d=\"M5.5 8h.1M8.5 8h.1M11.5 8h.1M14.5 8h.1M5.5 10.5h.1M14.5 10.5h.1M7.5 12.5h5\"/>",
+  "up": "<path d=\"m6.5 12 3.5-3.5 3.5 3.5\"/>",
 } as const
 
 export type IconName = keyof typeof IC
