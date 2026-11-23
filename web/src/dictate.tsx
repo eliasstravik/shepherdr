@@ -1,14 +1,15 @@
 // The mic in a message box (and in Feedback): dictation only. A voice call is the other thing (the wave button).
 // SHEP-314: while it records, the box's bottom row becomes the recording itself, the way ChatGPT's, Claude's and
 // WhatsApp's composers do it: Cancel on the left, a wave drawn from the microphone's real level and the time in the
-// middle, Done on the right where Send was. The words show above it as they are heard (kept ones in full, the ones
-// still being heard lighter, the way Apple's dictation writes them), then "Writing it down" until they land in the box.
+// middle, Done on the right where Send was. The words show above it as they are heard, the way Apple's dictation and
+// Wispr Flow write them, then "Writing it down" until they land in the box.
 // Every way it fails says why, there. Escape cancels; leaving the chat cancels.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { canDictate, clock, dictate, dictSample, SAY, type Dictation, type Heard } from './dictation.ts'
 import { IDLE, NOTHING, shownWords, step, type DictEvent, type DictState } from './dictstate.ts'
 import { has } from './kernel.ts'
 import { still } from './motion.ts'
+import { escapeFirst } from './overlay.tsx'
 import { I, IB } from './ui.tsx'
 import './dictate.css'
 
@@ -89,18 +90,16 @@ export function DictateButton({ write, scope }: { write: (text: string) => void;
     const t = setInterval(() => tick((n) => n + 1), 250)
     return () => clearInterval(t)
   }, [s.k])
-  // Escape cancels (or closes the error), before anything else on the page hears it
+  // Escape cancels (or closes the error), before anything else on the page hears it (a dialog it's in stays open)
   useEffect(() => {
     if (!active) return
-    const key = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.isComposing) return
-      e.preventDefault()
-      e.stopPropagation()
+    const take = () => {
       if (s.k === 'error') dispatch({ t: 'dismiss' })
       else cancel()
+      return true
     }
-    window.addEventListener('keydown', key, true)
-    return () => window.removeEventListener('keydown', key, true)
+    escapeFirst.add(take)
+    return () => void escapeFirst.delete(take)
   }, [active, s.k])
   // focus: on the surface's main button while it shows (keyboard: Enter is Done), then back where it belongs
   const was = useRef(false)
@@ -148,7 +147,7 @@ export function DictateButton({ write, scope }: { write: (text: string) => void;
         ) : heard ? (
           <p className="dsaid">
             {shown.said}
-            <span className="dpart">{shown.partial}</span>
+            {shown.partial}
           </p>
         ) : (
           <p className="dhint">{s.k === 'writing' ? 'Writing it down…' : 'Listening…'}</p>
@@ -170,7 +169,7 @@ export function DictateButton({ write, scope }: { write: (text: string) => void;
             <Wave on={s.k === 'on'} />
             <span className="dtime" aria-hidden>
               <i className={`ddot${s.k === 'on' ? ' rec' : ''}`} />
-              {s.k === 'on' ? clock(Date.now() - s.since) : '0:00'}
+              {s.k === 'on' ? clock(Date.now() - s.since) : s.k === 'writing' ? clock(s.took) : '0:00'}
             </span>
             {s.k === 'writing' ? (
               <button type="button" className="ddone wr" data-main aria-label="Writing it down" aria-disabled="true" onClick={() => undefined}>

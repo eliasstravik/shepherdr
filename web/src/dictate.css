@@ -7,7 +7,7 @@
    down as they come, the older ones fading out at the top) */
 .dwords{height:calc(var(--uil) * 2);padding:0 10px;overflow:hidden;font-size:var(--ui);line-height:var(--uil);overflow-wrap:anywhere}
 .dwords.more{-webkit-mask-image:linear-gradient(transparent,#000 10px);mask-image:linear-gradient(transparent,#000 10px)}
-.dsaid{color:var(--fg)}.dpart,.dhint{color:var(--muted)}
+.dsaid{color:var(--fg)}.dhint{color:var(--muted)}
 .dsurf.error .dwords{height:auto;min-height:calc(var(--uil) * 2);padding-top:4px}
 .derr{display:flex;align-items:flex-start;gap:8px;color:var(--fg)}
 .derr .i{margin-top:calc((var(--uil) - 16px) / 2);color:var(--red)}

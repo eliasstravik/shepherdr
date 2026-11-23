@@ -8,7 +8,7 @@ export type DictState =
   | { k: 'idle' }
   | { k: 'asking'; slow: boolean }
   | { k: 'on'; since: number }
-  | { k: 'writing' }
+  | { k: 'writing'; took: number }
   | { k: 'error'; why: string }
 
 export type DictEvent =
@@ -39,7 +39,7 @@ export function step(s: DictState, e: DictEvent): { s: DictState; write?: string
       return s.k === 'asking' ? { s: { k: 'asking', slow: true } } : { s }
     case 'phase':
       if (e.p === 'on' && s.k === 'asking') return { s: { k: 'on', since: e.at } }
-      if (e.p === 'writing' && s.k === 'on') return { s: { k: 'writing' } }
+      if (e.p === 'writing' && s.k === 'on') return { s: { k: 'writing', took: Math.max(0, e.at - s.since) } }
       return { s }
     case 'end': {
       // after a Cancel (idle) or a failure (error) the recording has nothing more to say

@@ -17,6 +17,8 @@ describe('the dictation surface', () => {
   test('mic, the browser asks, recording, Done, writing it down, the words land once', () => {
     const r = run([{ t: 'start' }, { t: 'phase', p: 'asking', at: 1 }, { t: 'phase', p: 'on', at: 5 }])
     expect(r.s).toEqual({ k: 'on', since: 5 })
+    // the time stops where Done was pressed
+    expect(run([{ t: 'phase', p: 'writing', at: 9 }], r.s).s).toEqual({ k: 'writing', took: 4 })
     const w = run([{ t: 'phase', p: 'writing', at: 9 }, { t: 'end', text: '  add a cancel button ' }], r.s)
     expect(w.s).toEqual(IDLE)
     expect(w.wrote).toEqual(['add a cancel button'])
