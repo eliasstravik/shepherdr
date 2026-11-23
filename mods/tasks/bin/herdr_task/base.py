@@ -194,17 +194,27 @@ def guard(args):
                    "the real core and wipe its spaces.")
 
 
-def run(args, cwd=None, check=False, env=None):
+def run(args, cwd=None, check=False, env=None, stdin=None):
     guard(args)
-    r = subprocess.run(args, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    r = subprocess.run(args, cwd=cwd, env=env, stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
     if check and r.returncode != 0:
         raise Fail((r.stderr or r.stdout).strip() or f"{args[0]} failed")
     return r
 
 
+# git never asks anyone for a password (#1260): a fetch or push to an HTTPS remote with no
+# credential helper fails at once instead of waiting for a username nobody will type, which held
+# every herdr-task call for that folder.
+GIT_QUIET = {"GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
+NO_SIGN_IN = ("terminal prompts disabled", "could not read username", "could not read password")
+
+
 def git(cwd, *args):
-    r = run(["git", "-C", cwd, *args])
-    return r.returncode == 0, r.stdout.strip(), r.stderr.strip()
+    r = run(["git", "-C", cwd, *args], env={**os.environ, **GIT_QUIET}, stdin=subprocess.DEVNULL)
+    err = r.stderr.strip()
+    if r.returncode != 0 and any(s in err.lower() for s in NO_SIGN_IN):
+        err = f"git can't sign in to the remote: set up a credential helper or SSH key for it. ({err})"
+    return r.returncode == 0, r.stdout.strip(), err
 
 
 def hc_json(*args):

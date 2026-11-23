@@ -4047,6 +4047,56 @@ class ReviewedNamesItsCommit(unittest.TestCase):
         self.assertNotIn("reviews", self.task)
 
 
+class GitNeverAsksForAPassword(unittest.TestCase):
+    """#1260: herdr-task's fetch or push to an HTTPS remote with no credential helper waited hours for a username
+    on the terminal, and every herdr-task call for that folder hung. It fails at once and says why instead."""
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "the controlling-terminal trick is Linux's")
+    def test_fetch_from_a_remote_that_wants_a_password_fails_fast(self):
+        import http.server
+        import pty
+        import threading
+
+        class Refuse(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Basic realm="x"')
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
+            def log_message(self, *a):
+                pass
+
+        srv = http.server.HTTPServer(("127.0.0.1", 0), Refuse)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.shutdown)
+        repo = tempfile.mkdtemp()
+        subprocess.run(["git", "init", "-q", repo], check=True)
+        subprocess.run(["git", "-C", repo, "remote", "add", "origin", f"http://127.0.0.1:{srv.server_port}/r.git"], check=True)
+        # A real terminal, as in the report: git would prompt on it and wait for an answer that never comes.
+        main_fd, tty = pty.openpty()
+        self.addCleanup(os.close, main_fd)
+        tty_name = os.ttyname(tty)
+        os.close(tty)
+
+        def own_terminal():
+            os.setsid()
+            os.close(os.open(tty_name, os.O_RDWR))  # the first terminal a session leader opens becomes its own
+
+        code = ("import sys, json; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
+                "from herdr_task.base import git; print(json.dumps(git(sys.argv[2], 'fetch', 'origin')))")
+        env = {k: v for k, v in os.environ.items() if k not in ("GIT_TERMINAL_PROMPT", "GIT_ASKPASS", "SSH_ASKPASS", "GCM_INTERACTIVE")}
+        env.update({"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"})
+        try:
+            out = subprocess.run([sys.executable, "-c", code, BIN, repo], capture_output=True, text=True, env=env,
+                                 preexec_fn=own_terminal, timeout=20)
+        except subprocess.TimeoutExpired:
+            self.fail("git waited for a password")
+        ok, _, err = json.loads(out.stdout)
+        self.assertFalse(ok)
+        self.assertIn("git can't sign in to the remote", err)
+
+
 if __name__ == "__main__":
     unittest.main()
 
