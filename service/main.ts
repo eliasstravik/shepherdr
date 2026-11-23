@@ -42,14 +42,14 @@ import { Jobs } from "./jobs.ts";
 import { terminalBridge } from "./terminal.ts";
 import { worktree } from "./worktree.ts";
 import * as SPm from "../core/spaces.js";
-import { createScreens } from "./screens.ts";
+import { createScreens, SCREEN_PASSWORD } from "./screens.ts";
 import { voiceCall, callToResume, callsOn, handOff, type ChatView } from "./voice.ts";
 import type { HearIO } from "./voice-hear.ts";
 import type { VoiceIO } from "./voice-tools.ts";
 import { Artifacts, artifactAction, artifactRoute } from "./artifacts.ts";
 import { TaskLogs } from "./task-logs.ts";
 import { Settings, onWritten, PUSH, pushBody, readSettings } from "./settings.ts";
-import { Secrets, SecretsHome } from "./secrets.ts";
+import { Secrets, SecretsHome, secretValue } from "./secrets.ts";
 import { Agents } from "./agents.ts";
 import { Machines } from "./machines.ts";
 import { Push, alertsOf, agentAlerts } from "./push.ts";
@@ -390,6 +390,9 @@ const screens = createScreens({
   machine: me?.host ?? "this machine",
   send: (m) => void hub.send(m.address, m.text).catch(() => null),
   changed: () => model.rebuild(),
+  // a Mac's Screen Sharing password: the secret SCREEN_SHARING_PASSWORD (Settings › Secrets), as herdr-desktop's doctor names it
+  password: () => secretValue(SCREEN_PASSWORD, hub),
+  machines: async () => ((await hub.call<{ machines: any[] }>("machine.list", {}, 8000)).machines ?? []).map((m) => ({ name: String(m.name), target: String(m.target ?? ""), via: !!m.via, state: String(m.state ?? "") })),
 });
 if (pluginOn("screens")) screens.start();
 let desktopsOf: () => string[] = () => (pluginOn("screens") ? screens.desktops() : []);

@@ -11,6 +11,7 @@ import type { Hub } from "./hub.ts";
 import { HOME, where } from "./paths.ts";
 import * as SC from "../core/secrets.js";
 import * as HC from "../core/host.js";
+import { PY } from "../core/paths.js";
 import { spawn } from "./spawn.ts";
 
 const { NAME, ASK, asksIn, keptLine, declinedLine, SECRETS_DOC, secretsRecord, believeRecord, autoKeeper, followTo, COUNT_SCRIPT } = SC as any;
@@ -23,6 +24,32 @@ const BIN = [join(import.meta.dir, "..", "bin", "herdr-secret"), join(HOME, ".lo
 
 /** herdr-secret as installed here. */
 export const secretBin = () => BIN;
+
+/** One secret's value for the service's own use (a Mac's Screen Sharing password: service/screens.ts), never shown
+ *  nor logged, as the voice key is read (core/voice.js voiceKey): this machine's vault when it keeps the secrets (or
+ *  none is named yet), else the keeper's, read over herdr-core's link into memory only. Everywhere's value, or this
+ *  machine's own. undefined: none is set, or the keeper can't be asked now. */
+export async function secretValue(name: string, hub?: Pick<Hub, "call">): Promise<string | undefined> {
+  if (!NAME.test(name)) return undefined;
+  const p = spawn([BIN, "where", "--json"], { stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+  const out = await new Response(p.stdout).text();
+  let w: { here?: boolean; set?: boolean; name?: string | null } | null = null;
+  try { w = (await p.exited) === 0 ? JSON.parse(out) : null; } catch {}
+  const pick = (text: string) => {
+    try {
+      const all = (JSON.parse(text)?.secrets ?? []) as any[];
+      const e = all.find((x) => x?.name === name && x?.scope === "machine" && !x?.machine) ?? all.find((x) => x?.name === name && x?.scope === "everywhere");
+      return typeof e?.value === "string" && e.value ? e.value : undefined;
+    } catch { return undefined; }
+  };
+  if (!w || w.here || !w.set || !w.name || !hub) { try { return pick(readFileSync(VAULT, "utf8")); } catch { return undefined; } }
+  // the keeper's Everywhere value, as base64 so no output handling can change it
+  const script = `import base64, json, os\n${PY}\ntry:\n    v = json.load(open(SHEP(".herdr/vault.json")))\n    e = next((e for e in v.get("secrets", []) if e.get("name") == ${JSON.stringify(name)} and e.get("scope") == "everywhere" and isinstance(e.get("value"), str)), None)\n    print(base64.b64encode(e["value"].encode()).decode() if e else "")\nexcept Exception:\n    print("")\n`;
+  const r = await hub.call<{ code: number; stdout: string }>("machine.exec", { on: w.name, argv: ["python3", "-c", script], timeout: 15 }, 20_000).catch(() => null);
+  if (!r || r.code !== 0) return undefined;
+  const b64 = Buffer.from(r.stdout ?? "", "base64").toString("utf8").trim();
+  return b64 ? Buffer.from(b64, "base64").toString("utf8") : undefined;
+}
 
 async function run(args: string[], input?: string) {
   const p = spawn([BIN, ...args], { stdin: input === undefined ? "ignore" : "pipe", stdout: "pipe", stderr: "pipe" });

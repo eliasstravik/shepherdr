@@ -56,7 +56,7 @@ afterAll(() => { srv.stop(true); rmSync(home, { recursive: true, force: true });
 
 const env = { HOME: home, SHEPHERDR_HOME: join(home, "sh"), PATH: process.env.PATH ?? "", HERDR_BROWSER_BIN: AB, HERDR_DESKTOP_BIN: "/bin/true" };
 const log = () => { try { return readFileSync(join(fake, "log"), "utf8"); } catch { return ""; } };
-const until = async (ok: () => boolean, ms = 8000) => { const t = Date.now(); while (!ok()) { if (Date.now() - t > ms) throw new Error("timed out"); await Bun.sleep(20); } };
+const until = async (ok: () => boolean | Promise<boolean>, ms = 8000) => { const t = Date.now(); while (!(await ok())) { if (Date.now() - t > ms) throw new Error("timed out"); await Bun.sleep(20); } };
 const people: Record<string, Who> = {
   "task:SHOP-2": { task: "shop#2", space: "sp1", machine: null, address: "t-worker", title: "Fix the cart" },
   "task:SHOP-3": { task: "shop#3", space: "sp1", machine: null, address: "t-three", title: "Other" },
@@ -228,12 +228,13 @@ test("a chat's own agent has its tab in the same browser; a screenshot is saved 
   expect(readFileSync(shot.path!, "utf8")).toBe("png!");
   expect(shot.send).toEqual({ address: "t-worker", text: expect.stringContaining(shot.path!) });
   expect((await s.screenAction({ type: "screen", key: "task:SHOP-2", op: "shot", data: "data:text/html;base64,AAAA" })).ok).toBe(false);
-  expect(await s.screenAction({ type: "screen", key: "task:vmb:API-1", op: "take" })).toEqual({ ok: false, error: expect.stringContaining("another machine") });
+  expect(await s.screenAction({ type: "screen", key: "task:vmb:API-1", op: "take" })).toEqual({ ok: false, error: expect.stringContaining("doesn't reach") });
   expect((await s.screenAction({ type: "screen", key: "task:NOPE", op: "take" })).error).toBe("There is no such screen.");
   const p = page();
   s.screenRelay("task:vmb:API-1", p);
+  await until(() => !!p.state()?.error);
   expect(p.state()).toMatchObject({ closed: true, error: expect.stringContaining("vmb") });
-  expect(await s.desktopOf("task:vmb:API-1")).toMatchObject({ ok: false });
+  expect(await s.desktopOf("task:vmb:API-1")).toMatchObject({ ok: false, code: "elsewhere" });
 });
 
 test("a Mac's one desktop: who holds it, who waits, and the machine's own screen", async () => {
@@ -255,4 +256,131 @@ test("a Mac's one desktop: who holds it, who waits, and the machine's own screen
   });
   expect(s.desktops()).toEqual(["vm"]);
   expect(await s.desktopOf("machine:vm")).toEqual({ ok: true, port: srv.port!, own: false, password: undefined });
+});
+
+// ---- SHEP-347: a desktop starts by itself, says why it can't be shown, and comes from another machine ----
+
+// A stand-in Xvnc (herdr-desktop starts it as the real one): its display's socket file, a screen server of 2x2 on its
+// port that asks for no sign-in. Display numbers 90 and up, which nothing else here uses.
+const XVNC = join(fake, "x", "Xvnc");
+mkdirSync(join(fake, "x"), { recursive: true });
+writeFileSync(XVNC, `#!/usr/bin/env python3
+import os, signal, socket, sys, threading
+d = sys.argv[1].lstrip(":"); port = int(sys.argv[sys.argv.index("-rfbport") + 1])
+sock = "/tmp/.X11-unix/X" + d
+os.makedirs("/tmp/.X11-unix", exist_ok=True); open(sock, "w").close()
+def bye(*_):
+    try: os.remove(sock)
+    except OSError: pass
+    os._exit(0)
+signal.signal(signal.SIGTERM, bye)
+srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1); srv.bind(("127.0.0.1", port)); srv.listen()
+def one(c):
+    try:
+        c.sendall(b"RFB 003.008\\n"); c.recv(12); c.sendall(bytes([1, 1])); c.recv(1); c.sendall(bytes(4)); c.recv(1)
+        c.sendall(bytes([0, 2, 0, 2, 32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0, 0, 0, 0, 4]) + b"fake")
+        while c.recv(4096): pass
+    except OSError: pass
+while True:
+    c, _ = srv.accept(); threading.Thread(target=one, args=(c,), daemon=True).start()
+`);
+chmodSync(XVNC, 0o755);
+const xenv = (first: number) => ({ ...env, PATH: `${join(fake, "x")}:${env.PATH}`, HERDR_DESKTOP_FIRST: String(first) });
+
+test("the Desktop tab starts an agent's own display by itself, says so meanwhile, and again after it stopped", async () => {
+  const { s } = make({ env: xenv(90) });
+  const down = () => sh([join(BIN, "herdr-desktop"), "--own", "--task", "shop#2", "--space", "sp1", "--down"], xenv(90));
+  try {
+    expect(await s.desktopCheck("task:SHOP-2")).toEqual({ ok: false, code: "starting", why: "Starting the desktop…" });
+    let c: any;
+    await until(async () => (c = await s.desktopCheck("task:SHOP-2") as any).code !== "starting");
+    expect(c).toEqual({ ok: true });
+    expect(readFileSync(join(root, "shop-2.display"), "utf8")).toContain("port=59");
+    // the display stopped: the next look starts it again
+    await down();
+    expect((await s.desktopCheck("task:SHOP-2") as any).code).toBe("starting");
+    await until(async () => (await s.desktopCheck("task:SHOP-2")).ok);
+  } finally { await down(); }
+});
+
+test("each reason a desktop can't be shown has its own words: no display, a Mac's Screen Sharing off, its sign-in, its password", async () => {
+  // no virtual display on this machine (no Xvnc or Xvfb on its PATH)
+  const bare = join(home, "bare");
+  mkdirSync(bare, { recursive: true });
+  for (const t of ["sh", "python3", "sed", "cat", "mkdir", "chmod", "rm", "find", "uname", "dirname"]) { const w = Bun.which(t); if (w && !existsSync(join(bare, t))) Bun.spawnSync(["ln", "-s", w, join(bare, t)]); }
+  const none = make({ env: { ...env, PATH: bare } }).s;
+  expect(await none.desktopCheck("task:SHOP-2")).toEqual({ ok: false, code: "starting", why: "Starting the desktop…" });
+  let c: any;
+  await until(async () => (c = await none.desktopCheck("task:SHOP-2") as any).code !== "starting");
+  expect(c).toEqual({ ok: false, code: "missing", why: expect.stringContaining("This machine has no virtual display") });
+  // a Mac: Screen Sharing off (nothing on its port), then a Mac that offers only Apple's sign-in, then a password
+  const closed = Bun.listen({ hostname: "127.0.0.1", port: 0, socket: { data() {} } });
+  const off = closed.port;
+  closed.stop();
+  const mac = (port: number, password?: string) => make({ shared: true, password: () => password, env: { ...env, HERDR_DESKTOP_DRIVER: "shared", HERDR_DESKTOP_PORT: String(port) } }).s;
+  expect(await mac(off).desktopCheck("machine:vm")).toEqual({ ok: false, code: "sharing-off", why: "Screen Sharing is off on this Mac." });
+  const apple = Bun.listen<{ n: number }>({ hostname: "127.0.0.1", port: 0, socket: { open(x) { x.data = { n: 0 }; x.write("RFB 003.889\n"); }, data(x, d) { x.data.n += d.length; if (x.data.n >= 12) x.write(new Uint8Array([4, 30, 33, 36, 35])); } } });
+  expect((await mac(apple.port, "s3cret").desktopCheck("machine:vm"))).toMatchObject({ ok: false, code: "mac-auth" });
+  apple.stop(true);
+  const pw = Bun.listen<{ n: number }>({ hostname: "127.0.0.1", port: 0, socket: { open(x) { x.data = { n: 0 }; x.write("RFB 003.889\n"); }, data(x, d) { x.data.n += d.length; if (x.data.n === 12) x.write(new Uint8Array([2, 30, 2])); else if (x.data.n === 13) x.write(new Uint8Array(16)); else if (x.data.n === 29) x.write(new Uint8Array([0, 0, 0, 1])); } } });
+  expect((await mac(pw.port).desktopCheck("machine:vm"))).toMatchObject({ ok: false, code: "password" });
+  expect((await mac(pw.port, "wrong").desktopCheck("machine:vm"))).toMatchObject({ ok: false, code: "password-wrong" });
+  pw.stop(true);
+});
+
+test("another machine's desktop and browser: started there over its link, forwarded on 127.0.0.1, taken over there", async () => {
+  // the other machine: its own home, reached by a command as `hc machine add --via` does
+  const there = join(home, "there"), tbin = join(there, ".local", "bin");
+  mkdirSync(tbin, { recursive: true });
+  for (const t of ["herdr-desktop", "herdr-browser"]) if (!existsSync(join(tbin, t))) Bun.spawnSync(["ln", "-s", join(BIN, t), join(tbin, t)]);
+  if (!existsSync(join(tbin, "Xvnc"))) Bun.spawnSync(["ln", "-s", XVNC, join(tbin, "Xvnc")]);
+  const troot = join(there, ".herdr", "browser");
+  const tenv = { HOME: there, PATH: env.PATH, HERDR_BROWSER_BIN: AB, HERDR_DESKTOP_BIN: "/bin/true" };
+  let state = "connected";
+  const link = () => ({ name: "vmb", target: `env HOME=${there} HERDR_DESKTOP_FIRST=93 HERDR_BROWSER_BIN=${AB} sh -c`, via: true, state });
+  const { s } = make({ machines: async () => [link()] });
+  const down = () => sh([join(BIN, "herdr-desktop"), "--own", "--task", "api#1", "--space", "sp9", "--down"], tenv);
+  try {
+    expect((await s.desktopCheck("task:vmb:API-1") as any).code).toBe("starting");
+    let c: any;
+    await until(async () => (c = await s.desktopCheck("task:vmb:API-1") as any).code !== "starting", 15_000);
+    expect(c).toEqual({ ok: true });
+    const disp = readFileSync(join(troot, "api-1.display"), "utf8");
+    expect(disp).toContain("display=:9");
+    // the page's view: the forward listens on 127.0.0.1 only, and the screen server's hello comes through it
+    const got: number[] = [];
+    let closed = false;
+    const r = s.desktopRelay("task:vmb:API-1", { send: (b) => void got.push(...b), close: () => { closed = true; }, buffered: () => 0 });
+    await until(() => got.length >= 12, 15_000);
+    expect(Buffer.from(got.slice(0, 12)).toString()).toBe("RFB 003.008\n");
+    r.message(new TextEncoder().encode("RFB 003.008\n"));
+    await until(() => got.length >= 14);
+    r.message(new Uint8Array([1]));
+    await until(() => got.length >= 18);
+    r.message(new Uint8Array([1]));
+    await until(() => got.length >= 18 + 28, 15_000);
+    expect(got.slice(18, 22)).toEqual([0, 2, 0, 2]);          // the stand-in Xvnc's own 2x2, from the other machine
+    // while it is watched, it is the agent's: view-only until Take over
+    expect(s.screensOf()["task:vmb:API-1"]).toEqual({ active: true, driver: "agent" });
+    expect(await s.screenAction({ type: "screen", key: "task:vmb:API-1", op: "take" })).toEqual({ ok: true });
+    expect(existsSync(join(troot, "api-1.you"))).toBe(true);    // its agent's herdr-desktop there is refused now
+    const refused = await sh([join(tbin, "herdr-desktop"), "--task", "api#1", "--space", "sp9", "snapshot"], tenv);
+    expect(refused.stderr).toContain("took over");
+    expect(s.screensOf()["task:vmb:API-1"]).toEqual({ active: true, driver: "you" });
+    expect((await s.screenAction({ type: "screen", key: "task:vmb:API-1", op: "handback" })).ok).toBe(true);
+    await until(() => !existsSync(join(troot, "api-1.you")));
+    r.end();
+    expect(s.screensOf()["task:vmb:API-1"]).toBeUndefined();
+    // its link down: said plainly
+    state = "unreachable";
+    expect(await s.desktopCheck("task:vmb:API-1")).toEqual({ ok: false, code: "offline", why: "vmb can't be reached now." });
+    state = "connected";
+    // its browser: herdr-browser runs there, its stream comes through a forward
+    expect((await sh([join(tbin, "herdr-browser"), "--task", "api#1", "--space", "sp9", "open", "https://shop.test/"], tenv)).exitCode).toBe(0);
+    const p = page();
+    const b = s.screenRelay("task:vmb:API-1", p);
+    await until(() => p.got.some((m) => m.type === "frame"), 15_000);
+    expect(p.state()).toMatchObject({ connected: true, url: "https://shop.test/cart" });
+    b.end();
+  } finally { await down(); }
 });

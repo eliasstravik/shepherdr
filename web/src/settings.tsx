@@ -243,7 +243,7 @@ function TaskRows({ snap, place }: { snap: Snapshot; place: string }) {
 
 /** Add or replace a secret: its name, the value in a masked box, and who may use it. Agents use it by name and never
  *  see it. */
-function secretDialog(snap: Snapshot, place: string, name?: string, scope?: string) {
+export function secretDialog(snap: Snapshot, place: string, name?: string, scope?: string, opts: { fresh?: boolean; done?(): void } = {}) {
   openForm(
     function Form({ close }) {
       const [n, setN] = useState(name ?? '')
@@ -253,11 +253,11 @@ function secretDialog(snap: Snapshot, place: string, name?: string, scope?: stri
         const key = n.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_')
         if (!key || !v) return
         close()
-        await tryAct({ type: 'secret', level, name: key, value: v }, 'Saved')
+        if (await tryAct({ type: 'secret', level, name: key, value: v }, 'Saved')) opts.done?.()
       }
       return (
         <>
-          <h2>{name ? `Replace ${name}` : 'Add a secret'}</h2>
+          <h2>{name ? `${opts.fresh ? 'Set' : 'Replace'} ${name}` : 'Add a secret'}</h2>
           <p>{level === 'all' ? 'Every space can use it.' : `Only ${spaceLabel(snap, level)} can use it.`}</p>
           {!name && (
             <label className="fld">
@@ -276,7 +276,7 @@ function secretDialog(snap: Snapshot, place: string, name?: string, scope?: stri
         </>
       )
     },
-    { label: name ? `Replace ${name}` : 'Add a secret' },
+    { label: name ? `${opts.fresh ? 'Set' : 'Replace'} ${name}` : 'Add a secret' },
   )
 }
 

@@ -7,7 +7,8 @@
 // "Needs your hands" card with Skip and Take over.
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { PaneFrame } from '@client/App.tsx'
-import { definePlugin, getState, notice, openSettings, setUI, togglePane, tryAct, useSnap, useUI, type ScreenAt, type Thread } from '@client/kernel.ts'
+import { act as call, definePlugin, getState, notice, openSettings, setUI, togglePane, tryAct, useSnap, useUI, type ScreenAt, type Thread } from '@client/kernel.ts'
+import { secretDialog } from '@client/settings.tsx'
 import { openMenu } from '@client/overlay.tsx'
 import { Btn, cx, Hd, I, IB } from '@client/ui.tsx'
 import { DoneRow } from '@plugins/chat/cards.tsx'
@@ -178,6 +179,8 @@ function BrowserView({ k, drive, ring, send, state, onFrameRef }: { k: string; d
         onTouchMove={(e) => touch('touchMove', e)}
         onTouchEnd={(e) => touch('touchEnd', e)}
       />
+      {/* why there is no page to show (its machine can't be reached, its tool isn't there), in its own line */}
+      {blank && state?.error && <div className="empty desk-why" role="status"><b>{state.error}</b><span>Shepherdr looks again by itself.</span></div>}
       {/* a phone's own keyboard types into the page through this box */}
       {drive && phone && <input ref={typed} aria-label="Type into the page" autoCapitalize="off" autoCorrect="off" style={{ position: 'absolute', opacity: 0, width: 1, height: 1, bottom: 0 }} onChange={(e) => { const t = e.target.value; e.target.value = ''; if (t) send({ type: 'text', text: t }) }} onKeyDown={(e) => { const k1 = e.key.length > 1 ? keyEvent(e.nativeEvent, 'keyDown') : null; if (k1) send(k1) }} />}
       {!drive && <button type="button" className="veil" aria-label="Live view. Take over to click and type" onClick={() => notice('Take over to click and type')} />}
@@ -202,47 +205,126 @@ function DemoPicture({ k, drive, desktop, idle, onContinued }: { k: string; driv
 
 /* ---------- the desktop's live picture ---------- */
 
+/** Why a desktop can't be shown (the service's screen › check), in its own plain line. */
+type Check = { ok: true } | { ok: false; code: string; why: string }
+/** the secret a Mac's Screen Sharing password is kept in (service/screens.ts SCREEN_PASSWORD) */
+const PASSWORD = 'SCREEN_SHARING_PASSWORD'
+/** what the person can do about each reason: the steps, the button that fixes it, and whether it is looked at again
+ *  by itself (and how often) */
+function fixOf(code: string, onMac: string): { steps?: string[]; fix?: 'password' | 'machines'; again?: number } {
+  const set = `Back here, tap Set the password: it is kept as the secret ${PASSWORD}, hidden, and never shown.`
+  const allow = `For agents to click and type there, also allow Accessibility and Screen Recording on ${onMac}: run agent-desktop permissions there.`
+  switch (code) {
+    case 'starting': return { again: 1000 }
+    case 'offline': return { again: 5000 }
+    case 'gone': return { again: 3000 }
+    case 'sharing-off': return { steps: [`On ${onMac}, open System Settings › General › Sharing and turn on Screen Sharing.`], again: 5000 }
+    case 'mac-auth': return {
+      steps: [`On ${onMac}, open System Settings › General › Sharing and tap the ⓘ button beside Screen Sharing.`, 'Turn on “VNC viewers may control screen with password” and choose a password.', set, allow],
+      fix: 'password',
+    }
+    case 'password': return { steps: ['Use the password from “VNC viewers may control screen with password” (System Settings › General › Sharing, the ⓘ beside Screen Sharing).', set, allow], fix: 'password' }
+    case 'password-wrong': return { steps: [`Set it again: it must match the one in ${onMac}'s Screen Sharing settings (the ⓘ button).`], fix: 'password' }
+    case 'missing': return { steps: ['Install TigerVNC there: sudo apt install tigervnc-standalone-server'] }
+    case 'no-tool': return { steps: ["It arrives with that machine's next tools update from Shepherdr."], again: 30_000 }
+    default: return {}
+  }
+}
+
 /** A desktop, drawn by a screen client (VNC) through Shepherdr's own connection. On a phone: pinch to zoom, drag to
- *  pan, tap to click, long-press to right-click, and a keyboard button with the extra keys. */
-function DesktopView({ k, drive, ring, apiRef }: { k: string; drive: boolean; ring: boolean; apiRef: React.MutableRefObject<{ paste(t: string): void; shot(): string | null } | null> }) {
+ *  pan, tap to click, long-press to right-click, and a keyboard button with the extra keys. Before it connects, the
+ *  service says whether it can be shown: its own display is started when it has none ("Starting the desktop…"), and
+ *  a reason it can't gets its own line with what fixes it. It connects again by itself when the display comes back. */
+function DesktopView({ k, drive, ring, apiRef, busy, onMac }: { k: string; drive: boolean; ring: boolean; apiRef: React.MutableRefObject<{ paste(t: string): void; shot(): string | null } | null>; busy?: string; onMac: string }) {
+  const snap = useSnap()
   const host = useRef<HTMLDivElement>(null)
   const typed = useRef<HTMLInputElement>(null)
   const rfb = useRef<import('@novnc/novnc').default | null>(null)
   const phone = useUI((u) => u.phone)
-  const [status, setStatus] = useState('Opening the desktop…')
+  const [status, setStatus] = useState<Check | 'opening' | 'live'>('opening')
+  // a new try: the Try again button, a password just set
+  const [tries, setTries] = useState(0)
+  const [watchAnyway, setWatchAnyway] = useState(false)
+  const held = !!busy && !watchAnyway
   useEffect(() => {
+    if (held) return
     let gone = false
-    void import('@novnc/novnc').then(({ default: RFB }) => {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const later = (f: () => void, ms: number) => { clearTimeout(timer); timer = setTimeout(f, ms) }
+    const check = async () => {
+      if (gone) return
+      let c: Check
+      try { c = await call<Check>({ type: 'screen', key: k, op: 'check' }) } catch { c = { ok: false, code: 'down', why: "Shepherdr can't be reached right now." } }
+      if (gone) return
+      if (c.ok) return void connect()
+      setStatus(c)
+      const again = c.code === 'down' ? 5000 : fixOf(c.code, onMac).again
+      if (again) later(() => void check(), again)
+    }
+    const connect = () => void import('@novnc/novnc').then(({ default: RFB }) => {
       if (gone || !host.current) return
       const r = new RFB(host.current, wsUrl(`api/desktop?key=${encodeURIComponent(k)}`).href, { wsProtocols: ['binary'] })
       r.scaleViewport = true
       r.background = 'transparent'
       r.viewOnly = true
-      r.addEventListener('connect', () => setStatus(''))
-      r.addEventListener('disconnect', () => setStatus("Can't show this desktop now."))
+      r.addEventListener('connect', () => setStatus('live'))
+      // the display went (or never came): ask why, and connect again once it is back
+      r.addEventListener('disconnect', () => {
+        if (rfb.current === r) { rfb.current = null; apiRef.current = null }
+        if (gone) return
+        setStatus('opening')
+        later(() => void check(), 1000)
+      })
       rfb.current = r
       apiRef.current = { paste: (t) => r.clipboardPasteFrom(t), shot: () => { try { return r.toDataURL('image/png') } catch { return null } } }
     })
+    setStatus('opening')
+    void check()
     return () => {
       gone = true
+      clearTimeout(timer)
       rfb.current?.disconnect()
       rfb.current = null
       apiRef.current = null
     }
-  }, [k])
+  }, [k, tries, held])
   useEffect(() => {
     if (rfb.current) rfb.current.viewOnly = !drive
   }, [drive, status])
+  const failed = typeof status === 'object' && !status.ok ? status : null
+  const fx = failed ? fixOf(failed.code, onMac) : null
+  const setPassword = () => { if (snap) secretDialog(snap, 'all', PASSWORD, 'all', { fresh: !snap.config?.secrets.some((x) => x.name === PASSWORD), done: () => setTries((n) => n + 1) }) }
   // X keysyms of the extra keys a phone's keyboard lacks
   const KEYS: [string, number, string][] = [['esc', 0xff1b, 'Escape'], ['tab', 0xff09, 'Tab'], ['←', 0xff51, 'ArrowLeft'], ['↑', 0xff52, 'ArrowUp'], ['↓', 0xff54, 'ArrowDown'], ['→', 0xff53, 'ArrowRight']]
   return (
     <>
-      <div className={cx('scr', ring && 'drive')} style={{ aspectRatio: phone ? '4/3' : '16/10' }}>
+      <div className={cx('scr', ring && 'drive')} style={{ aspectRatio: held || (failed && failed.code !== 'starting') ? undefined : phone ? '4/3' : '16/10' }}>
         <div ref={host} style={{ position: 'absolute', inset: 0 }} />
-        {status && <div className="empty" style={{ position: 'absolute', inset: 0, padding: 24, alignContent: 'center' }}><span>{status}</span></div>}
-        {!drive && <button type="button" className="veil" aria-label="Live view. Take over to click and type" onClick={() => notice('Take over to click and type')} />}
+        {held ? (
+          <div className="empty desk-why flow" role="status">
+            <b>{busy} is using this Mac's screen now.</b>
+            <span>The Mac has one screen, so agents take turns. This one's turn comes when it's done.</span>
+            <div className="acts"><Btn small onClick={() => setWatchAnyway(true)}>Watch anyway</Btn></div>
+          </div>
+        ) : status === 'opening' ? (
+          <div className="empty desk-why" role="status"><span>Opening the desktop…</span></div>
+        ) : failed?.code === 'starting' ? (
+          <div className="empty desk-why" role="status"><span>{failed.why}</span></div>
+        ) : failed ? (
+          <div className="empty desk-why flow" role="status">
+            <b>{failed.why}</b>
+            {fx?.steps && (fx.steps.length > 1 ? <ol>{fx.steps.map((t) => <li key={t}>{t}</li>)}</ol> : <span>{fx.steps[0]}</span>)}
+            {fx?.again && failed.code !== 'starting' && <span>Shepherdr looks again by itself.</span>}
+            <div className="acts">
+              {fx?.fix === 'password' && <Btn small kind="pri" onClick={setPassword}>Set the password</Btn>}
+              {/needs you to log in/.test(failed.why) && <Btn small onClick={() => { setUI({ pane: null }); openSettings('all', 'Machines') }}>Open Machines</Btn>}
+              {!['elsewhere', 'no-screen'].includes(failed.code) && <Btn small onClick={() => setTries((n) => n + 1)}>Try again</Btn>}
+            </div>
+          </div>
+        ) : null}
+        {!drive && status === 'live' && <button type="button" className="veil" aria-label="Live view. Take over to click and type" onClick={() => notice('Take over to click and type')} />}
       </div>
-      {drive && phone && (
+      {drive && phone && status === 'live' && (
         <div className="keys" style={{ background: 'none', padding: '8px 0 0' }}>
           <button type="button" aria-label="Keyboard" style={{ background: 'var(--control)', color: 'var(--fg)' }} onClick={() => typed.current?.focus()}><I n="term" c="s16" /></button>
           {KEYS.map(([l, sym, code]) => <button type="button" key={code} aria-label={`${code} key`} style={{ background: 'var(--control)', color: 'var(--fg)' }} onClick={() => rfb.current?.sendKey(sym, code)}>{l}</button>)}
@@ -357,7 +439,7 @@ function ScreenPane() {
         </div>
       )}
       <div onPointerDown={bump} onKeyDown={bump}>
-        {snap.demo ? <DemoPicture key={`${k}:${src}`} k={k} drive={drive} desktop={src === 'd'} idle={isIdle && src === 'b'} onContinued={() => setAddr('billing.example.com/invoices')} /> : src === 'b' ? <BrowserView k={k} drive={drive} ring={driving} send={send} state={state} onFrameRef={frame} /> : <DesktopView k={k} drive={drive} ring={driving} apiRef={desk} />}
+        {snap.demo ? <DemoPicture key={`${k}:${src}`} k={k} drive={drive} desktop={src === 'd'} idle={isIdle && src === 'b'} onContinued={() => setAddr('billing.example.com/invoices')} /> : src === 'b' ? <BrowserView k={k} drive={drive} ring={driving} send={send} state={state} onFrameRef={frame} /> : <DesktopView k={k} drive={drive} ring={driving} apiRef={desk} busy={sc.d?.busy} onMac={sc.d?.own === false && machine !== snap.host ? mach : 'the Mac'} />}
       </div>
     </PaneFrame>
   )

@@ -79,6 +79,11 @@ div.b[data-menu]{cursor:pointer}
 .scr{touch-action:none}
 .scr.idle{aspect-ratio:16/10}
 .app.phone .scr.idle{aspect-ratio:4/3}
+/* why a desktop can't be shown: its own line, the steps that fix it, a button (SHEP-347) */
+.desk-why{position:absolute;inset:0;padding:24px;align-content:center}
+.desk-why.flow{position:relative;inset:auto;min-height:240px}
+.desk-why ol{margin:4px 0 0;padding-left:20px;text-align:left;color:var(--muted);font-size:14px;line-height:20px;display:grid;gap:6px;max-width:520px}
+.desk-why .acts{justify-content:center;margin-top:8px}
 
 /* an artifact is a real page, in a frame that cannot reach the app */
 /* The frame fills the whole panel (or the middle, expanded) and the page scrolls inside it to its end: the box around
