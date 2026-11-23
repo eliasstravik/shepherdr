@@ -55,6 +55,12 @@ function scrollerOf(el: HTMLElement) {
   return null
 }
 
+function swallowClick(ms: number) {
+  const swallow = (c: MouseEvent) => (c.stopPropagation(), c.preventDefault())
+  addEventListener('click', swallow, { capture: true, once: true })
+  setTimeout(() => removeEventListener('click', swallow, { capture: true }), ms)
+}
+
 /** a pointer went down on a row that can be dragged: follows it until it goes up */
 export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
   if ((e.pointerType === 'mouse' && e.button !== 0) || e.ctrlKey || (e.target as HTMLElement).closest('[role=menu]')) return
@@ -218,14 +224,16 @@ export function press(e: ReactPointerEvent<HTMLElement>, o: Press) {
     const was = active
     end()
     if (!was) {
-      if (held && !mouse && !strayed) o.heldUp?.(el)
+      // the click this lift sends lands on what the hold opened (its shade): it opens or shuts nothing
+      if (held && !mouse && !strayed && o.heldUp) {
+        o.heldUp(el)
+        swallowClick(400)
+      }
       return
     }
     settle()
     // the click a drag ends with opens nothing
-    const swallow = (c: MouseEvent) => (c.stopPropagation(), c.preventDefault())
-    addEventListener('click', swallow, { capture: true, once: true })
-    setTimeout(() => removeEventListener('click', swallow, { capture: true }), 50)
+    swallowClick(50)
   }
   const cancel = (ev: PointerEvent) => {
     if (ev.pointerId !== id) return
