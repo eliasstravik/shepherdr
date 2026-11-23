@@ -9,7 +9,7 @@ import type { AgentPick, Need, Snapshot, Task, Place } from "../web/shared/types
 import { ACTS, ASK_FIRST, navWords, REPLY_MAX, SETTINGS } from "../core/voice.js";
 import { screenParams, screenWords } from "../core/screen.js";
 import { planRows, windowWords, whyWords, healthWords } from "../core/machines.js";
-import { artifactsIn, everything, isEverything, listOf, machineLabel, machineWarn, needsCount, nowGroups, onBranch, scheduleLine, schedulesOf, spaceLabel, spacesOf, etaOf, leftWords, statusWord, taskInSpace, taskLine, taskWhen, tstate, unreachable, whereWords } from "../web/shared/view.ts";
+import { artifactsIn, everything, isEverything, isTilde, listOf, machineLabel, machineWarn, needsCount, nowGroups, onBranch, scheduleLine, schedulesOf, spaceLabel, spacesOf, etaOf, leftWords, statusWord, taskInSpace, taskLine, taskWhen, tstate, unreachable, whereWords } from "../web/shared/view.ts";
 import { SOURCES, scrub, render, at, search, segments, type SourceArgs } from "./voice-data.ts";
 
 /** Where a call comes from and what its app shows now (sent by the page as it changes). SHEP-105: a call is with
@@ -381,11 +381,11 @@ function lookSpaces(snap: Snapshot) {
   const ev = everything(snap);
   if (ev) { const n = needsCount(snap); out.push(`Everything, the root chat${n ? `: ${n} ${n === 1 ? "needs" : "need"} you in all` : ""}.`); }
   for (const m of listOf(snap, "Active")) {
-    const rows = [...(m.home ? [m.home] : []), ...m.groups.flatMap((g) => g.spaces), ...m.spaces].map((p) => `${p === m.home ? "its home space (~)" : `#${p.name}`}${counts(p.id) ? `: ${counts(p.id)}` : ""}`);
+    const rows = [...m.groups.flatMap((g) => g.spaces), ...m.spaces].map((p) => `${isTilde(snap, p) ? "its home space (~)" : `#${p.name}`}${counts(p.id) ? `: ${counts(p.id)}` : ""}`);
     if (rows.length) out.push(`On ${m.machine.name}${unreachable(m.machine) ? " (can't reach it)" : ""}: ${rows.join("; ")}.`);
   }
   const arch = spacesOf(snap).filter((p) => p.archived);
-  if (arch.length) out.push(`Archived: ${arch.slice(0, 8).map((p) => `#${p.name}`).join(", ")}.`);
+  if (arch.length) out.push(`Archived: ${arch.slice(0, 8).map((p) => label(snap, p.id)).join(", ")}.`);
   return done(out.join("\n") || "No spaces yet.");
 }
 

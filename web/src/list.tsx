@@ -4,7 +4,7 @@
 // Archive, Remove, Feedback).
 import { useState } from 'react'
 import type { Snapshot } from '@shared/types.ts'
-import { everything, folderOf, groupOf, isEverything, isHomeSpace, listOf, machineLabel, needsCount, placeDown, placeOf, spaceLabel, tasksIn, tstate, unreachable, type ListMachine, type Space } from '@shared/view.ts'
+import { everything, folderOf, groupOf, isEverything, isHomeSpace, isTilde, listOf, machineLabel, needsCount, placeDown, placeOf, spaceLabel, tasksIn, tstate, unreachable, type ListMachine, type Space } from '@shared/view.ts'
 import { act, getState, go, notice, openSettings, registry, setUI, shownOn, tryAct, useUI, type Filter, type MenuRow } from './kernel.ts'
 import { confirm, openDialog, openForm, openMenu } from './overlay.tsx'
 import { AgentField, MachineField, pickFor, type Pick } from './picker.tsx'
@@ -65,13 +65,13 @@ function archive(snap: Snapshot, p: Space) {
   }
   const busy = p.archived ? '' : busyWords(snap, p.id)
   // asked only when tasks run there: archiving itself deletes nothing
-  if (busy) confirm({ title: `Archive #${p.name}?`, body: `${busy}Nothing is deleted; the filter in the list shows it again.`, ok: 'Archive', run })
+  if (busy) confirm({ title: `Archive ${spaceLabel(snap, p.id)}?`, body: `${busy}Nothing is deleted; the filter in the list shows it again.`, ok: 'Archive', run })
   else void run()
 }
 
 function remove(snap: Snapshot, p: Space) {
   confirm({
-    title: `Remove #${p.name}?`,
+    title: `Remove ${spaceLabel(snap, p.id)}?`,
     body: `${busyWords(snap, p.id)}It leaves Shepherdr, with its chat history and the pages its agents made. Its folder and everything in it stay where they are.`,
     ok: 'Remove',
     danger: true,
@@ -81,14 +81,15 @@ function remove(snap: Snapshot, p: Space) {
   })
 }
 
-/** one field and Save: Rename (a space, a group, a task, an artifact) */
-export function renameDialog(name: string, save: (name: string) => void | Promise<unknown>) {
+/** one field and Save: Rename (a space, a group, a task, an artifact). blank: what an empty name shows (a machine's
+ *  home space: ~), saved as no name */
+export function renameDialog(name: string, save: (name: string) => void | Promise<unknown>, blank?: string) {
   openForm(
     function Form({ close }) {
       const [v, setV] = useState(name)
       const ok = () => {
         const t = v.trim()
-        if (!t) return
+        if (!t && blank === undefined) return
         close()
         if (t !== name) void save(t)
       }
@@ -97,7 +98,7 @@ export function renameDialog(name: string, save: (name: string) => void | Promis
           <h2>Rename</h2>
           <label className="fld">
             <span>Name</span>
-            <input className="inp" name="name" value={v} autoComplete="off" onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && ok()} />
+            <input className="inp" name="name" value={v} placeholder={blank} autoComplete="off" onChange={(e) => setV(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && ok()} />
           </label>
           <div className="acts">
             <Btn onClick={close}>Cancel</Btn>
@@ -272,8 +273,9 @@ export function spaceMenu(anchor: Element, placeId: string, head = false) {
   const first = [...registry.spaceMenu.flatMap((m) => m.rows(p, head)), ...(head ? swapRow(getState().ui) : [])]
   const line = first.length > 0
   if (isEverything(snap, p.id)) return openMenu(anchor, [...first, { icon: 'gear', label: 'Settings', line, run: () => openSettings('all') }], { label: 'Everything' })
-  // a machine's home space stays first under it: never renamed, grouped, archived or removed
-  if (isHomeSpace(snap, p)) return openMenu(anchor, [...first, { icon: 'gear', label: 'Settings', line, run: () => openSettings(p.id) }], { label: spaceLabel(snap, p.id) })
+  // a machine's home space is a space like any other; unnamed it shows as ~, and an emptied name goes back to that
+  const home = isHomeSpace(snap, p)
+  const tilde = isTilde(snap, p)
   const mine = groupOf(snap, p.id)
   const groups = (snap.sections ?? []).filter((s) => s.id !== 'pinned' && (s.machine ?? snap.host) === p.machine && s.id !== mine?.id)
   const moveTo = (to: string) => void tryAct({ type: 'move', id: p.id, to })
@@ -282,7 +284,11 @@ export function spaceMenu(anchor: Element, placeId: string, head = false) {
     { icon: 'gear', label: 'Settings', line, run: () => openSettings(p.id) },
     // SHEP-335: a space on a repo opens that repo's task settings
     ...((r) => (p.git && r ? [{ icon: 'folder' as const, label: 'Repo settings', run: () => openSettings('all', 'Tasks', r.key) }] : []))(snap.config?.repos?.find((x) => x.spaces.includes(p.id))),
-    { icon: 'pen', label: 'Rename', run: () => renameDialog(p.name, (name) => tryAct({ type: 'rename', id: p.id, name })) },
+    {
+      icon: 'pen',
+      label: 'Rename',
+      run: () => (home ? renameDialog(tilde ? '' : p.name, (name) => tryAct({ type: 'rename', id: p.id, name, ...(name ? {} : { unname: true }) }), '~') : renameDialog(p.name, (name) => tryAct({ type: 'rename', id: p.id, name }))),
+    },
     {
       icon: 'folder',
       label: 'Move to group',
@@ -295,7 +301,7 @@ export function spaceMenu(anchor: Element, placeId: string, head = false) {
     { icon: 'archive', label: p.archived ? 'Unarchive' : 'Archive', run: () => archive(snap, p) },
     { icon: 'bin', label: 'Remove', danger: true, line: true, run: () => remove(snap, p) },
   ]
-  openMenu(anchor, rows, { label: `#${p.name}`, ...(nameCut(anchor) ? { top: () => <WholeName name={p.name} /> } : {}) })
+  openMenu(anchor, rows, { label: spaceLabel(snap, p.id), ...(nameCut(anchor) && !tilde ? { top: () => <WholeName name={p.name} /> } : {}) })
 }
 
 /** a cut-off name (one line, or two that wrap) shows whole where it opens: its menu's first line (SHEP-356) */
@@ -348,34 +354,13 @@ function SpaceRow({ snap, p, sub, under, siblings, section }: { snap: Snapshot; 
   const wide = useUI((u) => u.wide)
   const n = needsCount(snap, p.id)
   const dim = !!placeDown(snap, p.id) || p.archived
+  const tilde = isTilde(snap, p)
   return (
     <div className="rowx" data-project={p.id} data-section={section} data-drop={under} onPointerDown={dragSpace(snap, p, under, siblings)}>
-      <Row icon="hash" label={p.name} className={[sub ? 'sub' : '', dim ? 'dim' : ''].join(' ')} current={at === p.id && !wide} end={<Cnt n={n} />} onClick={() => go(p.id)} />
+      <Row icon="hash" label={tilde ? '~' : p.name} {...(tilde ? { 'aria-label': spaceLabel(snap, p.id) } : {})} className={[sub ? 'sub' : '', dim ? 'dim' : ''].join(' ')} current={at === p.id && !wide} end={<Cnt n={n} />} onClick={() => go(p.id)} />
       <IB
         icon="dots"
-        label={`More for ${p.name}`}
-        aria-haspopup="menu"
-        onClick={(e) => {
-          const el = e.currentTarget
-          go(p.id)
-          spaceMenu(el, p.id)
-        }}
-      />
-    </div>
-  )
-}
-
-/** a machine's home space: its first row, its home folder as ~; not dragged, as it stays first */
-function HomeRow({ snap, p }: { snap: Snapshot; p: Space }) {
-  const at = useUI((u) => u.at)
-  const wide = useUI((u) => u.wide)
-  const label = spaceLabel(snap, p.id)
-  return (
-    <div className="rowx" data-project={p.id} data-home="">
-      <Row icon="folder" label="~" aria-label={label} className={placeDown(snap, p.id) ? 'dim' : ''} current={at === p.id && !wide} end={<Cnt n={needsCount(snap, p.id)} />} onClick={() => go(p.id)} />
-      <IB
-        icon="dots"
-        label={`More for ${label}`}
+        label={`More for ${tilde ? spaceLabel(snap, p.id) : p.name}`}
         aria-haspopup="menu"
         onClick={(e) => {
           const el = e.currentTarget
@@ -525,11 +510,10 @@ export function List({ snap }: { snap: Snapshot }) {
         </div>
       )}
       {machines.map((m) => {
-        const { machine, home, groups, spaces, filter } = m
+        const { machine, groups, spaces, filter } = m
         return (
           <div key={machine.id} style={{ display: 'contents' }}>
             <MachineHead snap={snap} m={m} />
-            {home && <HomeRow snap={snap} p={home} />}
             {filter === 'Archived' && !spaces.length && <p className="hint mempty">No archived spaces.</p>}
             {groups.flatMap((g) => [
               // a group is dragged by its heading, among the groups of its machine; its spaces go with it
