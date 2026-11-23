@@ -140,7 +140,10 @@ test('the voice call button is gone from the header and the phone bottom bar; it
 
 test('the bubbles are one line of pills that scroll sideways, a long one truncating in its pill', () => {
   const css = read('../../src/ds.css')
-  expect(css).toMatch(/\.sugs\{display:flex;gap:8px;overflow-x:auto/)
+  // the properties the row needs, in any order, so a restyle of the rest doesn't break it
+  const sugs = css.match(/\.sugs\{([^}]*)\}/)![1].split(';')
+  for (const x of ['display:flex', 'overflow-x:auto']) expect(sugs).toContain(x)
+  expect(sugs).not.toContain('flex-wrap:wrap')
   const sug = css.match(/\.sug\{([^}]*)\}/)![1]
   for (const x of ['flex:none', 'white-space:nowrap', 'overflow:hidden', 'text-overflow:ellipsis', 'user-select:none', '-webkit-touch-callout:none'])
     expect(sug).toContain(x)
