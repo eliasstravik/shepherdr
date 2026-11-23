@@ -18,7 +18,7 @@ import { hearing, type HearIO } from "./voice-hear.ts";
 import { spawn } from "./spawn.ts";
 export type { ChatView } from "./voice-hear.ts";
 
-const { API, opening, whereLine, envLines, apiError, voiceKey, ensureAgent, agentFile, toolWords, turnGate, hangUpGuard, closeWords, HUNG_UP, REFUSED } = V as any;
+const { API, opening, whereLine, envLines, apiError, voiceKey, ensureAgent, agentFile, turnGate, hangUpGuard, closeWords, HUNG_UP, REFUSED } = V as any;
 const secretsDir = () => join(appHome(), "secrets");
 
 const envFile = (file: string): Record<string, string> => { try { return envLines(readFileSync(file, "utf8")); } catch { return {}; } };
@@ -167,7 +167,6 @@ export function voiceCall(hub: Hub, deps: CallDeps, first: Page) {
   const tell = (m: object) => { try { page?.send(JSON.stringify(m)); } catch {} };
   const toVoice = (m: object) => { if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(m)); };
   const here = () => { const s = io.snap(); return s ? lookHere(s, where) : ""; };
-  let doing = "";
   let said = "", saying: ReturnType<typeof setTimeout> | null = null;
   const end = (why: string | null = null) => {
     if (ended) return;
@@ -223,19 +222,14 @@ export function voiceCall(hub: Hub, deps: CallDeps, first: Page) {
         tell({ type: "state", state: "listening" });
       }
       else if (m.type === "user_transcript") {
+        // SHEP-326: only the state goes to the page, never the words: a call shows no text
         turn.seen("user_transcript"); guard.seen("user_transcript"); tell({ type: "state", state: "thinking" });
-        // what it heard, for the caption line (nothing of a call is written into a chat)
-        const heard = m.user_transcription_event?.user_transcript;
-        if (typeof heard === "string" && heard.trim()) tell({ type: "heard", text: heard.trim().slice(0, 300) });
       }
       else if (m.type === "agent_response") {
         turn.seen("agent_response");
         guard.seen("agent_response", m.agent_response_event?.agent_response);
         // a word before a tool ("On it."): the call is still working on it
-        tell(busy ? { type: "state", state: "working", doing } : { type: "state", state: "listening" });
-        // what it said, for the call card (SHEP-105: the last thing the voice said)
-        const text = m.agent_response_event?.agent_response;
-        if (typeof text === "string" && text.trim()) tell({ type: "said", text: text.trim().slice(0, 300) });
+        tell(busy ? { type: "state", state: "working" } : { type: "state", state: "listening" });
       }
       else if (m.type === "audio" && typeof m.audio_event?.audio_base_64 === "string") {
         const pcm = Buffer.from(m.audio_event.audio_base_64, "base64");
@@ -252,10 +246,8 @@ export function voiceCall(hub: Hub, deps: CallDeps, first: Page) {
           if (may) hangUp();
           return;
         }
-        // SHEP-113: the call shows what it is doing, in plain words ("Working: checking tasks")
-        doing = toolWords(String(c.tool_name ?? ""), c.parameters ?? {});
         turn.seen("client_tool_call");
-        tell({ type: "state", state: "working", doing });
+        tell({ type: "state", state: "working" });
         busy++;
         const asked = Date.now();
         try {

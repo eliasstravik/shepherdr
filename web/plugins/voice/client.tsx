@@ -1,16 +1,19 @@
 // Voice: a hands-free, interruptible voice for Shepherdr as a whole, run over the app (no call screen). It operates
 // the app through tools: it looks, opens things, sends and acts, with a yes before anything that deletes, merges or
 // stops. The wave button starts it (furthest right in the header; at the right of a phone's bottom bar). In a call the
-// button becomes two of the same size, Mute and End call, with one caption line: what it heard and what it says.
-// Nothing of a call is written into a chat. The mic inside the message box is dictation only.
-import { useEffect } from 'react'
+// button becomes two of the same size, Mute and End call, beside a live wave of whoever is talking (the agent in blue,
+// you in the text colour, still dots while it connects). SHEP-326: a call shows no words anywhere: no state words, no
+// captions, nothing in a chat; what it did shows as the usual cards. The mic inside the message box is dictation only.
+import { useEffect, useState } from 'react'
 import { DictateButton } from '@client/dictate.tsx'
+import type { Sample } from '@client/meter.ts'
 import { definePlugin, getState, go, launchHref, notice, openArtifact, openSettings, openTask, setUI, tryAct, useStore, useUI, type Thread } from '@client/kernel.ts'
 import { closeTop as closeLayer } from '@client/overlay.tsx'
-import { cx, I, IB } from '@client/ui.tsx'
+import { I, IB } from '@client/ui.tsx'
 import { isEverything, placeOf, taskOf } from '@shared/view.ts'
-import { callPhase, muteCall, onCaption, sendWhere, startCall, stopCall, type Nav, type NavAck } from './call.ts'
+import { callPhase, callSample, muteCall, sendWhere, startCall, stopCall, type Nav, type NavAck } from './call.ts'
 import { wantsCall, withoutVoice } from './launch.ts'
+import { CallButtonsView, CallMarkView } from './mark.tsx'
 import { resetScreen, screenAction, type Head } from './screen.ts'
 
 /** what this page shows, told to the call as it changes: its "here" and "this task" */
@@ -71,7 +74,6 @@ export async function voiceNav(nav: Nav): Promise<NavAck> {
     if (!t) return no("this app doesn't list that task")
     setUI(OFF)
     openTask(t.id)
-    setUI({ voiced: t.id })
     if (str(nav.tab) === 'screen' || str(nav.tab) === 'browser') setUI({ pane: 'screen', scr: { key: `task:${t.id}`, src: 'b', drive: false } })
     return check(getState().ui.task === t.id, "the task didn't open")
   }
@@ -121,27 +123,22 @@ export function endCall() {
   demoTimers.forEach(clearTimeout)
   demoTimers = []
   stopCall()
-  onCaption(null)
-  setUI({ call: false, callMuted: false, callCap: '', voiced: null })
+  setUI({ call: false, callMuted: false })
 }
 
 export function toggleCall(resume: string | null = null) {
   const { ui } = getState()
   if (ui.call) return endCall()
   ;(document.activeElement as HTMLElement | null)?.blur?.()
-  setUI({ call: true, callMuted: false, callCap: '', callError: null })
+  setUI({ call: true, callMuted: false })
   if (getState().snap?.demo) {
+    // the demo's call: no audio, only what it does (the payment question opened, then answered)
     const later = (ms: number, f: () => void) => demoTimers.push(setTimeout(f, ms))
-    setUI({ callCap: 'Listening…' })
-    later(1800, () => setUI({ callCap: '“Open the payment question.”' }))
-    later(3200, () => { openTask('SHOP-14'); setUI({ voiced: 'SHOP-14', callCap: 'It asks: Stripe or Adyen? It would go with Stripe.' }) })
-    later(6400, () => setUI({ callCap: '“Go with Stripe.”' }))
-    later(7800, () => { void tryAct({ type: 'answer', chat: 'SHOP-14/worker', question: 'q-pay', choice: 0, byVoice: true }); setUI({ voiced: 'SHOP-14', callCap: 'Sent. It is carrying on.' }) })
-    later(10200, () => setUI({ callCap: 'Listening…' }))
+    later(3200, () => openTask('SHOP-14'))
+    later(7800, () => void tryAct({ type: 'answer', chat: 'SHOP-14/worker', question: 'q-pay', choice: 0, byVoice: true }))
     return
   }
   resetScreen()
-  onCaption((text, who) => setUI({ callCap: who === 'you' ? `“${text}”` : text }))
   const fail = (m: string) => {
     endCall()
     notice(/ElevenLabs key/i.test(m) ? 'Voice needs an ElevenLabs key: ask Shepherdr to add the secret ELEVENLABS_API_KEY.' : m)
@@ -155,49 +152,44 @@ function toggleMute() {
   setUI({ callMuted: on })
 }
 
-/** the caption: what it heard or says; else Muted, Speaking… or Listening… */
-function useCaption() {
-  const cap = useUI((u) => u.callCap)
-  const muted = useUI((u) => u.callMuted)
-  const phase = useStore(() => callPhase())
-  // the phase changes without the store knowing: look again twice a second while a call is on
-  const tick = useUI((u) => u.call)
+/** the call's phase, looked at twice a second while a call is on (it changes without the store knowing) */
+function usePhase() {
+  const on = useUI((u) => u.call)
+  const [phase, setPhase] = useState(callPhase)
   useEffect(() => {
-    if (!tick) return
-    let last = callPhase()
-    const t = setInterval(() => {
-      if (callPhase() !== last) {
-        last = callPhase()
-        setUI((u) => ({ callCap: u.callCap }))
-        // a new turn of the person's clears what the voice said before
-        if (last === 'listening') setUI({ callCap: '' })
-      }
-    }, 500)
+    if (!on) return
+    setPhase(callPhase())
+    const t = setInterval(() => setPhase(callPhase()), 500)
     return () => clearInterval(t)
-  }, [tick])
-  return cap || (muted ? 'Muted' : phase === 'speaking' ? 'Speaking…' : phase === 'thinking' || phase === 'working' ? 'Working…' : phase === 'connecting' || phase === 'reconnecting' ? 'Connecting…' : 'Listening…')
+  }, [on])
+  return phase
 }
 
-/** Mute (shown pressed, with a struck-through mic, when muted) and End call (red) */
+/** the call's mark, from its live phase */
+function CallMark({ phone }: { phone: boolean }) {
+  const phase = usePhase()
+  const demo = useStore((s) => !!s.snap?.demo)
+  return <CallMarkView phone={phone} phase={demo ? 'listening' : phase} muted={useUI((u) => u.callMuted)} sample={demo ? demoSample : callSample} />
+}
+
+/** the demo's call has no audio: a made-up voice, you then the agent in turns, so its wave moves as a real one does */
+function demoSample(): Sample {
+  const t = performance.now() / 1000
+  const who = Math.floor(t / 3) % 2 ? 'agent' : 'you'
+  const words = Math.max(0, Math.sin(t * 9) * Math.sin(t * 2.3)) * (t % 3 < 2.4 ? 1 : 0)
+  return { level: words * (who === 'agent' || !getState().ui.callMuted ? 0.6 : 0), who: words > 0.05 ? who : null }
+}
+
 function CallButtons({ phone }: { phone: boolean }) {
-  const muted = useUI((u) => u.callMuted)
-  const c = phone ? 'vbtn' : 'ib'
-  const z = phone ? 's22' : ''
-  return (
-    <>
-      <button type="button" className={c} aria-pressed={muted} aria-label={muted ? 'Unmute yourself' : 'Mute yourself'} onClick={toggleMute}><I n={muted ? 'micoff' : 'mic'} c={z} /></button>
-      <button type="button" className={cx(c, 'end')} aria-label="End call" onClick={endCall}><I n="end" c={z} /></button>
-    </>
-  )
+  return <CallButtonsView phone={phone} muted={useUI((u) => u.callMuted)} onMute={toggleMute} onEnd={endCall} />
 }
 
 function HeaderVoice(_: { thread: Thread }) {
   const call = useUI((u) => u.call)
-  const cap = useCaption()
   if (!call) return <IB icon="wave" label="Talk to Shepherdr" onClick={() => toggleCall()} />
   return (
     <>
-      <span className="vline" role="status">{cap}</span>
+      <CallMark phone={false} />
       <CallButtons phone={false} />
     </>
   )
@@ -208,10 +200,9 @@ function BarVoice() {
   return call ? <CallButtons phone /> : <button type="button" className="vbtn" aria-label="Talk to Shepherdr" onClick={() => toggleCall()}><I n="wave" c="s22" /></button>
 }
 
-function BarCaption() {
+function BarMark() {
   const call = useUI((u) => u.call)
-  const cap = useCaption()
-  return call ? <div className="vcap" role="status">{cap}</div> : null
+  return call ? <div className="vcap"><CallMark phone /></div> : null
 }
 
 export default definePlugin({
@@ -219,7 +210,7 @@ export default definePlugin({
   setup(reg) {
     reg.header.push({ order: 50, View: HeaderVoice })
     reg.barEnd.push(BarVoice)
-    reg.barAbove.push(BarCaption)
+    reg.barAbove.push(BarMark)
     reg.overlays.push(CallWhere)
     reg.boxButtons.push({ order: 10, View: ({ thread, write }) => <DictateButton write={write} scope={thread.chat} /> })
     reg.voiceWake = () => !getState().ui.call && toggleCall()

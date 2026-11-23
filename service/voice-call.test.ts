@@ -305,9 +305,9 @@ test("SHEP-113: the person's ask is answered first; updates that came meanwhile 
   expect(said).toHaveLength(1);
   expect(said[0].text).toContain("The build is green.");
   expect(heard.indexOf(said[0])).toBeGreaterThanOrEqual(answeredAt);
-  // the page saw each state, with what the tool did in plain words
+  // the page saw each state, never what the tool did in words (SHEP-326)
   // ("On it." is said while it shows Speaking: the page shows the voice playing over this state)
-  expect(states()).toEqual(["listening", "thinking", "listening", "working: checking tasks", "thinking", "listening"]);
+  expect(states()).toEqual(["listening", "thinking", "listening", "working", "thinking", "listening"]);
   c.end();
 }, 10000);
 
@@ -388,4 +388,27 @@ test("SHEP-251: the phone locks: its page hands the call to Shepherdr Wake, whic
   c.detach(wake.p);
   expect(back.p.closed).toBe(false);
   c.end();
+});
+
+// SHEP-326: a call shows no words: the page gets the call's state, never what was heard, said or what a tool does
+test("the page is told the call's state, never its words", async () => {
+  const phone = page((nav) => ({ ok: true, where: { device: "phone", artifact: nav.artifact } }));
+  const c = phone.start({ client: "web", device: "phone", machine: "eliass-mac-mini", call: "p:h1" });
+  await until(() => !!agent);
+  await Bun.sleep(50);
+  agent.send(JSON.stringify({ type: "user_transcript", user_transcription_event: { user_transcript: "Open the hulk game please" } }));
+  agent.send(JSON.stringify({ type: "agent_response", agent_response_event: { agent_response: "Opening the hulk game now." } }));
+  await tool({ what: "artifact", id: "the hulk mini game" });
+  await until(() => phone.got.filter((m) => m.type === "state").length >= 3);
+  const states = phone.got.filter((m) => m.type === "state");
+  expect(states.map((m) => m.state)).toContain("thinking");
+  expect(states.map((m) => m.state)).toContain("working");
+  // only a state, nothing else in it
+  for (const m of states) expect(Object.keys(m).sort()).toEqual(["state", "type"]);
+  expect(phone.got.some((m) => m.type === "heard" || m.type === "said")).toBe(false);
+  const all = JSON.stringify(phone.got);
+  expect(all).not.toContain("Open the hulk game please");
+  expect(all).not.toContain("Opening the hulk game now");
+  c.end();
+  agent = null;
 });

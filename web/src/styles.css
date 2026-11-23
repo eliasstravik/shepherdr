@@ -4,7 +4,7 @@
 
 /* ---- beyond the design system's own sheet: what real content needs ---- */
 
-/* the shell is a column: thin lines on top, the three columns, the phone's caption and bar */
+/* the shell is a column: thin lines on top, the three columns, the phone's call wave and bar */
 .device,.app.phone .device{display:flex;flex-direction:column}
 .shell{flex:1}
 .shell>.side,.shell>.col{grid-row:1}
