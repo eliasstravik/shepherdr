@@ -56,3 +56,16 @@ test("the picker's lists come from each agent's own menus; an agent Shepherdr ca
   expect(c.agents[0]!.perms[0]).toEqual({ id: "manual", label: "Default", about: "Asks before edits and commands" });
   expect(c.agents[1]).toMatchObject({ id: "pi", installed: false, why: "No chat yet" });
 });
+
+test("two home spaces on this computer: Everything is always the same one, and neither is listed (SHEP-296)", async () => {
+  const { enrich } = await import("./next.ts");
+  const { HOME } = await import("./paths.ts");
+  const spaces = [{ id: "spH", folder: HOME, machine: null }, { id: "home", folder: `${HOME}/`, machine: null }, { id: "sp1", folder: "/srv/app", machine: null }];
+  const snap: any = { places: spaces.map((s) => ({ id: s.id, chat: `p:${s.id}`, name: s.id, machine: "mini" })), tasks: [], machines: [] };
+  const f: any = { spaces, rows: [], archived: [], asked: () => null, reportOf: () => null, config: { plans: [] } };
+  for (const order of [spaces, [...spaces].reverse()]) {
+    const out: any = enrich({ ...snap, places: [...snap.places] }, { ...f, spaces: order });
+    expect(out.everything).toBe("home");
+    expect(out.places.filter((p: any) => p.home).map((p: any) => p.id).sort()).toEqual(["home", "spH"]);
+  }
+});

@@ -3,7 +3,7 @@
 // Anything else is refused. Inputs are checked here; commands run with argument lists, never a shell line.
 import type { Hub } from "./hub.ts";
 import { join } from "node:path";
-import { appHome, writable } from "./paths.ts";
+import { HOME, appHome, writable } from "./paths.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { sendBody, steerNow, messageBody, refusal, reactionLine, mentionedIn, taskTag } from "../core/send.js";
@@ -427,6 +427,8 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const own: any[] = Array.isArray(compat.shared.value("spaces")) ? compat.shared.value("spaces") : [];
     const mine = own.find((x: any) => ownId(x) === b.place);
     if (!mine) throw new Error("That space isn't here any more.");
+    // Everything stays (SHEP-296): removed, the service made it again at once, and a Home made by hand was a second
+    if (mine === SP.everythingOf(own, HOME)) throw new Error(SP.EVERYTHING_STAYS);
     await compat.shared.set("spaces", own.filter((x: any) => x !== mine));
     const bar = compat.shared.value("spaces-chat") ?? {}, next = withoutSpace(bar, b.place);
     if (next !== bar) await compat.shared.set("spaces-chat", next);

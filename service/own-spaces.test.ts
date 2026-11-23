@@ -82,6 +82,21 @@ test("remove: gone from the list, its group, its icon and the order; its Assista
   expect(existsSync(join(DIR, "herdr-app"))).toBe(false);
 });
 
+test("Everything can't be removed: refused in plain words, nothing changed, its Assistant kept (SHEP-296)", async () => {
+  const w = world();
+  // this computer's home folder, written with a trailing slash: still Everything
+  w.shared.spaces = [{ id: "home", name: "Home", folder: `${HOME}/`, machine: null }, ...w.shared.spaces];
+  w.hub.terminals.set("t0", { address: "t0", state: "live", labels: { "herdr.role": "coordinator", "herdr.coordinator.space": "home" } });
+  const before = structuredClone(w.shared);
+  await expect(act(w.hub, { type: "space-remove", place: "home", stop: true }, w.compat)).rejects.toThrow("Everything is the root chat, so it can't be removed or archived.");
+  expect(w.shared).toEqual(before);
+  expect(w.calls()).toEqual([]);
+  // a second home space an older store holds (Everything is "home"): that one can go
+  w.shared.spaces.push({ id: "spH", name: "Home", folder: HOME, machine: null });
+  expect(await act(w.hub, { type: "space-remove", place: "spH" }, w.compat)).toEqual({ ok: true });
+  expect(w.ids()).toEqual(["home", "spA", "spB", "vm/sp1", "vm/sp2"]);
+});
+
 test("a space's own agent stops with hc kill of its Assistant: count, keep its workers, or stop them first", async () => {
   const w = world();
   expect(await act(w.hub, { type: "assistant-close", place: "vm/sp1", mode: "count" }, w.compat)).toEqual({ ok: true, workers: 1 });
@@ -154,6 +169,10 @@ test("the model carries the window's spaces over once per machine, then never re
   expect(put.spaces.spaces.map((s: any) => s.id).sort()).toEqual(["home", "sp1"]);
   expect(doc.spaces.filter((s: any) => s.id === "home").length).toBe(1);
   expect(read).toEqual(["here", "vm"]);
+  // a home space written another way (a trailing slash) is Everything already: no second one is made (SHEP-296)
+  doc.spaces = [{ id: "spH", name: "Home", folder: `${HOME}/`, machine: null }, ...doc.spaces.filter((s: any) => s.id !== "home")];
+  await refresh();
+  expect(doc.spaces.map((s: any) => s.id)).toEqual(["spH", "sp1"]);
 });
 
 test("a missing copied document waits for the old session and imports it on retry", async () => {

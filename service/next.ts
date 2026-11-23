@@ -5,6 +5,7 @@
 // agents read (herdr-task turns Settings into lines of a brief).
 import type { Automation, Catalog, CatalogAgent, Config, LevelConfig, Place, Snapshot, Task, AgentPick } from "../web/shared/types.ts";
 import { HOME } from "./paths.ts";
+import { everythingOf, sameFolder } from "../core/spaces.js";
 import { readSettings, writeSettings } from "./settings.ts";
 
 /** the plugins: Tasks, Artifacts, Search and Alerts are always on; the rest each have a switch */
@@ -192,7 +193,7 @@ export function warningsOf(snap: Snapshot, plans: Config["plans"]): NonNullable<
 /* ---------- the snapshot's 3.2 facts ---------- */
 
 /** a machine's home folder: this computer's own, another's /home/<user>, /Users/<user> or /root */
-const atHome = (s: { folder?: string; machine?: string | null }) => (s.machine ? /^\/(home\/[^/]+|Users\/[^/]+|root)\/?$/.test(s.folder ?? "") : s.folder === HOME);
+const atHome = (s: { folder?: string; machine?: string | null }) => (s.machine ? /^\/(home\/[^/]+|Users\/[^/]+|root)\/?$/.test(s.folder ?? "") : sameFolder(s.folder, HOME, HOME));
 
 export interface Facts {
   spaces: any[];
@@ -218,7 +219,7 @@ export interface Facts {
 export function enrich(snap: Snapshot, f: Facts): Snapshot {
   const spaceOf = new Map(f.spaces.map((s) => [s.id, s]));
   const homes = new Set(f.spaces.filter(atHome).map((s) => s.id));
-  const everything = f.spaces.find((s) => !s.machine && atHome(s))?.id;
+  const everything = everythingOf(f.spaces, HOME)?.id;
   const places: Place[] = snap.places.map((p) => {
     const s = spaceOf.get(p.id);
     const blocked = ["blocked", "stopped"].includes(s?.assistantStatus) || !!f.asked(p.chat);

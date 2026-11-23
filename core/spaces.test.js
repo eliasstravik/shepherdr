@@ -91,3 +91,21 @@ test("an ended assistant stays visible until a new one starts", () => {
   const newer = { ...old, address: "t3", created_ms: 200 };
   expect(assistantOf(space, [newer, { ...old, created_ms: 100 }])).toEqual(newer);
 });
+
+test("folders compare as one path, and Everything is always the same one of two home spaces (SHEP-296)", async () => {
+  const { folderKey, sameFolder, everythingOf } = await import("./spaces.js");
+  const home = ["", "home", "u"].join("/");
+  expect(folderKey("~/", home)).toBe(home);
+  expect(folderKey(`${home}//`, home)).toBe(home);
+  expect(folderKey("/", home)).toBe("/");
+  expect(sameFolder("~/dev/app/", `${home}/dev/app`, home)).toBe(true);
+  expect(sameFolder(`${home}/dev`, `${home}/dev/app`, home)).toBe(false);
+  expect(sameFolder("", "", home)).toBe(false);
+  const a = { id: "spz", folder: `${home}/`, machine: null }, b = { id: "home", folder: home, machine: null }, c = { id: "spa", folder: home, machine: null };
+  const vm = { id: "sp0", folder: home, machine: "vm" };
+  expect(everythingOf([vm, a, b, c], home)).toBe(b);
+  expect(everythingOf([c, b, a].reverse(), home)).toBe(b);
+  expect(everythingOf([a, c, vm], home)).toBe(c);
+  expect(everythingOf([c, a], home)).toBe(c);
+  expect(everythingOf([vm], home)).toBe(null);
+});
