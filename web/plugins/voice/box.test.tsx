@@ -102,7 +102,7 @@ test('in a call the box takes no text: nothing is sent, and it goes read-only', 
 })
 
 test('a suggested reply is never sent as it is: the round button and Enter send only what is in the box', () => {
-  const go = chat.slice(chat.indexOf('const go = '), chat.indexOf('const pasteNow'))
+  const go = chat.slice(chat.indexOf('const go = '), chat.indexOf('const useSug = '))
   expect(go).toContain('const t = text.trim()')
   expect(go).not.toContain('sug?.text')
   expect(chat).toContain('const filled = !!text.trim() || !!files?.length')
@@ -146,34 +146,36 @@ test("the Tab chip is one of the box's icon buttons: centred over the round butt
   expect(kbd).toContain('margin-top:calc(22px - var(--ib)/2)')
   // a long suggestion truncates before the chip
   expect(css).toContain('.crow .cin{flex:1;min-width:0;text-overflow:ellipsis}')
+})
+
 // 3.2.3's broken dictation: the row ran out of the box, the wave read nothing, Done and Cancel were loud filled discs
 // that sat lower than the idle buttons. web/demo/dict-check.ts checks all of it in a real Chrome; these keep the causes.
-const css = read('../../src/dictate.css') + read('../../src/ds.css')
+const allCss = read('../../src/dictate.css') + read('../../src/ds.css')
 const wave = read('../../src/wave.tsx')
 const dictation = read('../../src/dictation.ts')
 
 test("the wave's canvas fills its box and never sizes it (its pixel count once widened the row past the box)", () => {
   expect(wave).toMatch(/<span className=\{`wv \$\{className\}/)
-  expect(css).toContain('.wv>canvas{position:absolute;inset:0;display:block;width:100%;height:100%}')
+  expect(allCss).toContain('.wv>canvas{position:absolute;inset:0;display:block;width:100%;height:100%}')
   // the recording's row: one column that can shrink to nothing, clipped to the box
-  expect(css).toMatch(/\.dsurf\{[^}]*grid-template-columns:minmax\(0,1fr\)[^}]*overflow:hidden/)
+  expect(allCss).toMatch(/\.dsurf\{[^}]*grid-template-columns:minmax\(0,1fr\)[^}]*overflow:hidden/)
 })
 
 test("Done and Cancel / End call are the idle buttons' size and place, in the app's own green and red, quiet", () => {
   // nothing changes their size; only an error's longer row sets them at its foot
-  expect(css).not.toMatch(/\.cbar:has\(>\.dsurf\)\{align-items/)
-  expect(css).not.toMatch(/\.(ib|send)[^{]*\.(ok|end)[^{]*\{[^}]*(width|height|padding)/)
+  expect(allCss).not.toMatch(/\.cbar:has\(>\.dsurf\)\{align-items/)
+  expect(allCss).not.toMatch(/\.(ib|send)[^{]*\.(ok|end)[^{]*\{[^}]*(width|height|padding)/)
   // the app's tokens, never a hard-coded colour or a white icon on a filled disc
-  const ok = css.match(/\.ib\.vs\.ok,[^{]*\{([^}]*)\}/)![1]!
-  const end = css.match(/\.send\.vs\.end,[^{]*\{([^}]*)\}/)![1]!
+  const ok = allCss.match(/\.ib\.vs\.ok,[^{]*\{([^}]*)\}/)![1]!
+  const end = allCss.match(/\.send\.vs\.end,[^{]*\{([^}]*)\}/)![1]!
   expect(ok).toContain('color:var(--green)')
   expect(end).toContain('color:var(--red)')
   for (const r of [ok, end]) expect(r).not.toMatch(/#[0-9a-f]{3,6}|#fff/i)
 })
 
 test("the call's wave fills the row up to the mic", () => {
-  expect(css).not.toMatch(/\.vmark\{[^}]*max-width/)
-  expect(css).toMatch(/\.vmark\{[^}]*flex:1 1 0/)
+  expect(allCss).not.toMatch(/\.vmark\{[^}]*max-width/)
+  expect(allCss).toMatch(/\.vmark\{[^}]*flex:1 1 0/)
 })
 
 test("the microphone's level reaches the wave whatever the live words do", () => {
