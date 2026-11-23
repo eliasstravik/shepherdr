@@ -49,6 +49,19 @@ test("on a phone the Tasks panel steps aside so the chat's box shows; a task ope
   await new Promise((r) => setTimeout(r, 100))
 })
 
+test('replying needs no CSS global and survives a fake page with no lookups (another test file may leave one behind)', () => {
+  const g = globalThis as { document?: unknown; CSS?: unknown }
+  const [doc, css] = [g.document, g.CSS]
+  Object.assign(g, { document: { visibilityState: 'visible' }, CSS: undefined })
+  try {
+    setUI({ at: 'shop' })
+    expect(() => replyToTask(task)).not.toThrow()
+    expect(getState().ui.reply).toMatchObject({ 'p:shop': { task: 'vm:SHOP-2' } })
+  } finally {
+    Object.assign(g, { document: doc, CSS: css })
+  }
+})
+
 test("a task row's slide is a message's: the same mark, and only a slide past it replies", () => {
   const short = new Finger(100, 100, 0)
   short.move(100 + REPLY_AT - 1, 102)

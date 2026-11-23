@@ -3,6 +3,7 @@
 // that task in the space's chat. A press held still can open a menu. Mouse pointers never slide: they have the menu.
 import { useEffect, useRef, useState, type PointerEvent as RPE } from 'react'
 import { getState, setUI } from '@client/kernel.ts'
+import { attr } from '@client/attr.ts'
 import { I } from '@client/ui.tsx'
 import { placeOf } from '@shared/view.ts'
 import type { Task } from '@shared/types.ts'
@@ -142,7 +143,7 @@ export function replyToTask(t: Pick<Task, 'id' | 'name'>) {
     ...(ui.phone && ui.pane ? { pane: null, task: null } : {}),
   }))
   // the box may only show once the chat is back in front
-  const focus = () => globalThis.document?.querySelector<HTMLTextAreaElement>(`textarea[data-box="${CSS.escape(key)}"]`)?.focus()
+  const focus = () => globalThis.document?.querySelector?.<HTMLTextAreaElement>(`textarea[data-box="${attr(key)}"]`)?.focus?.()
   if (ui.wide || (ui.phone && ui.pane)) setTimeout(focus, 60)
   else focus()
 }
