@@ -20,6 +20,7 @@ from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, CLAUDE_PROFILE, R
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, SUMMARY_MAX
 from .github import finish, remote_of
+from .guard import guard_argv
 from .browsers import browser_env, browser_line, browser_path, desktop_path
 
 
@@ -992,9 +993,10 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     rel = ["--parent", parent, "--outlive-parent"] if parent else ["--no-parent"]
     name = agent_name(s, task, "review" if role else None)
     # HERDR_BROWSER_TASK and HERDR_BROWSER_SPACE: whose tab herdr-browser drives in which space's browser, and whose
-    # desktop herdr-desktop uses (3.2; HERD-57), for it and its children.
+    # desktop herdr-desktop uses (3.2; HERD-57), for it and its children. guard_argv: nothing it runs can take down
+    # the live session it runs in (SHEP-323).
     r = run(["hc", "run", "--bg", "--json", "--keep", "--cwd", folder_for(s, task), "--name", name,
-             *labels, *rel, "--", *low_priority(clean_env(["env", *browser_env(key, bare(space)), *in_shell(cmd)]), name)])
+             *labels, *rel, "--", *low_priority(clean_env(["env", *browser_env(key, bare(space)), *in_shell(guard_argv(cmd))]), name)])
     try:
         out = json.loads(r.stdout)
     except ValueError:

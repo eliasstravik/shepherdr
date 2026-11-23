@@ -4,6 +4,12 @@ How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 
 ## Tests
 
+- Never stop, restart, update or reconfigure the live herdr-core or Shepherdr on this machine (no `hc server
+  stop|restart`, `hc update`, systemctl, pkill or kill on them, no install or update over the live binaries). A task's
+  terminal has HC_SESSION=shepherdr, the live session, and an `export HC_SESSION=...` is gone by the next shell call:
+  name the throwaway session on every command (`HC_SESSION=<throwaway> hc ...`) and use a throwaway HOME (SHEP-323;
+  `herdr_task/guard.py` refuses the rest from a task's terminal). `SHEPHERDR_REAL_CORE=1` runs `test/test_guard.py`'s
+  real throwaway-core repro.
 - Quick checks are fine here (seconds): `bin/sync-shared --check`, `python3 -m unittest discover -s test` and the
   `node --check` loop in [docs/develop.md](docs/develop.md). The installer tests use throwaway roots only.
 - Shell checks: plain `bash -n` is the real one. Dash (`sh -n` here) misses bash-only parse errors that macOS's bash 3.2

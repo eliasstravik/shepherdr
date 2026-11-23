@@ -116,7 +116,18 @@ WAIT_OLD = "(again on a timeout, or while it says turn 0: it hadn't started)"
 WAIT_RULE = ('(again on a timeout; still at turn 0 after one, `hc read <its name>` to see why: a startup dialog such as "Allow external CLAUDE.md imports?" or "Trust this folder?" waits for an answer, which you give with `hc keys <its name> enter` (or `down enter`), then wait again)')
 PLAN_OLD = '`claude --permission-mode plan …`; never'
 PLAN_RULE = '`env … claude --permission-mode dontAsk …`; never'
-WORKER_MD = WORKER_MD_BEFORE_WAIT.replace(WAIT_OLD, WAIT_RULE).replace(PLAN_OLD, PLAN_RULE)
+WORKER_MD_BEFORE_LIVE = WORKER_MD_BEFORE_WAIT.replace(WAIT_OLD, WAIT_RULE).replace(PLAN_OLD, PLAN_RULE)
+# Since a task's test stopped the live session it ran in (SHEP-323): never the live one, a throwaway session named on
+# each command. Shepherdr's guard (guard.py) refuses it too.
+LIVE_ANCHOR = "- Run the project's checks before you say you're done.\n"
+LIVE_RULE = ("- Never stop, restart, update or reconfigure the live session you run in, or Shepherdr's own service"
+             's: no `hc server stop|restart` or `hc update` on it, no systemctl, pkill or kill on herdr-core or Sh'
+             'epherdr, no `shepherdr install|update` over the live install. A test that needs a herdr-core uses a '
+             'throwaway session named on the same command, every time (`HC_SESSION=<throwaway> hc …`: an `export` '
+             "from an earlier shell call is gone, and your terminal's own HC_SESSION is the live one), and a throw"
+             'away HOME. Your terminal refuses these; never work around it. If the live one really needs it, ask t'
+             'he person.\n')
+WORKER_MD = WORKER_MD_BEFORE_LIVE.replace(LIVE_ANCHOR, LIVE_ANCHOR + LIVE_RULE)
 
 REVIEWER_MD_BEFORE_SUBAGENT = """You review one Herdr task's work before it can merge. Read only: never edit files, commit or push.
 - Read the task, then the diff of its branch against its base, and run the project's checks.
@@ -153,7 +164,7 @@ OLD_WORKER_READY = """You work on one Herdr task. Stay within the task's scope a
 - When the work is finished, run the `herdr-task ready` command given at the end of your brief, with a short summary. That puts the task in Ready for the person, who accepts it. Never mark a task done yourself.
 """
 OLD_WORKER_MD = OLD_WORKER_READY.split("- When the work is finished")[0]
-OLD_WORKERS = (WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
+OLD_WORKERS = (WORKER_MD_BEFORE_LIVE, WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
 
 
 TEMPLATE_HEADS = {
