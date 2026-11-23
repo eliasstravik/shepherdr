@@ -33,6 +33,18 @@ describe("live dictation", () => {
     expect(w.hear(JSON.stringify({ message_type: "committed_transcript", text: "late" }))).toBe(null);
   });
 
+  test("what to show while you speak: the kept words and the ones still being heard (SHEP-314)", () => {
+    const w = liveWords();
+    expect(w.shown()).toEqual({ said: "", partial: "" });
+    w.hear(JSON.stringify({ message_type: "partial_transcript", text: "Good  mor" }));
+    expect(w.shown()).toEqual({ said: "", partial: "Good mor" });
+    w.hear(JSON.stringify({ message_type: "committed_transcript", text: "Good morning." }));
+    expect(w.shown()).toEqual({ said: "Good morning.", partial: "" });
+    w.hear(JSON.stringify({ message_type: "partial_transcript", text: "I want" }));
+    expect(w.shown()).toEqual({ said: "Good morning.", partial: "I want" });
+    expect(w.text()).toBe("Good morning.");
+  });
+
   test("silence: no words, still done", () => {
     const w = liveWords();
     w.done();

@@ -221,7 +221,7 @@ export default definePlugin({
     reg.barEnd.push(BarVoice)
     reg.barAbove.push(BarCaption)
     reg.overlays.push(CallWhere)
-    reg.boxButtons.push({ order: 10, View: ({ write }) => <DictateButton write={write} /> })
+    reg.boxButtons.push({ order: 10, View: ({ thread, write }) => <DictateButton write={write} scope={thread.chat} /> })
     reg.voiceWake = () => !getState().ui.call && toggleCall()
     // opened from the home screen's "Talk" shortcut (?voice=1): straight into a call
     if (wantsCall(launchHref)) {
