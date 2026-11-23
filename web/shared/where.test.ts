@@ -14,10 +14,11 @@ const shop = { name: 'shop', folder: '/home/me/dev/shop', short: '~/dev/shop', r
 test("a task's tag: the repo's or folder's name, its machine only with several", () => {
   const one = snap({})
   expect(workWords(one, task({ work: shop }))).toBe('shop')
-  // a folder that is no repo, and the home folder in words
-  expect(workWords(one, task({ work: { name: 'notes', folder: '/home/me/notes', repo: false } }))).toBe('notes')
-  expect(workWords(one, task({ work: { name: '~', folder: '/home/me', repo: false } }))).toBe('Home folder')
-  expect(workWords(one, task({ work: { name: '/', folder: '/', repo: false } }))).toBe('Root folder')
+  // a folder that is no repo shows its path as it is: ~ for home, / for the root
+  expect(workWords(one, task({ work: { name: 'notes', folder: '/home/me/notes', short: '~/notes', repo: false } }))).toBe('~/notes')
+  expect(workWords(one, task({ work: { name: '~', folder: '/home/me', short: '~', repo: false } }))).toBe('~')
+  expect(workWords(one, task({ work: { name: '/', folder: '/', short: '/', repo: false } }))).toBe('/')
+  expect(workWords(snap({ machines: [machine('mini'), machine('mac', 'Mac')] }), task({ on: 'mac', work: { name: '~', folder: '/Users/me', short: '~', repo: false } }))).toBe('~ · Mac')
   // no folder known: no tag
   expect(workWords(one, task({}))).toBe('')
   // two machines: the task's own is named, by the person's name for it

@@ -27,7 +27,7 @@ export function placeholderOf(snap: Snapshot, thread: Thread): string {
   return isEverything(snap, thread.place) ? 'Message Shepherdr' : `Message #${placeOf(snap, thread.place)?.name ?? ''}`
 }
 
-/** The open space's folder beside its name (SHEP-316): a quiet chip, Home folder / Root folder in words, its machine
+/** The open space's folder beside its name (SHEP-316): a quiet chip, the path as it is (~, /), its machine
  *  when it is another; a long path gives way from its start. A tap shows the whole path with Copy. */
 function FolderChip({ snap, place }: { snap: Snapshot; place: Space }) {
   const f = folderOf(snap, place)
