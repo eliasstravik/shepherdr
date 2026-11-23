@@ -142,6 +142,26 @@ class Repo(unittest.TestCase):
         self.assertIn(".cbox:focus-within{", css)
         self.assertIn(".inp:focus{", css)
 
+    def test_no_tap_flash(self):
+        """No browser box on a press (SHEP-303: Android Chrome flashed blue over every button). The page root turns
+        the tap highlight off for everything under it, keyboard focus rings stay, and nothing turns it back on."""
+        with open(J("web/src/ds.css"), encoding="utf-8") as fh:
+            css = fh.read()
+        self.assertRegex(css, r"(?<![\w.-])html\{[^}]*-webkit-tap-highlight-color:transparent")
+        self.assertIn(":focus-visible{outline:2px solid var(--fg)", css)
+        found = []
+        for root, _, files in os.walk(J("web")):
+            if "node_modules" in root or os.sep + "dist" in root:
+                continue
+            for f in files:
+                if f.endswith((".css", ".tsx", ".ts", ".html")):
+                    with open(os.path.join(root, f), encoding="utf-8") as fh:
+                        src = fh.read()
+                    for m in re.finditer(r"tap-?highlight-?color[\"']?\s*:\s*([^;}\n]+)", src, re.I):
+                        if "transparent" not in m.group(1) and "rgba(0,0,0,0)" not in m.group(1).replace(" ", ""):
+                            found.append(f"{os.path.relpath(os.path.join(root, f), J('.'))}: {m.group(0)}")
+        self.assertFalse(found, "a tap highlight turned back on:\n" + "\n".join(found))
+
     def test_no_leftovers(self):
         for p in text_files():
             name = os.path.basename(p)
