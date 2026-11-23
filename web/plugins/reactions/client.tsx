@@ -1,23 +1,51 @@
-// Reactions, both ways: the agent reacts to some of your messages with one emoji by itself; you react from a message's
-// menu (a row of your most used emoji, then + for every emoji, with search). Your reaction reaches the agent at once
-// as a small message. Switched off: the row is gone (an agent's own reactions still show).
-import { useEffect, useState } from 'react'
+// Reactions, both ways: the agent reacts to some of your messages with one emoji by itself; you react from the quick
+// bar a tap on a message shows (its smiley), or from its menu (a row of your most used emoji, then + for every emoji,
+// with search). Each reaction is a chip on the bubble's lower edge, overlapping it as in WhatsApp and iMessage: the
+// emoji at about the text's size, a count when you both picked it, yours tinted; a tap on yours takes it back, a tap on
+// the agent's adds the same. You keep one reaction per message: picking another changes it. Your reaction reaches the
+// agent at once as a small message. Switched off: the row is gone (an agent's own reactions still show).
+import { useEffect, useRef, useState } from 'react'
 import { definePlugin, tryAct } from '@client/kernel.ts'
-import { openDialog } from '@client/overlay.tsx'
-import { I } from '@client/ui.tsx'
+import { openDialog, openMenu } from '@client/overlay.tsx'
+import { cx, I } from '@client/ui.tsx'
 import type { Chat, Message } from '@shared/types.ts'
+import { chipLabel, chipsOf, minesOf, togglesFor } from './chips.ts'
 import { loadEmoji, quickRow, remember, search, tone, withTone, type Group } from './emoji.ts'
 
-/** react to a message; the same emoji again takes it back */
-export function react(chat: string, msg: string, emoji: string) {
+/** react to a message: the same emoji again takes it back, another one changes yours */
+export function react(chat: string, msg: Message, emoji: string) {
   remember(emoji)
-  void tryAct({ type: 'react', chat, message: msg, emoji })
+  void (async () => {
+    for (const e of togglesFor(msg.reactions, emoji)) if (!(await tryAct({ type: 'react', chat, message: msg.id, emoji: e }))) return
+  })()
 }
 
-/** the small mark under a message: yours under the agent's (left), the agent's under yours (right) */
-function Pills({ msg }: { msg: Message; chat: Chat }) {
-  if (!msg.reactions?.length) return null
-  return <span className={msg.who === 'you' ? 'rx' : 'rx l'} aria-label={`Reaction ${msg.reactions.map((r) => r.emoji).join(' ')}`}>{msg.reactions.map((r) => r.emoji).join(' ')}</span>
+/** the chips on a message's lower edge; one added while it is on screen pops in */
+export function Chips({ msg, chat }: { msg: Message; chat: Chat }) {
+  const chips = chipsOf(msg.reactions)
+  const first = useRef<Set<string> | null>(null)
+  first.current ??= new Set(chips.map((c) => c.emoji))
+  if (!chips.length) return null
+  return (
+    <div className="rxs" role="group" aria-label="Reactions">
+      {chips.map((c) => (
+        <button
+          type="button"
+          key={c.emoji}
+          className={cx('rxc', c.pending && 'pending', !first.current!.has(c.emoji) && 'pop')}
+          aria-pressed={c.mine}
+          aria-label={chipLabel(c)}
+          onClick={(e) => {
+            e.stopPropagation()
+            react(chat.key, msg, c.emoji)
+          }}
+        >
+          <span className="e">{c.emoji}</span>
+          {c.count > 1 && <span className="n">{c.count}</span>}
+        </button>
+      ))}
+    </div>
+  )
 }
 
 /** every emoji, with search */
@@ -41,20 +69,22 @@ function All({ onPick }: { onPick: (e: string) => void }) {
   )
 }
 
-function Row({ msg, chat, close }: { msg: Message; chat: Chat; close: () => void }) {
+/** the emoji row: your most used six, then + for every emoji; the one you picked already is marked */
+export function Row({ msg, chat, close }: { msg: Message; chat: Chat; close: () => void }) {
   const pick = (e: string) => {
     close()
-    react(chat.key, msg.id, e)
+    react(chat.key, msg, e)
   }
+  const mine = minesOf(msg.reactions)
   return (
-    <div className="emo">
-      {quickRow(tone()).slice(0, 6).map((e) => <button type="button" key={e} aria-label={`React ${e}`} onClick={() => pick(e)}>{e}</button>)}
+    <div className="emo" role="group" aria-label="React">
+      {quickRow(tone()).slice(0, 6).map((e) => <button type="button" key={e} aria-label={`React ${e}`} aria-pressed={mine.includes(e)} onClick={() => pick(e)}>{e}</button>)}
       <button
         type="button"
         aria-label="More emoji"
         onClick={() => {
           close()
-          openDialog((done) => <All onPick={(e) => { done(); react(chat.key, msg.id, e) }} />, { wide: true, bare: true, label: 'Emoji' })
+          openDialog((done) => <All onPick={(e) => { done(); react(chat.key, msg, e) }} />, { wide: true, bare: true, label: 'Emoji' })
         }}
       >
         <I n="plus" />
@@ -63,10 +93,25 @@ function Row({ msg, chat, close }: { msg: Message; chat: Chat; close: () => void
   )
 }
 
+/** the quick bar's smiley: the emoji row floats above it */
+function Add({ msg, chat }: { msg: Message; chat: Chat }) {
+  return (
+    <button
+      type="button"
+      className="qbtn"
+      aria-label="Add reaction"
+      onClick={(e) => openMenu(e.currentTarget, (close) => <Row msg={msg} chat={chat} close={close} />, { label: 'React', float: true })}
+    >
+      <I n="smile" />
+    </button>
+  )
+}
+
 export default definePlugin({
   name: 'reactions',
   setup(reg) {
-    reg.messageEdge.push({ order: 100, View: Pills })
+    reg.messageEdge.push({ order: 100, View: Chips })
+    reg.messageQuick.push({ order: 10, View: Add })
     reg.messageMenu.push({ order: 10, Top: Row })
   },
 })

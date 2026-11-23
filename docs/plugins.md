@@ -42,7 +42,8 @@ Settings › Plugins has the switches. They are kept as `everywhere.plugins_off`
 | `panes` | What the right-hand pane can show |
 | `bar`, `barEnd`, `barAbove` | The phone's bottom bar, its right end, and one line above it |
 | `spaceMenu`, `taskMenu`, `messageMenu` | Rows of a space's, a task's and a message's menu |
-| `messageParts`, `messageEdge` | Drawn under a message, and a small mark under its bubble |
+| `messageParts`, `messageEdge` | Drawn under a message, and the reaction chips on its bubble's lower edge |
+| `messageQuick` | First in the quick bar a tap or a mouse over a message shows (add a reaction) |
 | `chatCards`, `chatTail`, `chatBody` | Cards put in a chat from a task's status, what follows the messages, what takes the chat's place |
 | `aboveBox`, `boxButtons`, `drawer` | Above the message box, inside its bar, and under the column |
 | `sideHead`, `middle`, `overlays`, `topBars` | The list's top row, the whole middle column, whole-screen layers, thin lines at the top |

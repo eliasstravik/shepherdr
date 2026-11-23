@@ -22,6 +22,12 @@ function resetDemo() {
 }
 
 const push = () => socks.forEach((s) => s.send(JSON.stringify({ type: 'snapshot', snapshot: state[s.data.mode] })))
+/** your reaction toggles, as the real service's: the agent's own stays (the same emoji from both: 'both') */
+function toggled(list: NonNullable<Message['reactions']>, emoji: string): NonNullable<Message['reactions']> {
+  const out = list.flatMap((r) => (r.emoji !== emoji ? [r] : r.by === 'both' ? [{ ...r, by: 'them' as const }] : r.by === 'me' ? [] : [r]))
+  if (list.some((r) => r.emoji === emoji && (r.by === 'me' || r.by === 'both'))) return out
+  return out.some((r) => r.emoji === emoji) ? out.map((r) => (r.emoji === emoji ? { ...r, by: 'both' as const } : r)) : [...out, { emoji, by: 'me' }]
+}
 const pushChat = (key: string) => socks.forEach((s) => s.data.watch.includes(key) && s.send(JSON.stringify({ type: 'chat', chat: chatFor(s, key) })))
 const chatFor = (s: Sock, key: string): Chat => {
   if (s.data.mode === 'empty') return { key, messages: chats[key]?.messages.filter((m) => m.id.startsWith('n')) ?? [], cli: 'claude', top: true, agent: chats[key]?.agent ?? chats[EV]!.agent }
@@ -127,7 +133,7 @@ function action(a: Record<string, any>): unknown {
   if (a.type === 'artifact-delete') return each((snap) => { snap.artifacts = snap.artifacts.filter((x) => x.id !== a.artifact) }), { ok: true }
   if (a.type === 'artifact-pin') return each((snap) => { snap.artifacts = snap.artifacts.map((x) => (x.id === a.artifact ? { ...x, pinned: a.on } : x)) }), { ok: true }
   if (a.type === 'artifact-rename') return each((snap) => { snap.artifacts = snap.artifacts.map((x) => (x.id === a.artifact ? { ...x, title: a.name } : x)) }), { ok: true }
-  if (a.type === 'react') { for (const c of Object.values(chats)) for (const m of c.messages) if (m.id === a.message && c.key === a.chat) { m.reactions = [{ emoji: a.emoji, by: 'me' }]; pushChat(c.key) } return { ok: true } }
+  if (a.type === 'react') { for (const c of Object.values(chats)) for (const m of c.messages) if (m.id === a.message && c.key === a.chat) { m.reactions = toggled(m.reactions ?? [], a.emoji); pushChat(c.key) } return { ok: true } }
   return { ok: true }
 }
 
