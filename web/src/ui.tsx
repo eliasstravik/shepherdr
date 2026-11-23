@@ -8,7 +8,8 @@ export { cx }
 
 /** an icon of the one set; `c`: its size and colour classes (s16, s20, s22, c-ask, c-ready, c-working, c-mute, bolt) */
 export function I({ n, c }: { n: IconName; c?: string }) {
-  return <svg className={cx('i', c)} viewBox="0 0 20 20" aria-hidden="true" dangerouslySetInnerHTML={{ __html: IC[n] }} />
+  // a Working ring turns wherever it shows (ds.css .i.turn; a slow pulse with reduced motion)
+  return <svg className={cx('i', n === 'working' && 'turn', c)} viewBox="0 0 20 20" aria-hidden="true" dangerouslySetInnerHTML={{ __html: IC[n] }} />
 }
 
 type Press = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'aria-pressed' | 'aria-expanded'> & { pressed?: boolean; expanded?: boolean }

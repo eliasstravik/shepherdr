@@ -16,6 +16,7 @@
 /* Motion › Reduced, like the device's own setting */
 :root[data-motion="reduced"] .sheet.in,:root[data-motion="reduced"] .drawer.in,:root[data-motion="reduced"] .pop.in,:root[data-motion="reduced"] .dlg.in,:root[data-motion="reduced"] .win.in{animation:none}
 :root[data-motion="reduced"] .tg i{transition:none}
+:root[data-motion="reduced"] .i.turn{animation:calm 2.4s ease-in-out infinite}
 
 /* an agent's own logo */
 .logo.img{box-shadow:none}.logo.img img{display:block;width:16px;height:16px;object-fit:contain}
