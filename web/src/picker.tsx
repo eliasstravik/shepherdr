@@ -1,13 +1,14 @@
 // The pickers: a choice that can grow (agents, models, machines, spaces) is a picker row (what is picked, a chevron)
 // that opens a searchable list, never a row of buttons. The agent picker always shows what is picked first, then lets
-// you change one thing at a time: Agent, Model and Permissions as rows, Effort and Speed as small switches, and Done.
+// you change one thing at a time: Agent, Model, Effort, Speed and Permissions, each the same row (its label, what is
+// picked, a chevron) that opens its own list, and Done.
 // A sheet on a phone, a 560 px dialog on a desktop; an open list takes the form's place, with a back arrow.
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { AgentPick, Catalog, CatalogAgent, CatalogModel, Snapshot } from '@shared/types.ts'
 import { everything, isEverything, machineLabel, machineOf, spacesOf, unreachable } from '@shared/view.ts'
 import { act, getState } from './kernel.ts'
 import { openDialog } from './overlay.tsx'
-import { Btn, I, IB, Logo, Row, Seg } from './ui.tsx'
+import { Btn, I, IB, Logo, Row } from './ui.tsx'
 
 /** what runs: the agent, its model, effort, speed and permission mode; `label`: the model's name as a running agent reports it */
 export type Pick = AgentPick & { label?: string | null }
@@ -143,11 +144,51 @@ function PickerHead({ title, back, close }: { title: ReactNode; back?: () => voi
   )
 }
 
+export type Field = 'agent' | 'model' | 'effort' | 'speed' | 'mode'
+
+/** the agent picker's rows, in order: each one's label and what is picked; Effort, Speed and Permissions only when
+ *  the agent or model has a choice there */
+export function pickerRows(p: Pick, cat?: Catalog): { f: Field; label: string; value: string }[] {
+  const a = agentOf(cat, p.agent)
+  const m = modelOf(a, p)
+  const w = pickWords(p, cat)
+  const efforts = m?.efforts?.length ? m.efforts : (a?.efforts ?? [])
+  const rows: { f: Field; label: string; value: string }[] = [
+    { f: 'agent', label: 'Agent', value: w.agent },
+    { f: 'model', label: 'Model', value: w.model + (w.group ? ` · ${w.group}` : '') },
+  ]
+  if (efforts.length) rows.push({ f: 'effort', label: 'Effort', value: w.effort })
+  if ((m?.speeds?.length ?? 0) > 1) rows.push({ f: 'speed', label: 'Speed', value: SPEEDS[w.speed] ?? cap(w.speed) })
+  if (a?.perms.length) rows.push({ f: 'mode', label: 'Permissions', value: a.perms.find((x) => x.id === (p.perm ?? a.permDefault))?.label ?? '' })
+  return rows
+}
+
+/** a short list a row opens (Effort, Speed, Permissions): its title, its choices, which one is on, and the pick
+ *  each one makes */
+export function choiceList(f: 'effort' | 'speed' | 'mode', p: Pick, cat?: Catalog): { title: string; items: { id: string; label: string; sub?: string; on: boolean; pick: Pick }[] } {
+  const a = agentOf(cat, p.agent)
+  const m = modelOf(a, p)
+  const w = pickWords(p, cat)
+  if (f === 'effort') {
+    const efforts = m?.efforts?.length ? m.efforts : (a?.efforts ?? [])
+    return { title: `Effort · ${w.model || w.agent}`, items: efforts.map((e) => ({ id: e, label: cap(e), on: cap(e) === w.effort, pick: { ...p, effort: e } })) }
+  }
+  if (f === 'speed')
+    return {
+      title: `Speed · ${w.model || w.agent}`,
+      items: (m?.speeds ?? ['regular']).map((s) => ({ id: s, label: SPEEDS[s] ?? cap(s), on: s === w.speed, pick: { ...p, fast: s === 'ultrafast' ? 'ultrafast' : s === 'fast' } })),
+    }
+  return {
+    title: `Permissions · ${w.agent}`,
+    items: (a?.perms ?? []).map((x) => ({ id: x.id, label: x.label, sub: x.about, on: (p.perm ?? a?.permDefault) === x.id, pick: { ...p, perm: x.id } })),
+  }
+}
+
 function AgentPicker({ title, machine, start, onChange, close }: { title: string; machine: string; start: Pick; onChange: (p: Pick) => void; close: () => void }) {
   const snap = getState().snap
   const cat = useCatalog(machine)
   const [p, setP] = useState<Pick>(start)
-  const [field, setField] = useState<'' | 'agent' | 'model' | 'mode'>('')
+  const [field, setField] = useState<'' | Field>('')
   const [q, setQ] = useState('')
   const set = (next: Pick) => {
     setP(next)
@@ -156,8 +197,6 @@ function AgentPicker({ title, machine, start, onChange, close }: { title: string
   const a = agentOf(cat, p.agent)
   const m = modelOf(a, p)
   const w = pickWords(p, cat)
-  const efforts = m?.efforts?.length ? m.efforts : (a?.efforts ?? [])
-  const speeds = m?.speeds ?? ['regular']
   const mach = snap ? machineLabel(snap, machine) : machine
   const open = (f: typeof field) => {
     setField(f)
@@ -165,76 +204,56 @@ function AgentPicker({ title, machine, start, onChange, close }: { title: string
   }
   const hit = (s: string) => !q.trim() || s.toLowerCase().includes(q.trim().toLowerCase())
 
-  if (!field) {
-    const rowLabel = (label: string, value: string) => (
-      <span className="n">
-        <span className="l2">{label}</span>
-        <span className="l1" style={{ color: 'var(--fg)', fontWeight: 500 }}>{value}</span>
-      </span>
-    )
+  // every row the same: the agent's logo in the first column (kept empty on the others, so they all line up), its
+  // label over what is picked, a chevron
+  if (!field)
     return (
       <div className="pk">
         <PickerHead title={title} close={close} />
-        <button type="button" className="row row2" onClick={() => open('agent')}>
-          <Logo agent={p.agent} name={w.agent} />
-          {rowLabel('Agent', w.agent)}
-          <I n="right" c="s16" />
-        </button>
-        <button type="button" className="row row2" onClick={() => open('model')}>
-          <span style={{ width: 20 }} />
-          {rowLabel('Model', w.model + (w.group ? ` · ${w.group}` : ''))}
-          <I n="right" c="s16" />
-        </button>
-        {!!a?.perms.length && (
-          <button type="button" className="row row2" onClick={() => open('mode')}>
-            <span style={{ width: 20 }} />
-            {rowLabel('Permissions', a.perms.find((x) => x.id === (p.perm ?? a.permDefault))?.label ?? '')}
+        {pickerRows(p, cat).map((r) => (
+          <button key={r.f} type="button" className="row row2" aria-label={`${r.label}: ${r.value}. Change`} onClick={() => open(r.f)}>
+            {r.f === 'agent' ? <Logo agent={p.agent} name={w.agent} /> : <span className="pk-gap" />}
+            <span className="n">
+              <span className="l2">{r.label}</span>
+              <span className="l1 pk-v">{r.value}</span>
+            </span>
             <I n="right" c="s16" />
           </button>
-        )}
-        {efforts.length > 0 && (
-          <div className="pfs">
-            <span className="hint">Effort</span>
-            <Seg label="Effort" values={efforts.map(cap)} value={w.effort} onChange={(v) => set({ ...p, effort: efforts.find((e) => cap(e) === v) ?? null })} />
-          </div>
-        )}
-        {speeds.length > 1 && (
-          <div className="pfs">
-            <span className="hint">Speed</span>
-            <Seg label="Speed" values={speeds.map((s) => SPEEDS[s] ?? cap(s))} value={SPEEDS[w.speed]} onChange={(v) => set({ ...p, fast: v === 'Ultra-fast' ? 'ultrafast' : v === 'Fast' })} />
-          </div>
-        )}
+        ))}
         <div className="acts" style={{ marginTop: 8 }}>
           <Btn kind="pri" onClick={close}>Done</Btn>
         </div>
       </div>
     )
-  }
 
-  if (field === 'mode' && a)
+  if (field === 'effort' || field === 'speed' || field === 'mode') {
+    const c = choiceList(field, p, cat)
     return (
       <div className="pk">
-        <PickerHead title={`Permissions · ${a.name}`} back={() => open('')} close={close} />
+        <PickerHead title={c.title} back={() => open('')} close={close} />
         <div className="list" style={{ minHeight: 0 }}>
-          {a.perms.map((x) => {
-            const on = (p.perm ?? a.permDefault) === x.id
-            return (
-              <Row
-                key={x.id}
-                label={x.label}
-                sub={x.about}
-                current={on}
-                end={on ? <I n="check" /> : undefined}
-                onClick={() => {
-                  set({ ...p, perm: x.id })
-                  open('')
-                }}
-              />
-            )
-          })}
+          {c.items.map((x) => (
+            <Row
+              key={x.id}
+              label={x.label}
+              sub={x.sub}
+              current={x.on}
+              end={
+                <>
+                  {field === 'speed' && <Bolts speed={x.id} c="s16 bolt c-mute" />}
+                  {x.on && <I n="check" />}
+                </>
+              }
+              onClick={() => {
+                set(x.pick)
+                open('')
+              }}
+            />
+          ))}
         </div>
       </div>
     )
+  }
 
   if (field === 'agent') {
     const here = (cat?.agents ?? []).filter((x) => x.installed && hit(x.name))
