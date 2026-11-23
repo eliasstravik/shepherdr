@@ -22,7 +22,10 @@ What the update does, in order:
    scheduler from the default one. Shepherdr's agents still in the default session (an Assistant, a task's agent)
    move too, each on its own conversation, once it's idle; one at work waits, and the update says so.
    `herdr-task carry-over` tries again when a machine couldn't be reached or an agent was busy. `shepherdr doctor`
-   names any agent still left behind.
+   names any agent still left behind. Who keeps the secrets and who serves the web app are kept by each machine's
+   id, which differs per session: the carry-over changes them to the new ids, here and on linked machines, and
+   repairs what 3.2.0 left naming the old ones (each update and `herdr-task carry-over` look again). `shepherdr
+   doctor` says when one names a machine none knows, and how to fix it.
 5. It starts the service and prints the app's link.
 6. It converts old artifacts to pages, once. `herdr-artifact convert --all` tries again if that failed.
 
