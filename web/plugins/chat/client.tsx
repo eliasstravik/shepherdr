@@ -17,7 +17,7 @@ import { DoneRow, QuestionCard, SecretCard } from './cards.tsx'
 import { briefFrom, deliveryWord, looksLong, startWords } from './brief.ts'
 import { Finger, HOLD_MS, quickFit, REPLY_AT, type QuickFit } from './press.ts'
 import { dayLabel } from './days.ts'
-import { Markdown } from './markdown.tsx'
+import { Markdown, withLinks } from './markdown.tsx'
 import { dropped, pasted } from './paste.ts'
 import { suggestionOf, suggestionsOn } from './suggest.ts'
 import { BoxThumb, openPreview, SentThumb, sourcesOf } from './thumbs.tsx'
@@ -312,13 +312,15 @@ function Bubble({ msg, chat, thread, gap, pending, failed, mark }: { msg: Messag
             }}
             onClick={(e) => {
               if (skip.current) return void (skip.current = false)
+              // a tap on a link follows the link, not the message's quick actions
+              if ((e.target as Element).closest('a[href]')) return
               if (sel || getSelection()?.toString()) return
               setQuick(quick ? null : { id: qid, y: yIn(e.clientY) })
             }}
             onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget && (e.preventDefault(), full(e.currentTarget))}
           >
             {msg.reply && <span className="quote">{msg.reply.text}</span>}
-            {mine ? <div className="md" style={{ whiteSpace: 'pre-wrap' }}>{msg.text}</div> : <Markdown text={msg.text ?? ''} mentions={msg.mentions} />}
+            {mine ? <div className="md" style={{ whiteSpace: 'pre-wrap' }}>{withLinks(msg.text ?? '')}</div> : <Markdown text={msg.text ?? ''} mentions={msg.mentions} />}
           </div>
           {registry.messageEdge.map((x, i) => <x.View key={i} msg={msg} chat={chat} />)}
         </div>

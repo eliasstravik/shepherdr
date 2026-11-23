@@ -182,7 +182,10 @@ export const chats: Record<string, Chat> = Object.fromEntries(
       ask('q-pay', '', byPay, ['Stripe', 'Adyen']),
       { id: `m${++n}`, who: 'agent', news: { task: 'vm:GARDEN-4', ref: 'GARDEN-4', mark: 'needs', what: '', text: 'I need an image library to resize the photos.' } },
       ask('q-pil', 'Run a command', byPhoto, ['Allow once', 'Decline'], { command: 'pip install pillow' }),
-      a('Dependency check started on its schedule in #shop. It found 3 packages behind and is updating them.', { suggest: 'Show me what needs me' }),
+      a('Dependency check started on its schedule in #shop. It found 3 packages behind and is updating them.'),
+      me('And the sale plan, APP/?artifact=a-plan, still good?'),
+      // links to the app itself, as `herdr-artifact link` prints them: they open in the app (SHEP-339)
+      a('The quotes are compared: [Supplier quotes compared](APP/?artifact=a-quotes). Its task: [Compare supplier quotes](APP/?task=NOTES-4). The [shop space](APP/?place=p:mac-mini:shop). The suppliers\' own site: [example.com](https://example.com/).', { suggest: 'Show me what needs me' }),
     ], sonnet),
     chat(P.shop, [a('I made a mock-up of the new checkout. Have a look.'), { id: `m${++n}`, who: 'agent', artifact: { id: 'a-mock', v: 3 } }, a('Started SHOP-15, added from Everything.'), { id: `m${++n}`, who: 'agent', news: { task: 'SHOP-14', ref: 'SHOP-14', mark: 'needs', what: '', text: "Which provider should I switch to, Stripe or Adyen? I'd go with Stripe." } }, ask('q-pay', '', byPay, ['Stripe', 'Adyen']), a('SHOP-16 started on its schedule in #shop. It found 3 packages behind and is updating them.', { suggest: 'How is the checkout button going?' })], sonnet),
     // working, nothing written yet: the working sign alone (SHEP-313)
