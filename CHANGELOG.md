@@ -1,5 +1,26 @@
 # Changelog
 
+## 3.2.14
+
+Buttons react the moment you tap them, dictation keeps your first words, and an Assistant's answer from a machine that
+can't reach yours still arrives.
+
+### Buttons
+
+- A button looks pressed as soon as you tap it, then says what it's doing with a small spinner; the other buttons on
+  the card wait until it's done, and a failure shows on the card itself.
+- After an action on another machine's task, its task list is read again right away, so the row changes at once.
+
+### Dictation
+
+- The wave that says "start talking" now shows only once the microphone really hears you. Until then a quiet dot shows
+  that it's getting ready, so a phone no longer loses your first words.
+
+### Assistants on other machines
+
+- When an Assistant answers a machine it can't reach, the answer waits on its own machine and yours fetches it, for up
+  to 12 hours. It shows in the chat as an incoming message, and the sender's row says it's waiting and why.
+
 ## 3.2.13
 
 The phone and watch app can see more: your spaces, unread chats, failed schedules, machines in trouble and how much
