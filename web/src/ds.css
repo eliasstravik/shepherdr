@@ -297,7 +297,7 @@ button.b{cursor:pointer}
 .app.phone .win{left:0;right:0;grid-template-columns:minmax(0,1fr);border-radius:0;box-shadow:none}
 .app.phone .win .pg{padding:0 16px 24px}.app.phone .win .nav{padding:0 8px 16px;background:none}.app.phone .win .hd{padding:0 4px}
 .srow{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:var(--row2);padding:8px 0;border-top:1px solid var(--line)}
-h3+.srow,.hint+.srow,.banner+.srow{border-top:0}
+h3+.srow,.hint+.srow,.banner+.srow,.promise+.srow{border-top:0}
 .srow .n{flex:1;min-width:0}.srow .n small{display:block;color:var(--muted);font-size:var(--sec);line-height:var(--secl)}
 .srow .val{color:var(--muted);font-size:var(--sec);line-height:var(--secl);text-align:right;min-width:0}
 .srow.wrap{flex-wrap:wrap}.srow.wrap .n{min-width:min(10rem,100%)}
@@ -615,7 +615,7 @@ textarea.cin{overflow-y:auto}
 .stat dt{color:var(--muted);font-size:var(--sec);line-height:var(--secl);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stat dd{margin:0;font-size:18px;line-height:24px;font-weight:600;font-variant-numeric:tabular-nums}
 .rawlog{display:grid;gap:0;margin:8px 0 0;padding:0;max-height:60vh;overflow:auto;font-size:var(--sec);line-height:var(--secl)}
-.rawlog li{display:grid;grid-template-columns:7.5rem minmax(0,1fr);gap:0 12px;padding:6px 0;border-top:1px solid var(--line)}
-.rawlog time{color:var(--muted);font-variant-numeric:tabular-nums;grid-row:span 2}.rawlog span{color:var(--muted);overflow-wrap:anywhere}
+.rawlog li{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:0 12px;padding:6px 0;border-top:1px solid var(--line)}
+.rawlog time{color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums;grid-row:span 2}.rawlog span{color:var(--muted);overflow-wrap:anywhere}
 .anote{display:flex;align-items:center;gap:8px;margin:8px 8px 0;padding:4px 4px 4px 12px;border-radius:12px;background:var(--raised);font-size:14px;line-height:20px}
 .anote .n{flex:1;min-width:0}

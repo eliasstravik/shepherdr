@@ -57,8 +57,8 @@ export function Numbers({ s }: { s: Summary }) {
     ['Sent back', String(s.tasks.sent_back)],
     ['Reopened', String(s.tasks.reopened)],
     ['Wait at Ready', took(s.waits.ready_for_review?.avg_ms)],
-    ['Needs you answered in', took(s.waits.needs_you?.avg_ms)],
-    ['Agents blocked for', took(s.waits.blocked?.avg_ms)],
+    ['Wait at Needs you', took(s.waits.needs_you?.avg_ms)],
+    ['Agents stopped for', took(s.waits.blocked?.avg_ms)],
     ['Questions answered', String(s.questions.answered)],
   ]
   return (
@@ -83,10 +83,7 @@ function Raw({ days, close }: { days: number; close: () => void }) {
   }, [days])
   return (
     <>
-      <div className="hd">
-        <h2>What is stored</h2>
-        <IB icon="x" label="Close" onClick={close} />
-      </div>
+      <h2>What is stored</h2>
       <p className="hint">Every event of the last {days === 1 ? 'day' : `${days} days`}, as kept on your machines: when, what, and ids. Never what was said.</p>
       {err && <p className="hint">{err}</p>}
       {!got && !err && <p className="hint">Reading…</p>}
@@ -97,11 +94,14 @@ function Raw({ days, close }: { days: number; close: () => void }) {
             <li key={i}>
               <time>{new Date(e.t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</time>
               <b>{e.e}</b>
-              <span>{Object.entries(e).filter(([k]) => k !== 't' && k !== 'e').map(([k, v]) => `${k} ${String(v)}`).join(' · ')}</span>
+              <span>{Object.entries(e).filter(([k]) => k !== 't' && k !== 'e').map(([k, v]) => `${k} ${k.endsWith('ms') && typeof v === 'number' ? took(v) : String(v)}`).join(' · ')}</span>
             </li>
           ))}
         </ol>
       )}
+      <div className="acts">
+        <Btn onClick={close}>Close</Btn>
+      </div>
     </>
   )
 }
