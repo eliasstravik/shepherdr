@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 const dir = mkdtempSync(join(tmpdir(), "glance-"));
 process.env.SHEPHERDR_DATA = dir;
 const { Push, alertsOf } = await import("./push.ts");
-const { GlanceFeed, glanceOf, buttonChoices, openUrlOk, fullText, CALM_MS, NATIVE_GRACE_MS, TEXT_MAX } = await import("./glance.ts");
+const { GlanceFeed, glanceOf, buttonChoices, openUrlOk, fullText, saidToPerson, CALM_MS, NATIVE_GRACE_MS, TEXT_MAX } = await import("./glance.ts");
 const { Live } = await import("./live.ts");
 const { gate } = await import("./auth.ts");
 
@@ -92,6 +92,17 @@ test("a numbered-options question with no bubbles of the agent's: one per option
   const g = glanceOf(snap, alertsOf(snap), NOW, lastOf({ who: "agent", text }));
   expect(g.items[0].suggest).toEqual(["1. One card per provider", "2. A single list", "3. Tabs"]);
   expect(g.items[0].text).toBe(text);
+});
+
+test("the feed's last words skip messages between agents: a no-reply after another Assistant's message keeps the bubbles", () => {
+  // a chat log's items (core/chat-log.js) as the service picks the feed's last words from them
+  const ask = { kind: "agent", text: "Merge it?", suggests: ["yes", "not yet"] };
+  const peer = { kind: "user", text: "Fixed it there", from: "vmk/t2" };
+  const sent = { kind: "sent", text: "Go on", to: "SHOP-2" };
+  const news = { kind: "news", ref: "SHOP-2", text: "is ready" };
+  expect([{ kind: "user", text: "go" }, ask, peer, sent, news, { kind: "mark" }].findLast(saidToPerson)).toBe(ask);
+  expect([ask, peer, { kind: "user", text: "yes" }].findLast(saidToPerson)?.text).toBe("yes");
+  expect([ask, peer, { kind: "agent", text: "Merged." }].findLast(saidToPerson)?.text).toBe("Merged.");
 });
 
 test("no suggested replies: none said, the person wrote last, Settings off, or a card that takes no words", () => {

@@ -27,6 +27,19 @@ test('rows that are not words (activity, news) never hide or replace them', () =
     .toEqual({ id: 'm0', texts: ['yes'] })
 })
 
+test('messages between agents never clear them: one from another Assistant, one this agent sent, then its no-reply', () => {
+  const ask = { text: 'Merge it?', suggests: ['yes', 'not yet'] }
+  const peerIn = { who: 'you', text: 'Fixed it there', brief: { label: 'Message from Assistant on vmk', from: 'Assistant on vmk' }, relay: { dir: 'from', name: 'Assistant on vmk' } } as Partial<Message>
+  const sentOut = { who: 'agent', text: 'Go on', brief: { label: 'Message to Fix login', from: 'Assistant', to: 'Fix login' }, relay: { dir: 'to', name: 'Fix login' } } as Partial<Message>
+  const news = { news: { task: 'SHOP-2', ref: 'SHOP-2', mark: 'ready', what: 'is ready', text: 'Fix login' } } as Partial<Message>
+  expect(suggestionOf(chat([ask, peerIn]), true)).toEqual({ id: 'm0', texts: ['yes', 'not yet'] })
+  expect(suggestionOf(chat([ask, peerIn, sentOut, news]), true)).toEqual({ id: 'm0', texts: ['yes', 'not yet'] })
+  // the person writing, or a new reply with words, still does
+  expect(suggestionOf(chat([ask, peerIn, { who: 'you', text: 'yes' }]), true)).toBeNull()
+  expect(suggestionOf(chat([ask, peerIn, { text: 'Merged.' }]), true)).toBeNull()
+  expect(suggestionOf(chat([ask, peerIn, { text: 'Merged?', suggests: ['ok'] }]), true)).toEqual({ id: 'm2', texts: ['ok'] })
+})
+
 test('none with the setting off, nor in an empty chat', () => {
   expect(suggestionOf(chat([{ text: 'Merge it?', suggests: ['yes'] }]), false)).toBeNull()
   expect(suggestionOf(undefined, true)).toBeNull()

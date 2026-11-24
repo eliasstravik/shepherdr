@@ -145,6 +145,10 @@ const today = (now: number) => { const d = new Date(now); d.setHours(0, 0, 0, 0)
  * last: a chat's newest message with words, as the web app's chat has it (its text and the agent's suggested replies;
  * who: "you" when the person's), for an item's suggested replies.
  */
+/** a chat log item (core/chat-log.js) that counts for the suggested replies: the agent's words or the person's, never a
+ *  message between agents (another agent's in: a user item with from; one it sent: kind "sent"), so the agent's
+ *  bubbles outlive its no-reply answer to another Assistant's message, news or a background notice */
+export const saidToPerson = (x: any) => !!x?.text && (x.kind === "agent" || (x.kind === "user" && !x.from));
 export type LastSaid = (chat: string) => { who: "agent" | "you"; text?: string; suggests?: string[] } | null | undefined;
 export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now(), last: LastSaid = () => null): Glance {
   // the chat's bubbles, as web/plugins/chat/suggest.ts suggestionOf shows them: the agent's newest words', none after
