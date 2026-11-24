@@ -1,5 +1,14 @@
 # Changelog
 
+## 3.2.12
+
+A chat no longer opens as a list of task rows before its messages appear.
+
+### Chat
+
+- While a chat's messages load, it no longer shows only the tasks' Done lines and review cards: those wait until the
+  messages are in, so the chat opens as the conversation it is.
+
 ## 3.2.11
 
 The phone and watch app can show what an agent asks in full, with its suggested replies to send in one tap.
