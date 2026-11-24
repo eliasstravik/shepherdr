@@ -194,7 +194,7 @@ function Note() {
   return (
     <div className="anote" role="status">
       <span className="n">Shepherdr now keeps personal analytics, only on your machines.</span>
-      <Btn small onClick={() => { seen(); openSettings('all', NAME) }}>Settings</Btn>
+      <Btn small onClick={() => { seen(); openSettings('all', NAME) }}>Show me</Btn>
       <IB icon="x" label="Close" onClick={seen} />
     </div>
   )
