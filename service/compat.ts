@@ -72,6 +72,28 @@ export function sentAs(sends: Sent[], x: { text?: string; at?: number; images?: 
   return s?.cid;
 }
 
+/** The page's sends a message in the log is made of, when the agent got several as one (two sent in a row while it
+ *  worked, joined in its box, with a blank line or glued): 2+ of them in the order sent, their words together being its
+ *  words. Words alone (no files); each send is one message (taken). */
+export function sentParts(sends: Sent[], x: { text?: string; at?: number; images?: number; paths?: string[] }, taken: Set<string>): Sent[] | undefined {
+  if (!x.text || x.images || x.paths?.length) return;
+  const at = x.at ?? 0, bare = (v: string) => said(v).replace(/\s+/g, "");
+  const want = bare(x.text);
+  const open = sends.filter((s) => !taken.has(s.cid) && !s.files.length && bare(s.text) && at >= s.at - CLOCKS && at - s.at <= 30 * 60_000).sort((p, q) => p.at - q.at);
+  for (let i = 0; i < open.length; i++) {
+    let got = "";
+    for (let j = i; j < open.length; j++) {
+      got += bare(open[j].text);
+      if (!want.startsWith(got)) break;
+      if (got === want && j > i) {
+        const parts = open.slice(i, j + 1);
+        for (const p of parts) taken.add(p.cid);
+        return parts;
+      }
+    }
+  }
+}
+
 // a message's reactions as 2.1 shows them: yours, the agent's, or both
 function reactionsOf(list?: { emoji: string; by: string }[]) {
   if (!list?.length) return {};
@@ -621,6 +643,12 @@ export class Compat {
           ...(from ? { relay: { dir: "from", name: from, ...(files.length ? { files } : {}) } } : {}) } as Message);
       } else if (x.kind === "user" && (x.text || x.paths?.length || x.images)) {
         const sentCid = sends.length && !x.from ? sentAs(sends, x, takenSends) : undefined;
+        // several sent in a row that the agent got as one: each shows as sent, on its own, with its id
+        const parts = !sentCid && sends.length > 1 && !x.from && !x.replyTo ? sentParts(sends, x, takenSends) : undefined;
+        if (parts) {
+          parts.forEach((p, n) => messages.push({ id: n ? `${x.id}:c${n}` : x.id, who: "you", text: p.text, at: x.at, cid: p.cid, ...(n ? {} : reactions) } as Message));
+          continue;
+        }
         const cid = sentCid ? { cid: sentCid } : {};
         // the tasks it mentions, as chips under it (core/send.js: the same matching as the window's)
         // one picked with @ already draws as a chip in its words (core/mentions.js): not again under them
@@ -696,6 +724,12 @@ export class Compat {
       const words = (v: string) => v.replace(/\s+/g, " ").trim();
       const s = (this.sends.get(addr ?? "") ?? []).find((x) => words(x.text) === words(q.text) && x.at <= q.at + 5000 && q.at - x.at < 10 * 60_000);
       const mark = { who: "you" as const, at: q.at, waiting: true, waitsFor: "queue" as const, ...(s ? { cid: s.cid } : {}) };
+      // several sent in a row, queued as one: each waits on its own
+      const parts = !s && q.text && !q.images ? sentParts(this.sends.get(addr ?? "") ?? [], q, new Set()) : undefined;
+      if (parts) {
+        parts.forEach((p, n) => messages.push({ id: n ? `${q.id}:c${n}` : q.id, text: p.text, ...mark, cid: p.cid } as Message));
+        continue;
+      }
       if (q.text) messages.push({ id: q.id, text: q.text, ...mark } as Message);
       for (const [n, path] of (s?.files ?? []).entries()) messages.push({ id: `${q.id}:f${n}`, file: { name: path.split("/").pop() ?? "image", path }, ...mark } as Message);
       if (!s && q.images) messages.push({ id: `${q.id}:n`, images: q.images, ...mark } as Message);

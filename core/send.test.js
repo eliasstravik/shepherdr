@@ -358,3 +358,66 @@ test("inFront: a plain shell, a shell running the agent, the agent, another prog
   expect(inFront({ state: "live" })).toBeNull();
   expect(NOT_TYPED.shell).toContain("nothing was typed");
 });
+
+// A working Claude Code whose box hc send pastes into, then presses Enter a moment later: what was in the box goes as
+// one message (submitted), whatever was in it.
+function pastingClaude() {
+  const submitted = [];
+  let box = "";
+  const io = {
+    sleep: (ms) => new Promise((r) => setTimeout(r, Math.min(ms, 5))),
+    status: () => "working",
+    hc: async (args) => {
+      if (args[0] === "send") {
+        box += args[2];
+        await new Promise((r) => setTimeout(r, 40));
+        submitted.push(box);
+        box = "";
+        return { code: 0, stdout: '{"started":true}' };
+      }
+      if (args[0] === "read") return { code: 0, stdout: `● working\n────\n❯ ${box.split("\n")[0]}\n────\n  esc to interrupt` };
+      return { code: 0, stdout: "" };
+    },
+  };
+  return { io, submitted, put: (t) => { box = t; } };
+}
+
+test("two messages sent at once go in one after the other, each as it was written, never glued", async () => {
+  const c = pastingClaude();
+  const a = "Cut a new release and tell me when that task is done then";
+  const b = "What's next in the artifact then?";
+  const first = sendBody(c.io, "tq1", "claude", a);
+  await new Promise((r) => setTimeout(r, 5));
+  await Promise.all([first, sendBody(c.io, "tq1", "claude", b)]);
+  expect(c.submitted).toEqual([a, b]);
+});
+
+test("one sent while Claude Code's box still holds the message before it goes after a blank line", async () => {
+  const c = pastingClaude();
+  const a = "Cut a new release then";
+  await sendBody(c.io, "tq2", "claude", a);
+  // Esc put it back in the box (an older Claude Code), and nobody pressed Enter on it
+  c.put(a);
+  await sendBody(c.io, "tq2", "claude", "What's next?");
+  expect(c.submitted).toEqual([a, `${a}\n\nWhat's next?`]);
+  // a draft the person typed there is not ours: nothing added (hc send waits for theirs)
+  c.put("half typed");
+  await sendBody(c.io, "tq2", "claude", "And this");
+  expect(c.submitted.at(-1)).toBe("half typedAnd this");
+});
+
+// Claude Code can log one message twice: taken in mid-turn (a queued_command), then again once a stopped turn hands it
+// back. Seen as two of the same bubble, glued words and all.
+test("a message Claude Code logs twice, taken mid-turn and again after a stop, shows once", async () => {
+  const words = "Cut a new release then\n\nWhat's next in the artifact then?";
+  const asked = { parentUuid: null, isSidechain: false, attachment: { type: "queued_command", prompt: words, commandMode: "prompt", origin: { kind: "human" }, timestamp: at }, type: "attachment", uuid: "qc", timestamp: at };
+  const stop = { parentUuid: null, isSidechain: false, type: "user", message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user for tool use]" }] }, uuid: "x", timestamp: at };
+  const said = (uuid) => ({ parentUuid: null, isSidechain: false, type: "user", message: { role: "user", content: words }, uuid, timestamp: at, origin: { kind: "human" } });
+  const again = said("u2");
+  const yours = (c) => c.items.filter((x) => x.kind === "user").map((x) => x.text);
+  expect(yours(await conv([asked, stop, again]))).toEqual([words]);
+  expect(yours(await conv([again, asked]))).toEqual([words]);
+  // the same words again after the agent answered are a message of their own
+  const answer = { parentUuid: null, isSidechain: false, type: "assistant", uuid: "a1", timestamp: at, message: { id: "m1", role: "assistant", content: [{ type: "text", text: "On it." }] } };
+  expect(yours(await conv([again, answer, said("u3")]))).toEqual([words, words]);
+});

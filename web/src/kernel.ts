@@ -9,7 +9,7 @@ import { everything, placeOf, taskChat, taskOf, type ListFilter, type Space } fr
 import { clean, NO_FILTER, type TaskFilter } from '@shared/task-filter.ts'
 import type { IconName } from './icons.ts'
 import { catchLink } from './applink.ts'
-import { OPEN_WITHIN, PONG_WITHIN, retryIn, SAY_LOST_AFTER } from './link.ts'
+import { heartbeatDue, OPEN_WITHIN, PONG_LATE, PONG_WITHIN, retryIn, SAY_LOST_AFTER } from './link.ts'
 import { expire, loadOutbox, prune, saveOutbox, settle, type Outgoing } from './outbox.ts'
 import { setupGuarded } from './guard.tsx'
 import { HttpError, wakeAll } from './uploads.ts'
@@ -574,6 +574,8 @@ let saying: ReturnType<typeof setTimeout> | null = null
 let downSince: number | null = null
 let pruned = false
 let tried = 0
+/** when the link last heard from the server */
+let heard = 0
 
 export function connect() {
   if (retrying) clearTimeout(retrying)
@@ -586,6 +588,7 @@ export function connect() {
   opening = setTimeout(() => drop(sock), OPEN_WITHIN)
   sock.onopen = () => {
     clearTimeout(opening!)
+    heard = Date.now()
     tries = 0
     downSince = null
     if (saying) clearTimeout(saying)
@@ -597,6 +600,7 @@ export function connect() {
     watchVisible()
   }
   sock.onmessage = (ev) => {
+    heard = Date.now()
     if (pinging) clearTimeout(pinging)
     pinging = null
     if (typeof ev.data !== 'string') return
@@ -683,6 +687,16 @@ function wake() {
 }
 
 if (typeof document !== 'undefined') {
+  // on screen, a quiet link is checked now and then: one dead without closing is replaced, and its chats come again
+  setInterval(() => {
+    if (ws?.readyState !== WebSocket.OPEN || !heartbeatDue(Date.now(), heard, document.visibilityState === 'visible', !!pinging)) return
+    const sock = ws
+    pinging = setTimeout(() => {
+      tries = 0
+      drop(sock)
+    }, PONG_LATE)
+    sock.send(JSON.stringify({ type: 'ping' }))
+  }, 5000)
   document.addEventListener('visibilitychange', wake)
   addEventListener('pageshow', (e) => (e as PageTransitionEvent).persisted && wake())
   addEventListener('online', wake)

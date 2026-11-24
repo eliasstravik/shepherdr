@@ -112,3 +112,35 @@ test("opening a stopped chat reads the agent's last recorded log", async () => {
   expect(chats.reader("t8")!.path).toBe(log);
   expect(chats.reader("t8")!.state).toBe("ready");
 });
+
+// "Not seeing your responses in chat": right after the service restarts (an update), a page that comes back asks for
+// its space's chat before the service knows that space's agent again. Once it does, the chat comes by itself, with what
+// the agent said meanwhile, without a reload.
+test("a chat asked for before a restarted service knows its agent comes once it does, with what was said meanwhile", async () => {
+  const { Live } = await import("./live.ts");
+  const { appendFileSync } = await import("node:fs");
+  const h = hub();
+  const map = new Map<string, string>();
+  const live = new Live(h, { on() {}, load: async () => ({}) } as any, () => null, "test");
+  live.chats = new Chats(h);
+  const said = (r: any) => (r.conv?.items ?? []).filter((x: any) => x.kind === "agent").map((x: any) => x.text);
+  live.compat = { historyOf: () => null, addrOf: (k: string) => map.get(k) ?? null, freshChat: (k: string) => ({ key: k, fresh: true }),
+    chat: (k: string, r: any) => ({ key: k, state: r.state, said: said(r) }) } as any;
+  const got: any[] = [];
+  const ws: any = { data: { who: "demo" }, readyState: 1, getBufferedAmount: () => 0, send: (t: string) => { const m = JSON.parse(t); if (m.type === "chat") got.push(m.chat); } };
+  live.join(ws);
+  live.message(ws, JSON.stringify({ type: "watch", chats: ["p:sp1"], visible: true }));
+  await Bun.sleep(200);
+  expect(got.every((c) => c.fresh)).toBe(true);
+  // the service finds its terminals again: the space's agent, whose log has its answer from while it was down
+  appendFileSync(log, JSON.stringify({ parentUuid: null, isSidechain: false, type: "assistant", uuid: "a1", timestamp: "2026-01-01T00:00:01Z", message: { id: "m1", role: "assistant", content: [{ type: "text", text: "answered while you were away" }] } }) + "\n");
+  feed(h, "restarted", "t9", { address: "t9", state: "live", argv: ["claude"], cwd: "/work/demo", labels: {}, foreground: { name: "claude", pid: 4242, argv: ["claude"], cwd: "/work/demo" } });
+  map.set("p:sp1", "t9");
+  live.setSnapshot({ tasks: [] });
+  for (let i = 0; i < 30 && !got.at(-1)?.said?.length; i++) await Bun.sleep(100);
+  expect(got.at(-1)).toEqual({ key: "p:sp1", state: "ready", said: ["answered while you were away"] });
+  // and what it says next comes too
+  appendFileSync(log, JSON.stringify({ parentUuid: null, isSidechain: false, type: "assistant", uuid: "a2", timestamp: "2026-01-01T00:00:02Z", message: { id: "m2", role: "assistant", content: [{ type: "text", text: "and this" }] } }) + "\n");
+  for (let i = 0; i < 40 && got.at(-1)?.said?.length !== 2; i++) await Bun.sleep(100);
+  expect(got.at(-1)?.said).toEqual(["answered while you were away", "and this"]);
+});

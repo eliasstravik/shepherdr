@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { sentAs } from "./compat.ts";
+import { sentAs, sentParts } from "./compat.ts";
 
 // What a page sent comes back from the agent's log with the page's id (SHEP-22: pictures made the page's own match
 // fail, and its bubble stayed under everything newer).
@@ -37,4 +37,20 @@ test("two identical messages sent in a row: each its own id, in order", () => {
   const taken = new Set<string>();
   expect(sentAs(sends, { text: "thumbnails broken", at: 10_300 }, taken)).toBe("A");
   expect(sentAs(sends, { text: "thumbnails broken", at: 600_300 }, taken)).toBe("B");
+});
+
+test("two sent in a row that the agent got as one, glued or with a blank line, are each their own again, in order", () => {
+  const a = send({ cid: "A", text: "Cut a new release and update me that the task is done then", at: 10_000 });
+  const b = send({ cid: "B", text: "What's next in the artifact then?", at: 11_000 });
+  for (const text of [`${a.text}${b.text}`, `${a.text}\n\n${b.text}`]) {
+    const taken = new Set<string>();
+    expect(sentAs([a, b], { text, at: 12_000 }, taken)).toBeUndefined();
+    expect(sentParts([a, b], { text, at: 12_000 }, taken)?.map((s) => s.cid)).toEqual(["A", "B"]);
+    // each send is one message: the same words again later are not them
+    expect(sentParts([a, b], { text, at: 13_000 }, taken)).toBeUndefined();
+  }
+  // only whole sends, in the order sent, and never just one
+  expect(sentParts([a, b], { text: `${b.text}${a.text}`, at: 12_000 }, new Set())).toBeUndefined();
+  expect(sentParts([a, b], { text: `${a.text} and more`, at: 12_000 }, new Set())).toBeUndefined();
+  expect(sentParts([a, b], { text: a.text, at: 12_000 }, new Set())).toBeUndefined();
 });

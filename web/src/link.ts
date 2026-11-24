@@ -13,3 +13,13 @@ export const PONG_WITHIN = 1500
 
 /** the top line says the link is gone only after this long without it: a quick reconnect shows nothing */
 export const SAY_LOST_AFTER = 3000
+
+/** on screen, a link that heard nothing for this long is asked for a ping: a socket can die without closing (the
+ *  service restarted behind a proxy, the phone changed networks) and the chat would quietly stop moving */
+export const HEARTBEAT = 20_000
+
+/** a heartbeat's ping not answered by then: the link is replaced and the chats come again in full */
+export const PONG_LATE = 5000
+
+/** whether an open link on screen is due its heartbeat ping (none on its way already) */
+export const heartbeatDue = (now: number, heard: number, visible: boolean, pinging: boolean) => visible && !pinging && now - heard >= HEARTBEAT
