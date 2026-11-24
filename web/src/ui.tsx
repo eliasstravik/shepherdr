@@ -1,7 +1,8 @@
 // The design system's parts (ds.css), one build each: icon, buttons, rows, segments, switch, meter, header, empty
 // state. Every screen is made of these.
-import { useEffect, useRef, useState, useSyncExternalStore, type ButtonHTMLAttributes, type ReactNode, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ButtonHTMLAttributes, type ReactNode, type RefObject } from 'react'
 import { IC, type IconName } from './icons.ts'
+import { fitBox } from './grow.ts'
 import { onPresses, press, pressOf, pressVersion, waiting, type Press as CardPress } from './pending.ts'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
@@ -230,11 +231,9 @@ export function Hd({ back, title, sub, pad, scrolled, children, lead }: { back?:
 
 /** a text box that grows with its text up to six lines, then scrolls inside itself */
 export function useGrow(ref: RefObject<HTMLTextAreaElement | null>, value: string) {
-  useEffect(() => {
-    const t = ref.current
-    if (!t) return
-    t.style.height = '44px'
-    t.style.height = `${Math.min(164, t.scrollHeight)}px`
+  // before the frame is drawn, so a new line never shows first at the old height
+  useLayoutEffect(() => {
+    if (ref.current) fitBox(ref.current)
   }, [ref, value])
 }
 
