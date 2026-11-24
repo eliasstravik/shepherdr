@@ -21,6 +21,9 @@ describe('the dictation surface', () => {
     // the browser asks: asking, then listening once allowed
     expect(run([{ t: 'start' }, { t: 'phase', p: 'asking', at: 5 }]).s).toEqual({ k: 'asking' })
     expect(run([{ t: 'start' }, { t: 'phase', p: 'asking', at: 5 }, { t: 'phase', p: 'on', at: 5 }]).s).toEqual({ k: 'on', since: 5 })
+    // the microphone handed over while the hint shows: the hint goes at once, back to wordless getting ready
+    expect(run([{ t: 'start' }, { t: 'phase', p: 'asking', at: 5 }, { t: 'phase', p: 'given', at: 5 }]).s).toEqual({ k: 'starting' })
+    expect(run([{ t: 'start' }, { t: 'phase', p: 'given', at: 5 }]).s).toEqual({ k: 'starting' })
     // a late "asking" after the audio started changes nothing
     expect(run([{ t: 'start' }, { t: 'phase', p: 'on', at: 5 }, { t: 'phase', p: 'asking', at: 5 }]).s).toEqual({ k: 'on', since: 5 })
   })
