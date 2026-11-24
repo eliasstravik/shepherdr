@@ -6,13 +6,15 @@ import { HOLD_MS, SLOP } from './press.ts'
 
 export { MAX_SUGGESTS, MAX_OPTION_SUGGESTS, SUGGEST_CHARS, suggestsOfMessage, choicesOf, suggestionsOn } from '@shared/suggest.ts'
 
-// The suggested replies to show: the newest text is the agent's, it carries suggestions and the person hasn't
-// written after it. Off in Settings: none. { id, texts } or null.
+// The suggested replies to show: the agent's newest reply with words to the person, while it carries suggestions and
+// the person hasn't written after it. Messages between agents (another Assistant's message in, one this agent sent a
+// task or another Assistant: relay rows) are not said to the person and never clear them, nor do turns that show
+// nothing (no-reply, reactions only, news lines). Off in Settings: none. { id, texts } or null.
 export function suggestionOf(chat: Chat | undefined, on: boolean): { id: string; texts: string[] } | null {
   if (!on || !chat) return null
   for (let i = chat.messages.length - 1; i >= 0; i--) {
     const m = chat.messages[i]!
-    if (!m.text) continue
+    if (!m.text || m.relay || m.brief?.from) continue
     if (m.who === 'you' || m.error) return null
     const texts = suggestsOfMessage(m)
     return texts.length ? { id: m.id, texts } : null

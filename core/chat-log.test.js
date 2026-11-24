@@ -253,6 +253,27 @@ test("a reply's suggest line rides on the reply, never shows, and a later reply 
   expect(c.items.filter((x) => x.kind === "agent").map((x) => x.suggests)).toEqual([["yes, merge it"], undefined]);
 });
 
+// The bubbles' bug: a reply with suggestions, then another Assistant's message or a news line answered with a no-reply.
+// The no-reply turn adds no agent words, so the reply stays the agent's newest words with its suggestions.
+test("a no-reply answer to another Assistant's message or a news line adds no words after the suggested reply", async () => {
+  const peer = '<herdr-assistant from="vmk/t2" machine="vmk" space="Ops" can-reply="no">Fixed it there</herdr-assistant>';
+  const news = '<herdr-news task="SHOP-2" event="ready">SHOP-2 is ready: Fix login</herdr-news>';
+  for (const [incoming, quiet] of [[peer, "<no-reply>"], [news, "<hc no-reply/>"], [peer, "<hc no-reply/>"]]) {
+    const c = await read([
+      person,
+      reply("m1", [text('Merge it now?\n<hc suggest="yes, merge it"/>\n<hc suggest="not yet"/>')]),
+      { ...person, uuid: "i1", message: { role: "user", content: incoming } },
+      reply("m2", [text(quiet)]),
+    ]);
+    expect(said(c)).toEqual(["Merge it now?"]);
+    const last = c.items.findLast((x) => x.kind === "agent");
+    expect(last.suggests).toEqual(["yes, merge it", "not yet"]);
+  }
+  // the plain case: nothing after the reply
+  const plain = await read([person, reply("m1", [text('Merge it now?\n<hc suggest="yes, merge it"/>')])]);
+  expect(plain.items.findLast((x) => x.kind === "agent").suggests).toEqual(["yes, merge it"]);
+});
+
 test("a suggest line in an earlier block doesn't carry onto a later block's words", async () => {
   const c = await read([person, reply("m1", [text('Done?\n<hc suggest="yes"/>'), { type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }]), reply("m2", [text("More to do.")])]);
   const agents = c.items.filter((x) => x.kind === "agent");

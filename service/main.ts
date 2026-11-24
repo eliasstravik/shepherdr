@@ -55,7 +55,7 @@ import { Agents } from "./agents.ts";
 import { Machines } from "./machines.ts";
 import { Push, alertsOf, agentAlerts } from "./push.ts";
 import { waiting } from "../web/shared/alerts.ts";
-import { GlanceFeed, MAX_CHATS, glanceOf, openUrlOk } from "./glance.ts";
+import { GlanceFeed, MAX_CHATS, glanceOf, openUrlOk, saidToPerson } from "./glance.ts";
 import { chatPage } from "./native-chat.ts";
 import { unreadChats } from "../web/shared/needs-you.ts";
 import type { Watcher } from "./chats.ts";
@@ -182,8 +182,9 @@ const lastSaid = (key: string) => {
 // a chat's newest message with words (the person's or its agent's), for the glance's suggested replies
 const lastWords = (key: string) => {
   const a = compat.addrOf(key), items: any[] = (a ? live.chats?.reader(a)?.conv?.items : null) ?? [];
-  // as the chat lists them (compat.ts): its words, a message it sent another agent (no bubbles), the person's
-  const m = items.findLast((x) => (x.kind === "agent" || x.kind === "sent" || x.kind === "user") && x.text);
+  // as the chat lists them (compat.ts): its words or the person's; messages between agents (another agent's in, one it
+  // sent) never clear the bubbles, as web/plugins/chat/suggest.ts suggestionOf
+  const m = items.findLast(saidToPerson);
   return m ? { who: m.kind === "user" ? "you" as const : "agent" as const, text: m.text as string, ...(m.kind === "agent" ? { suggests: m.suggests as string[] | undefined } : {}) } : null;
 };
 // SHEP-447: an unread Assistant chat's newest words, for the glance feed's chats: Chats reads a chat only while someone
