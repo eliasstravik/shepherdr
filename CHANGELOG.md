@@ -1,5 +1,40 @@
 # Changelog
 
+## 3.2.18
+
+A Cmd+K palette and shortcuts for everything, long pastes fold away, `!` commands show in the chat, and the chat
+no longer flickers while you type.
+
+### Shortcuts
+
+- ⌘K (Ctrl+K) opens a palette that finds anything and runs any command; `?` shows every shortcut, and Settings ›
+  Shortcuts lists them.
+
+### Chat
+
+- A long paste (25 lines or 2,500 characters and up) becomes a small chip in the message box: open it to read, put it
+  back in the box to edit, or remove it. It is sent exactly as pasted. A long message in the chat shows folded with
+  Show more.
+- A line starting with `!` runs as a command in Claude Code's or Codex's own shell, and now shows in the chat as a
+  command row with its state and what it printed. The box shows when it is in command mode.
+- The chat holds still while you type: on Safari it no longer jumps up and down on every key.
+- Suggested reply bubbles are never cut off: agents keep each one short, and the app shows every bubble whole.
+
+### Notices
+
+- Toasts stay long enough to read, wait while you hover them or the tab is in the background, stack up to three and
+  each has a close button (Escape too). An error that asks you to do something stays until you close it.
+
+### Voice
+
+- Settings › Voice now holds the ElevenLabs key: add, test, replace or remove it there. It is the same key as the
+  ELEVENLABS_API_KEY secret, so nothing to redo if you already have one. Talk or the mic without a key opens the page.
+
+### Artifacts
+
+- A proof page scrolls while its Mark up box is open, and a Reply box inside a page no longer breaks it with
+  "Couldn't show this page".
+
 ## 3.2.17
 
 Suggested replies no longer vanish when news or a message from another agent arrives.
