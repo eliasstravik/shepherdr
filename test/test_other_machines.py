@@ -1014,3 +1014,111 @@ class TaskSpaceByRepo(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReplyBack(unittest.TestCase):
+    """An Assistant on a VM answers the Mac's, which it can't reach: its answer waits on the VM (the outbox), the Mac,
+    which asked, fetches it over its own link and gives it to its Assistant as a real <herdr-assistant> message."""
+
+    def setUp(self):
+        from unittest import mock
+        self.vm, self.mac = scratch(self), scratch(self)
+        self.mock = mock
+
+    def on(self, store):
+        """machines' files in that machine's store"""
+        m = self.mock
+        return [m.patch.object(machines, "OUTBOX", os.path.join(store, "outbox")), m.patch.object(machines, "AWAITING", os.path.join(store, ".awaiting.json")),
+                m.patch.object(machines, "STORE", store)]
+
+    def run_on(self, store, fn):
+        ps = self.on(store)
+        for p in ps:
+            p.start()
+        try:
+            return fn()
+        finally:
+            for p in ps:
+                p.stop()
+
+    def vm_answers(self, target="mac/t13", text="Disk is at 40%, all fine."):
+        graph = {"core": {"name": "vm-kil", "id": "v1"}, "assistants": [{"address": "t3", "space": "sp1", "space_name": "root"}]}
+        with self.mock.patch.object(machines, "directory", lambda refresh=False: ({"graph": graph}, [])), \
+                self.mock.patch.object(machines, "nodes", lambda g: []):
+            return self.run_on(self.vm, lambda: machines.tell(target, text, sender="t3"))
+
+    def test_the_mac_tells_it_it_can_reply_and_remembers_to_fetch(self):
+        graph = {"core": {"name": "mac", "id": "m1"}, "assistants": [{"address": "t13", "space": "sp0", "space_name": "Home"}]}
+        row = {"target": "vm-kil/t3", "route": "vm-kil", "how": ["herdr-core"], "address": "t3", "space": "sp1", "space_name": "root"}
+        sent = []
+        with self.mock.patch.object(machines, "directory", lambda refresh=False: ({"graph": graph}, [row])), \
+                self.mock.patch.object(machines, "nodes", lambda g: [{"route": [{"to": "vm-kil"}], "node": {"core": {"name": "vm-kil", "id": "v1"}}}]), \
+                self.mock.patch.object(machines, "route_text", lambda r: "vm-kil" if r else ""), \
+                self.mock.patch.object(machines, "_path_back", lambda *a: None), \
+                self.mock.patch.object(machines, "_deliver", lambda n, h, a, t: sent.append(t) or True):
+            r = self.run_on(self.mac, lambda: machines.tell("vm-kil/t3", "How full is the disk?", sender="t13"))
+            waits = self.run_on(self.mac, machines._awaiting)
+        self.assertTrue(r["can_reply"])
+        self.assertIn('from="mac/t13"', sent[0])
+        self.assertIn('can-reply="yes"', sent[0])
+        self.assertEqual((waits["vm-kil"]["me"], waits["vm-kil"]["how"]), ("mac", ["herdr-core"]))
+
+    def test_the_vm_leaves_its_answer_and_says_so(self):
+        r = self.vm_answers()
+        self.assertEqual((r["left"], r["machine"]), (True, "mac"))
+        files = os.listdir(os.path.join(self.vm, "outbox"))
+        self.assertEqual(len(files), 1)
+        # the CLI's words: a waiting send, with why (the chat's relay row reads them)
+        from io import StringIO
+        from contextlib import redirect_stdout
+        import argparse
+        out = StringIO()
+        with self.mock.patch.object(machines, "sandbox_blocks_hc", lambda: None), \
+                self.mock.patch.object(machines, "tell", lambda t, x: dict(r)), redirect_stdout(out):
+            machines.cmd_tell(argparse.Namespace(target="mac/t13", text="x", json=False))
+        self.assertTrue(out.getvalue().startswith("Not delivered yet, left for mac/t13 to fetch: mac can't be reached from here"), out.getvalue())
+
+    def test_a_reachable_or_unknown_target_is_never_left(self):
+        graph = {"core": {"name": "vm-kil", "id": "v1"}, "assistants": []}
+        with self.mock.patch.object(machines, "directory", lambda refresh=False: ({"graph": graph}, [])), \
+                self.mock.patch.object(machines, "nodes", lambda g: [{"route": [{"to": "laptop"}], "node": {"core": {"name": "laptop"}}}]), \
+                self.mock.patch.object(machines, "route_text", lambda r: "laptop" if r else ""):
+            for target in ("laptop/t4", "Everything", "vm-kil/t9"):
+                with self.assertRaises(machines.Fail):
+                    self.run_on(self.vm, lambda: machines.tell(target, "hi", sender="t3"))
+        self.assertFalse(os.path.exists(os.path.join(self.vm, "outbox")))
+
+    def test_the_vms_cli_hands_over_only_the_askers_once(self):
+        self.vm_answers()
+        self.vm_answers("other/t2", "not for the Mac")
+        env = {"HOME": self.vm, "PATH": os.environ.get("PATH", ""), "HERDR_TASK_STORE": self.vm}
+        take = lambda: subprocess.run([sys.executable, os.path.join(BIN, "herdr-task"), "_outbox", "--for", "mac"], env=env, capture_output=True, text=True, timeout=60)
+        r = take()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = json.loads(r.stdout.strip().splitlines()[-1])
+        self.assertEqual([(x["to"], x["from"], x["machine"], x["space"], x["text"]) for x in got], [("t13", "t3", "vm-kil", "root", "Disk is at 40%, all fine.")])
+        self.assertEqual(json.loads(take().stdout.strip().splitlines()[-1]), [])
+        self.assertEqual(len(os.listdir(os.path.join(self.vm, "outbox"))), 1)  # the other machine's still waits
+
+    def test_the_mac_fetches_it_and_its_assistant_gets_a_real_message(self):
+        self.vm_answers()
+        self.run_on(self.mac, lambda: machines._await("vm-kil", ["herdr-core"], "vm-kil", "mac"))
+        calls, given = [], []
+
+        def run(argv, **kw):
+            calls.append(argv)
+            out = json.dumps(self.run_on(self.vm, lambda: machines.take_outbox(argv[-1])))
+            return subprocess.CompletedProcess(argv, 0, out + "\n", "")
+        report = {}
+        with self.mock.patch.object(machines.subprocess, "run", run), self.mock.patch.object(machines, "guard", lambda a: None), \
+                self.mock.patch.object(machines, "send_or_hold", lambda a, t, how: given.append((a, t, how)) or "sent"):
+            self.run_on(self.mac, lambda: machines.replies_pass(report))
+            self.run_on(self.mac, lambda: machines.replies_pass(report))  # again at once: not asked again so soon
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][:5], ["hc", "exec", "--on", "vm-kil", "--"])
+        self.assertEqual(given, [("t13", '<herdr-assistant from="vm-kil/t3" machine="vm-kil" space="root" can-reply="yes">Disk is at 40%, all fine.</herdr-assistant>', "news")])
+        self.assertEqual(report["replies"], [{"from": "vm-kil/t3", "to": "t13", "got": "sent"}])
+
+    def test_nothing_asked_means_no_call(self):
+        with self.mock.patch.object(machines.subprocess, "run", lambda *a, **k: self.fail("called")):
+            self.run_on(self.mac, lambda: machines.replies_pass({}))

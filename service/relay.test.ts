@@ -89,3 +89,17 @@ test("a task's chat: its Assistant's message is a row there too, and what it sen
   ]);
   expect(chat.messages.some((m: any) => m.activity)).toBe(false);
 });
+
+test("a VM's answer to an Assistant it can't reach: waiting on its side, a row from it on the asker's once fetched", async () => {
+  const vm = await conv([
+    user("u1", '<herdr-assistant from="mac/t13" machine="mac" space="Home" can-reply="yes">How full is the disk?</herdr-assistant>', 0),
+    calls("a1", [["c1", "herdr-task tell-assistant mac/t13 'Disk is at 40%.'"]], 1),
+    result("c1", "Not delivered yet, left for mac/t13 to fetch: mac can't be reached from here, so it picks this up itself the next time it checks (within a minute while it waits on an answer).", 2),
+  ]);
+  const sent = relays(compat().chat("p:local:shop", { conv: vm, start: 0, machine: null, addr: "t2", kind: "claude" }, assistant)).filter((r: any) => r.dir === "to");
+  expect(sent).toEqual([{ who: "agent", dir: "to", name: "Assistant on Mac", how: "assistant", state: "waiting", why: "mac can't be reached from here", text: "Disk is at 40%." }]);
+  // the Mac's Assistant, once it fetched it (machines.replies_pass)
+  const mac = await conv([user("u1", '<herdr-assistant from="vm-kil/t3" machine="vm-kil" space="root" can-reply="yes">Disk is at 40%.</herdr-assistant>', 0)]);
+  expect(relays(compat().chat("p:local:shop", { conv: mac, start: 0, machine: null, addr: "t2", kind: "claude" }, assistant))).toEqual([
+    { who: "you", dir: "from", name: "#root on vm-kil", text: "Disk is at 40%." }]);
+});

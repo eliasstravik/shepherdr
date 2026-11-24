@@ -20,7 +20,7 @@ from .commands import (
 )
 from .tick import cmd_tick
 from .automations import auto_list, cmd_auto, cmd_scheduler, cmd_track, EVENTS, HOW
-from .machines import cmd_assistants, cmd_machines, cmd_sync_auto, cmd_tell
+from .machines import cmd_assistants, cmd_machines, cmd_outbox, cmd_sync_auto, cmd_tell
 from .flags import cmd_flags
 from .home import cmd_home
 from .assistant_settings import cmd_session_note
@@ -535,6 +535,9 @@ def main():
     c.add_argument("--command", required=True)
     c.add_argument("--sandboxed", action="store_true")  # Codex's: its proof and commits run escalated (#866)
     c.set_defaults(fn=cmd_allow, json=False)
+    c = sub.add_parser("_outbox")  # another machine fetching the Assistants' answers left here for it (machines.replies_pass)
+    c.add_argument("--for", dest="for_", required=True)
+    c.set_defaults(fn=cmd_outbox, json=False)
     c = sub.add_parser("_session-note")  # the chat's SessionStart hook (mods/chat/session-note.sh): an Assistant's extra words
     c.add_argument("terminal")
     c.set_defaults(fn=cmd_session_note, json=False)

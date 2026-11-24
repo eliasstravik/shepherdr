@@ -782,6 +782,11 @@ def cmd_tick(args):
     except Exception as e:  # never stops the queue
         report["news_error"] = str(e)
     try:
+        from .machines import replies_pass
+        replies_pass(report)
+    except Exception as e:  # never stops the queue
+        report["replies_error"] = str(e)
+    try:
         end_done_pass(report, args.folder)
         memory_guard(report)
     except Exception as e:  # never stops the queue
