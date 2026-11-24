@@ -6,7 +6,7 @@ import { caps, say } from './keys.ts'
 
 export function Kbd({ chord }: { chord: string }) {
   return (
-    <span className="kbd" aria-label={say(chord)}>
+    <span className="kcap" aria-label={say(chord)}>
       {caps(chord).map((step, i) => (
         <Fragment key={i}>
           {i > 0 && <span className="then">then</span>}

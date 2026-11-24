@@ -212,7 +212,7 @@ function ShortcutsSettings() {
 /* ---------- the app's own commands ---------- */
 
 const appCommands = (): Command[] => [
-  { id: 'shortcuts.sheet', title: 'Keyboard shortcuts', area: 'General', icon: 'keyboard', keys: ['Shift+/', 'Mod+/'], words: 'help keys cheat sheet hotkeys', run: openSheet },
+  { id: 'shortcuts.sheet', title: 'Keyboard shortcuts', area: 'General', icon: 'keyboard', keys: ['Shift+/', 'Mod+/'], words: 'help keys cheat sheet hotkeys', when: () => !getState().ui.phone, run: openSheet },
   { id: 'shortcuts.settings', title: 'Open Settings', area: 'General', icon: 'gear', keys: ['Mod+,'], words: 'preferences options', run: () => openSettings('all') },
   { id: 'shortcuts.list', title: 'Show or hide the list', area: 'General', icon: 'panel', keys: ['Mod+B'], words: 'sidebar toggle spaces', when: () => !getState().ui.phone, run: () => {
     const { ui } = getState()

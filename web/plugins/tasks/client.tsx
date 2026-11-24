@@ -185,7 +185,7 @@ export function taskRows(t: Task, where: 'row' | 'thread'): MenuRow[] | null {
     ...extra.filter((r) => r.label === 'Show screen'),
     ...(s === 'next' ? [{ icon: 'folder' as const, label: 'Move to', sub: spacesOf(snap).filter((p) => p.id !== t.place && !p.archived).map((p) => ({ label: spaceLabel(snap, p.id), run: () => void tryAct({ type: 'task-move', chat, place: p.id }, undefined, 'Moving…') })) }] : []),
     // from the menu it closes without merging: "Done · not merged" for a task on its own branch
-    ...(s !== 'done' && s !== 'archived' ? [{ icon: 'check' as const, label: 'Mark as done', ...(s === 'ready' ? { cmd: 'tasks.done' } : {}), run: () => void tryAct({ type: 'close', chat, force: true }, undefined, 'Marking as done…') }] : []),
+    ...(s !== 'done' && s !== 'archived' ? [{ icon: 'check' as const, label: 'Mark as done', run: () => void tryAct({ type: 'close', chat, force: true }, undefined, 'Marking as done…') }] : []),
     { icon: 'pen', label: 'Rename', cmd: 'tasks.rename', run: () => renameDialog(t.name, (name) => tryAct({ type: 'task-rename', chat, name })) },
     // Stop pauses the agent, like pressing Esc: it drops what it was doing and waits
     ...(s === 'working' ? [{ icon: 'stop' as const, label: 'Stop', cmd: 'tasks.stop', run: () => void tryAct({ type: 'stop', chat }, undefined, 'Stopping…') }] : []),
@@ -762,7 +762,7 @@ function taskCommands(): Command[] {
       // a task is made by asking the space's Assistant: the box starts the ask
       requestAnimationFrame(() => focusBox(chat, 'New task: '))
     } },
-    { id: 'tasks.done', title: 'Mark as done', area: 'Tasks', icon: 'check', keys: ['E'], words: 'accept merge approve finish', when: () => !!ready(), run: () => {
+    { id: 'tasks.done', title: 'Mark as done and merge', area: 'Tasks', icon: 'check', keys: ['E'], words: 'accept merge approve finish', when: () => !!ready(), run: () => {
       const t = ready()
       if (t) void tryAct({ type: 'accept', task: t.id }, undefined, onBranch(t) ? 'Merging…' : 'Marking as done…')
     } },

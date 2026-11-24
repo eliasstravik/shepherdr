@@ -56,7 +56,7 @@ An agent that asks you something, wants a permission or a plan approved shows un
 <tr>
 <td align="center" valign="top" width="33%"><h3>1️⃣</h3><b>Install it on your machine</b><br /><sub>With herdr-core installed, clone this repo and run <code>./install.sh --dry-run</code> to see what it does, then <code>./install.sh</code>. It builds the web app and starts its service.</sub></td>
 <td align="center" valign="top" width="33%"><h3>2️⃣</h3><b>Check it and open it</b><br /><sub>Run <code>shepherdr doctor</code>. Open the link it prints, on any device on your tailnet.</sub></td>
-<td align="center" valign="top" width="33%"><h3>3️⃣</h3><b>Write in a chat</b><br /><sub>Make a space for a folder (<code>New space</code>) and say what needs doing. <code>Ctrl+K</code> searches everything and <code>Ctrl+`</code> opens your own terminal.</sub></td>
+<td align="center" valign="top" width="33%"><h3>3️⃣</h3><b>Write in a chat</b><br /><sub>Make a space for a folder (<code>New space</code>) and say what needs doing. <code>⌘K</code> (<code>Ctrl+K</code>) finds anything and runs any command, and <code>?</code> shows every shortcut.</sub></td>
 </tr>
 </table>
 
