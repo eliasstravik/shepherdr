@@ -127,6 +127,7 @@ function Scheduled({ place }: { place: string }) {
 export default definePlugin({
   name: 'schedules',
   setup(reg) {
+    reg.commands.push({ id: 'schedules.open', title: 'Open Scheduled', area: 'Go to', icon: 'clock', keys: ['G S'], words: 'schedules automations recurring', run: () => setUI({ pane: 'tasks', task: null, art: null, artWide: false, tab: 'Scheduled' }) })
     reg.views.scheduled = Scheduled
   },
 })

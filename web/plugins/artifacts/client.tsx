@@ -322,6 +322,8 @@ function ArtifactsButton() {
 export default definePlugin({
   name: 'artifacts',
   setup(reg) {
+    // G A (Linear's and GitHub's "go to")
+    reg.commands.push({ id: 'artifacts.open', title: 'Open Artifacts', area: 'Go to', icon: 'doc', keys: ['G A'], words: 'pages pane proofs', run: () => setUI((ui) => (ui.pane === 'artifacts' && !ui.art ? {} : { pane: 'artifacts', art: null, task: null, artWide: false })) })
     reg.header.push({ order: 40, View: ArtifactsButton })
     reg.bar.push({ order: 20, pane: 'artifacts', label: 'Artifacts', icon: 'doc' })
     reg.panes.push({ id: 'artifacts', View: ArtifactsPane })

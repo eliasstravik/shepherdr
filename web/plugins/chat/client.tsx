@@ -5,6 +5,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyn
 import { copyText } from '@client/copy.ts'
 import { dictatedInto, TEXT_IN_CALL, useDictating } from '@client/dictate.tsx'
 import { attr } from '@client/attr.ts'
+import { boxPart, focusBox, focusChat } from '@client/commands.ts'
 import { act, attempt, definePlugin, getState, has, notice, openTask, registry, setUI, tryAct, useChat, useDraft, useSnap, useStore, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
 import { partsOf, placeOutgoing, placesOf, keyOf, readNow, showsAs, type Outgoing } from '@client/outbox.ts'
 import { confirm, openMenu } from '@client/overlay.tsx'
@@ -1172,6 +1173,12 @@ function SharedChip({ chat, thread }: { chat: string; thread: Thread }) {
 export default definePlugin({
   name: 'chat',
   setup(reg) {
+    // R puts the cursor in the message box (Gmail's, Superhuman's reply); Cmd+Shift+M opens the agent line's model and
+    // effort picker (T3 Code's, Claude's)
+    reg.commands.push(
+      { id: 'chat.reply', title: 'Write in the chat', area: 'Chat', icon: 'reply', keys: ['R'], words: 'reply message box type focus compose', when: () => !!focusChat(), run: () => void focusBox() },
+      { id: 'chat.model', title: 'Change model or effort', area: 'Chat', icon: 'agent', keys: ['Mod+Shift+M'], words: 'agent picker claude codex fast', when: () => !!boxPart('button.agent'), run: () => boxPart('button.agent')?.click() },
+    )
     // Share into Shepherdr (SHEP-345): a share lands in the chat open last
     watchLastChat()
     void landLaunchShare()

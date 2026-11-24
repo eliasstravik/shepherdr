@@ -25,6 +25,33 @@ export function offPlugins(): string[] {
 }
 export const pluginOn = (id: string) => !offPlugins().includes(id);
 
+/* ---------- Settings › Shortcuts: the person's own keys, kept for every device ---------- */
+
+const CMD_ID = /^[a-z][a-z0-9-]*\.[a-z0-9.-]+$/;
+const keyList = (v: unknown): string[] | null =>
+  Array.isArray(v) && v.length <= 4 && v.every((k) => typeof k === "string" && k.length > 0 && k.length <= 40) ? (v as string[]) : null;
+
+/** everywhere.shortcuts ({"tasks.open": ["G T"]}, [] for none) and everywhere.shortcut_letters_off */
+export function shortcutsOf(f: any): { keys: Record<string, string[]>; letters: boolean } {
+  const raw = f?.everywhere?.shortcuts;
+  const keys: Record<string, string[]> = {};
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) for (const [id, v] of Object.entries(raw)) { const l = keyList(v); if (CMD_ID.test(id) && l) keys[id] = l; }
+  return { keys, letters: f?.everywhere?.shortcut_letters_off !== true };
+}
+
+/** "shortcut.<id>": its keys (null: back to its default); "shortcuts.reset": every one back; "shortcuts.letters" */
+function setShortcut(next: any, key: string, value: unknown) {
+  const e = (next.everywhere ??= {});
+  if (key === "shortcuts.letters") { if (value === false) e.shortcut_letters_off = true; else delete e.shortcut_letters_off; return; }
+  if (key === "shortcuts.reset") { delete e.shortcuts; return; }
+  const id = key.slice("shortcut.".length);
+  if (!CMD_ID.test(id) || ["__proto__", "constructor", "prototype"].some((w) => id.includes(w))) throw new Error("That isn't a command.");
+  const own = { ...(e.shortcuts && typeof e.shortcuts === "object" ? e.shortcuts : {}) };
+  if (value === null) delete own[id];
+  else { const l = keyList(value); if (!l) throw new Error("Those aren't keys."); own[id] = l; }
+  if (Object.keys(own).length) e.shortcuts = own; else delete e.shortcuts;
+}
+
 /* ---------- settings: everything's, and a space's own on top ---------- */
 
 const ROLE = { Chats: "coordinator", Tasks: "worker", Reviews: "reviewer" } as const;
@@ -119,6 +146,7 @@ export function configOf(input: { defaults: Defaults; spaces: string[]; secrets:
     secrets: input.secrets.map((s) => ({ name: s.name, scope: s.space ?? "all" })),
     plugins: PLUGINS.map((p) => ({ id: p.id, name: p.name, on: !off.includes(p.id), ...(p.always ? { always: true } : {}) })),
     plans: input.plans,
+    shortcuts: shortcutsOf(f),
     ...(input.addMachine ? { addMachine: input.addMachine } : {}),
     ...(input.desktops?.length ? { desktops: input.desktops } : {}),
   };
@@ -136,6 +164,10 @@ export function setConfig(place: string, key: string, value: unknown, scope?: { 
     const off = new Set<string>(Array.isArray(e.plugins_off) ? e.plugins_off : []);
     if (value) off.delete(id); else off.add(id);
     if (off.size) e.plugins_off = [...off]; else delete e.plugins_off;
+    return writeSettings(next);
+  }
+  if (key.startsWith("shortcut.") || key === "shortcuts.reset" || key === "shortcuts.letters") {
+    setShortcut(next, key, value);
     return writeSettings(next);
   }
   if (key === "analytics.on" || key === "analytics.noted") {

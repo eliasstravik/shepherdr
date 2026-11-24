@@ -17,7 +17,7 @@ import { OWN_VERSION } from './update.ts'
 import { IconButton } from './space-icon.tsx'
 import { Btn, cx, I, IB, Meter, Row, Seg, Tgl } from './ui.tsx'
 
-const ALL: [string, IconName][] = [['General', 'gear'], ['Agents', 'agent'], ['Tasks', 'tasks'], ['Secrets', 'key'], ['Machines', 'server'], ['Usage', 'gauge'], ['Plugins', 'plug'], ['About', 'info']]
+export const ALL: [string, IconName][] = [['General', 'gear'], ['Agents', 'agent'], ['Tasks', 'tasks'], ['Secrets', 'key'], ['Machines', 'server'], ['Usage', 'gauge'], ['Plugins', 'plug'], ['About', 'info']]
 const SPACE: [string, IconName][] = [['Space', 'hash'], ['Agents', 'agent'], ['Tasks', 'tasks'], ['Secrets', 'key']]
 
 /** a settings row: a label and a control */

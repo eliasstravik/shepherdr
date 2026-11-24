@@ -180,6 +180,16 @@ function action(a: Record<string, any>): unknown {
     each((snap) => {
       const c = snap.config!
       if (a.key.startsWith('plugin.')) return void (c.plugins = c.plugins.map((p) => (p.id === a.key.slice(7) ? { ...p, on: !!a.value } : p)))
+      // Settings › Shortcuts (SHEP-470), as the service keeps them
+      if (a.key.startsWith('shortcut')) {
+        const sc = (c.shortcuts ??= { keys: {}, letters: true })
+        if (a.key === 'shortcuts.letters') sc.letters = a.value !== false
+        else if (a.key === 'shortcuts.reset') sc.keys = {}
+        else if (a.value === null) { const { [a.key.slice(9)]: _, ...rest } = sc.keys; sc.keys = rest }
+        else sc.keys = { ...sc.keys, [a.key.slice(9)]: a.value }
+        c.shortcuts = { ...sc }
+        return
+      }
       const lv: any = a.place === 'all' ? c.all : (c.spaces[a.place] ??= { ...structuredClone(c.all), own: [] })
       const own: string[] = a.place === 'all' ? [] : lv.own
       const [k, sub] = a.key.split('.')

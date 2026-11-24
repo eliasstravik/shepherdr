@@ -5,12 +5,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { PaneFrame, placeholderOf, showList } from '@client/App.tsx'
 import { newSpaceDialog, renameDialog } from '@client/list.tsx'
-import { definePlugin, getState, go, has, maximize, sideHidden, minimize, notice, openTask, registry, setUI, togglePane, tryAct, act, attempt, useSnap, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
+import { definePlugin, getState, go, has, type Command, maximize, sideHidden, minimize, notice, openTask, registry, setUI, togglePane, tryAct, act, attempt, useSnap, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
 import { confirm, openDialog, openForm, openMenu } from '@client/overlay.tsx'
 import { AgentField, pickFor, type Pick } from '@client/picker.tsx'
 import { edge } from '@client/resize.ts'
 import { ActBtn, ActError, Btn, Cnt, cx, Empty, Hd, I, IB, MenuGroup, Row, useCardActs } from '@client/ui.tsx'
 import { waiting } from '@client/pending.ts'
+import { focusBox, focusChat, focusTask } from '@client/commands.ts'
 import { SpaceIcon } from '@client/space-icon.tsx'
 import type { MergeEvidence, Snapshot, Task } from '@shared/types.ts'
 import { askedWords, isEverything, machineLabel, nowGroups, onBranch, placeDown, reposOf, spaceLabel, spaceOnFolder, spacesOf, etaOf, leftWords, statusWord, taskChat, taskLine, taskWhen, tasksIn, tstate, workKey, workName, workWords, type Repo } from '@shared/view.ts'
@@ -155,8 +156,14 @@ function del(t: Task) {
  *  Stop, then Archive and Delete. In its thread, View as terminal / View as chat follows Terminal and Screen below a line:
  *  it changes this chat's view rather than opening one beside it. */
 export function taskMenu(anchor: Element, t: Task, where: 'row' | 'thread') {
+  const rows = taskRows(t, where)
+  if (rows) openMenu(anchor, rows, { label: t.name })
+}
+
+/** a task's menu's rows (its menu, and the palette's actions on the task in focus) */
+export function taskRows(t: Task, where: 'row' | 'thread'): MenuRow[] | null {
   const snap = getState().snap
-  if (!snap) return
+  if (!snap) return null
   const s = tstate(t)
   const th = where === 'thread'
   const chat = taskChat(t)
@@ -179,14 +186,14 @@ export function taskMenu(anchor: Element, t: Task, where: 'row' | 'thread') {
     ...(s === 'next' ? [{ icon: 'folder' as const, label: 'Move to', sub: spacesOf(snap).filter((p) => p.id !== t.place && !p.archived).map((p) => ({ label: spaceLabel(snap, p.id), run: () => void tryAct({ type: 'task-move', chat, place: p.id }, undefined, 'Moving…') })) }] : []),
     // from the menu it closes without merging: "Done · not merged" for a task on its own branch
     ...(s !== 'done' && s !== 'archived' ? [{ icon: 'check' as const, label: 'Mark as done', run: () => void tryAct({ type: 'close', chat, force: true }, undefined, 'Marking as done…') }] : []),
-    { icon: 'pen', label: 'Rename', run: () => renameDialog(t.name, (name) => tryAct({ type: 'task-rename', chat, name })) },
+    { icon: 'pen', label: 'Rename', cmd: 'tasks.rename', run: () => renameDialog(t.name, (name) => tryAct({ type: 'task-rename', chat, name })) },
     // Stop pauses the agent, like pressing Esc: it drops what it was doing and waits
-    ...(s === 'working' ? [{ icon: 'stop' as const, label: 'Stop', run: () => void tryAct({ type: 'stop', chat }, undefined, 'Stopping…') }] : []),
+    ...(s === 'working' ? [{ icon: 'stop' as const, label: 'Stop', cmd: 'tasks.stop', run: () => void tryAct({ type: 'stop', chat }, undefined, 'Stopping…') }] : []),
     ...extra.filter((r) => r.label !== 'Show screen' && r.on === undefined && r.icon !== 'viewswap'),
     { icon: 'archive', label: t.archived ? 'Unarchive' : 'Archive', line: true, run: () => { void tryAct({ type: 'archive', chat, on: !t.archived }, undefined, t.archived ? 'Unarchiving…' : 'Archiving…'); if (!t.archived) setUI((ui) => ({ ...(ui.task === t.id ? { task: null } : {}), ...(ui.max === t.id ? { max: null } : {}) })) } },
     { icon: 'bin', label: 'Delete', danger: true, run: () => del(t) },
   ]
-  openMenu(anchor, rows, { label: t.name })
+  return rows
 }
 
 /* ---------- a task not started yet ---------- */
@@ -475,7 +482,7 @@ function TaskRow({ snap, t, tag }: { snap: Snapshot; t: Task; tag: boolean }) {
   // a slide to the right replies to it in the space's chat, as to a message (Reply in chat)
   const { on, slide, armed, skip, moving } = useSlide(() => replyToTask(t))
   return (
-    <div className="rowx tsl" {...on}>
+    <div className="rowx tsl" data-task-row={t.id} {...on}>
       <SlideHint slide={slide} armed={armed} />
       <button type="button" className={cx('row row2 tk', down && 'dim', moving.className)} style={moving.style} onTransitionEnd={moving.onTransitionEnd} aria-current={cur} onClick={() => (skip.current ? void (skip.current = false) : open(t))}>
         <StatusIcon t={t} dim={!!down} />
@@ -720,7 +727,66 @@ export default definePlugin({
     reg.views.taskHead = TaskHead
     reg.views.taskTop = TaskTop
     reg.chatCards.push({ order: 20, cards: taskCards })
+    reg.commands.push(...taskCommands())
   },
 })
+
+/* ---------- commands: the palette's rows and their shortcuts ---------- */
+
+const ready = () => { const t = focusTask(); return t && tstate(t) === 'ready' && !t.accepting && t.status !== 'merging' ? t : undefined }
+const shownRows = () => [...document.querySelectorAll<HTMLElement>('.col [data-task-row]')].map((r) => r.dataset.taskRow!)
+/** J and K: the next or previous task of the Tasks pane's list, opened */
+function step(by: 1 | -1) {
+  const ids = shownRows()
+  if (!ids.length) return
+  const at = ids.indexOf(getState().ui.task ?? '')
+  const id = ids[at < 0 ? (by > 0 ? 0 : ids.length - 1) : Math.min(ids.length - 1, Math.max(0, at + by))]
+  const t = getState().snap?.tasks.find((x) => x.id === id)
+  if (t) open(t)
+  document.querySelector(`[data-task-row="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'nearest' })
+}
+
+/** G T opens Tasks (Linear's and GitHub's "go to"); J/K step through them (Gmail, Linear); E is Mark as done on the task
+ *  in focus when it waits for you, as its card's button (Superhuman, Linear), H its Not now; C asks for a new task
+ *  (Linear's create); F maximizes; Cmd+. stops its agent (the Mac's own cancel) */
+function taskCommands(): Command[] {
+  const open1 = () => !!focusTask()
+  return [
+    { id: 'tasks.open', title: 'Open Tasks', area: 'Go to', icon: 'tasks', keys: ['G T'], words: 'pane panel list show', run: () => setUI((ui) => (ui.pane === 'tasks' && !ui.task ? {} : { pane: 'tasks', task: null, art: null, artWide: false })) },
+    { id: 'tasks.next', title: 'Next task', area: 'Tasks', icon: 'down', keys: ['J'], when: () => getState().ui.pane === 'tasks', run: () => step(1) },
+    { id: 'tasks.prev', title: 'Previous task', area: 'Tasks', icon: 'up', keys: ['K'], when: () => getState().ui.pane === 'tasks', run: () => step(-1) },
+    { id: 'tasks.new', title: 'New task', area: 'Tasks', icon: 'plus', keys: ['C'], words: 'create add make', when: () => !!getState().snap?.places.length, run: () => {
+      const { snap, ui } = getState()
+      const chat = snap?.places.find((p) => p.id === ui.at)?.chat
+      if (ui.max) setUI({ max: null })
+      // a task is made by asking the space's Assistant: the box starts the ask
+      requestAnimationFrame(() => focusBox(chat, 'New task: '))
+    } },
+    { id: 'tasks.done', title: 'Mark as done and merge', area: 'Tasks', icon: 'check', keys: ['E'], words: 'accept merge approve finish', when: () => !!ready(), run: () => {
+      const t = ready()
+      if (t) void tryAct({ type: 'accept', task: t.id }, undefined, onBranch(t) ? 'Merging…' : 'Marking as done…')
+    } },
+    { id: 'tasks.later', title: 'Not now', area: 'Tasks', icon: 'clock', keys: ['H'], words: 'later skip review', when: () => !!ready() && !later.has(ready()!.id), run: () => {
+      const t = ready()
+      if (!t) return
+      later.add(t.id)
+      notice('Not now: it stays under Needs you')
+    } },
+    { id: 'tasks.stop', title: 'Stop the agent', area: 'Tasks', icon: 'stop', keys: ['Mod+.'], words: 'stop pause cancel interrupt', when: () => { const c = focusChat(); const { snap } = getState(); const t = focusTask(); return !!c && !!snap && (t ? tstate(t) === 'working' : !!snap.places.find((p) => p.id === getState().ui.at)) }, run: () => {
+      const c = focusChat()
+      if (c) void tryAct({ type: 'stop', chat: c }, undefined, 'Stopping…')
+    } },
+    { id: 'tasks.max', title: 'Maximize the task', area: 'Tasks', icon: 'expand', keys: ['F'], words: 'minimize full focus expand shrink', when: () => !getState().ui.phone && (open1() || !!getState().ui.max), run: () => {
+      const { ui } = getState()
+      if (ui.max && (!ui.task || ui.pane !== 'tasks')) return minimize()
+      const t = focusTask()
+      if (t) ui.max === t.id ? minimize() : maximize(t.id)
+    } },
+    { id: 'tasks.rename', title: 'Rename the task', area: 'Tasks', icon: 'pen', words: 'name title', when: open1, run: () => {
+      const t = focusTask()
+      if (t) renameDialog(t.name, (name) => tryAct({ type: 'task-rename', chat: taskChat(t), name }))
+    } },
+  ]
+}
 
 export { notice }
