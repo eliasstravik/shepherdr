@@ -777,6 +777,13 @@ export class Conversation {
       replyTo = u.quoted;
       text = u.rest;
     }
+    // Claude Code logged this very message already, taken in mid-turn (its queued_command), and logs it again when a
+    // stopped turn hands it back (or the other way round): it is one message, shown once. The same words again after
+    // the agent answered, or a while later, are a message of their own.
+    const li = this.items.findLastIndex((x) => x.kind === "user");
+    const prev = li >= 0 ? this.items[li] : null;
+    if (prev && prev.text === text && !prev.from && !u.from && (prev.images || 0) === (u.images || 0) && Math.abs((u.at ?? 0) - (prev.at ?? 0)) < 10 * 60_000
+      && !this.items.slice(li + 1).some((x) => x.kind === "agent" || x.kind === "ask" || x.kind === "user")) return;
     // a new message from the person: no step of an earlier turn is still running (SHEP-430)
     this.open.clear();
     this.waits.clear();

@@ -240,6 +240,10 @@ export async function sendTyped(io, addr, kind, body, opts = SETTLE, again = fal
     // the box let it go since (Claude Code took it in late): typed again it would go twice
     if (box !== undefined && !holds(box, body)) return { code: 0, stdout: "{}", stderr: "" };
   }
+  // Claude Code's box still holds an earlier message of ours (put back by an Esc, or its Enter not taken yet): hc send
+  // pastes after it, so the two would go as one, glued ("…thenWhat's…"). A blank line keeps them apart.
+  const before = await boxOf(io, addr);
+  if (before && heldBefore(addr, before, body)) body = "\n\n" + body;
   const going = io.hc(["send", addr, body]);
   let back = false, last = null;
   const sent = going.finally(() => { back = true; });
@@ -266,11 +270,42 @@ export const STUCK = "It's still in the agent's message box: its Enter didn't ta
 // The person's reaction to a message, as the agent reads it (on: added, else removed).
 export const reactionLine = (emoji, text, on = true) => `<hc from="person" ${on ? "reaction" : "reaction-removed"}="${emoji}" to="${excerpt(text)}"/>`;
 
+// What was sent to each terminal lately (its words line, when): one still in Claude Code's box is ours, not the person's
+// own draft there (heldBefore).
+const lately = new Map();
+const LATELY = 10 * 60_000;
+function noteLately(addr, body) {
+  const now = Date.now();
+  lately.set(addr, [...(lately.get(addr) ?? []).filter((x) => now - x.at < LATELY), { words: wordsLine(body), at: now }].slice(-10));
+}
+// The box holds an earlier message sent here (its first words), not the one about to go.
+function heldBefore(addr, box, body) {
+  const rest = String(box ?? "").replace(/^❯\s?/, "").trim();
+  if (!rest) return false;
+  const mine = wordsLine(body);
+  return (lately.get(addr) ?? []).some((x) => x.words && x.words !== mine && rest.includes(x.words.slice(0, 24)));
+}
+
+// One send at a time per terminal: two typed at once land in its box together and go as one glued message (the
+// person sent two in a row while it worked). Each waits for the one before it, its steer included.
+const typing = new Map();
+function inTurn(addr, run) {
+  const prev = typing.get(addr) ?? Promise.resolve();
+  const mine = prev.catch(() => null).then(run);
+  const tail = mine.catch(() => null);
+  typing.set(addr, tail);
+  tail.then(() => { if (typing.get(addr) === tail) typing.delete(addr); });
+  return mine;
+}
+
 // Sends the body. kind: "claude", "codex" or another CLI. -> hc's result (code 0: it's in the agent's terminal).
 // again: its last send stayed in Claude Code's box (sendTyped).
-export async function sendBody(io, addr, kind, body, again = false) {
-  let r = await sendTyped(io, addr, kind, body, SETTLE, again);
-  if (r.code !== 0 && refusal(r).kind === "blocked" && (kind === "claude" || kind === "codex")) r = await replyInstead(io, addr, body);
-  if (r.code === 0 && kind === "claude") await steerNow(io, addr, STEER, body);
-  return r;
+export function sendBody(io, addr, kind, body, again = false) {
+  return inTurn(addr, async () => {
+    let r = await sendTyped(io, addr, kind, body, SETTLE, again);
+    if (r.code !== 0 && refusal(r).kind === "blocked" && (kind === "claude" || kind === "codex")) r = await replyInstead(io, addr, body);
+    if (r.code === 0) noteLately(addr, body);
+    if (r.code === 0 && kind === "claude") await steerNow(io, addr, STEER, body);
+    return r;
+  });
 }
