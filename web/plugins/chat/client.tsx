@@ -781,7 +781,7 @@ function Reply({ text, onSend, onEdit }: { text: string; onSend: (t: string) => 
   useEffect(() => () => press.stop(), [press])
   // a tap sends it: the bubble lifts away first (SUG_GO_MS), so the tap is seen to go; with reduced motion it sends at once
   const [going, setGoing] = useState(false)
-  const go = () => {
+  const leave = () => {
     if (going) return
     if (still()) return onSend(text)
     setGoing(true)
@@ -801,7 +801,7 @@ function Reply({ text, onSend, onEdit }: { text: string; onSend: (t: string) => 
         e.preventDefault()
         press.menu()
       }}
-      onClick={() => press.click() && go()}
+      onClick={() => press.click() && leave()}
     >
       {text}
     </button>

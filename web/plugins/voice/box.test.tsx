@@ -116,7 +116,7 @@ test('the round button and Enter send only what is in the box; a suggested reply
   expect(tap).toContain('send(key, key, t, false, true)')
   expect(tap).toContain('spent.add(sug.id)')
   expect(tap).not.toMatch(/setText|text\b(?!\))/)
-  expect(chat).toMatch(/className="sug"\s*onMouseDown=\{keepFocus\}/)
+  expect(chat).toMatch(/className=\{going \? 'sug go' : 'sug'\}\s*onMouseDown=\{keepFocus\}/)
   const edit = chat.slice(chat.indexOf('const editSug = '), chat.indexOf('const filled'))
   expect(edit).toContain('setText(t)')
   expect(edit).toContain('box.focus()')
@@ -170,9 +170,10 @@ test('a short reply ("1") gets a bubble at least the send button and a fingertip
 
 test('every bubble looks the same: no filled first pick or other variant at rest', () => {
   const css = read('../../src/ds.css')
-  // only the bubble's own rule, the touch size, a mouse's hover and the keyboard's focus ring style a bubble
+  // only the bubble's own rule, the touch size, a mouse's hover and the keyboard's focus ring style a bubble; a press
+  // and a tapped one lifting away as it sends (SHEP-450) are not at rest
   const rules = [...css.matchAll(/([^{}]*\.sug\b[^{}]*)\{/g)].map((m) => m[1]!.trim().replace(/^.*\*\/\s*/s, ''))
-  for (const r of rules) expect(r).toMatch(/^(\.sug|\.app\.tap \.sug|\.sug:hover|\.sug:focus-visible)$/)
+  for (const r of rules) expect(r).toMatch(/^(\.sug|\.app\.tap \.sug|\.sug:hover|\.sug:focus-visible|\.sug:active|\.sug\.go)$/)
   // and the code gives each the same class
   const row = chat.slice(chat.indexOf('export function Replies('), chat.indexOf('export function pickOf('))
   expect(row).not.toMatch(/primary|'pri'/)

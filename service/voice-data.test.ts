@@ -39,8 +39,8 @@ const VOICE_ONLY = ["model-menu", "role-info", "machine-hosts"];
 test("every action the web app sends is a voice data source (a read) or a change (WRITES)", () => {
   const types = readFileSync(join(ROOT, "web/shared/types.ts"), "utf8");
   const union = types.slice(types.indexOf("export type Action ="), types.indexOf("\n\n", types.indexOf("export type Action =")));
-  // the app's own sends: act({ type: … }) and tryAct({ type: … }) (web/src/kernel.ts), with or without a type argument
-  const app = new Set([...WEB.matchAll(/\b(?:act|tryAct)(?:<[^(]*>)?\(\s*\{\s*type:\s*'([a-z.-]+)'/g)].map((m) => m[1]));
+  // the app's own sends: act({ type: … }), tryAct({ type: … }) and attempt({ type: … }) (web/src/kernel.ts), with or without a type argument
+  const app = new Set([...WEB.matchAll(/\b(?:act|tryAct|attempt)(?:<[^(]*>)?\(\s*\{\s*type:\s*'([a-z.-]+)'/g)].map((m) => m[1]));
   expect(app.size).toBeGreaterThan(25);
   const sent = new Set([...[...union.matchAll(/type: '([a-z.-]+)'/g)].map((m) => m[1]), ...app]);
   expect(sent.size).toBeGreaterThan(30);
