@@ -6,15 +6,22 @@
 export const MAX_SUGGESTS = 3
 /** the most bubbles shown when the reply ends with a question and its options: one per option */
 export const MAX_OPTION_SUGGESTS = 5
-/** a bubble made from an option is at most this long (the agents' own limit) */
-export const SUGGEST_CHARS = 40
+/** SHEP-463: a suggested reply is at most this many characters, the agents' hard limit (templates/worker.md and
+ *  assistant.md say it): one bubble's line at its widest on a phone (280 px, 14 px text) holds about 33 characters of
+ *  ordinary words in Inter, Roboto or SF, fewer in capitals, so 30 leaves room. A bubble made from an option is at
+ *  most this long too. */
+export const SUGGEST_CHARS = 30
+/** a suggested reply longer than this is never shown (a bubble always shows its whole text, since a tap sends all of
+ *  it; one a little over the limit grows or wraps to two lines, one far over is left out rather than cut) */
+export const SUGGEST_MOST = 2 * SUGGEST_CHARS
 
 /** a message's suggested replies, in order: the agent's own, at most MAX_SUGGESTS (an older service's single suggest is
  *  one). When the message ends with a question and its numbered or lettered options, one bubble per option, at most
- *  MAX_OPTION_SUGGESTS: the agent's own bubble for an option where it gave one, else one made from the option. */
+ *  MAX_OPTION_SUGGESTS: the agent's own bubble for an option where it gave one, else one made from the option. One
+ *  longer than SUGGEST_MOST is left out (an option's then gets the one made from the option). */
 export function suggestsOfMessage(m: { text?: string; suggest?: string; suggests?: string[] }): string[] {
   const all = m.suggests?.length ? m.suggests : m.suggest ? [m.suggest] : []
-  const own = [...new Set(all.map((t) => t.trim()).filter(Boolean))]
+  const own = [...new Set(all.map((t) => t.replace(/\s+/g, ' ').trim()).filter((t) => t && [...t].length <= SUGGEST_MOST))]
   const opts = choicesOf(m.text ?? '')
   if (!opts.length) return own.slice(0, MAX_SUGGESTS)
   if (own.length >= opts.length) return own.slice(0, MAX_OPTION_SUGGESTS)

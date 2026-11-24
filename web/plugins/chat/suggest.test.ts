@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test'
-import { ReplyPress, repliesHidden, suggestionOf, suggestionsOn } from './suggest.ts'
+import { ReplyPress, repliesHidden, suggestionOf, suggestionsOn, suggestsOfMessage, SUGGEST_CHARS } from './suggest.ts'
+import { SUGGEST_MOST } from '@shared/suggest.ts'
 import type { Chat, Message } from '@shared/types.ts'
 
 const chat = (messages: Partial<Message>[]) => ({ key: 'p:sp1', messages: messages.map((m, i) => ({ id: `m${i}`, who: 'agent', ...m })) }) as Chat
@@ -130,8 +131,23 @@ test('a question with options gets one bubble per option, made from the list whe
   // lettered, and at most five; a long option is cut at a word
   const many = 'Pick one?\na) ' + 'Alpha beta gamma delta epsilon zeta eta theta iota' + '\nb) B\nc) C\nd) D\ne) E\nf) F'
   const t = suggestionOf(chat([{ text: many }]), true)!.texts
-  expect(t).toEqual(['a. Alpha beta gamma delta epsilon zeta', 'b. B', 'c. C', 'd. D', 'e. E'])
-  expect(t.every((x) => x.length <= 40)).toBe(true)
+  expect(t).toEqual(['a. Alpha beta gamma delta', 'b. B', 'c. C', 'd. D', 'e. E'])
+  expect(t.every((x) => x.length <= SUGGEST_CHARS)).toBe(true)
+})
+
+test('SHEP-463: a reply far over the 30-character limit is left out, never shown cut; a little over stays whole', () => {
+  expect(SUGGEST_CHARS).toBe(30)
+  const near = 'Walk me through the Clay admin clicks now' // 41: over the limit, under twice it: shown in full
+  const far = 'Walk me through every single admin click in the Clay workspace, one by one, slowly' // 82
+  expect(suggestionOf(chat([{ text: 'Next?', suggests: ['status?', near, far] }]), true)!.texts).toEqual(['status?', near])
+  // only far ones: no bubbles at all
+  expect(suggestionOf(chat([{ text: 'Next?', suggests: [far] }]), true)).toBeNull()
+  // exactly the most is kept, one more is not (counted in characters, an emoji is one)
+  const most = 'x'.repeat(SUGGEST_MOST), over = 'y'.repeat(SUGGEST_MOST + 1)
+  expect(suggestsOfMessage({ text: 'Next?', suggests: [most, over, '👍'.repeat(SUGGEST_MOST)] })).toEqual([most, '👍'.repeat(SUGGEST_MOST)])
+  // an option's own bubble that is far over: the one made from the option takes its place
+  const asked = 'Which way?\n1. One card per provider\n2. A table instead'
+  expect(suggestsOfMessage({ text: asked, suggests: ['1, ' + far, '2, a table'] })).toEqual(['1. One card per provider', '2, a table'])
 })
 
 test('an ordinary numbered list is no question: steps, a summary, or a question only after the list', () => {

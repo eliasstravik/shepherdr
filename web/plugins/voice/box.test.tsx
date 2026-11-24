@@ -143,15 +143,17 @@ test('the voice call button is gone from the header and the phone bottom bar; it
   expect(app).not.toMatch(/barEnd|barAbove|Talk to Shepherdr/)
 })
 
-test('the bubbles are one line of pills that scroll sideways, a long one truncating in its pill', () => {
+test('the bubbles are one line of pills that scroll sideways, a long one wrapping in its pill, never cut', () => {
   const css = read('../../src/ds.css')
   // the properties the row needs, in any order, so a restyle of the rest doesn't break it
   const sugs = css.match(/\.sugs\{([^}]*)\}/)![1].split(';')
   for (const x of ['display:flex', 'overflow-x:auto']) expect(sugs).toContain(x)
   expect(sugs).not.toContain('flex-wrap:wrap')
   const sug = css.match(/\.sug\{([^}]*)\}/)![1]
-  for (const x of ['flex:none', 'white-space:nowrap', 'overflow:hidden', 'text-overflow:ellipsis', 'user-select:none', '-webkit-touch-callout:none'])
+  for (const x of ['flex:none', 'overflow-wrap:anywhere', 'user-select:none', '-webkit-touch-callout:none'])
     expect(sug).toContain(x)
+  // SHEP-463: a tap sends the whole text, so a bubble shows all of it: no ellipsis, no one-line clamp
+  for (const x of ['text-overflow', 'white-space:nowrap', 'line-clamp']) expect(sug).not.toContain(x)
   expect(css).not.toContain('.kbd')
 })
 
@@ -161,7 +163,7 @@ test('a short reply ("1") gets a bubble at least the send button and a fingertip
   // one size, never under the send button, used for both sides so a one-character bubble is a circle
   const size = sug.find(x => x.startsWith('--sugh:'))!
   expect(size).toContain('var(--send)')
-  for (const x of ['min-width:var(--sugh)', 'height:var(--sugh)', 'text-align:center']) expect(sug).toContain(x)
+  for (const x of ['min-width:var(--sugh)', 'min-height:var(--sugh)', 'text-align:center']) expect(sug).toContain(x)
   // by touch, never under the app's touch target
   const tap = css.match(/\.app\.tap \.sug\{([^}]*)\}/)![1]
   expect(tap).toMatch(/--sugh:max\([^;]*var\(--hit\)/)
