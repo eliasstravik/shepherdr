@@ -13,7 +13,7 @@ the rest. [`web/plugins.json`](../web/plugins.json) is the list, in order.
 | analytics | always on | Settings › Personal analytics, kept only on your machines ([analytics.md](analytics.md)); its own switch turns recording off | |
 | terminal | yes | Your own terminal in a space or a task, and "View as terminal" | No Terminal menu items |
 | screens | yes | An agent's browser and desktop: watch, Take over, Hand back | No Screen menu item, live picture or card |
-| voice | yes | Voice over the whole app, and dictation in the message box | No voice or mic button |
+| voice | yes | Voice over the whole app, dictation in the message box, and Settings › Voice (the ElevenLabs key) | No voice or mic button, no Voice page |
 | schedules | yes | Tasks › Scheduled | No Scheduled tab |
 | reactions | yes | Emoji reactions on messages | No emoji row in a message's menu |
 

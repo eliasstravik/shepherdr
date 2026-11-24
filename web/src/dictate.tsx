@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { canDictate, clock, dictate, dictSample, SAY, warmMic, type Dictation } from './dictation.ts'
 import { IDLE, insertAt, step, type DictEvent, type DictState } from './dictstate.ts'
-import { getState, has, holdReload, useUI } from './kernel.ts'
+import { getState, has, holdReload, openSettings, useUI } from './kernel.ts'
 import { escapeFirst } from './overlay.tsx'
 import { cx, I } from './ui.tsx'
 import { Wave } from './wave.tsx'
@@ -187,6 +187,10 @@ export function DictRow({ s }: { s: DictState }) {
             <p className="derr" role="alert">
               <I n="warn" c="s16" />
               <span>{s.why}</span>
+              {/ElevenLabs key/i.test(s.why) && (
+                // no key yet: Settings › Voice (the Voice plugin's page) is where it is added
+                <button type="button" className="lk" onClick={() => openSettings('all', 'Voice')}>Add key</button>
+              )}
             </p>
           ) : (
             <p className="dhint">{SAY.asking}</p>

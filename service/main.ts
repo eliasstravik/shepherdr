@@ -60,7 +60,7 @@ import { chatPage } from "./native-chat.ts";
 import { unreadChats } from "../web/shared/needs-you.ts";
 import type { Watcher } from "./chats.ts";
 import { Shows } from "./show.ts";
-import { dictate, liveToken, cachedKey, refused } from "./dictate.ts";
+import { dictate, liveToken, cachedKey, refused, forgetKey, checkVoiceKey } from "./dictate.ts";
 import { readUsage } from "../core/voice.js";
 import { sh, exec } from "./model.ts";
 import { existedWords, folders, newSpace, newSpaceInfo } from "./spaces.ts";
@@ -798,6 +798,7 @@ async function doAction(body: any): Promise<Response> {
       const card = body.card && typeof body.card.chat === "string" ? { address: compat.addrOf(body.card.chat) ?? "" } : undefined;
       if (card && !card.address) throw new Error("That agent isn't here any more.");
       await secrets.keep(body.level, body.name, typeof body.value === "string" ? body.value : null, card);
+      if (body.name === "ELEVENLABS_API_KEY") forgetKey();
       await refreshSecrets();
       return json({ ok: true });
     } catch (err) { return new Response((err as Error).message, { status: 400 }); }
@@ -840,6 +841,8 @@ async function doAction(body: any): Promise<Response> {
     try { return json({ ok: true, text: settings.template(body.role, typeof body.text === "string" ? body.text : undefined) }); }
     catch (err) { return json({ ok: false, error: (err as Error).message }); }
   }
+  // Settings › Voice's test: whether the ElevenLabs key works, in plain words (never the key)
+  if (body?.type === "voice-check") return json(await checkVoiceKey(hub));
   if (body?.type === "limits-check") { await machines.checkNow(); return json({ ok: true }); }
   if (body?.type === "secrets-move") {
     // Settings › Secrets › Kept on: the vault moves (shepherdr secrets move-to); the page sees it as it goes

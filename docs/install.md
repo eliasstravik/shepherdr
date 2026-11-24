@@ -9,7 +9,7 @@ the service and shares the app on your tailnet. There is one kind of install.
 - python3 3.8 or newer, git, and Claude Code or Codex, installed and signed in.
 - Tailscale, signed in: the app is shared on your tailnet only.
 - Bun runs the service and builds the app. The installer installs it from bun.sh when it is missing.
-- Optional: `gh` (pull requests), `jq` (question cards), an ElevenLabs key for voice and dictation, the Herdr app.
+- Optional: `gh` (pull requests), `jq` (question cards), an ElevenLabs key for voice and dictation (added in Settings › Voice), the Herdr app.
 
 ## Install
 
