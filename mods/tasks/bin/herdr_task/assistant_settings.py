@@ -174,7 +174,7 @@ def rows(space, d=None, folder=None):
              "with why and its agent doesn't start)") if setup else "none", "on" if setup else "off", [("tasks", "setup")]),
             ("reactions", "Reactions", "on (react to some of the person's messages with one emoji)" if reacting
              else "off (never react to the person's messages)", "on" if reacting else "off", [("agents", "reactions")]),
-            ("suggestions", "Suggested replies", "on (end each reply with one to three replies the person would likely send next, or one per option, up to five, when it asks a question with options; shown as bubbles to tap)"
+            ("suggestions", "Suggested replies", "on (end each reply with one to three replies the person would likely send next, or one per option, up to five, when it asks a question with options; each at most 30 characters; shown as bubbles to tap)"
              if suggesting else "off (no suggested replies)", "on" if suggesting else "off", [("agents", "suggestions")]),
             ("feedback", "Feedback offers", f"on (offer once to file a Shepherdr problem as an issue on {repo}, only on the person's yes)"
              if offering else "off (never offer feedback for Shepherdr; file nothing)", "on" if offering else "off",

@@ -781,7 +781,7 @@ def task_settings(s, t, space=None, argv=None, live=False):
     add("Agent", text, {"agent": agent, "model": model, "effort": effort, "flags": extra}, a_by)
     # Suggested replies (SHEP-186): the reply ends with one to three replies the person would likely send next (templates/worker.md)
     sug = (cfg.get("agents") or {}).get("suggestions") is not False
-    add("Suggested replies", "on (your reply ends with one to three replies the person would likely send next, or one per option, up to five, when it asks a question with options; shown as bubbles to tap)" if sug
+    add("Suggested replies", "on (your reply ends with one to three replies the person would likely send next, or one per option, up to five, when it asks a question with options; each at most 30 characters; shown as bubbles to tap)" if sug
         else "off (no suggested replies)", sug, by_layer(s, space, "agents", "suggestions", sug, True))
     return lines
 

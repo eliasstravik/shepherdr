@@ -94,6 +94,14 @@ test("a numbered-options question with no bubbles of the agent's: one per option
   expect(g.items[0].text).toBe(text);
 });
 
+test("SHEP-463: the feed's suggest keeps the web app's limit: one far over 30 characters is left out, never cut", () => {
+  const snap = waitSnap("Next?");
+  const near = "Walk me through the Clay admin clicks now";
+  const far = "Walk me through every single admin click in the Clay workspace, one by one, slowly";
+  const g = glanceOf(snap, alertsOf(snap), NOW, lastOf({ who: "agent", text: "Next?", suggests: ["status?", near, far] }));
+  expect(g.items[0].suggest).toEqual(["status?", near]);
+});
+
 test("the feed's last words skip messages between agents: a no-reply after another Assistant's message keeps the bubbles", () => {
   // a chat log's items (core/chat-log.js) as the service picks the feed's last words from them
   const ask = { kind: "agent", text: "Merge it?", suggests: ["yes", "not yet"] };

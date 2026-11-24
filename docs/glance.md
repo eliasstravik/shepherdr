@@ -111,7 +111,8 @@ Two optional fields (SHEP-443, no `format` bump: an older app ignores them):
   task's summary, a Needs-you task's status line. Only on `needs` and `ready` items; `body` stays its 80-character line.
 - `suggest`: the suggested replies the web app shows as bubbles above that chat's box (the agent's `<hc suggest>`
   lines, or one per option when its message ends with a numbered or lettered question; `web/shared/suggest.ts`), in
-  order, at most 5. Only on an item that takes words (`reply`, or `answer.other`), only when it has some: none once the
+  order, at most 5. Agents keep each to 30 characters; one over 60 is left out, as the web app leaves it out, so
+  show each in full, never cut (it is sent whole). Only on an item that takes words (`reply`, or `answer.other`), only when it has some: none once the
   person wrote last, none when Settings › Agents › Suggested replies is off. Send one as a `reply` (or `other`).
 
 ## For the watch (SHEP-447)

@@ -923,6 +923,23 @@ class BackToWork(unittest.TestCase):
         with open(ghnews.__file__) as f:
             self.assertIn("add one small fix-forward task at once", f.read())
 
+    def test_suggested_replies_hard_limit(self):
+        """SHEP-463: every agent is told a suggested reply is at most 30 characters (what a phone's bubble holds, the
+        web app's SUGGEST_CHARS), short but complete; an unedited old worker default gets today's."""
+        from herdr_task import templates
+        texts = {}
+        for name in ("worker.md", "assistant.md"):
+            with open(os.path.join(ROOT, "templates", name)) as f:
+                texts[name] = f.read()
+        for words in (templates.WORKER_MD, *texts.values()):
+            self.assertIn(templates.LIMIT_RULE, words)
+            self.assertNotIn("under about 40 characters", words)
+            self.assertIn('never a bare "1"', words)
+        self.assertIn("at most 30 characters", templates.LIMIT_RULE)
+        self.assertIn(templates.WORKER_MD_BEFORE_LIMIT, templates.OLD_WORKERS)
+        with open(os.path.join(ROOT, "web", "shared", "suggest.ts")) as f:
+            self.assertIn("export const SUGGEST_CHARS = 30\n", f.read())
+
     def test_later_rounds_review_only_the_new_change(self):
         """#1116: a later review round reviews only what changed since the last reviewed commit, its reviewer splits
         must-fix from follow-up, and only must-fix findings cost a round; unedited old templates get today's."""
