@@ -21,7 +21,9 @@ export function toggleTaskTerm(task: string) {
   else setUI({ tterm: !ui.tterm })
 }
 
-export const spaceTermRow = (ui: UI): MenuRow => ({ icon: 'prompt', label: 'Terminal', on: spaceTermOn(ui), run: toggleSpaceTerm })
+/** the keys that open your own terminal, shown on its row where a keyboard has them (not on a phone) */
+export const TERM_KEYS = 'Ctrl+`'
+export const spaceTermRow = (ui: UI): MenuRow => ({ icon: 'prompt', label: 'Terminal', ...(ui.phone ? {} : { value: TERM_KEYS }), on: spaceTermOn(ui), run: toggleSpaceTerm })
 export const taskTermRow = (ui: UI, task: string): MenuRow => ({ icon: 'prompt', label: 'Terminal', on: taskTermOn(ui), run: () => toggleTaskTerm(task) })
 
 /** View as terminal / View as chat: this same chat shown as its agent's raw terminal, in the chat's place, and back. Not

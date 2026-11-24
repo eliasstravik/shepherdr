@@ -639,6 +639,8 @@ function codexStep(name, args) {
 //                                             out: where the call's result line is)
 //   { kind: "ask", id, text, questions?, closed? }  (the agent's own question tool, Codex's with its questions; closed once its dialog
 //                                          is gone: "answered" | "dismissed")   { kind: "error", id, text }
+//   { kind: "command", id, at, text, state, out? }  (a `!` command the person ran in the agent's shell: running | done |
+//                                          failed, out: what it printed, its end kept when long)
 // `doing` is what it does right now (the last call not answered yet), for the status line.
 // `meta` is what the agent runs on, from its newest lines: { model, effort, speed, used, window }
 // (used: tokens in its context window now; window: that window's size when the log says it;
@@ -657,6 +659,37 @@ export function claudeSwitch(text) {
   if (m) return { effort: m[1] };
   m = /^Fast mode (ON|OFF)\b/.exec(t);
   if (m) return { speed: m[1] === "ON" ? "fast" : "standard" };
+  return null;
+}
+
+// A `!` command the person ran in the agent's own shell (Claude Code's bash mode, Codex's `!`), from a user line's
+// text. Claude Code logs it as two lines: <bash-input>cmd</bash-input>, then <bash-stdout>…</bash-stdout><bash-stderr>…
+// </bash-stderr> (all it printed goes to stdout when it ran fine, to stderr when it failed; both empty: it failed
+// silently; "(Bash completed with no output)": fine, nothing printed). Codex logs one: <user_shell_command><command>…
+// </command><result>Exit code: N … Output: …</result></user_shell_command>.
+// -> { cmd } (it started), { out, state } (what it printed: done | failed), { cmd, out, state } (both), or null.
+const CMD_OUT = 8000;
+const cmdOut = (s) => {
+  const t = String(s ?? "").replace(/\s+$/, "");
+  return t.length > CMD_OUT ? `…${t.slice(-CMD_OUT)}` : t;
+};
+export function shellRun(text) {
+  const t = String(text ?? "");
+  let m = /^\s*<bash-input>([\s\S]*)<\/bash-input>\s*$/.exec(t);
+  if (m) return m[1].trim() ? { cmd: m[1].trim() } : null;
+  m = /^\s*<bash-stdout>([\s\S]*?)<\/bash-stdout>\s*<bash-stderr>([\s\S]*?)<\/bash-stderr>\s*$/.exec(t);
+  if (m) {
+    const stdout = m[1].trim() === "(Bash completed with no output)" ? "" : m[1];
+    const ok = Boolean(m[1].trim());
+    return { out: cmdOut(ok ? stdout || m[2] : m[2]), state: ok ? "done" : "failed" };
+  }
+  m = /^\s*<user_shell_command>\s*<command>([\s\S]*?)<\/command>\s*(?:<result>([\s\S]*?)<\/result>)?\s*<\/user_shell_command>\s*$/.exec(t);
+  if (m && m[1].trim()) {
+    const r = m[2] ?? "";
+    const code = /^\s*Exit code:\s*(-?\d+)/m.exec(r);
+    const out = /^Output:\n?([\s\S]*)$/m.exec(r);
+    return { cmd: m[1].trim(), out: cmdOut(out ? out[1] : r.trim()), state: code && code[1] === "0" ? "done" : "failed" };
+  }
   return null;
 }
 
@@ -699,6 +732,19 @@ export class Conversation {
   push(item) {
     this.items.push(item);
     return item;
+  }
+
+  // A `!` command the person ran (shellRun): its row ({ kind: "command", id, at, text, state, out? }), running until
+  // what it printed comes. A command whose end never came (cut from the log) shows as done once the chat moves on.
+  command(run, off, at) {
+    const open = this.items.findLast((x) => x.kind === "command" && x.state === "running");
+    if (run.cmd) {
+      if (open) open.state = "done";
+      this.push({ kind: "command", id: `k${off}`, at, text: run.cmd, state: run.state ?? "running", ...(run.state ? { out: run.out } : {}) });
+    } else if (open) {
+      open.state = run.state;
+      open.out = run.out;
+    }
   }
 
   // The messages a command sent other agents (sendsOf), each its own item after the call's row:
@@ -1051,6 +1097,9 @@ export class Conversation {
         return;
       }
       if (l.isCompactSummary || l.isVisibleInTranscriptOnly) return;
+      // a `!` command the person ran in its shell (bash mode): its own row, with what it printed
+      const run = typeof l.message?.content === "string" ? shellRun(l.message.content) : null;
+      if (run) { this.command(run, off, time(l.timestamp)); return; }
       if (Array.isArray(l.message?.content) && l.message.content.some((b) => b?.type === "tool_result")) { this.answers(l, off); return; }
       if (l.origin?.kind && l.origin.kind !== "human") return;
       const u = claudeUser(l.message?.content);
@@ -1125,6 +1174,9 @@ export class Conversation {
     if (l.type === "response_item") {
       if (p.type === "message" && p.role === "user") {
         const items = Array.isArray(p.content) ? p.content : [];
+        // a `!` command the person ran in Codex's shell: its own row, with what it printed and its exit code
+        const run = items.length === 1 && typeof items[0]?.text === "string" ? shellRun(items[0].text) : null;
+        if (run?.cmd) { this.command(run, off, time(l.timestamp)); return; }
         const kinds = p.internal_chat_message_metadata_passthrough?.content_item_kinds;
         const words = items.map((it, i) => {
           if (it?.type !== "input_text" || typeof it.text !== "string") return "";

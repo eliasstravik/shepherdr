@@ -77,6 +77,8 @@ const KEEP_WAITING = 30 * 60_000
  *  answers, the tasks it mentions: core/send.js messageBody), whitespace as one space */
 export const words = (s: string) =>
   s
+    // a command's `! ls` comes back as `!ls`
+    .replace(/^\s*!\s+/, '!')
     .replace(/^\s*<hc\b[^>]*\/>\s*$/gm, '')
     .replace(/^\s*<hc task=[^\n]*<\/hc>\s*$/gm, '')
     .replace(/\s+/g, ' ')

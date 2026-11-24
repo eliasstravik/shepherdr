@@ -433,3 +433,11 @@ test("atRest: background work alone is done, what runs kept as bg; a real turn s
   expect(atRest(null)).toBe(null);
   expect(BG_ONLY.test("Running 1 shell still running")).toBe(false);
 });
+
+// A `!` command runs in the agent's shell only when nothing goes before its `!`: no reply tag, no task tags.
+test("a ! command goes alone, first", async () => {
+  const { messageBody, isCommand } = await import("./send.js");
+  expect(messageBody({ text: "!ls -la", quote: "earlier words", tags: '<hc task="T-1" title="x" state="y" folder="z"></hc>\n' })).toBe("!ls -la");
+  expect(messageBody({ text: "hello", quote: "earlier" })).toBe('<hc reply-to="earlier"/>\nhello');
+  expect([isCommand("!ls"), isCommand(" ! git status"), isCommand("!"), isCommand("hi !ls")]).toEqual([true, true, false, false]);
+});
