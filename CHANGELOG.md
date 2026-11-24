@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.2.16
+
+Agents with a command running in the background no longer look busy, and dictation no longer flashes "allow the
+microphone" when it is already allowed.
+
+### Agents and chat
+
+- An agent that finished its turn but left a command running in the background now shows as at rest: no typing dots,
+  no Stop button, not counted as Working and no "still working" alerts. The chat shows a quiet "1 background command
+  running" line instead.
+- A message an agent only wrote inside a background command, a loop or a function no longer shows as a "Message to …
+  · Delivered" row: only a message it really sent does.
+
+### Dictation
+
+- The "allow the microphone" hint no longer flashes, or stays up, when the microphone is already allowed (seen in the
+  installed Android app). It shows only while a prompt is really waiting and goes the moment the microphone is ready.
+- When the microphone is blocked in the Android app, Shepherdr says to turn it on in the phone's settings for the app.
+
 ## 3.2.15
 
 Shepherdr now keeps a private record of how you use it, for you and your agents, and messages you send quickly to an
