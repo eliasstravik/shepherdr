@@ -2,7 +2,7 @@
 // source is mods/tasks/bin/herdr_task/layout.py (the move, healing, rollback); this is its table and its shell for
 // the window's mods, the service and the web app. test/test_layout.py checks both say the same.
 //   config ~/.config/shepherdr        settings.json, model-picks.json
-//   data   ~/.local/share/shepherdr   tasks/, artifacts/, secrets/, worktrees/, tools.json, LAYOUT
+//   data   ~/.local/share/shepherdr   tasks/, artifacts/, secrets/, worktrees/, analytics/, tools.json, LAYOUT
 //   state  ~/.local/state/shepherdr   service/, browser/, secret-drop/, secret-served/, cli-check.json, machine-hold.json
 // SHEPHERDR_HOME=<root> puts them under <root>/{config,data,state,cache}; else XDG_* are honoured. Until a machine's
 // data moved (data/LAYOUT says 2) every kind is its old ~/.herdr path; after, the old paths link to the new ones, so
@@ -28,6 +28,7 @@ export const KINDS = {
   "secret-served": [".herdr/secret-served", "state", "secret-served"],
   "cli-check": [".herdr/cli-check.json", "state", "cli-check.json"],
   "machine-hold": [".herdr/machine-hold.json", "state", "machine-hold.json"],
+  "analytics": [".herdr/analytics", "data", "analytics"],
 };
 
 const abs = (p) => (typeof p === "string" && p.startsWith("/") ? p.replace(/\/+$/, "") : null);
@@ -61,7 +62,7 @@ export function paths(home, env = {}, migrated = false, mac = false) {
  * @typedef {{ roots: { config: string, data: string, state: string, cache?: string }, migrated: boolean, settings: string,
  *   "model-picks": string, tasks: string, artifacts: string, vault: string, "secret-remote": string, tools: string,
  *   service: string, browser: string, "secret-drop": string, "secret-served": string, "cli-check": string,
- *   "machine-hold": string, worktrees: string, templates: string }} ShepPaths
+ *   "machine-hold": string, analytics: string, worktrees: string, templates: string }} ShepPaths
  */
 
 /** The same from roots already known (what SH_PRINT printed on that machine).

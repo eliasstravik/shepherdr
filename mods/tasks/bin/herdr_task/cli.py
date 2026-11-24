@@ -9,7 +9,7 @@ import subprocess
 import sys
 import time
 
-from . import link
+from . import analytics, link
 from .base import bundle, ENTRY, Fail, guard, run, STORE, sync_held, VERSION
 from .agents import LINE_MAX, ROW_MAX, SUMMARY_MAX
 from .launch import cmd_allow, name_tabs
@@ -572,6 +572,14 @@ def main():
     c = sub.add_parser("_disk-top")  # what fills a disk that holds new tasks, found in the background (queues.disk_top)
     c.add_argument("path")
     c.set_defaults(fn=lambda a: __import__("herdr_task.queues", fromlist=["cmd_disk_top"]).cmd_disk_top(a), json=False)
+    c = sub.add_parser("analytics", help="personal analytics, kept only on your own machines: how you use Shepherdr, as numbers "
+                       "(show: a summary; raw: every event; export: all of it as one JSON; delete: everything, on every machine; on/off)")
+    c.add_argument("what", nargs="?", choices=["show", "raw", "export", "delete", "on", "off"], default="show")
+    c.add_argument("--period", choices=["day", "week", "month"], help="the last day, week or month (default: week)")
+    c.add_argument("--days", type=int, help="the last N days instead")
+    c.add_argument("--here", action="store_true", help="this machine only, not your other machines too")
+    c.add_argument("--json", action="store_true")
+    c.set_defaults(fn=analytics.cmd_analytics)
     c = sub.add_parser("_track")
     c.add_argument("id")
     c.add_argument("address")
