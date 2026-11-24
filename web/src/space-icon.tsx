@@ -65,7 +65,7 @@ async function pasted(): Promise<string | null> {
 /** The icon's own button, left of a Name field, the field's height. `root`: Everything's (its layers is its default). */
 export function IconButton({ icon, root, onChange }: { icon: string | null; root?: boolean; onChange: (icon: string | null) => void }) {
   const file = useRef<HTMLInputElement>(null)
-  const take = (f: Promise<string | null>) => void f.then((v) => v && onChange(v)).catch((e) => notice(e instanceof Error ? e.message : "That picture couldn't be used."))
+  const take = (f: Promise<string | null>) => void f.then((v) => v && onChange(v)).catch((e) => notice(e instanceof Error ? e.message : "That picture couldn't be used.", { tone: 'error' }))
   const rows: MenuRow[] = [
     { icon: 'smile', label: 'Emoji', run: () => openDialog((done) => <All onPick={(e) => { done(); onChange(e) }} />, { wide: true, bare: true, label: 'Emoji' }) },
     { icon: 'image', label: 'Photo', run: () => file.current?.click() },

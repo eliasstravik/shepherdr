@@ -45,7 +45,7 @@ function upload(key: string, chat: string, id: string, f: File) {
 export function attach(key: string, chat: string, files: File[]) {
   for (const f of files) {
     if (f.size > MAX_FILE) {
-      notice(`${f.name} is over 25 MB.`)
+      notice(`${f.name} is over 25 MB.`, { tone: 'error' })
       continue
     }
     const id = newCid()

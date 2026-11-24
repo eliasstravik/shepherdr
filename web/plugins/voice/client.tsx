@@ -148,7 +148,7 @@ export function toggleCall(resume: string | null = null) {
     if (needsKey(m)) {
       openVoiceSettings()
       notice('Talk needs your ElevenLabs key. Add it here.')
-    } else notice(m)
+    } else notice(m, { tone: 'error' })
   }
   void startCall(null, fail, voiceNav, () => getState().snap && sendWhere(whereNow()), (why) => { endCall(); if (why) notice(`Call ended: ${why}.`) }, { title: 'Shepherdr', hangUp: endCall, mute: (on) => { muteCall(on); setUI({ callMuted: on }) } }, () => endCall(), resume).catch(() => fail('Audio could not start on this device.'))
 }

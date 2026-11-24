@@ -109,7 +109,7 @@ function Raw({ days, close }: { days: number; close: () => void }) {
 async function exportAll() {
   try {
     const r = await act<{ ok?: boolean; error?: string }>({ type: 'analytics', do: 'export' })
-    if (r.ok === false) return notice(r.error || 'It could not be exported.')
+    if (r.ok === false) return notice(r.error || 'It could not be exported.', { tone: 'error' })
     const { ok: _ok, ...rest } = r
     const url = URL.createObjectURL(new Blob([JSON.stringify(rest, null, 2)], { type: 'application/json' }))
     const a = document.createElement('a')
@@ -120,7 +120,7 @@ async function exportAll() {
     a.remove()
     setTimeout(() => URL.revokeObjectURL(url), 10_000)
   } catch (e) {
-    notice(String((e as Error).message || e))
+    notice(String((e as Error).message || e), { tone: 'error' })
   }
 }
 

@@ -14,6 +14,7 @@ import { expire, loadOutbox, prune, saveOutbox, settle, type Outgoing } from './
 import { setupGuarded } from './guard.tsx'
 import { HttpError, wakeAll } from './uploads.ts'
 import { SHOW_AFTER } from './pending.ts'
+import { dismiss, toast, type ToastOpts } from './toasts.ts'
 
 /* ---------- the places plugins fill ---------- */
 
@@ -525,46 +526,22 @@ export async function attempt(a: { type: string } & Record<string, unknown>): Pr
 /** an action whose failure is said in a small notice instead of thrown. `doing`: what it does, said in the notice with
  *  a spinner while it takes longer than a moment (a menu's row is gone once tapped: the notice is its answer) */
 export async function tryAct(a: { type: string } & Record<string, unknown>, done?: string, doing?: string): Promise<boolean> {
-  const busy = doing ? setTimeout(() => notice(doing, 60_000, true), SHOW_AFTER) : null
+  let spin = 0
+  const busy = doing ? setTimeout(() => (spin = notice(doing, { busy: true })), SHOW_AFTER) : null
   const error = await attempt(a)
   if (busy) clearTimeout(busy)
-  if (error !== null) notice(error)
-  else if (done) notice(done)
-  else if (doing && noticeText === doing) clearNotice()
+  if (spin) dismiss(spin)
+  if (error !== null) notice(error, { tone: 'error' })
+  else if (done) notice(done, { tone: 'ok' })
   return error === null
 }
 
-/* a small notice at the top (the design system's toast) */
-let noticeText: string | null = null
-/** the notice says something still going: a spinner beside its words */
-let noticeBusy = false
-let noticeTimer: ReturnType<typeof setTimeout> | null = null
-const noticeListeners = new Set<() => void>()
-/** ms: how long it stays (a longer one for words to read) */
-export function notice(text: string, ms = 2600, busy = false) {
-  noticeText = text
-  noticeBusy = busy
-  if (noticeTimer) clearTimeout(noticeTimer)
-  noticeTimer = setTimeout(() => {
-    noticeText = null
-    noticeListeners.forEach((l) => l())
-  }, ms)
-  noticeListeners.forEach((l) => l())
+/* a small notice at the top (the design system's toast): toasts.ts holds how long each stays and when it waits */
+/** shows a toast and returns its id; a number is the old form's least time in ms, `busy` a spinner beside its words */
+export function notice(text: string, o: ToastOpts | number = {}, busy = false): number {
+  return toast(text, typeof o === 'number' ? { ms: o, busy } : o)
 }
-function clearNotice() {
-  if (noticeTimer) clearTimeout(noticeTimer)
-  noticeText = null
-  noticeListeners.forEach((l) => l())
-}
-export const noticeIsBusy = () => noticeBusy
-export const useNotice = () =>
-  useSyncExternalStore(
-    (l) => {
-      noticeListeners.add(l)
-      return () => void noticeListeners.delete(l)
-    },
-    () => noticeText,
-  )
+export { dismiss as dismissNotice }
 
 let tries = 0
 let retrying: ReturnType<typeof setTimeout> | null = null
@@ -772,7 +749,7 @@ if (typeof window !== 'undefined') {
     if (!said || document.visibilityState !== 'visible') return
     document.removeEventListener('visibilitychange', say)
     after.said = null
-    setTimeout(() => notice(said, 4000), 600)
+    setTimeout(() => notice(said, { ms: 5000 }), 600)
   }
   if (after.said) {
     document.addEventListener('visibilitychange', say)
