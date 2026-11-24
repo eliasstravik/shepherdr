@@ -112,7 +112,7 @@ async function deliver(cid: string, pending: Promise<string>[]) {
     let r: { waiting?: boolean; waitsFor?: Outgoing['waitsFor']; at?: number }
     try {
       r = await retrying(
-        () => act<typeof r>({ type: 'send', chat: o.chat, text: o.text, attachments: files.map((f) => f.path), cid, ...(o.reply?.task ? { replyTask: o.reply.task } : { reply: o.reply?.id }), human: true, ...(o.hold ? { hold: true } : {}), ...(o.was ? { was: o.was } : {}) }, AbortSignal.timeout(SEND_TIMEOUT)),
+        () => act<typeof r>({ type: 'send', chat: o.chat, text: o.text, attachments: files.map((f) => f.path), cid, ...(o.reply?.task ? { replyTask: o.reply.task } : { reply: o.reply?.id }), human: true, ...(o.hold ? { hold: true } : {}), ...(o.was ? { was: o.was } : {}), ...(o.how ? { how: o.how } : {}) }, AbortSignal.timeout(SEND_TIMEOUT)),
         first.at,
         { onWait: (offline) => patch((x) => (!!x.offline === offline ? {} : { offline: offline || undefined })) },
       )
@@ -123,6 +123,7 @@ async function deliver(cid: string, pending: Promise<string>[]) {
     patch((x) => ({ state: 'sent', error: undefined, offline: undefined, serverAt, ...(x.queued || x.wentAt ? {} : { waiting: r?.waiting || undefined, waitsFor: (r?.waiting && r.waitsFor) || undefined }) }))
   } catch (e) {
     patch(() => ({ state: 'failed', error: reasonOf(e), offline: undefined }))
+    void act({ type: 'analytics', do: 'event', event: 'message.failed', fields: { chat: first.chat } }).catch(() => undefined)
   } finally {
     gates.delete(cid)
     opened()
@@ -131,7 +132,7 @@ async function deliver(cid: string, pending: Promise<string>[]) {
 
 /** Send what a box holds: its words, its files and the message it replies to. `hold`: the agent is working, so it
  *  waits its turn and is delivered when the agent is free. */
-export function send(key: string, chat: string, text: string, hold = false, alone = false) {
+export function send(key: string, chat: string, text: string, hold = false, alone = false, how?: 'typed' | 'dictated' | 'bubble') {
   const s = getState()
   // one that failed to go up stays out of it (its tile said so). Alone (a suggested reply tapped): only the text, the
   // box's files and quoted reply stay where they are for the draft
@@ -152,6 +153,8 @@ export function send(key: string, chat: string, text: string, hold = false, alon
     before: s.outbox.filter((x) => x.chat === chat).map((x) => x.cid),
     state: 'sending',
     ...(hold ? { hold: true } : {}),
+    // personal analytics: how it was written (typed, dictated or a suggested reply's bubble), never what
+    how: how ?? (alone ? 'bubble' : 'typed'),
   }
   setOutbox((all) => [...all, out])
   if (!alone) {

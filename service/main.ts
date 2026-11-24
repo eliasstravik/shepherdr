@@ -34,6 +34,7 @@ import { catalogOf, configOf, enrich, offPlugins, pluginOn, plansOf, reposOf, sc
 import { ensureShell, type ShellAt } from "./shells.ts";
 import { Chats } from "./chats.ts";
 import { act, findMachines, hc as hcRun } from "./actions.ts";
+import { analyticsAction, howOf, noteVersion, record as note } from "./analytics.ts";
 import { AgentWatch } from "./watch.ts";
 import { Compat, activity, newsKey, placeKey } from "./compat.ts";
 import { keep, served as fileResponse, smaller } from "./media.ts";
@@ -124,6 +125,7 @@ const SERVICE_FILE = join(DATA, "service.json");
 
 const hub = new Hub();
 const host = new Host(hub, VERSION);
+noteVersion(VERSION);
 await Promise.race([host.start(), Bun.sleep(10_000)]);
 const store = new Store(hub, host);
 new Sync(hub, host).start();
@@ -602,7 +604,7 @@ const voiceIO: VoiceIO = {
       return out;
     } finally { f.stop(); }
   },
-  async send(key, text) { await act(hub, { type: "send", chat: key, text, human: true }, compat); },
+  async send(key, text) { await act(hub, { type: "send", chat: key, text, human: true }, compat); note("message.sent", { chat: key, how: "talk" }); },
   async action(body) {
     const answeredAt = Date.now();
     const r = await doAction(body);
@@ -668,6 +670,8 @@ const voiceIO: VoiceIO = {
         return folders(hub, machine, path || "~", home);
       }
       case "me": return { machine: me?.host ?? null, link: ownLink(), version: VERSION, off: offPlugins() };
+      // personal analytics, as `herdr-task analytics` sums them up (service/analytics.ts)
+      case "insights": return action({ type: "analytics", do: "show", days: path === "day" ? 1 : path === "week" ? 7 : 30 });
     }
     throw new Error(`No such data: ${source}.`);
   },
@@ -684,6 +688,11 @@ async function doAction(body: any): Promise<Response> {
     const done = await artifactAction(body).catch((e) => ({ ok: false, error: (e as Error).message }));
     if (done) { void artifacts.read(); return json(done); }
   }
+  // Settings › Personal analytics, and the page's own events for it (service/analytics.ts)
+  if (body?.type === "analytics") {
+    try { return json(await analyticsAction(body, (key, value) => { setConfig("all", key, value); model.rebuild(); })); }
+    catch (err) { return json({ ok: false, error: (err as Error).message }); }
+  }
   // 3.2's settings window: one value for everything ("all") or a space; null puts a space's row back (Reset)
   if (body?.type === "config" && typeof body.key === "string") {
     try {
@@ -691,6 +700,7 @@ async function doAction(body: any): Promise<Response> {
       // a repo's (SHEP-335): a space sitting on it goes along, for what a file not moved yet still keeps there
       const sp = place === "all" ? null : (model.spaces as any[]).find((x) => (place.startsWith("repo:") ? spaceRepo(x) === place.slice(5) : x.id === place));
       setConfig(place, body.key, body.value ?? null, sp ? { id: sp.id, name: sp.name, machine: sp.machine ?? null, folder: sp.folder ?? null, repo: spaceRepo(sp) } : null);
+      note("settings.changed", { key: body.key, space: place === "all" ? undefined : place });
       model.rebuild();
       return json({ ok: true });
     } catch (err) { return json({ ok: false, error: (err as Error).message }); }
@@ -857,6 +867,10 @@ async function doAction(body: any): Promise<Response> {
     const ref = typeof body?.task === "string" ? body.task : typeof body?.chat === "string" ? body.chat.split("/")[0] : null;
     const onTask = TASK_ACTS.has(body?.type) && ref ? compat.taskOf(ref) : null;
     const r = await act(hub, body, compat);
+    // personal analytics: that it happened and how, never what was said (service/analytics.ts)
+    if (body?.type === "send" && typeof body.chat === "string" && !body.was) note("message.sent", { chat: body.chat, how: howOf(body.how) });
+    else if (body?.type === "answer" && typeof body.chat === "string")
+      note("question.answered", { chat: body.chat, how: body.byVoice || body.talk ? "talk" : typeof body.choice === "number" || Array.isArray(body.choices) ? "pick" : "typed" });
     // the list of spaces changed (renamed, removed): shown in the answer's snapshot, not at the next event
     if (body?.type === "rename" || body?.type === "space-remove") model.rebuild();
     // a task on another machine: its new state read now, so the card changes with this answer, not up to 10 s later

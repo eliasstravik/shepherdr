@@ -59,6 +59,9 @@ export const canStartCall = () => !isDictating()
 export const canStartDictation = () => !getState().ui.call
 export const useDictating = () => useSyncExternalStore((f) => (seen.add(f), () => void seen.delete(f)), isDictating, isDictating)
 
+/** the boxes (their chat keys) whose words came from dictation since their last send: personal analytics' "dictated" */
+export const dictatedInto = new Set<string>()
+
 /** One dictation into a box (setText: the box's whole new text; the words go in at its cursor, what was typed stays).
  *  anchor: an element inside the box (.cbox), to find its text. Escape cancels; leaving the chat cancels; it can't
  *  start during a voice call. */
@@ -72,6 +75,7 @@ export function useDictation(setText: (value: string) => void, scope: string | u
     const box = boxOf()
     const r = insertAt(box?.value ?? '', at.current, text)
     setText(r.value)
+    if (scope) dictatedInto.add(scope)
     landed.current = r.caret
   })
   const live = useRef<Dictation | null>(null)

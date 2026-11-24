@@ -3,7 +3,7 @@
 // message box. The same parts draw a space's chat and a task's thread.
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { copyText } from '@client/copy.ts'
-import { TEXT_IN_CALL, useDictating } from '@client/dictate.tsx'
+import { dictatedInto, TEXT_IN_CALL, useDictating } from '@client/dictate.tsx'
 import { attr } from '@client/attr.ts'
 import { act, attempt, definePlugin, getState, has, notice, openTask, registry, setUI, tryAct, useChat, useDraft, useSnap, useStore, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
 import { partsOf, placeOutgoing, placesOf, keyOf, readNow, showsAs, type Outgoing } from '@client/outbox.ts'
@@ -855,7 +855,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
     const t = text.trim()
     if (!t && !files?.length) return
     if (sg) spent.add(sg.id)
-    send(key, key, t, wait && busy)
+    send(key, key, t, wait && busy, false, dictatedInto.delete(key) ? 'dictated' : 'typed')
     setText('')
     if (shared) putAway()
   }

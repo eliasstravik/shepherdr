@@ -455,7 +455,8 @@ export function SettingsWindow({ snap }: { snap: Snapshot }) {
   const space = s.scope !== 'all' && !isEverything(snap, s.scope) ? placeOf(snap, s.scope) : undefined
   const place = space ? space.id : 'all'
   const own = registry.settings.filter((x) => (space ? x.scope !== 'all' : x.scope !== 'space')).map((x) => [x.name, x.icon] as [string, IconName])
-  const L = [...(space ? SPACE : ALL), ...own]
+  // a plugin's own sections go before About
+  const L = space ? [...SPACE, ...own] : [...ALL.slice(0, -1), ...own, ...ALL.slice(-1)]
   const title = space ? `Settings for ${spaceLabel(snap, space.id)}` : 'Settings'
   const cur = s.sec ?? (ph ? null : L[0]![0])
   const close = () => setUI({ settings: null })

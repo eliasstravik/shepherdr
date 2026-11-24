@@ -7,6 +7,8 @@ import { GIVE_UP } from './uploads.ts'
 export interface Outgoing {
   /** the screen's own id for it: the message comes back with it */
   cid: string
+  /** how it was written, for personal analytics (never its words) */
+  how?: 'typed' | 'dictated' | 'bubble' 
   chat: string
   text: string
   /** id: the box's own (its picture on this screen, send.ts localOf) */

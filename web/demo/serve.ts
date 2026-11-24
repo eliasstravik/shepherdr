@@ -44,12 +44,50 @@ const patchTask = (id: string, p: Partial<Task>) => each((snap) => { snap.tasks 
 const uploaded = new Map<string, File>()
 const say = (key: string, m: Partial<Message>) => { (chats[key] ??= { key, messages: [], cli: 'claude', top: true }).messages.push({ id: `n${++n}`, who: 'agent', at: Date.now(), ...m } as Message); pushChat(key) }
 
+const analytics = { on: true, noted: false }
+const H = 3600_000
+function demoAnalytics(days: number) {
+  const k = days === 1 ? 0.2 : days === 30 ? 4 : 1
+  const r = (x: number) => Math.round(x * k)
+  return {
+    days, events: r(412), on: analytics.on, unreached: [],
+    app: { opened: r(38), devices: { phone: r(24), desktop: r(14) } },
+    messages: { sent: r(126), how: { typed: r(71), dictated: r(33), bubble: r(19), talk: r(3) }, failed: r(1) },
+    questions: { answered: r(17) },
+    tasks: { added: r(21), started: r(20), ready: r(19), sent_back: r(4), done: r(16), reopened: r(1), removed: 0 },
+    waits: { ready_for_review: { n: 16, avg_ms: 3.1 * H, median_ms: 1.2 * H }, needs_you: { n: 9, avg_ms: 0.4 * H, median_ms: 0.2 * H }, blocked: { n: 3, avg_ms: 0.9 * H, median_ms: 0.5 * H }, before_start: null, working: null },
+    agents: [{ agent: 'claude', model: 'opus', effort: 'medium', tasks: r(14) }],
+    errors: { send_failed: r(1), link_lost: r(2) },
+    text: '',
+  }
+}
+function demoEvents() {
+  const t = Date.now()
+  return [
+    { t: t - 5 * H, e: 'app.opened', device: 'phone' },
+    { t: t - 4.9 * H, e: 'message.sent', chat: 'shop', how: 'dictated' },
+    { t: t - 4 * H, e: 'task.ready', task: 'SHOP-14', space: 'shop', agent: 'claude', model: 'opus', effort: 'medium', worked_ms: 42 * 60_000 },
+    { t: t - 1 * H, e: 'task.done', task: 'SHOP-14', space: 'shop', merged: true, wait_ms: 3 * H, machine: 'mini' },
+    { t: t - 0.5 * H, e: 'message.sent', chat: 'SHOP-15/worker', how: 'bubble' },
+  ]
+}
+
 function action(a: Record<string, any>): unknown {
   if (a.type === 'screen') {
     if (a.op === 'handback' || a.op === 'skip') each((snap) => { const screen = snap.screens?.[a.key]; if (screen?.hands) screen.hands.settled = a.op === 'skip' ? 'skip' : 'done' })
     return { ok: true }
   }
   if (a.type === 'catalog') return { ok: true, catalog: catalog(a.machine) }
+  // Settings › Personal analytics: a fictional week (web/plugins/analytics)
+  if (a.type === 'analytics') {
+    if (a.do === 'state') return { ok: true, on: analytics.on, noted: analytics.noted }
+    if (a.do === 'noted') return (analytics.noted = true), { ok: true }
+    if (a.do === 'set') return (analytics.on = !!a.on), { ok: true, on: analytics.on }
+    if (a.do === 'show') return { ok: true, ...demoAnalytics(Number(a.days) || 7) }
+    if (a.do === 'raw' || a.do === 'export') return { ok: true, days: a.days ?? 7, events: demoEvents(), meaning: {} }
+    if (a.do === 'delete') return { ok: true, deleted: { 'this machine': true, mini: true } }
+    return { ok: true }
+  }
   if (a.type === 'send') {
     // as the service gives your message back from the log: its words, then each file under them, a moment later
     const paths: string[] = Array.isArray(a.attachments) ? a.attachments.filter(Boolean) : []

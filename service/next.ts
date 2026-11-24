@@ -138,6 +138,13 @@ export function setConfig(place: string, key: string, value: unknown, scope?: { 
     if (off.size) e.plugins_off = [...off]; else delete e.plugins_off;
     return writeSettings(next);
   }
+  if (key === "analytics.on" || key === "analytics.noted") {
+    // Settings › Personal analytics (SHEP-453): its switch, and its first-time note seen; for every machine
+    const e = (next.everywhere ??= {});
+    if (key === "analytics.on") { if (value === false) e.analytics_off = true; else delete e.analytics_off; }
+    else e.analytics_noted = true;
+    return writeSettings(next);
+  }
   const all = place === "all";
   const repoPlace = place.startsWith("repo:") ? place.slice(5) : null;
   const forTasks = /^agents\.(Tasks|Reviews)$/.test(key) || ["review", "merge", "proof"].includes(key);

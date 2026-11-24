@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 
+from . import analytics
 from .base import ENTRY, Fail, guard, hc_json, layout, now, plugin_off, STORE, WHERE
 from .when import parse_at
 from .settings import bare, set_task, settings_for, SET_KEYS, worker_argv, worktrees_on
@@ -591,6 +592,8 @@ def fire(s, a, why, brief=None):
         t["attention"] = f"Couldn't start: {e}"
     a["last_run"], a["last_task"] = now(), s.ref(t)
     a["runs"] = (a.get("runs") or [])[-(RUNS_KEPT - 1):] + [run_rec]
+    analytics.record("schedule.failed" if run_rec.get("error") else "schedule.ran", task=s.ref(t), space=t.get("space"),
+                     kind=why.split(":")[0] if why else None)
     s.dirty = True
     return t
 

@@ -9,6 +9,7 @@ import re
 import time
 from contextlib import contextmanager
 
+from . import analytics
 from .base import Fail, git, hc_json, HOME, LEGACY, now, run, STORE
 from .settings import settings_for
 from .agents import agent_running
@@ -228,6 +229,7 @@ class Store:
         d["slug"] = self.slug
         d.setdefault("next", 1)
         d.setdefault("tasks", [])
+        self.before = analytics.snapshot(d["tasks"]) if self.write else None
         self.new_prefix = False
         if self.write and self.loc["kind"] == "repo" and not d.get("project_id"):
             pid = project_id(self.loc["folder"], make=True)
@@ -282,6 +284,10 @@ class Store:
                 f.write("\n")
             os.replace(tmp, self.path)
             self.dirty = False
+            # personal analytics (analytics.py): what changed, as ids and timings, on this machine only
+            if self.before is not None:
+                analytics.saved(self.before, self.data)
+                self.before = analytics.snapshot(self.data.get("tasks"))
 
     @contextmanager
     def released(self):
@@ -317,6 +323,8 @@ class Store:
                 fresh["tasks"] = tasks
                 self.data.clear()
                 self.data.update(fresh)
+                # what others changed meanwhile, they recorded themselves
+                self.before = analytics.snapshot(tasks)
             # Saved again on the way out: the caller goes on changing its task without saying so.
             self.dirty = True
 
