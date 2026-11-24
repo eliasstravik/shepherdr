@@ -103,9 +103,10 @@ test('in a call the box takes no text: nothing is sent, and it goes read-only', 
 
 test('the round button and Enter send only what is in the box; a suggested reply is its own bubble, sent with a tap', () => {
   const go = chat.slice(chat.indexOf('const go = '), chat.indexOf('const sendSug = '))
-  expect(go).toContain('const t = text.trim()')
+  // the box's words and its folded long pastes, nothing else
+  expect(go).toContain('const t = joined(text, pastes.map((p) => p.text))')
   expect(go).not.toMatch(/sug\.texts/)
-  expect(chat).toContain('const filled = !!text.trim() || !!files?.length')
+  expect(chat).toContain('const filled = !!text.trim() || !!files?.length || !!pastes.length')
   // no greyed suggestion in the box, no Tab chip
   expect(chat).toContain('placeholder={placeholder}')
   expect(chat).not.toContain('Use suggestion')
