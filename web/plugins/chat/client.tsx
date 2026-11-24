@@ -31,6 +31,7 @@ import { ReplyPress, repliesHidden, suggestionOf, suggestionsOn } from './sugges
 import { BoxThumb, openPreview, SentThumb, sourcesOf } from './thumbs.tsx'
 import { heldStep, signOf } from './typing.ts'
 import { newsRow, type NewsRow } from './news.ts'
+import { cardsNow, stillLoading, TRIES, wantsEarlier } from './hold.ts'
 import { outOfView, setAway, useAway, type Waiting } from './away.ts'
 import { keepAtEnd, rowEdges } from './stick.ts'
 
@@ -458,6 +459,21 @@ function Messages({ thread }: { thread: Thread }) {
   const end = useRef<HTMLDivElement>(null)
   const stuck = useRef(true)
   const jump = useUI((u) => u.jump)
+  // the newest page held only task rows (SHEP-445): earlier pages, by themselves, until a few real messages are in
+  const [, bump] = useState(0)
+  const tried = opened.get(thread.chat) ?? 0
+  useEffect(() => {
+    if (!wantsEarlier(chat, tried) || loading.has(thread.chat)) return
+    const key = thread.chat
+    loading.add(key)
+    void act({ type: 'earlier', chat: key })
+      .catch(() => undefined)
+      .finally(() => {
+        loading.delete(key)
+        opened.set(key, (opened.get(key) ?? 0) + 1)
+        bump((n) => n + 1)
+      })
+  }, [chat, tried, thread.chat])
 
   // it opens at the newest message and stays there as new ones come, unless you scrolled up; scrolling up to the top
   // loads earlier ones
@@ -546,7 +562,10 @@ function Messages({ thread }: { thread: Thread }) {
   /** the last quiet "how it closed" line, so a twin right under it doesn't show */
   let lastEnded = ''
   // the app's own cards (a review, a stopped agent), each where it came up among the messages
-  const cards = registry.chatCards.flatMap((c) => c.cards(snap, thread)).sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity))
+  // none while its messages are still on their way: never a wall of task rows standing in for the chat (SHEP-445)
+  const cards = cardsNow(registry.chatCards.flatMap((c) => c.cards(snap, thread)), chat, tried).sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity))
+  // what you sent still shows at once; the rest waits with the cards
+  const held = stillLoading(chat, tried)
   const cardsUntil = (at: number) => {
     while (cards.length && (cards[0]!.at ?? Infinity) <= at) {
       const c = cards.shift()!
@@ -557,6 +576,7 @@ function Messages({ thread }: { thread: Thread }) {
   }
   const stub: Chat = chat ?? { key: thread.chat, messages: [], cli: '' }
   for (const { msg: m, pending, failed, mark } of rows) {
+    if (held && m.who !== 'you') continue
     if (m.at) cardsUntil(m.at)
     const who = m.who === 'you' ? 'me' : 'a'
     const k = keyOf(m)
@@ -633,6 +653,8 @@ function Messages({ thread }: { thread: Thread }) {
   )
 }
 const loading = new Set<string>()
+/** how many earlier pages a chat read by itself when it opened (SHEP-445), so opening it again doesn't read more */
+const opened = new Map<string, number>()
 
 /** the cards in these rows still waiting for an answer, oldest first, with the reminder's words */
 export function waitingIn(rows: Shown[], thread: Thread): Waiting[] {
