@@ -11,10 +11,11 @@ import { definePlugin, getState, notice, openTask, setUI, useSnap, useUI, type T
 import { Btn, Hd, I, IB } from '@client/ui.tsx'
 import { openMenu } from '@client/overlay.tsx'
 import { copyText } from '@client/copy.ts'
+import { appTakes, focusChat, focusTask } from '@client/commands.ts'
 import type { Chat, Task } from '@shared/types.ts'
 import { machineLabel, placeOf, taskChat, taskOf, tasksIn, tstate } from '@shared/view.ts'
 import { fitGrid, following, footTop, LINE, linesFor, shrinkTo, showKeys } from './fit.ts'
-import { spaceTermRow, switchView, taskTermRow, toggleSpaceTerm, viewRow } from './menu.ts'
+import { spaceTermRow, switchView, taskTermRow, toggleSpaceTerm, toggleTaskTerm, viewRow } from './menu.ts'
 import { connectTerminal, streamInput } from './stream.ts'
 import { linkLayer, type LinkLayer } from './linklayer.ts'
 import { opens, type Link } from './links.ts'
@@ -252,7 +253,7 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
   }
   return (
     <>
-      <div className="tw" style={fill ? { flex: 1, display: 'flex', flexDirection: 'column' } : undefined}>
+      <div className="tw" data-keys="own" style={fill ? { flex: 1, display: 'flex', flexDirection: 'column' } : undefined}>
         <div ref={box} className={fill ? 'termbox fill' : 'termbox'} data-term={stream}>
           <div ref={host} style={own ? { height: '100%' } : undefined} />
           {status && <div style={{ position: 'absolute', left: 16, top: 8, color: '#737373', font: `13px/20px ${MONO}` }}>{status}</div>}
@@ -328,8 +329,8 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
             scrolling.current.y = y
           }}
           onKeyDown={(e) => {
-            // the app's own keys pass: Ctrl+` closes the drawer, Ctrl+K searches
-            if ((e.ctrlKey || e.metaKey) && (e.key === '`' || e.key.toLowerCase() === 'k')) return
+            // the app's own few keys pass (commands that say `terminal`): Cmd+K the palette, Ctrl+` your terminal
+            if (appTakes(e.nativeEvent)) return
             if (e.nativeEvent.isComposing || e.keyCode === 229) return
             const k = toKey(e, ctrlRef.current)
             if (!k) return
@@ -458,14 +459,12 @@ export default definePlugin({
     reg.taskMenu.push({ order: 5, rows: (t, where) => (where === 'thread' ? [taskTermRow(getState().ui, t.id)] : []) })
     reg.spaceMenu.push({ order: 10, rows: (p, head) => [viewRow(getState().ui, p.chat, head)] })
     reg.taskMenu.push({ order: 10, rows: (t, where) => (where === 'thread' ? [viewRow(getState().ui, taskChat(t), true)] : []) })
-    reg.keys.push({
-      order: 20,
-      handle: (e) => {
-        if (!(e.ctrlKey && e.key === '`')) return false
-        toggleSpaceTerm()
-        return true
-      },
-    })
+    // Ctrl+` (VS Code's, Claude's) opens your own terminal, and works from inside one; Ctrl+Shift+` swaps the chat in
+    // focus for its agent's terminal
+    reg.commands.push(
+      { id: 'terminal.mine', title: 'Open your terminal', area: 'Terminal', icon: 'prompt', keys: ['Ctrl+`'], terminal: true, words: 'shell console toggle close', run: () => { const t = focusTask(); if (t && !getState().ui.phone && getState().ui.pane === 'tasks') toggleTaskTerm(t.id); else toggleSpaceTerm() } },
+      { id: 'terminal.view', title: 'View as terminal', area: 'Terminal', icon: 'viewswap', keys: ['Ctrl+Shift+`'], terminal: true, words: 'view as chat agent raw switch', run: () => { const c = focusChat(); if (c) switchView(c, !getState().ui.aterm[c]) } },
+    )
   },
 })
 

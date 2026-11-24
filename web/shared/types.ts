@@ -1534,6 +1534,9 @@ export interface Config {
   addMachine?: string
   /** machines with a real screen whose desktop can be opened (Settings › Machines) */
   desktops?: string[]
+  /** Settings › Shortcuts: the shortcuts the person changed (a command's id to its keys; empty: none), and whether
+   *  single-letter keys work; the same on every device */
+  shortcuts?: { keys: Record<string, string[]>; letters: boolean }
 }
 
 /* ---------- 3.2: screens, an agent's browser and desktop ---------- */

@@ -21,10 +21,10 @@ export function toggleTaskTerm(task: string) {
   else setUI({ tterm: !ui.tterm })
 }
 
-/** the keys that open your own terminal, shown on its row where a keyboard has them (not on a phone) */
+/** the keys that open your own terminal by default (its command, terminal.mine, may be given others) */
 export const TERM_KEYS = 'Ctrl+`'
-export const spaceTermRow = (ui: UI): MenuRow => ({ icon: 'prompt', label: 'Terminal', ...(ui.phone ? {} : { value: TERM_KEYS }), on: spaceTermOn(ui), run: toggleSpaceTerm })
-export const taskTermRow = (ui: UI, task: string): MenuRow => ({ icon: 'prompt', label: 'Terminal', on: taskTermOn(ui), run: () => toggleTaskTerm(task) })
+export const spaceTermRow = (ui: UI): MenuRow => ({ icon: 'prompt', label: 'Terminal', on: spaceTermOn(ui), cmd: 'terminal.mine', run: toggleSpaceTerm })
+export const taskTermRow = (ui: UI, task: string): MenuRow => ({ icon: 'prompt', label: 'Terminal', on: taskTermOn(ui), cmd: 'terminal.mine', run: () => toggleTaskTerm(task) })
 
 /** View as terminal / View as chat: this same chat shown as its agent's raw terminal, in the chat's place, and back. Not
  *  the Terminal row (your own shell beside the chat): a line sets it apart from what opens beside the chat, and while the
@@ -35,5 +35,5 @@ export function switchView(chat: string, on: boolean) {
 
 export function viewRow(ui: Pick<UI, 'aterm'>, chat: string, line = false): MenuRow {
   const term = !!ui.aterm[chat]
-  return { icon: 'viewswap', label: term ? 'View as chat' : 'View as terminal', ...(term ? { value: 'Terminal now' } : {}), line, run: () => switchView(chat, !term) }
+  return { icon: 'viewswap', label: term ? 'View as chat' : 'View as terminal', ...(term ? { value: 'Terminal now' } : {}), cmd: 'terminal.view', line, run: () => switchView(chat, !term) }
 }

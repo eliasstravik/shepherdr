@@ -4,6 +4,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { useUI, type MenuRow } from './kernel.ts'
 import { Btn, cx, I, Row } from './ui.tsx'
+import { KeysOf } from './kbd.tsx'
 
 interface Layer {
   id: number
@@ -26,6 +27,8 @@ interface Layer {
 }
 
 let layers: Layer[] = []
+/** a menu or dialog is open: the app's single-key shortcuts wait */
+export const hasLayer = () => layers.length > 0
 let seq = 1
 const listeners = new Set<() => void>()
 const emit = () => listeners.forEach((l) => l())
@@ -150,7 +153,7 @@ export function MenuRows({ rows, close: done, cap, top }: { rows: MenuRow[]; clo
               value={r.value}
               danger={r.danger}
               // a view it opens: a check at its end while that view is open
-              end={r.on && <I n="check" c="s16" />}
+              end={(r.on || r.cmd) && <>{r.cmd && <KeysOf id={r.cmd} />}{r.on && <I n="check" c="s16" />}</>}
               {...(r.on === undefined ? { role: 'menuitem' } : { role: 'menuitemcheckbox', 'aria-checked': r.on })}
               onClick={() => {
                 done()

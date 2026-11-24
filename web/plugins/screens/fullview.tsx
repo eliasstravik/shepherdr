@@ -189,6 +189,7 @@ export function TypeBox({ remote, armed, setArmed, onFocus, inputRef }: { remote
     <input
       ref={inputRef}
       className="ftype"
+      data-keys="own"
       aria-label="Type into the screen"
       defaultValue={SENTINEL}
       autoComplete="off"

@@ -8,6 +8,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { canStartCall, DictRow, SlotsView, TEXT_IN_CALL, useDictation } from '@client/dictate.tsx'
 import type { Sample } from '@client/meter.ts'
+import { boxPart } from '@client/commands.ts'
 import { definePlugin, getState, go, launchHref, notice, openArtifact, openSettings, openTask, setUI, tryAct, useStore, useUI, type Thread } from '@client/kernel.ts'
 import { closeTop as closeLayer } from '@client/overlay.tsx'
 import { isEverything, placeOf, taskOf } from '@shared/view.ts'
@@ -225,6 +226,12 @@ function BoxEnd({ thread, setText, filled, send }: { thread: Thread; setText: (v
 export default definePlugin({
   name: 'voice',
   setup(reg) {
+    // T starts or ends a call (no text box has the keys); Cmd+Shift+Space dictates into the box in focus, and again
+    // finishes, from inside the box too
+    reg.commands.push(
+      { id: 'voice.talk', title: 'Talk to Shepherdr', area: 'Voice', icon: 'wave', keys: ['T'], words: 'voice call speak end hang up', run: () => toggleCall() },
+      { id: 'voice.dictate', title: 'Dictate', area: 'Voice', icon: 'mic', keys: ['Mod+Shift+Space'], words: 'speech microphone voice typing', when: () => !!boxPart('[data-slot=mic]'), run: () => { const m = boxPart('[data-slot=mic]'); if (!m) return; const box = m.closest('.cbox')?.querySelector('textarea'); box?.focus(); m.click() } },
+    )
     reg.overlays.push(CallWhere)
     reg.settings.push({ name: VOICE_PAGE, icon: 'mic', order: 80, scope: 'all', View: VoiceSettings })
     reg.views.boxEnd = BoxEnd

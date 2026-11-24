@@ -7,6 +7,7 @@ import type { Snapshot } from '@shared/types.ts'
 import { downWords, isEverything, needsCount, placeDown, placeOf, spaceLabel, spaceName, taskOf, type Space } from '@shared/view.ts'
 import { getState, openSettings, registry, setUI, sideHidden, togglePane, useSnap, useUI, type Thread } from './kernel.ts'
 import { dismiss, hold, subscribe, toasts } from './toasts.ts'
+import { handleKey } from './commands.ts'
 import { List, spaceMenu } from './list.tsx'
 import { HeaderPath } from './where.tsx'
 import { closeTop, Layers } from './overlay.tsx'
@@ -222,6 +223,8 @@ export function App() {
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       for (const k of registry.keys) if (k.handle(e)) return void e.preventDefault()
+      // the commands' shortcuts (commands.ts): Cmd+K, ?, G then T…, as each may fire where the keys are
+      if (e.key !== 'Escape' && handleKey(e)) return void e.preventDefault()
       if (e.key !== 'Escape' || e.defaultPrevented) return
       if (closeTop()) return
       const u = getState().ui
