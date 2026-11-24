@@ -1,7 +1,8 @@
 // The design system's parts (ds.css), one build each: icon, buttons, rows, segments, switch, meter, header, empty
 // state. Every screen is made of these.
-import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode, type RefObject } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type ButtonHTMLAttributes, type ReactNode, type RefObject } from 'react'
 import { IC, type IconName } from './icons.ts'
+import { onPresses, press, pressOf, pressVersion, waiting, type Press as CardPress } from './pending.ts'
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
 export { cx }
@@ -31,6 +32,65 @@ export function Btn({ kind, small, className, children, ...rest }: ButtonHTMLAtt
       {children}
     </button>
   )
+}
+
+/** A card whose buttons ask the server (pending.ts): `card` names it (the same card wherever it shows), `at` its state
+ *  now, from the server's data (a new state settles a press). Its buttons are ActBtn with this. */
+export interface CardActs {
+  card: string
+  at: string
+  now: CardPress | undefined
+}
+export function useCardActs(card: string, at: string): CardActs {
+  useSyncExternalStore(onPresses, pressVersion)
+  return { card, at, now: pressOf(card, at) }
+}
+
+/** A card's button that asks the server: pressed at once, then (past a moment) a spinner and `busy` words in its place,
+ *  the card's other buttons waiting meanwhile; a no comes back as ActError under them. `run`: null for yes, else the
+ *  error words (kernel attempt()). `hold` false: a yes lets go at once (nothing on the card changes from it).
+ *  `chip`: a quick answer's round chip instead of a button. */
+export function ActBtn({ acts, id, run, busy, hold, chip, kind, small, className, children, disabled, ...rest }: Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onClick' | 'id'> & {
+  acts: CardActs
+  id: string
+  run: () => Promise<string | null>
+  busy: string
+  hold?: boolean
+  chip?: boolean
+  kind?: 'pri' | 'str' | 'danger'
+  small?: boolean
+}) {
+  const p = acts.now
+  const mine = waiting(p) && p!.which === id
+  const shown = mine && p!.shown
+  return (
+    <button
+      type="button"
+      className={cx(chip ? 'chip' : 'btn', !chip && kind, !chip && small && 's', mine && 'going', shown && 'busy', className)}
+      disabled={disabled || (waiting(p) && !mine)}
+      aria-disabled={mine || undefined}
+      aria-busy={shown || undefined}
+      onClick={() => {
+        if (!waiting(p)) void press(acts.card, acts.at, id, run, hold)
+      }}
+      {...rest}
+    >
+      {shown ? (
+        <>
+          <I n="working" c="s16" />
+          <span>{busy}</span>
+        </>
+      ) : (
+        children
+      )}
+    </button>
+  )
+}
+
+/** a card's last press the server said no to: its words, short, in red under its buttons */
+export function ActError({ acts }: { acts: CardActs }) {
+  const e = acts.now?.error
+  return e ? <span className="s c-red acterr" role="alert">{e}</span> : null
 }
 
 /** a row: of the list, of a menu, of a picker */

@@ -250,7 +250,7 @@ export function feedbackDialog() {
         const ev = snap && everything(snap)
         if (!t || !ev) return
         close()
-        if (await tryAct({ type: 'send', chat: ev.chat, text: `File this feedback as an issue on the Shepherdr GitHub repository: “${t}”`, human: true, cid: `fb-${Date.now().toString(36)}` }, 'Sent to Shepherdr in Everything')) go(ev.id)
+        if (await tryAct({ type: 'send', chat: ev.chat, text: `File this feedback as an issue on the Shepherdr GitHub repository: “${t}”`, human: true, cid: `fb-${Date.now().toString(36)}` }, 'Sent to Shepherdr in Everything', 'Sending…')) go(ev.id)
       }
       return (
         <>

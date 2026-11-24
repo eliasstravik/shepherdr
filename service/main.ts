@@ -674,6 +674,9 @@ const voiceIO: VoiceIO = {
 };
 
 
+/** The person's calls on a task that change its state (its list says so): read again once done (model.reread). */
+const TASK_ACTS = new Set(["accept", "close", "delete", "archive", "reopen", "task-resume", "task-start", "task-move", "task-rename", "schedule"]);
+
 /** One of the web app's actions (an Action, POST /api/action), as the page sends it: a voice call's acts go here too. */
 async function doAction(body: any): Promise<Response> {
   // an artifact's own actions: delete, rename, pin, restore a version, keep a proof, a note with its spot, an answer
@@ -850,9 +853,15 @@ async function doAction(body: any): Promise<Response> {
     catch (err) { return json({ ok: false, error: (err as Error).message }); }
   }
   try {
+    // a task acted on: where its list is, to read it again once it is done (below)
+    const ref = typeof body?.task === "string" ? body.task : typeof body?.chat === "string" ? body.chat.split("/")[0] : null;
+    const onTask = TASK_ACTS.has(body?.type) && ref ? compat.taskOf(ref) : null;
     const r = await act(hub, body, compat);
     // the list of spaces changed (renamed, removed): shown in the answer's snapshot, not at the next event
     if (body?.type === "rename" || body?.type === "space-remove") model.rebuild();
+    // a task on another machine: its new state read now, so the card changes with this answer, not up to 10 s later
+    // (bounded: a slow link still answers)
+    if (onTask?.machine && (r as any)?.ok !== false) await Promise.race([model.reread(onTask.machine), Bun.sleep(4000)]);
     return json(r);
   } catch (err) { return new Response((err as Error).message, { status: 400 }); }
 }
