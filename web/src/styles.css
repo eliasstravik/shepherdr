@@ -192,3 +192,16 @@ button:disabled{opacity:.5;cursor:default}
 .tlinks i{position:absolute;border-bottom:1px solid color-mix(in srgb,var(--blue) 45%,transparent)}
 .tlinks i.on{border-bottom-color:var(--blue)}
 .tlcap{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;max-width:320px}
+/* a long paste waiting in the message box: a chip with its first words and size; opened, it shows the text to read */
+.fchip.paste{max-width:100%;padding-inline-start:0}
+.fchip.paste>.pk{display:flex;align-items:center;gap:6px;min-width:0;padding-inline-start:8px;color:var(--fg)}
+.fchip.paste.on{box-shadow:inset 0 0 0 1px var(--muted)}
+.fchip.paste .pw{min-width:0;max-width:min(280px,52vw);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:12px/20px ui-monospace,SFMono-Regular,Menlo,monospace}
+.pz{flex:none;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.pview{display:grid;gap:4px;margin:8px 8px 0;padding:8px 8px 4px 12px;border-radius:8px;background:var(--canvas);box-shadow:inset 0 0 0 1px var(--line)}
+.pview pre{max-height:min(240px,36vh);margin:0;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace}
+.pbar{display:flex;align-items:center;gap:8px;font-size:var(--sec);line-height:var(--secl)}
+/* a very long message in the chat: its first lines, faded, and Show more */
+.mfold.clip{max-height:360px;overflow:hidden;mask-image:linear-gradient(to bottom,#000 70%,transparent)}
+.b .fold.mmore{margin-block:2px 4px;min-height:32px}
+.mfold .code.block{align-items:flex-start}
