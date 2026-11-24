@@ -1,5 +1,27 @@
 # Changelog
 
+## 3.2.15
+
+Shepherdr now keeps a private record of how you use it, for you and your agents, and messages you send quickly to an
+agent arrive one by one.
+
+### Personal analytics
+
+- Shepherdr keeps a record of how you use it: messages sent and how (typed, dictated, a suggested reply or Talk),
+  tasks and how long they waited, schedules, failures. Never what was said: no message text, titles or secrets.
+- It stays on your machines and is never sent to anyone, not to Shepherdr's makers either.
+- Settings › Personal analytics shows the main numbers for a day, week or month, lists every event as kept, and can
+  export, switch it off or delete it all on every machine. It is on by default; a quiet note says so once.
+- Ask your Assistant "how do I use Shepherdr, and what should I change?": it reads the record and answers. Agents use
+  `herdr-task analytics`.
+
+### Sending to agents
+
+- Two messages sent to one agent at once no longer arrive glued together as one: they go one at a time, and the chat
+  shows each one once.
+- A message Claude Code takes mid-turn no longer shows twice in the chat.
+- A chat that went quiet on screen notices a dead link and reconnects, so replies keep coming.
+
 ## 3.2.14
 
 Buttons react the moment you tap them, dictation keeps your first words, and an Assistant's answer from a machine that
