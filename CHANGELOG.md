@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.2.17
+
+Suggested replies no longer vanish when news or a message from another agent arrives.
+
+### Chat
+
+- The reply bubbles under an Assistant's message now stay when another Assistant's message, a news line or a quiet
+  turn comes in after it. They go only when you write or the Assistant really replies again, in the chat and in the
+  phone and watch feed.
+- A message from another Assistant no longer shows as if you wrote it.
+
 ## 3.2.16
 
 Agents with a command running in the background no longer look busy, and dictation no longer flashes "allow the
