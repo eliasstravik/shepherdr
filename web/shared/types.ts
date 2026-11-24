@@ -350,6 +350,9 @@ export interface Task {
   artifacts?: string[]
   /** its proof artifact's id (herdr-task ready --proof) */
   proof?: string
+  /** its last recorded review round: passed (or the agent's own round on its final commit), or changes asked; none: no
+   *  round (Review off) */
+  review?: 'passed' | 'changes'
   /** its worker's own helper agents (SHEP-54: a reviewer it started), newest last */
   subagents?: { chat: string; title: string; status: 'working' | 'needs' | 'done'; at: number; ended?: number }[]
   desc?: string

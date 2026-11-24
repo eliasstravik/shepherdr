@@ -12,6 +12,7 @@ import { REASONS } from "../core/needs.js";
 import { suggestsOfMessage, suggestionsOn } from "../web/shared/suggest.ts";
 import { GROUPS } from "../web/shared/types.ts";
 import { ALERT_FRESH_MS, MEMORY_BACK_UNDER, alertStands, needsYou, unreadChats, waitingTasks } from "../web/shared/needs-you.ts";
+import { notifyOf } from "../web/shared/alerts.ts";
 
 /** the doc's format: a change the Android app can't read as before bumps it (new fields alone don't) */
 export const GLANCE_FORMAT = 1;
@@ -54,7 +55,22 @@ export type Item = {
   /** the chat's suggested replies, in order, at most 5 (the web app's bubbles): only on an item that takes words (reply
    *  or answer.other), and only when it has some */
   suggest?: string[];
+  /** a Ready item's last review round (SHEP-447): passed, changes asked, or none (no round recorded) */
+  review?: "passed" | "changes" | "none";
+  /** a Ready item's pull request checks: green, red, running, or none (no pull request or no checks) */
+  checks?: "green" | "red" | "running" | "none";
+  /** a Ready item's proof pages */
+  proofs?: number;
 };
+/** a space a watch can send a new task to (SHEP-447): its Assistant's chat takes a `send`; last used first */
+export type Space = { id: string; name: string; machine: string | null; chat: string; used?: number; home?: true };
+/** an Assistant's chat with a message not yet read (SHEP-447): its newest words' first lines (<= CHAT_TEXT) */
+export type ChatNews = { chat: string; place: string; space: string; machine: string | null; text?: string };
+/** something worth a buzz that is no task (SHEP-447): a schedule's run that failed, a machine out of reach or out of
+ *  memory. key: stable while it lasts, a new one is a new alert; alert: notify about it (false: its space's Notify is Off) */
+export type Event = { key: string; kind: "schedule" | "machine"; title: string; body: string; at?: number; place?: string; machine?: string | null; alert: boolean; url?: string };
+/** the plan with the least left (SHEP-447): its name, its fullest window, the share used and left (0-100) */
+export type Usage = { plan: string; window: string; used: number; left: number; resets?: string };
 export type Kind = Item["kind"];
 export type Counts = Record<Kind, number>;
 /** a section of the list, in the web app's Tasks panel order (Needs you, Ready, Working, Done): its kind, its name there,
@@ -64,7 +80,9 @@ export type Group = { kind: Kind; label: string; count: number };
  *  stream sends an urgent change at once and the rest (status lines, progress) at most once a minute */
 /** unread: how many Assistants' chats have a new message not yet read (their space not muted): Chat's badge, never in
  *  Needs you (SHEP-253) */
-export type Glance = { format: number; v: string; urgent: string; at: number; counts: Counts; order: Kind[]; groups: Group[]; items: Item[]; unread: number };
+/** spaces, chats, events, usage: SHEP-447's optional additions (an older app ignores them) */
+export type Glance = { format: number; v: string; urgent: string; at: number; counts: Counts; order: Kind[]; groups: Group[]; items: Item[]; unread: number;
+  spaces: Space[]; chats: ChatNews[]; events: Event[]; usage?: Usage | null };
 
 /** the Tasks panel's statuses each kind lists (merging is Working here) */
 const KIND_OF: Partial<Record<string, Kind>> = { need: "needs", ready: "ready", merging: "working", work: "working", done: "done" };
@@ -76,6 +94,8 @@ export const KINDS: { kind: Kind; label: string }[] = GROUPS.flatMap(([s]) => KI
   .map((kind) => ({ kind, label: GROUPS.find(([s]) => s === NAMED[kind])![1] }));
 
 export const WATCH_TITLE = 30, WATCH_BODY = 80, LABEL = 24, MAX_ITEMS = 40, TEXT_MAX = 2000;
+/** SHEP-447: the most spaces listed, unread chats listed, and characters of a chat's newest words */
+export const MAX_SPACES = 30, MAX_CHATS = 10, CHAT_TEXT = 280;
 // the rule of what stands (an agent's alert while it lasts) is Needs you's own, shared with the web app
 export { ALERT_FRESH_MS, MEMORY_BACK_UNDER, alertStands };
 const clip = (s: string, n: number) => { const t = String(s ?? "").replace(/\s+/g, " ").trim(); return t.length <= n ? t : t.slice(0, n - 1).trimEnd() + "…"; };
@@ -175,12 +195,13 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now(), 
   }
   // a task in Needs you is in no other section
   const waiting = waitingTasks(waits);
+  const proofIds = new Set<string>((snap.artifacts ?? []).filter((a: any) => a?.proof).map((a: any) => a.id));
   for (const [key, a] of alerts) {
     if (!key.startsWith("ready:")) continue;
     const t = tasks.get(key.slice(6));
     if (!t || waiting.has(t.id)) continue;
     items.push({ key, kind: "ready", type: "task", tag: a.tag, title: clip(a.title, WATCH_TITLE), body: clip(a.body, WATCH_BODY), task: t.id, ...taskRow(t), ...(t.at ? { at: t.at } : {}), alert: true,
-      url: a.url ?? urlOf(t.place, t.id), ...(a.accept ? { accept: a.accept } : {}), ...textOf(t.summary ?? a.body) });
+      url: a.url ?? urlOf(t.place, t.id), ...(a.accept ? { accept: a.accept } : {}), ...textOf(t.summary ?? a.body), ...trustOf(t, proofIds) });
   }
   const start = today(now);
   for (const t of snap.tasks ?? []) {
@@ -196,14 +217,91 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now(), 
   const groups: Group[] = KINDS.map((k) => ({ ...k, count: counts[k.kind] }));
   const order = KINDS.map((k) => k.kind);
   const kept = items.slice(0, MAX_ITEMS);
-  const unread = unreadChats(snap).length;
-  const v = Bun.hash(JSON.stringify([GLANCE_FORMAT, counts, kept, unread])).toString(36);
-  return { format: GLANCE_FORMAT, v, urgent: urgentOf(counts, kept), at: now, counts, order, groups, items: kept, unread };
+  const unreadNow = unreadChats(snap);
+  const unread = unreadNow.length;
+  const spaces = spacesOf(snap);
+  const chats: ChatNews[] = unreadNow.slice(0, MAX_CHATS).map((u) => {
+    const p = places.get(u.place), m = last(u.chat);
+    const text = m && m.who !== "you" ? fullText(m.text, CHAT_TEXT) : "";
+    return { chat: u.chat, place: u.place, space: p?.name ?? "", machine: p?.machine ?? null, ...(text ? { text } : {}) };
+  });
+  const events = eventsOf(snap, now);
+  const usage = usageOf(snap);
+  const v = Bun.hash(JSON.stringify([GLANCE_FORMAT, counts, kept, unread, spaces, chats, events, usage])).toString(36);
+  return { format: GLANCE_FORMAT, v, urgent: urgentOf(counts, kept, events), at: now, counts, order, groups, items: kept, unread, spaces, chats, events, usage };
 }
 
-/** what notifies in a doc: its alerts, their words and the counts */
-const urgentOf = (counts: Counts, items: Item[]) =>
-  Bun.hash(JSON.stringify([GLANCE_FORMAT, counts, items.filter((i) => i.alert).map((i) => [i.key, i.title, i.body])])).toString(36);
+/** a Ready task's review, checks and proof (SHEP-447): what a watch needs to offer Mark as done only when nothing is red */
+function trustOf(t: any, proofIds: Set<string>): Pick<Item, "review" | "checks" | "proofs"> {
+  const ids = new Set<string>((t.artifacts ?? []).filter((id: string) => proofIds.has(id)));
+  if (t.proof) ids.add(t.proof);
+  const checks = t.pr?.checks === "passed" ? "green" : t.pr?.checks === "failed" ? "red" : t.pr?.checks === "running" ? "running" : "none";
+  return { review: t.review === "passed" || t.review === "changes" ? t.review : "none", checks, proofs: ids.size };
+}
+
+/** the spaces a new task can go to, last used first: not archived, each with its Assistant's chat. Used: its Assistant's
+ *  last change or its newest task's, to the minute (a working Assistant moves it on every step) */
+export function spacesOf(snap: any): Space[] {
+  const newest = new Map<string, number>();
+  for (const t of snap.tasks ?? []) if (t.place && typeof t.at === "number") newest.set(t.place, Math.max(newest.get(t.place) ?? 0, t.at));
+  const out: Space[] = [];
+  for (const p of snap.places ?? []) {
+    if (p.archived || !p.chat || !p.id) continue;
+    const used = Math.floor(Math.max(Number(p.changedAt) || 0, newest.get(p.id) ?? 0) / 60_000) * 60_000;
+    out.push({ id: p.id, name: p.name ?? "", machine: p.machine ?? null, chat: p.chat, ...(used ? { used } : {}), ...(p.home ? { home: true as const } : {}) });
+  }
+  // a stable sort: equal times keep the sidebar's order
+  return out.sort((a, b) => (b.used ?? 0) - (a.used ?? 0)).slice(0, MAX_SPACES);
+}
+
+/** what is worth a buzz and is no task: a schedule whose run failed (its row in Schedules says so), a machine out of reach
+ *  or short of memory (the warnings line's words, and the memory guard's own alert while it stands) */
+export function eventsOf(snap: any, now: number): Event[] {
+  const out: Event[] = [];
+  const quiet = (place?: string) => !!place && !!snap.settings && notifyOf({ settings: snap.settings }, place) === "Off";
+  const seen = new Set<string>();
+  for (const [place, list] of Object.entries((snap.automations ?? {}) as Record<string, any[]>)) for (const a of list ?? []) {
+    if (!a?.failed || !a.error) continue;
+    const key = `schedule:${a.machine ?? ""}:${a.id ?? a.name}:${a.failed}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const at = a.runs?.find((r: any) => r?.error)?.at;
+    const where = a.place ?? place;
+    out.push({ key, kind: "schedule", title: clip(`Schedule failed · ${a.name}`, WATCH_TITLE), body: clip(a.error, WATCH_BODY), ...(typeof at === "number" ? { at } : {}),
+      place: where, machine: a.machine ?? null, alert: !quiet(where), url: urlOf(where) });
+  }
+  // the memory guard's alert (herdr-task tick: agents stopped to free memory) while it stands, before the warnings line's
+  const machines: any[] = snap.machines ?? [];
+  const memory = new Set<string>();
+  for (const a of snap.alerts ?? []) {
+    if (!a.memory || a.task || !alertStands(a, snap, now)) continue;
+    const m = machines.find((x) => (a.machine ? x.machine === a.machine && !x.here : x.here));
+    if (m) memory.add(m.machine);
+    out.push({ key: `alert:${a.id}`, kind: "machine", title: clip(a.title, WATCH_TITLE), body: clip(a.body, WATCH_BODY), at: Number(a.at) || undefined, machine: m?.machine ?? a.machine ?? null, alert: true });
+  }
+  for (const w of snap.warnings ?? []) {
+    const m = /^m:(.+):(down|memory)$/.exec(String(w.id ?? ""));
+    if (w.kind !== "machine" || !m || (m[2] === "memory" && memory.has(m[1]))) continue;
+    const name = machines.find((x) => x.machine === m[1])?.name ?? m[1];
+    out.push({ key: `machine:${m[1]}:${m[2]}`, kind: "machine", title: clip(m[2] === "down" ? `Can't reach ${name}` : `${name}: memory nearly full`, WATCH_TITLE), body: clip(w.text, WATCH_BODY), machine: m[1], alert: true });
+  }
+  return out;
+}
+
+/** the plan with the least left, as Settings › Plans shows them (this machine's CLIs), or null when none is read */
+export function usageOf(snap: any): Usage | null {
+  let best: Usage | null = null;
+  for (const p of snap.config?.plans ?? []) for (const w of p.windows ?? []) {
+    const used = Math.max(0, Math.min(100, Math.round(Number(w.used) || 0)));
+    if (!best || used > best.used) best = { plan: String(p.name ?? ""), window: String(w.name ?? ""), used, left: 100 - used, ...(w.resets ? { resets: String(w.resets) } : {}) };
+  }
+  return best;
+}
+
+/** what notifies in a doc: its alerts and events, their words and the counts */
+const urgentOf = (counts: Counts, items: Item[], events: Event[] = []) =>
+  Bun.hash(JSON.stringify([GLANCE_FORMAT, counts, items.filter((i) => i.alert).map((i) => [i.key, i.title, i.body]),
+    ...(events.some((e) => e.alert) ? [events.filter((e) => e.alert).map((e) => [e.key, e.title, e.body])] : [])])).toString(36);
 
 /** how long a device's web push stays quiet after its native stream dropped (a phone reconnecting) */
 export const NATIVE_GRACE_MS = 120_000;
@@ -258,7 +356,7 @@ export class GlanceFeed {
   /** a new alert (a key the doc before didn't have) is seen on each phone-app device whose page is on screen now; the
    *  first doc after a start marks nothing (what it lists was there before) */
   private mark(doc: Glance) {
-    const now = new Set(doc.items.filter((i) => i.alert).map((i) => i.key));
+    const now = new Set([...doc.items, ...(doc.events ?? [])].filter((i) => i.alert).map((i) => i.key));
     const fresh = this.keys ? [...now].filter((k) => !this.keys!.has(k)) : [];
     this.keys = now;
     if (fresh.length) for (const d of this.native.keys()) {
@@ -276,9 +374,11 @@ export class GlanceFeed {
   /** the doc as device D's phone app hears it: what came while its page was on screen notifies nothing there */
   docFor(device: string | null | undefined, doc = this.doc): Glance | null {
     const seen = device ? this.seen.get(device) : undefined;
-    if (!doc || !seen?.size || !doc.items.some((i) => i.alert && seen.has(i.key))) return doc;
-    const items = doc.items.map((i) => (i.alert && seen.has(i.key) ? { ...i, alert: false } : i));
-    return { ...doc, items, urgent: urgentOf(doc.counts, items) };
+    const quiet = <T extends { key: string; alert?: boolean }>(i: T) => !!i.alert && seen!.has(i.key);
+    if (!doc || !seen?.size || ![...doc.items, ...(doc.events ?? [])].some(quiet)) return doc;
+    const items = doc.items.map((i) => (quiet(i) ? { ...i, alert: false } : i));
+    const events = (doc.events ?? []).map((e) => (quiet(e) ? { ...e, alert: false } : e));
+    return { ...doc, items, events, urgent: urgentOf(doc.counts, items, events) };
   }
 
   /** nothing waits to go: back where the streams already are */
