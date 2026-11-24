@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.2.13
+
+The phone and watch app can see more: your spaces, unread chats, failed schedules, machines in trouble and how much
+plan is left.
+
+### The phone and watch app
+
+- It gets your spaces, last used first, so a new task can be started by voice by sending it to a space's Assistant.
+- Ready tasks say whether their review passed, whether their checks are green and how many proof pages they have, so
+  "Mark as done" is offered only when nothing is red.
+- Chats with a message you haven't read come with the Assistant's newest words, to read or answer from the wrist.
+- A schedule that failed, a machine that can't be reached or is nearly out of memory now buzz the watch too.
+- It shows how much of your plan is left, and can open a whole chat, write in it and mark it read with a much lighter
+  call than the web page uses.
+
 ## 3.2.12
 
 A chat no longer opens as a list of task rows before its messages appear.
