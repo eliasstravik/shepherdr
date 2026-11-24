@@ -25,6 +25,7 @@ import { replyToTask, SlideHint, useSlide } from './slide.tsx'
 import { dayLabel } from './days.ts'
 import { Markdown, withLinks } from './markdown.tsx'
 import { dropped, pasted } from './paste.ts'
+import { addPaste, dropPaste, isLongMessage, isLongPaste, joined, peekOf, setPastes, sizeOf, usePastes, type Paste } from './fold.ts'
 import { touch } from './clip.ts'
 import { landLaunchShare, putAway, useLanded, watchLastChat } from './share.ts'
 import { openSendTo } from './sendto.tsx'
@@ -331,7 +332,9 @@ function Bubble({ msg, chat, thread, gap, pending, failed, mark, onReply }: { ms
             onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget && (e.preventDefault(), full(e.currentTarget))}
           >
             {msg.reply?.task ? <TaskQuote id={msg.reply.task} title={msg.reply.text} /> : msg.reply && <span className="quote">{msg.reply.text}</span>}
-            {mine ? <div className="md" style={{ whiteSpace: 'pre-wrap' }}>{withLinks(msg.text ?? '')}</div> : <Markdown text={msg.text ?? ''} mentions={msg.mentions} />}
+            <Folded text={msg.text ?? ''}>
+              {mine ? <div className="md" style={{ whiteSpace: 'pre-wrap' }}>{withLinks(msg.text ?? '')}</div> : <Markdown text={msg.text ?? ''} mentions={msg.mentions} />}
+            </Folded>
           </div>
           {registry.messageEdge.map((x, i) => <x.View key={i} msg={msg} chat={chat} />)}
         </div>
@@ -345,6 +348,74 @@ function Bubble({ msg, chat, thread, gap, pending, failed, mark, onReply }: { ms
           <span className="c-red">Not sent{failed ? ` · ${failed}` : ''}</span>
           <span className="lk" role="button" tabIndex={0} onClick={() => retry(msg.cid!)}>Retry</span>
           <span className="lk" role="button" tabIndex={0} onClick={() => dropOut(msg.cid!)}>Remove</span>
+        </div>
+      )}
+    </>
+  )
+}
+
+/** a very long message (a pasted JSON, a log) shows its first lines and Show more. All its words are on the page, so
+ *  copy and the browser's find still see them; find scrolling into the folded part opens it. */
+export function Folded({ text, children }: { text: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+  // folded again: it shows its first lines (not where it was scrolled to), its start in view
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el || open) return
+    el.scrollTop = 0
+    if (el.getBoundingClientRect().top < 0) el.scrollIntoView({ block: 'nearest' })
+  }, [open])
+  if (!isLongMessage(text)) return <>{children}</>
+  return (
+    <>
+      <div ref={box} className={cx('mfold', !open && 'clip')} onScroll={(e) => !open && e.currentTarget.scrollTop > 0 && setOpen(true)}>
+        {children}
+      </div>
+      <button
+        type="button"
+        className="fold mmore"
+        aria-expanded={open}
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen(!open)
+        }}
+        onKeyDown={(e) => e.stopPropagation()}
+      >
+        <I n={open ? 'up' : 'down'} c="s16" />
+        {open ? 'Show less' : `Show more · ${sizeOf(text)}`}
+      </button>
+    </>
+  )
+}
+
+/** the long pastes waiting in the message box: each a chip with its first words and size; a tap opens it to read,
+ *  Edit puts it back in the box as text, its x takes it out */
+function PasteChips({ pastes, onRemove, onEdit }: { pastes: Paste[]; onRemove: (id: string) => void; onEdit: (p: Paste) => void }) {
+  const [open, setOpen] = useState<string | null>(null)
+  const shown = pastes.find((p) => p.id === open)
+  return (
+    <>
+      <div className="fchips" role="list" aria-label="Pasted text to send">
+        {pastes.map((p) => (
+          <span key={p.id} role="listitem" className={cx('fchip paste', open === p.id && 'on')}>
+            <button type="button" className="pk" aria-expanded={open === p.id} aria-label={`Pasted text, ${sizeOf(p.text)}: ${open === p.id ? 'close' : 'open'}`} onClick={() => setOpen(open === p.id ? null : p.id)}>
+              <I n="paste" c="s16 c-mute" />
+              <span className="pw">{peekOf(p.text, 60)}</span>
+              <span className="pz">{sizeOf(p.text)}</span>
+            </button>
+            <button type="button" aria-label="Remove the pasted text" onClick={() => { if (open === p.id) setOpen(null); onRemove(p.id) }}><I n="x" c="s16" /></button>
+          </span>
+        ))}
+      </div>
+      {shown && (
+        <div className="pview">
+          <pre tabIndex={0} aria-label="Pasted text">{shown.text}</pre>
+          <div className="pbar">
+            <span className="pz">{sizeOf(shown.text)}</span>
+            <span className="sp" />
+            <button type="button" className="fold" onClick={() => { setOpen(null); onEdit(shown) }}><I n="pen" c="s16" />Edit in the box</button>
+          </div>
         </div>
       )}
     </>
@@ -839,6 +910,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   const snap = useSnap()!
   const chat = useChat(key)
   const [text, setText] = useDraft(key)
+  const pastes = usePastes(key)
   const files = useUI((u) => u.files[key])
   const reply = useUI((u) => u.reply[key])
   const phone = useUI((u) => u.phone)
@@ -860,11 +932,13 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   // In a voice call the box takes no text (TEXT_IN_CALL).
   const go = (wait = false) => {
     if (getState().ui.call && !TEXT_IN_CALL) return
-    const t = text.trim()
+    // a long paste folded into a chip goes as text, exactly as pasted, after what was typed
+    const t = joined(text, pastes.map((p) => p.text))
     if (!t && !files?.length) return
     if (sg) spent.add(sg.id)
     send(key, key, t, wait && busy, false, dictatedInto.delete(key) ? 'dictated' : 'typed')
     setText('')
+    setPastes(key, () => [])
     if (shared) putAway()
   }
 
@@ -883,9 +957,16 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
     box.focus()
     requestAnimationFrame(() => box.setSelectionRange(t.length, t.length))
   }
-  const filled = !!text.trim() || !!files?.length
+  const filled = !!text.trim() || !!files?.length || !!pastes.length
   const BoxEnd = has('voice') ? registry.views.boxEnd : undefined
-  const stop = busy && !text.trim() && !files?.length
+  const stop = busy && !filled
+  /** a paste's chip opened to edit: its text goes into the box, at the end of what is there */
+  const editPaste = (p: Paste) => {
+    const t = text ? `${text.replace(/\n*$/, '')}\n\n${p.text}` : p.text
+    dropPaste(key, p.id)
+    setText(t)
+    ref.current?.focus()
+  }
   return (
     <>
     {sug && <Replies texts={sug.texts} onSend={sendSug} onEdit={editSug} />}
@@ -923,6 +1004,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
           ))}
         </div>
       )}
+      {!!pastes.length && <PasteChips pastes={pastes} onRemove={(id) => dropPaste(key, id)} onEdit={editPaste} />}
       <div className="crow">
         <textarea
           ref={ref}
@@ -938,9 +1020,16 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
           onChange={(e) => setText(e.target.value)}
           onPaste={(e) => {
             const f = pasted(e.clipboardData)
-            if (!f.length) return
+            if (f.length) {
+              e.preventDefault()
+              attach(key, key, f)
+              return
+            }
+            // a long paste (a log, a JSON) folds into a chip instead of filling the box
+            const t = e.clipboardData?.getData('text/plain') ?? ''
+            if (!isLongPaste(t)) return
             e.preventDefault()
-            attach(key, key, f)
+            addPaste(key, t)
           }}
           onKeyDown={(e) => {
             // Enter sends and Shift+Enter makes a new line, the same on phone and desktop
