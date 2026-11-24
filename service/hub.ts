@@ -3,7 +3,7 @@
 import { SESSION } from "./session.ts";
 import { CoreClient } from "./hc/client.ts";
 import type { CoreNotification, CoreTerminal } from "./hc/protocol.ts";
-import { inFront, NOT_TYPED } from "../core/send.js";
+import { inFront, NOT_TYPED, restRecord, atRest } from "../core/send.js";
 
 type Listener = (e: { type: string; terminal?: string; data?: any } | { type: "reset" }) => void;
 
@@ -13,6 +13,12 @@ export class Hub {
   private listeners = new Set<Listener>();
   terminals = new Map<string, CoreTerminal>();
   up = false;
+
+  // Every record as it really is (core/send.js atRest): a Claude Code whose turn ended but whose background shell still
+  // runs says "working" ("1 shell still running"); here it is at rest, so no chat, task list, count, glance or alert
+  // takes it for a turn.
+  private all(list: CoreTerminal[]) { return new Map(list.map((t) => [t.address, restRecord(t) as CoreTerminal])); }
+  private put(t: string, v: CoreTerminal) { this.terminals.set(t, restRecord(v) as CoreTerminal); }
 
   constructor(private binary = process.env.SHEPHERDR_HC || "hc") {}
 
@@ -53,7 +59,7 @@ export class Hub {
     try {
       const d: any = await this.call("terminal.get", { terminal }, 8000);
       const got = d?.terminal ?? d;
-      if (got && typeof got === "object") k = { ...(k ?? {}), ...got };
+      if (got && typeof got === "object") k = restRecord({ ...(k ?? {}), ...got });
     } catch (e: any) {
       if (e?.kind === "not_found" || e?.kind === "finished") return "gone";
     }
@@ -67,7 +73,7 @@ export class Hub {
       try {
         const c = await CoreClient.endpoint({ binary: this.binary, ...(SESSION ? { session: SESSION } : {}) });
         const snap = await c.subscribe((n) => this.event(n));
-        this.terminals = new Map(snap.terminals.map((t) => [t.address, t]));
+        this.terminals = this.all(snap.terminals);
         c.onDisconnect(() => { if (this.client === c) { this.client = null; this.up = false; this.emit({ type: "reset" }); void this.core(); } });
         this.client = c;
         this.up = true;
@@ -85,26 +91,27 @@ export class Hub {
   private event(n: CoreNotification) {
     const p = n.params;
     if (n.method === "missed") {
-      if (Array.isArray(p.terminals)) this.terminals = new Map(p.terminals.map((t) => [t.address, t]));
+      if (Array.isArray(p.terminals)) this.terminals = this.all(p.terminals);
       this.emit({ type: "reset" });
       return;
     }
     if (n.method !== "event" || !p.type) return;
-    const t = p.terminal, data: any = p.data ?? {};
+    const t = p.terminal, raw: any = p.data ?? {};
+    const data: any = raw.status && typeof raw.status === "object" ? { ...raw, status: atRest(raw.status) } : raw;
     const old = t ? this.terminals.get(t) : undefined;
     if (t) switch (p.type) {
-      case "created": case "restarted": this.terminals.set(t, data); break;
+      case "created": case "restarted": this.put(t, data); break;
       case "removed": this.terminals.delete(t); break;
       case "labels":
-        if (data.record) this.terminals.set(t, data.record);
-        else if (old) this.terminals.set(t, { ...old, labels: data.labels });
+        if (data.record) this.put(t, data.record);
+        else if (old) this.put(t, { ...old, labels: data.labels });
         break;
-      case "finished": if (old) this.terminals.set(t, { ...old, ...data, state: "finished" }); break;
-      case "lost": if (old) this.terminals.set(t, { ...old, ...data, pid: null }); break;
-      case "turn": if (old) this.terminals.set(t, { ...old, turn: data.turn }); break;
-      case "status": case "size": case "title": case "keep": if (old) this.terminals.set(t, { ...old, ...data }); break;
+      case "finished": if (old) this.put(t, { ...old, ...data, state: "finished" }); break;
+      case "lost": if (old) this.put(t, { ...old, ...data, pid: null }); break;
+      case "turn": if (old) this.put(t, { ...old, turn: data.turn }); break;
+      case "status": case "size": case "title": case "keep": if (old) this.put(t, { ...old, ...data }); break;
       // the program in front changed (a relaunched agent, a shell's command): its log is found by this pid (SHEP-87)
-      case "foreground": if (old) this.terminals.set(t, { ...old, foreground: p.data ?? null }); break;
+      case "foreground": if (old) this.put(t, { ...old, foreground: p.data ?? null }); break;
     }
     this.emit({ type: p.type, terminal: t, data });
   }

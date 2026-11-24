@@ -421,3 +421,15 @@ test("a message Claude Code logs twice, taken mid-turn and again after a stop, s
   const answer = { parentUuid: null, isSidechain: false, type: "assistant", uuid: "a1", timestamp: at, message: { id: "m1", role: "assistant", content: [{ type: "text", text: "On it." }] } };
   expect(yours(await conv([again, answer, said("u3")]))).toEqual([words, words]);
 });
+
+// Claude Code says "working" after its turn ended while only its background work runs: at rest (atRest).
+import { atRest, BG_ONLY } from "./send.js";
+test("atRest: background work alone is done, what runs kept as bg; a real turn stays working", () => {
+  for (const m of ["1 shell still running", "2 shells still running", "1 agent still running", "1 shell and 1 agent still running", "3 monitors still running"])
+    expect(atRest({ app: "claude-code", state: "working", msg: m })).toEqual({ app: "claude-code", state: "done", bg: m });
+  for (const m of ["Running hc ls --json", "Thinking", "Waiting for 1 background agent to finish", "", undefined, "Tests still running"])
+    expect(atRest({ state: "working", msg: m }).state).toBe("working");
+  expect(atRest({ state: "blocked", msg: "1 shell still running" }).state).toBe("blocked");
+  expect(atRest(null)).toBe(null);
+  expect(BG_ONLY.test("Running 1 shell still running")).toBe(false);
+});

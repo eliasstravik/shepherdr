@@ -13,7 +13,8 @@ export interface CoreTerminal {
   argv: string[]
   cwd: string
   state: string
-  status?: { state: string; kind?: string; progress?: number; app?: string; title?: string; msg?: string } | null
+  /** bg: what still runs in the background after its turn ended (core/send.js atRest; set by the hub, not hc) */
+  status?: { state: string; kind?: string; progress?: number; app?: string; title?: string; msg?: string; bg?: string } | null
   reported?: boolean
   turn?: number
   pid?: number | null

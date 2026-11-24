@@ -217,7 +217,45 @@ def git(cwd, *args):
     return r.returncode == 0, r.stdout.strip(), err
 
 
-def hc_json(*args):
+# Claude Code keeps reporting "working" after its turn ended while background work of its own still runs, its message
+# only that work ("1 shell still running", "2 shells still running"). That is no turn: its task is at rest, a message
+# goes straight in. The same rule is Shepherdr's core/send.js BG_ONLY.
+BG_ONLY = re.compile(r"^\d+ [a-z][a-z-]*(?:(?:, | and )\d+ [a-z][a-z-]*)* still running\.?$", re.I)
+
+
+def at_rest(st):
+    """An hc status (hc get's object) as it really is: "working" that is only background work becomes "done", what
+    still runs kept as "bg" and no longer as its message. Any other status unchanged."""
+    if not isinstance(st, dict) or st.get("state") != "working" or not BG_ONLY.match(str(st.get("msg") or "").strip()):
+        return st
+    out = {k: v for k, v in st.items() if k != "msg"}
+    out.update(state="done", bg=str(st.get("msg")).strip())
+    return out
+
+
+def rest_record(k):
+    """An hc record with its status as it really is (at_rest)."""
+    return dict(k, status=at_rest(k["status"])) if isinstance(k, dict) and isinstance(k.get("status"), dict) else k
+
+
+def _rest_list(d):
+    """hc ls's terminals with their status as it really is: hc ls says only "working", so a working Claude Code is
+    read in full (hc get) for its message; at rest, its row says "done"."""
+    for i, k in enumerate((d or {}).get("terminals") or [] if isinstance(d, dict) else []):
+        st = k.get("status")
+        if (st.get("state") if isinstance(st, dict) else st) != "working" or "claude" not in str(k.get("agent") or "claude"):
+            continue
+        if isinstance(st, dict) and st.get("msg") is not None:
+            d["terminals"][i] = rest_record(k)
+            continue
+        full = rest_record(_hc_raw("get", k["address"]) or {})
+        now = full.get("status")
+        if isinstance(now, dict) and now.get("state") == "done" and now.get("bg"):
+            d["terminals"][i] = dict(k, status="done" if isinstance(st, str) else now)
+    return d
+
+
+def _hc_raw(*args):
     r = run(["hc", *args, "--json"])
     if r.returncode != 0:
         return None
@@ -225,6 +263,17 @@ def hc_json(*args):
         return json.loads(r.stdout)
     except ValueError:
         return None
+
+
+def hc_json(*args):
+    """hc's answer as JSON, None when it fails. A terminal's status as it really is (at_rest): background work alone
+    is no turn."""
+    d = _hc_raw(*args)
+    if args[:1] == ("get",):
+        return rest_record(d)
+    if args[:1] == ("ls",):
+        return _rest_list(d)
+    return d
 APP_HOME = os.path.join(HOME, ".config", "herdr-app")
 # Where a machine that only runs tasks keeps the chat's question-card hook (hooks/ask-hook.sh
 # and ask-end.py), synced there beside herdr-task (machines.manifest; launch.ask_hook runs it).

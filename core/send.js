@@ -40,6 +40,22 @@ export function inFront(k) {
   return "agent";
 }
 
+// Claude Code keeps reporting "working" after its turn ended while background work of its own still runs, its message
+// only that work ("1 shell still running", "2 shells still running"). That is no turn: nobody is writing, a message goes
+// straight in, its task and chat are at rest. The same rule is herdr-task's agents.BG_ONLY.
+export const BG_ONLY = /^\d+ [a-z][a-z-]*(?:(?:, | and )\d+ [a-z][a-z-]*)* still running\.?$/i;
+
+/** An hc status as it really is: "working" that is only background work becomes "done", what still runs kept as `bg`
+ *  ("1 shell still running") and no longer as its message. Any other status unchanged. */
+export function atRest(st) {
+  if (!st || typeof st !== "object" || st.state !== "working" || !BG_ONLY.test(String(st.msg ?? "").trim())) return st;
+  const { msg, ...rest } = st;
+  return { ...rest, state: "done", bg: String(msg).trim() };
+}
+
+/** An hc terminal record with its status as it really is (atRest). */
+export const restRecord = (k) => (k && typeof k === "object" && k.status && typeof k.status === "object" ? { ...k, status: atRest(k.status) } : k);
+
 // Why nothing was typed, by what is in front (hc's refusal kind "no_agent").
 export const NOT_TYPED = {
   shell: "Its agent isn't running: its terminal is a plain shell now, so nothing was typed into it. Restart it, then send this again.",

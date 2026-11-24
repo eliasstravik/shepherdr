@@ -729,6 +729,14 @@ export function WorkingSign({ chat, thread }: { chat: Chat | undefined; thread?:
   )
 }
 
+/** Its turn is over but work of its own still runs in the background (a watcher, a server): one quiet line under its
+ *  last message, "1 background command running". No dots, no Stop: nobody is writing. Once that work wakes it, the
+ *  working sign takes over as usual. */
+export function BackgroundNote({ chat }: { chat: Chat | undefined }) {
+  if (!chat?.bgNote || chat.working || signOf(chat)) return null
+  return <p className="bgnote" role="status">{chat.bgNote}</p>
+}
+
 /** a tap on it takes no focus: the box's focus (and a phone's keyboard) stays as it was */
 export const keepFocus = (e: { preventDefault: () => void }) => e.preventDefault()
 
@@ -1022,7 +1030,7 @@ export default definePlugin({
     void landLaunchShare()
     reg.views.messages = Messages
     reg.views.box = Box
-    reg.chatTail.push({ order: 15, View: StoppedChat }, { order: 95, View: WorkingSign })
+    reg.chatTail.push({ order: 15, View: StoppedChat }, { order: 95, View: WorkingSign }, { order: 96, View: BackgroundNote })
     reg.aboveBox.push({ order: 20, View: AwayCard })
   },
 })
