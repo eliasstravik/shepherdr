@@ -806,6 +806,9 @@ export class Compat {
     const cards = messages.some((m) => (m.question && !m.question.closed) || m.secret);
     const under = st === "working" ? { doing: CV.doingWords(reader.conv, report) ?? "", ...(reader.conv?.waiting ? { waits: true } : {}) }
       : st === "blocked" && !cards ? { blocked: report.replace(/^answer:\s*/i, "") } : {};
+    // its turn is over but work of its own still runs in the background (core/send.js atRest): a quiet note under its
+    // last message, never the typing sign
+    const bgNote = st === "done" || st === "idle" ? CV.backgroundWords(t?.status?.bg) : null;
     // a note under the conversation (a lost session being started again: service/watch.ts)
     const note = addr ? watch?.notes?.get(addr)?.text : undefined;
     // instead of the conversation, the window's notice: still opening, not a chat agent, its log not found, ended
@@ -815,6 +818,6 @@ export class Compat {
       : reader.state === "none" || reader.state === "missing" ? ((t && t.state !== "live") || !t ? "ended" : kind ? "none" : "unsupported")
       : !reader.pinned && (!t || t.state !== "live") && !items.length ? "ended" : null;
     const failed = failedOf(addr);
-    return { key, messages, ...(failed.length ? { failed } : {}), ...head, ...under, ...(note ? { note } : {}), ...(notice ? { notice } : {}), ...(agent ? { agent } : {}), ...(jobs.length ? { jobs } : {}), working: st === "working", cli: reader.kind === "codex" ? "codex" : "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
+    return { key, messages, ...(failed.length ? { failed } : {}), ...head, ...under, ...(note ? { note } : {}), ...(bgNote && !notice ? { bgNote } : {}), ...(notice ? { notice } : {}), ...(agent ? { agent } : {}), ...(jobs.length ? { jobs } : {}), working: st === "working", cli: reader.kind === "codex" ? "codex" : "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
   }
 }

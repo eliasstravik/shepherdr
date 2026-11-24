@@ -928,6 +928,9 @@ export interface Chat {
   blocked?: string
   /** a note at the conversation's end (a lost session being started again) */
   note?: string
+  /** its turn is over but work of its own still runs in the background ("1 background command running"): a quiet
+   *  line under its last message, no dots and no Stop */
+  bgNote?: string
   /** a space's Assistant that hasn't started (SHEP-263): nothing said yet, and `agent` is what its first message
    *  starts it on (its model menu changes that choice, nothing runs yet) */
   fresh?: boolean

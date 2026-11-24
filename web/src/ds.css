@@ -478,6 +478,8 @@ html,body{height:100%}body{padding:0;overflow:hidden}
 .wdots i{flex:none;width:7px;height:7px;border-radius:50%;background:currentColor;animation:rise 1.2s ease-in-out infinite}
 .wdots i:nth-child(2){animation-delay:.15s}.wdots i:nth-child(3){animation-delay:.3s}
 .wstep{min-width:0;padding-top:8px;overflow:hidden;overflow-wrap:anywhere;text-wrap:pretty;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;line-clamp:3;animation:fade .2s ease-out both}
+/* a quiet line under the last message while only background work of its own runs: no motion, nothing to press */
+.bgnote{margin:8px 0 0;max-width:min(82%,560px);color:var(--muted);font-size:14px;line-height:20px;text-wrap:pretty}
 @keyframes wsin{from{opacity:0;transform:scale(.85)}}
 @keyframes rise{0%,60%,100%{transform:none;opacity:.45}30%{transform:translateY(-3px);opacity:1}}
 @media(prefers-reduced-motion:reduce){.i.turn{animation:calm 2.4s ease-in-out infinite}.wsign{animation-name:fade}.wdots i{animation:calm 2.4s ease-in-out infinite}.wdots i:nth-child(2){animation-delay:.4s}.wdots i:nth-child(3){animation-delay:.8s}.sheet.in,.drawer.in,.pop.in,.dlg.in,.win.in,.lbox.in{animation:none}.tg i{transition:none}}

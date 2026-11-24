@@ -491,3 +491,34 @@ test("a big call's step ends with its result, and none outlives the turn", async
   expect(d.open.size).toBe(0);
   expect(d.doing).toBe("Thinking");
 });
+
+// A message row only from a real send: a command that merely holds a send line (a watcher that replies once a device
+// turns up) is an ordinary command, never "Message to … · Delivered".
+test("sendsOf leaves out a send that may never run: in a loop's or an if's body, a function, or put in the background", () => {
+  const watcher = "until hc ls | grep -q watch; do sleep 30; done\nherdr-task reply 7 \"same map as phone\"";
+  // after the loop it runs only once the loop ends: still this call's own, as before (the call waits for it)
+  expect(sendsOf(watcher)).toEqual([{ to: "7", text: "same map as phone", how: "reply" }]);
+  expect(sendsOf("while true; do\n  if hc ls | grep -q watch; then\n    herdr-task reply 7 \"same map as phone\"\n    break\n  fi\n  sleep 30\ndone")).toEqual([]);
+  expect(sendsOf("if [ -e /tmp/x ]; then herdr-task reply 7 \"go\"; fi")).toEqual([]);
+  expect(sendsOf("for d in a b; do hc send t1 \"$d\"; done")).toEqual([]);
+  expect(sendsOf("notify() {\n  hc send t1 \"found it\"\n}\necho waiting")).toEqual([]);
+  expect(sendsOf("case $x in\n  y) hc send t1 \"yes\";;\nesac")).toEqual([]);
+  expect(sendsOf("hc send t1 \"later\" &")).toEqual([]);
+  // a condition runs; what follows a block is the call's own again
+  expect(sendsOf("if hc send t1 \"now\"; then echo ok; fi\nhc send t2 \"after\"")).toEqual([{ to: "t1", text: "now", how: "hc" }, { to: "t2", text: "after", how: "hc" }]);
+  expect(sendsOf("hc send t1 \"a\" && hc send t2 \"b\"")).toEqual([{ to: "t1", text: "a", how: "hc" }, { to: "t2", text: "b", how: "hc" }]);
+});
+
+test("a command run in the background is no message, whatever send line it holds; it shows as a command", async () => {
+  const bg = { type: "tool_use", id: "b1", name: "Bash", input: { command: "while ! hc ls | grep -q watch; do sleep 30; done; herdr-task reply 7 \"same map as phone\"", run_in_background: true }, caller: { type: "direct" } };
+  const c = await read([person, reply("m1", [bg]), result("b1", "Command running in background with ID: b9. Output is being written to: /tmp/b9.output.")]);
+  expect(c.items.filter((x) => x.kind === "sent")).toEqual([]);
+  expect(c.items.find((x) => x.kind === "tools").steps.map((s) => [s.id, !!s.relay])).toEqual([["b1", false]]);
+});
+
+test("a send whose command went on in the background before it ended takes its row back: not delivered, not known", async () => {
+  const c = await read([person, reply("m1", [bash("c1", 'sleep 900; herdr-task reply 7 "same map as phone"')]),
+    result("c1", "Command did not complete within its 120s timeout and was moved to the background (ID: b5). Output is being written to: /tmp/b5.output.")]);
+  expect(c.items.filter((x) => x.kind === "sent")).toEqual([]);
+  expect(c.items.find((x) => x.kind === "tools").steps.map((s) => [s.id, !!s.relay])).toEqual([["c1", false]]);
+});

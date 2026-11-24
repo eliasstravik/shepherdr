@@ -254,3 +254,11 @@ test("bgGroups: one row per kind, subagents first, the newest and their shared s
   expect(bgGroups([{ kind: "child", at: 1, status: "done" }, { kind: "child", at: 2, status: "needs" }, { kind: "child", at: 3, status: "working" }])[0].status).toBe("needs");
   expect(bgGroups([{ kind: "child", at: 1, status: "done" }, { kind: "child", at: 2, status: "done" }])[0].status).toBe("done");
 });
+
+import { backgroundWords } from "./chat-view.js";
+test("what still runs after its turn, in the chat's words", () => {
+  expect(backgroundWords("1 shell still running")).toBe("1 background command running");
+  expect(backgroundWords("2 shells still running")).toBe("2 background commands running");
+  expect(backgroundWords("1 shell and 1 agent still running")).toBe("1 background command and 1 background helper running");
+  expect(backgroundWords(undefined)).toBe(null);
+});

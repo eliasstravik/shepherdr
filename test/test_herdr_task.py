@@ -10289,3 +10289,42 @@ class RepoSettings(unittest.TestCase):
                       self.settings.settings_block(store, t, argv=["claude"], sources=True))
         rows = {x["label"]: x for x in self.settings.task_settings(store, t, argv=["claude"])}
         self.assertEqual((rows["Merge"]["from"], rows["Review"]["from"]), ("repo", "default"))
+
+
+class BackgroundWorkIsNoTurn(unittest.TestCase):
+    """A Claude Code whose turn ended but whose background shell still runs says "working · 1 shell still running":
+    herdr-task reads it at rest (base.at_rest), so its task isn't Working by that alone (own_work decides) and idle
+    or done detection sees it quiet."""
+
+    def setUp(self):
+        sys.path.insert(0, BIN)
+        import herdr_task.base as base
+        self.base = base
+
+    def test_at_rest(self):
+        at_rest = self.base.at_rest
+        for m in ("1 shell still running", "2 shells still running", "1 shell and 1 agent still running"):
+            self.assertEqual(at_rest({"app": "claude-code", "state": "working", "msg": m}), {"app": "claude-code", "state": "done", "bg": m})
+        for m in ("Running hc ls", "Waiting for 1 background agent to finish", None):
+            self.assertEqual(at_rest({"state": "working", "msg": m})["state"], "working")
+        self.assertEqual(at_rest({"state": "blocked", "msg": "1 shell still running"})["state"], "blocked")
+        self.assertEqual(at_rest("working"), "working")
+
+    def test_hc_json(self):
+        from unittest import mock
+        records = {"t1": {"address": "t1", "state": "live", "status": {"app": "claude-code", "state": "working", "msg": "1 shell still running"}},
+                   "t2": {"address": "t2", "state": "live", "status": {"app": "claude-code", "state": "working", "msg": "Running npm test"}}}
+        ls = {"terminals": [{"address": "t1", "agent": "claude-code", "state": "live", "status": "working"},
+                            {"address": "t2", "agent": "claude-code", "state": "live", "status": "working"},
+                            {"address": "t3", "agent": "codex", "state": "live", "status": "working"}]}
+        asked = []
+
+        def raw(*args):
+            asked.append(args)
+            return json.loads(json.dumps(ls)) if args[0] == "ls" else json.loads(json.dumps(records.get(args[1])))
+        with mock.patch.object(self.base, "_hc_raw", raw):
+            self.assertEqual([k["status"] for k in self.base.hc_json("ls")["terminals"]], ["done", "working", "working"])
+            self.assertEqual(self.base.hc_json("get", "t1")["status"], {"app": "claude-code", "state": "done", "bg": "1 shell still running"})
+            self.assertEqual(self.base.hc_json("get", "t2")["status"]["state"], "working")
+        # only the working Claude Codes are read in full, never the Codex one
+        self.assertNotIn(("get", "t3"), asked)

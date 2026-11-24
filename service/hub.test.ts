@@ -61,3 +61,23 @@ test("its agent in front (and fish running it, #780): the words go", async () =>
     expect(calls.map(([m]) => m)).toEqual(["terminal.get", "terminal.send"]);
   }
 });
+
+// A Claude Code whose turn ended but whose background shell still runs says "working · 1 shell still running": the
+// service keeps it at rest (core/send.js atRest), so no chat shows dots, no task or count says Working, no send steers.
+test("background work alone is no turn: every record the hub keeps says done, with what still runs as bg", () => {
+  const hub = new Hub("hc");
+  const ev = (type: string, terminal: string, data: any) => (hub as any).event({ method: "event", params: { type, terminal, data } });
+  const bg = { app: "claude-code", state: "working", msg: "1 shell still running" };
+  (hub as any).event({ method: "missed", params: { terminals: [{ address: "t1", state: "live", status: bg }, { address: "t2", state: "live", status: { state: "working", msg: "Running npm test" } }] } });
+  expect(hub.terminals.get("t1")?.status).toEqual({ app: "claude-code", state: "done", bg: "1 shell still running" } as any);
+  expect(hub.terminals.get("t2")?.status?.state).toBe("working");
+  // its background work wakes it: a real turn, working again
+  ev("status", "t1", { status: { app: "claude-code", state: "working", msg: "Reading the watcher's output" }, status_ms: 2 });
+  expect(hub.terminals.get("t1")?.status?.state).toBe("working");
+  ev("status", "t1", { status: { app: "claude-code", state: "working", msg: "2 shells still running" }, status_ms: 3 });
+  expect(hub.terminals.get("t1")?.status).toEqual({ app: "claude-code", state: "done", bg: "2 shells still running" } as any);
+  ev("created", "t3", { address: "t3", state: "live", status: bg });
+  expect(hub.terminals.get("t3")?.status?.state).toBe("done");
+  ev("labels", "t3", { record: { address: "t3", state: "live", labels: { a: "b" }, status: bg } });
+  expect(hub.terminals.get("t3")?.status?.state).toBe("done");
+});

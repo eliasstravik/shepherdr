@@ -99,6 +99,18 @@ export function reportMsg(t) {
 }
 // The working line's words: the call its log has open now, else its status report (not a question), else null
 // (the line says Working).
+// What still runs after its turn ended, as Claude Code's status said it ("1 shell still running": core/send.js atRest),
+// in the chat's own words: "1 background command running". null when nothing does.
+const BG_NAMES = { shell: "background command", agent: "background helper", monitor: "background watcher", task: "background task" };
+export function backgroundWords(bg) {
+  const parts = [...String(bg ?? "").matchAll(/(\d+) ([a-z][a-z-]*)/gi)].map(([, n, w]) => {
+    const one = w.toLowerCase().replace(/s$/, "");
+    const name = BG_NAMES[one] ?? `background ${one}`;
+    return `${n} ${name}${Number(n) === 1 ? "" : "s"}`;
+  });
+  return parts.length ? `${parts.join(" and ")} running` : null;
+}
+
 export const doingWords = (conv, report) => conv?.doing ?? (report && !/^answer:/i.test(report) ? report : null);
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

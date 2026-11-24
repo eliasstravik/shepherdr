@@ -152,3 +152,15 @@ test('the step stays while it works: the last one held until the next, gone with
   expect(at({ working: false }, msgs({ who: 'you', text: 'go' }, { text: 'Done.' }))).toBe('')
   expect(at({ working: true, live: turn() })).toContain('<span class="wstep">Thinking</span>')
 })
+
+// A finished turn with only background work left running: no dots, no Stop; a quiet note instead.
+const { BackgroundNote } = await import('./client.tsx')
+test('background work alone: no working sign, a quiet still note with no button', () => {
+  const c = chat({ working: false, bgNote: '1 background command running' }, msgs({ who: 'you', text: 'go' }, { text: 'Watching for the watch.' }))
+  expect(draw(c)).toBe('')
+  const note = renderToStaticMarkup(<BackgroundNote chat={c} />)
+  expect(note).toBe('<p class="bgnote" role="status">1 background command running</p>')
+  // the work wakes it: the dots are back and the note gives way
+  expect(renderToStaticMarkup(<BackgroundNote chat={{ ...c, working: true }} />)).toBe('')
+  expect(rule('.bgnote')).not.toContain('animation')
+})
