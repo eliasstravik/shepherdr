@@ -164,7 +164,7 @@ function General() {
       const said = await f()
       if (said) notice(said)
     } catch (e) {
-      notice(e instanceof Error ? e.message : 'That did not work. Try again.')
+      notice(e instanceof Error ? e.message : 'That did not work. Try again.', { tone: 'error' })
     }
     await read()
   }

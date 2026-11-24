@@ -159,7 +159,7 @@ export function newGroupDialog(machine?: string, then?: (id: string) => void) {
         if (!name.trim()) return
         close()
         const r = await act<{ ok?: boolean; id?: string; error?: string }>({ type: 'section', op: 'new', name: name.trim(), machine: m }).catch(() => ({ ok: false, error: 'That did not work.' }) as { ok?: boolean; id?: string; error?: string })
-        if (r.ok === false) return notice(r.error || 'That did not work.')
+        if (r.ok === false) return notice(r.error || 'That did not work.', { tone: 'error' })
         if (r.id) then?.(r.id)
       }
       return (
@@ -211,7 +211,7 @@ export function newSpaceDialog(machine?: string, pre?: { name: string; folder: s
           if (had || j.warning) notice(had ? `${had} already works in that folder, so it's open now.` : j.warning!, 10000)
         } catch (e) {
           setBusy(false)
-          notice(e instanceof Error ? e.message : 'The space could not be made.')
+          notice(e instanceof Error ? e.message : 'The space could not be made.', { tone: 'error' })
         }
       }
       return (

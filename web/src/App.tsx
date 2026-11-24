@@ -5,7 +5,8 @@
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import type { Snapshot } from '@shared/types.ts'
 import { downWords, isEverything, needsCount, placeDown, placeOf, spaceLabel, spaceName, taskOf, type Space } from '@shared/view.ts'
-import { getState, noticeIsBusy, openSettings, registry, setUI, sideHidden, togglePane, useNotice, useSnap, useUI, type Thread } from './kernel.ts'
+import { getState, openSettings, registry, setUI, sideHidden, togglePane, useSnap, useUI, type Thread } from './kernel.ts'
+import { dismiss, hold, subscribe, toasts } from './toasts.ts'
 import { List, spaceMenu } from './list.tsx'
 import { HeaderPath } from './where.tsx'
 import { closeTop, Layers } from './overlay.tsx'
@@ -165,11 +166,42 @@ function Bar({ snap }: { snap: Snapshot }) {
   )
 }
 
-function Toast() {
-  const text = useNotice()
-  // something still going (a menu's action that takes a while): the Working ring beside its words
-  const busy = noticeIsBusy()
-  return text ? <div className={busy ? 'toast busy' : 'toast'} role="status">{busy && <I n="working" c="s16" />}{text}</div> : null
+/** the toasts, stacked at the top, clear of the message box. Hovering or focusing them stops their time; each has a
+ *  close button (Escape closes the focused one). The list is always there, so screen readers hear each new one; an
+ *  error is said at once. */
+function Toasts() {
+  const list = useSyncExternalStore(subscribe, toasts, toasts)
+  const close = (id: number, e: { currentTarget: HTMLElement }) => {
+    // the focus goes to the next one's close button, not lost to the page
+    const li = e.currentTarget.closest('li')
+    const to = (li?.nextElementSibling ?? li?.previousElementSibling)?.querySelector<HTMLElement>('button')
+    const had = li?.contains(document.activeElement)
+    dismiss(id)
+    if (had) to ? to.focus() : hold('focus', false)
+  }
+  return (
+    <ol
+      className="toasts"
+      role="list"
+      aria-label="Notifications"
+      aria-live="polite"
+      onFocus={() => hold('focus', true)}
+      onBlur={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && hold('focus', false)}
+    >
+      {list.map((t) => (
+        <li key={t.id} className={cx('toast', t.busy && 'busy', t.tone === 'error' && 'err')} role={t.tone === 'error' ? 'alert' : undefined} onKeyDown={(e) => e.key === 'Escape' && (e.stopPropagation(), close(t.id, e))}
+          onPointerEnter={(e) => e.pointerType === 'mouse' && hold('hover', true)}
+          onPointerLeave={() => hold('hover', false)}
+        >
+          {t.busy ? <I n="working" c="s16" /> : t.tone === 'error' ? <I n="warn" c="s16 c-red" /> : null}
+          <span className="tt">{t.text}</span>
+          <button type="button" className="tx" aria-label="Dismiss" onClick={(e) => close(t.id, e)}>
+            <I n="x" c="s16" />
+          </button>
+        </li>
+      ))}
+    </ol>
+  )
 }
 
 /** a finger is the main pointer (a phone or a tablet): the app takes its touch sizes (SHEP-317) */
@@ -252,7 +284,7 @@ export function App() {
           <Layers />
           {registry.overlays.map((V, i) => <V key={i} />)}
         </div>
-        <Toast />
+        <Toasts />
       </div>
     </div>
   )
