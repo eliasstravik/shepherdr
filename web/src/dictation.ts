@@ -166,6 +166,19 @@ export function wholeLive(liveSecs: number, recSecs: number, slack = LIVE_SLACK)
   return liveSecs > 0 && liveSecs >= recSecs - slack
 }
 
+/** Elias: "the line should only show once things actually register". A phone hands the page its microphone before
+ *  real sound flows (its audio input still starting, the page's audio still waking up): the samples are exact zeros,
+ *  and anything said then is lost. A real microphone is never exactly silent, so the first sample that isn't zero is
+ *  the moment speech is really kept: only then does the wave (the signal to start talking) show. */
+export function sounds(samples: ArrayLike<number>): boolean {
+  for (let i = 0; i < samples.length; i++) if (samples[i] !== 0) return true
+  return false
+}
+
+/** how long the getting-ready state waits for that first sound before it shows the wave anyway (a muted microphone
+ *  gives only zeros; Done then says nothing was heard) */
+export const SOUND_WAIT = 4000
+
 /** how long the microphone stays on after Done, so the last word said as Done is tapped still gets in */
 export const TAIL_KEEP = 250
 
@@ -264,7 +277,7 @@ async function liveTokenFor(): Promise<string | null> {
 /** Starts listening. `end` gets what was heard when it finishes, or null when cancelled; `fail` why it didn't work. Shepherdr 3: the phone records,
  *  the service has ElevenLabs write it down (the window's dictation, the same words on every phone browser).
  *  `timing` (tests, the proof) hears each step after Done: 'live' or 'upload' and how many ms Done to words took.
- *  Phases: 'asking' only when the browser really asks for the microphone (askWhen), 'on' from the first audio,
+ *  Phases: 'asking' only when the browser really asks for the microphone (askWhen), 'on' from the first real sound (sounds),
  *  'writing' after Done. Before 'on' the surface is neutral: starting. */
 export type Phase = 'asking' | 'on' | 'writing'
 
@@ -285,7 +298,18 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
   // the microphone's 16 kHz samples not sent yet (sent about every 100 ms, and the rest at Done); tapped: all of them
   let pending: Uint8Array[] = [], size = 0, tapped = 0
   // when the recording started (the live words must cover it all: wholeLive), and whether the microphone is still on
-  let recAt = 0, hearing = true
+  // heardAt: the first real sound (the wave shows from then: the person speaks only after it)
+  let recAt = 0, heardAt = 0, hearing = true
+  let poll: ReturnType<typeof setInterval> | null = null, giveUp: ReturnType<typeof setTimeout> | null = null
+  /** sound really flows: the wave shows, and from now on every word is kept */
+  const soundCame = () => {
+    if (heardAt || state !== 'on') return
+    heardAt = performance.now()
+    if (poll) clearInterval(poll)
+    if (giveUp) clearTimeout(giveUp)
+    poll = giveUp = null
+    phase('on')
+  }
   const flush = () => {
     if (!size) return
     const all = new Uint8Array(size); let at = 0
@@ -314,6 +338,9 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
   // the microphone and the wave stop as soon as you're done: only the writing is left
   const quiet = () => {
     hearing = false
+    if (poll) clearInterval(poll)
+    if (giveUp) clearTimeout(giveUp)
+    poll = giveUp = null
     mic?.getTracks().forEach((t) => t.stop())
     ctx?.close().catch(() => undefined)
     ctx = null
@@ -365,13 +392,14 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
       if (state !== 'on') return
       state = 'finishing'
       // Done before the microphone started (its permission still open): nothing to write down, and say why
-      if (!rec || rec.state === 'inactive') return failed(mic ? SAY.empty : SAY.notYet)
+      if (!rec || rec.state === 'inactive' || !heardAt) return failed(mic ? SAY.empty : SAY.notYet)
       phase('writing')
       const done = performance.now()
       // the microphone hears a moment more (the last word as Done is tapped), then stops
       setTimeout(() => {
         if (over()) return
-        const recSecs = (performance.now() - recAt) / 1000
+        // from the first sound: nothing can be said before the wave shows
+        const recSecs = (performance.now() - (heardAt || recAt)) / 1000
         const audio = recording()
         flush()
         quiet()
@@ -412,10 +440,14 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
       rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
       rec.start(1000)
       recAt = performance.now()
-      phase('on')
-      // the recording runs whatever the audio below does: it is what Done uploads when the live words can't come
+      // the recording runs whatever the audio below does: it is what Done uploads when the live words can't come.
+      // The wave waits for the first real sound (sounds): the meter or the live words' tap, whichever hears it first
+      giveUp = setTimeout(soundCame, SOUND_WAIT)
       const c = ctx
-      if (!c) return live?.close()
+      if (!c) {
+        soundCame()
+        return live?.close()
+      }
       try {
         const src = c.createMediaStreamSource(stream)
         level = meter(c)
@@ -426,6 +458,12 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
         const hush = c.createGain()
         hush.gain.value = 0
         level.connect(hush).connect(c.destination)
+        const meterNode = level
+        const buf = new Float32Array(meterNode.fftSize)
+        poll = setInterval(() => {
+          meterNode.getFloatTimeDomainData(buf)
+          if (sounds(buf)) soundCame()
+        }, 20)
         // the live words: the microphone's samples, 16 kHz, to the socket as they come (kept until it opens), the tap
         // joined before the audio is made to run, so it hears from the first sample the audio gives; a module that
         // fails or takes too long only drops the live words (Done uploads the recording)
@@ -436,6 +474,7 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
           const down = to16k(c.sampleRate)
           tap.port.onmessage = (e) => {
             if (!hearing || over()) return
+            if (!heardAt && sounds(e.data as Float32Array)) soundCame()
             const pcm: Uint8Array = down(e.data as Float32Array)
             pending.push(pcm); size += pcm.length; tapped += pcm.length
             if (size >= 3200) flush()
@@ -448,6 +487,8 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
         } else live?.close()
         await running(c)
       } catch {
+        // no meter to hear the first sound with: the wave shows now, as before
+        if (!poll) soundCame()
         // the wave still moves when only the live words failed
         void running(c)
         // no wave or live words (a failed worklet): Done uploads the recording

@@ -39,9 +39,10 @@
 .dwave.off{color:var(--muted)}
 .dtime{display:inline-flex;align-items:center;gap:6px;min-width:5ch;color:var(--sub);font-size:var(--sec);line-height:var(--secl);font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
 .ddot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.dready .ddot{animation:calm 1.2s ease-in-out infinite}
 .ddot.rec{background:var(--red);animation:calm 1.6s ease-in-out infinite}
 .dspin{width:var(--ic);height:var(--ic);border:2px solid currentColor;border-right-color:transparent;border-radius:50%;flex:none;animation:turn .8s linear infinite}
 
 .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 
-@media(prefers-reduced-motion:reduce){.vsi,.dsurf,.ddot.rec{animation:none}.dspin{animation:calm 2s ease-in-out infinite}}
+@media(prefers-reduced-motion:reduce){.vsi,.dsurf,.ddot.rec,.dready .ddot{animation:none}.dspin{animation:calm 2s ease-in-out infinite}}

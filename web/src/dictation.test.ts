@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { afterDone, askWhen, heard, liveSession, micError, MIC, SAY, wholeLive } from './dictation.ts'
+import { afterDone, askWhen, dictate, heard, liveSession, micError, MIC, SAY, sounds, SOUND_WAIT, wholeLive, type Phase } from './dictation.ts'
 
 // SHEP-10: a failed transcription used to come back as no words at all, so nothing landed in the box and nothing said why
 describe('what the service answered to a recording', () => {
@@ -221,5 +221,94 @@ describe('the opening words are never lost', () => {
   test('the microphone isn’t gated: no noise suppression or echo cancellation to clip the first syllables', () => {
     expect(MIC.noiseSuppression).toBe(false)
     expect(MIC.echoCancellation).toBe(false)
+  })
+})
+
+// "it looks like the animation starts, but then it swallows the first few words". The wave showed as the phone handed
+// over its microphone, while the samples were still exact zeros (its audio input starting): what was said then was
+// lost. Now the wave (the signal to start talking) waits for the first real sound.
+describe('the wave shows only once the microphone really hears', () => {
+  test('a microphone still starting gives exact zeros; any real sound, however quiet, is not zero', () => {
+    expect(sounds(new Float32Array(512))).toBe(false)
+    const hum = new Float32Array(512)
+    hum[300] = 0.00003
+    expect(sounds(hum)).toBe(true)
+  })
+
+  /** a phone's microphone: zeros until `talk()`, then sound; MediaRecorder and the audio graph faked */
+  function phone() {
+    let live = false
+    const g = globalThis as any
+    const saved = { md: g.navigator?.mediaDevices, MR: g.MediaRecorder, AC: g.AudioContext, WS: g.WebSocket, perm: g.navigator?.permissions }
+    const node = () => ({ connect: (n: any) => n ?? node(), gain: { value: 1 } })
+    class AC {
+      state = 'running'
+      sampleRate = 48000
+      destination = node()
+      resume = async () => undefined
+      close = async () => undefined
+      createMediaStreamSource = () => node()
+      createGain = () => node()
+      createAnalyser = () => ({ ...node(), fftSize: 512, getFloatTimeDomainData: (b: Float32Array) => b.fill(live ? 0.01 : 0) })
+    }
+    class MR {
+      state = 'inactive'
+      mimeType = 'audio/webm'
+      ondataavailable: any = null
+      onstop: any = null
+      start() { this.state = 'recording' }
+      stop() { this.state = 'inactive'; this.onstop?.() }
+    }
+    const track = { stop: () => undefined }
+    Object.defineProperty(g.navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => ({ getTracks: () => [track] }) } })
+    Object.defineProperty(g.navigator, 'permissions', { configurable: true, value: { query: async () => ({ state: 'granted' }) } })
+    g.MediaRecorder = MR
+    g.AudioContext = AC
+    g.WebSocket = undefined
+    return {
+      talk: () => { live = true },
+      restore: () => {
+        Object.defineProperty(g.navigator, 'mediaDevices', { configurable: true, value: saved.md })
+        Object.defineProperty(g.navigator, 'permissions', { configurable: true, value: saved.perm })
+        g.MediaRecorder = saved.MR
+        g.AudioContext = saved.AC
+        g.WebSocket = saved.WS
+      },
+    }
+  }
+  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+  test('the microphone handed over but still silent: no wave; the first real sound shows it', async () => {
+    const p = phone()
+    const phases: Phase[] = []
+    try {
+      const d = dictate(() => undefined, () => undefined, undefined, (x) => phases.push(x))
+      await wait(150)
+      expect(phases).not.toContain('on')
+      p.talk()
+      await wait(80)
+      expect(phases).toContain('on')
+      d.cancel()
+    } finally {
+      p.restore()
+    }
+  })
+
+  test('Done before it really hears writes nothing and says the microphone hadn’t started', async () => {
+    const p = phone()
+    const why: string[] = []
+    try {
+      const d = dictate(() => undefined, (w) => why.push(w))
+      await wait(80)
+      d.finish()
+      expect(why).toEqual([SAY.empty])
+    } finally {
+      p.restore()
+    }
+  })
+
+  test('a muted microphone (only zeros) still shows the wave after a while, never a getting-ready forever', () => {
+    expect(SOUND_WAIT).toBeGreaterThan(1000)
+    expect(SOUND_WAIT).toBeLessThanOrEqual(5000)
   })
 })
