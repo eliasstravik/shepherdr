@@ -708,7 +708,7 @@ export class Conversation {
     let state = "delivered", why = "";
     if (/Not delivered yet|\bheld for\b|\bkept for\b|"held":\s*true/.test(t)) {
       state = "waiting";
-      why = /: (the person is writing[^\n.;]*|its agent[^\n.;]*)/.exec(t)?.[1] ?? "";
+      why = /: (the person is writing[^\n.;]*|its agent[^\n.;]*|\S+ can't be reached from here)/.exec(t)?.[1] ?? "";
     } else if (no || failed) {
       state = "failed";
       why = (no?.[1] ?? t.split("\n").map((l) => l.replace(/^(Error|error|herdr-task|hc):\s*/, "").trim()).find((l) => l && !/^Exit code/.test(l)) ?? "").replace(/\.$/, "");

@@ -1283,6 +1283,9 @@ def tell(target, text, sender=None):
         d, rows = directory(refresh=True)
         hits = _find(rows, target)
     if not hits:
+        left = _leave(d["graph"], rows, target, text, sender)
+        if left:
+            return left
         raise Fail(f"no live Assistant {target!r} reachable from here (herdr-task assistants lists them)")
     if len(hits) > 1:
         raise Fail(f"{target!r} is more than one Assistant: " + ", ".join(a["target"] for a in hits))
@@ -1294,7 +1297,7 @@ def tell(target, text, sender=None):
     receiver = next((n["node"] for n in nodes(graph) if route_text(n["route"]) == (to["route"] or "")), {})
     back = _path_back(graph, (receiver.get("core") or {}).get("id"), here.get("id")) if to["route"] else []
     attrs = {"from": f"{'>'.join(back)}/{me}" if back else (me if back == [] else f"{here.get('name')}/{me}"),
-             "machine": here.get("name"), "space": (mine or {}).get("space_name") or (mine or {}).get("space") or "", "can-reply": "yes" if back is not None and me else "no"}
+             "machine": here.get("name"), "space": (mine or {}).get("space_name") or (mine or {}).get("space") or "", "can-reply": "yes" if me else "no"}
     esc = lambda s: str(s).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
     msg = "<herdr-assistant " + " ".join(f'{k}="{esc(v)}"' for k, v in attrs.items()) + ">" + text.replace("</herdr-assistant", "&lt;/herdr-assistant") + "</herdr-assistant>"
     held, restarted = False, None
@@ -1312,8 +1315,151 @@ def tell(target, text, sender=None):
         ok = _deliver(to["route"].split(">"), to["how"], to["address"], msg)
     if not ok:
         raise Fail(f"couldn't deliver to {to['target']}")
+    if back is None and me:
+        # it can't reach this machine: its answer waits there, and this machine fetches it (replies_pass)
+        _await(to["route"], to["how"], (receiver.get("core") or {}).get("name") or to["route"].split(">")[-1], here.get("name"))
     return {"to": to["target"], "space": to.get("space_name"), "can_reply": attrs["can-reply"] == "yes", "from": attrs["from"], "held": held,
             **({"restarted": restarted} if restarted else {})}
+
+
+# ---- replies that can't go: left for the asker to fetch ------------------------------------
+# The Mac reaches a VM, never the other way. A VM's Assistant answering the Mac's (tell-assistant mac/t13 "…") leaves
+# its answer in OUTBOX on the VM; the Mac, which asked, remembers that machine in AWAITING for a while and fetches what
+# waits for it there over its own link (replies_pass, each tick), then gives it to that Assistant as a message like any
+# other <herdr-assistant>.
+OUTBOX = os.path.join(STORE, "outbox")
+AWAITING = os.path.join(STORE, ".awaiting.json")
+AWAIT_MS = 12 * 3600000         # a machine asked from here: its answers fetched for this long after the last ask
+FETCH_EVERY_MS = 20000          # at most this often per machine
+OUTBOX_KEEP_MS = 24 * 3600000   # an answer nobody fetched: dropped after this
+ADDRESS = re.compile(r"t\d[0-9a-z]*")
+
+
+def _leave(graph, rows, target, text, sender=None):
+    """target is an Assistant on a machine this one can't reach (mac/t13, from a message it got): leaves the message
+    for that machine to fetch. None when target isn't machine/address, or that machine is reachable from here."""
+    m = re.fullmatch(r"([\w.-]+)/(t\d[0-9a-z]*)", target.strip())
+    me = sender or os.environ.get("HC_TERMINAL_ID")
+    if not m or not me:
+        return None
+    machine, address = m.groups()
+    here = graph.get("core") or {}
+    known = {route_text(n["route"]) for n in nodes(graph)} | {(n["node"].get("core") or {}).get("name") for n in nodes(graph)}
+    if machine in known or machine == here.get("name"):
+        return None
+    mine = next((a for a in graph.get("assistants") or [] if a["address"] == me), None)
+    os.makedirs(OUTBOX, exist_ok=True)
+    _prune_outbox()
+    item = {"for": machine, "to": address, "from": me, "machine": here.get("name") or "", "at": now(), "text": text,
+            "space": (mine or {}).get("space_name") or (mine or {}).get("space") or ""}
+    name = f"{now()}-{secrets_token()}.json"
+    tmp = os.path.join(OUTBOX, "." + name)
+    with open(tmp, "w") as f:
+        json.dump(item, f)
+    os.replace(tmp, os.path.join(OUTBOX, name))
+    return {"to": target, "left": True, "machine": machine, "can_reply": True, "from": me, "held": False}
+
+
+def secrets_token():
+    return base64.b32encode(os.urandom(5)).decode().lower()
+
+
+def _prune_outbox():
+    for n in os.listdir(OUTBOX) if os.path.isdir(OUTBOX) else []:
+        p = os.path.join(OUTBOX, n)
+        try:
+            if now() - os.path.getmtime(p) * 1000 > OUTBOX_KEEP_MS:
+                os.remove(p)
+        except OSError:
+            pass
+
+
+def take_outbox(machine):
+    """The answers left here for machine, oldest first, each taken out of the outbox."""
+    out = []
+    _prune_outbox()
+    for n in sorted(os.listdir(OUTBOX)) if os.path.isdir(OUTBOX) else []:
+        if n.startswith(".") or not n.endswith(".json"):
+            continue
+        p = os.path.join(OUTBOX, n)
+        try:
+            with open(p) as f:
+                item = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if item.get("for") != machine:
+            continue
+        try:
+            os.remove(p)
+        except OSError:
+            continue  # another fetch took it
+        out.append(item)
+    return out
+
+
+def cmd_outbox(args):
+    print(json.dumps(take_outbox(args.for_)))
+
+
+def _awaiting(update=None):
+    os.makedirs(STORE, exist_ok=True)
+    with open(AWAITING + ".lock", "a") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        try:
+            with open(AWAITING) as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            d = {}
+        d = {k: v for k, v in d.items() if isinstance(v, dict) and now() < (v.get("until") or 0)}
+        if update:
+            update(d)
+            tmp = AWAITING + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(d, f)
+            os.replace(tmp, AWAITING)
+        return d
+
+
+def _await(route, how, name, me):
+    if not me:
+        return
+
+    def up(d):
+        d[route] = {**d.get(route, {}), "how": how, "name": name, "me": me, "until": now() + AWAIT_MS}
+    _awaiting(up)
+
+
+FETCH = 'p=$(command -v herdr-task || echo "$HOME/.local/bin/herdr-task"); exec "$p" _outbox --for "$1"'
+
+
+def replies_pass(report):
+    """Fetches the answers left for this machine on machines it asked that can't reach it, and gives each to the
+    Assistant it's for. Nothing to do (no hc call) unless this machine asked one lately."""
+    if not os.path.exists(AWAITING):
+        return
+    due = [(r, v) for r, v in _awaiting().items() if now() - (v.get("fetched") or 0) >= FETCH_EVERY_MS]
+    if not due:
+        return
+    guard(["hc"])
+    env = {k: v for k, v in os.environ.items() if k != "HC_TERMINAL_ID"}
+    for route, v in due:
+        _awaiting(lambda d: route in d and d[route].update(fetched=now()))
+        try:
+            r = subprocess.run(_hops(route.split(">"), v.get("how") or ["herdr-core"] * len(route.split(">")), ["sh", "-c", FETCH, "sh", v["me"]]),
+                               env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=30)
+            items = json.loads(r.stdout.strip().splitlines()[-1]) if r.returncode == 0 and r.stdout.strip() else []
+        except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+            continue
+        for x in items if isinstance(items, list) else []:
+            to = str(x.get("to") or "")
+            if not ADDRESS.fullmatch(to) or not x.get("from"):
+                continue
+            esc = lambda s: str(s).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
+            attrs = {"from": f"{route}/{x['from']}", "machine": x.get("machine") or v.get("name") or "", "space": x.get("space") or "", "can-reply": "yes"}
+            msg = "<herdr-assistant " + " ".join(f'{k}="{esc(val)}"' for k, val in attrs.items()) + ">" + \
+                str(x.get("text") or "").replace("</herdr-assistant", "&lt;/herdr-assistant") + "</herdr-assistant>"
+            got = send_or_hold(to, msg, "news")
+            report.setdefault("replies", []).append({"from": attrs["from"], "to": to, "got": got if isinstance(got, str) else bool(got)})
 
 
 # #1079 #1141: tell-assistant never returned, and nobody knew whether it went. It now ends within TELL_WAIT seconds and
@@ -1366,6 +1512,10 @@ def cmd_tell(args):
         r = _timed(lambda: tell(args.target, args.text), wait)
     except Fail as e:
         raise Fail(f"Not delivered to {args.target}: {e}") from None
+    if r.get("left"):
+        say(args, r, f"Not delivered yet, left for {r['to']} to fetch: {r['machine']} can't be reached from here, so it picks "
+                     "this up itself the next time it checks (within a minute while it waits on an answer).")
+        return
     say(args, r, ("Not delivered yet, held for" if r.get("held") else "Delivered to") + f" {r['to']}" + (f" ({r['space']})" if r.get("space") else "") +
         (f": its agent had stopped, so it started again ({r['restarted']}) with this as its first message" if r.get("restarted") else "") +
         (": the person is writing to it; it goes once they've sent or cleared that" if r.get("held") else "") +
