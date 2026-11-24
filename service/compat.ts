@@ -50,7 +50,7 @@ export const newsKey = (rows: Row[]) => JSON.stringify(rows.filter((r) => r.spac
 const NEWS: Record<string, TaskStatus> = { added: "todo", queued: "queued", started: "work", needs: "need", asks: "need", stalled: "need", failed: "need", ready: "ready", merging: "merging", merged: "done", done: "done", closed: "done" };
 type Sent = { cid: string; text: string; files: string[]; at: number };
 // (the tag lines a send puts before the words, if a log keeps them: the message it answers, the tasks it mentions)
-const said = (v: string) => v.replace(/^\s*<hc\b[^>]*\/>\s*$/gm, "").replace(/^\s*<hc task=[^\n]*<\/hc>\s*$/gm, "").replace(/\s+/g, " ").trim();
+const said = (v: string) => v.replace(/^\s*!\s+/, "!").replace(/^\s*<hc\b[^>]*\/>\s*$/gm, "").replace(/^\s*<hc task=[^\n]*<\/hc>\s*$/gm, "").replace(/\s+/g, " ").trim();
 /** how much earlier than the service's clock another machine's log may stamp a message (its clock may differ) */
 const CLOCKS = 60_000;
 const base = (p: string) => p.split("/").pop() ?? p;
@@ -686,6 +686,13 @@ export class Compat {
           (this.files.get(key) ?? this.files.set(key, new Set()).get(key)!).add(m.path);
           messages.push({ id: `${x.id}:m${n}`, who: "agent", at: x.at, file: { name: m.name, path: m.path, ...(m.alt ? { alt: m.alt } : {}) }, ...(md.text || n ? {} : reactions) } as Message);
         }
+      }
+      else if (x.kind === "command" && x.text) {
+        // a `!` command the person ran in the agent's shell: its row, with its state and what it printed; the page's
+        // send of it known again by its words
+        const text = `!${x.text}`;
+        const sentCid = sends.length ? sentAs(sends, { text, at: x.at }, takenSends) : undefined;
+        messages.push({ id: x.id, who: "you", at: x.at, text, ...(sentCid ? { cid: sentCid } : {}), command: { state: x.state, ...(x.out ? { out: x.out } : {}) } } as Message);
       }
       else if (x.kind === "error" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, error: true });
       // its own question asked now shows as its card (at the end), in place of its "Asked you" box, as the window's

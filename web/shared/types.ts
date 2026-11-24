@@ -593,6 +593,9 @@ export interface Reaction {
 export interface Message {
   id: string
   who: 'you' | 'agent'
+  /** a `!` command you ran in the agent's own shell (its text is the command, with its `!`): running until what it
+   *  printed comes back, then done or failed; out: what it printed (its end, when long) */
+  command?: { state: 'running' | 'done' | 'failed'; out?: string }
   /** This answer was given through the voice call. */
   byVoice?: boolean
   /** the agent's first suggested reply (an older page's single suggestion; suggests holds them all) */

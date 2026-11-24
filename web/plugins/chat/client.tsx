@@ -36,6 +36,8 @@ import { newsRow, type NewsRow } from './news.ts'
 import { cardsNow, stillLoading, TRIES, wantsEarlier } from './hold.ts'
 import { outOfView, setAway, useAway, type Waiting } from './away.ts'
 import { keepAtEnd, rowEdges } from './stick.ts'
+import { commandMode, commandOf, commandWord, type CommandState } from './command.ts'
+import { toggleSpaceTerm, toggleTaskTerm } from '@plugins/terminal/menu.ts'
 
 export { fileUrl } from './thumbs.tsx'
 
@@ -255,6 +257,29 @@ function QuickBar({ msg, chat, mine, wrap, y, done, more, reply: onReply }: { ms
     >
       <div className="qbx">{fit?.actions === 'react' ? buttons[0] : buttons}</div>
       {fit?.time && msg.at ? <span className="qt">{clock(msg.at)}</span> : null}
+    </div>
+  )
+}
+
+/** a `!` command you ran in the agent's shell: the command in monospace with how it went (sending, running, done,
+ *  failed), and what it printed under it; one that didn't go has Retry and Remove, as a message has */
+function CommandRow({ msg, state, failed, gap }: { msg: Message; state: CommandState; failed?: string; gap: boolean }) {
+  const out = msg.command?.out ?? ''
+  const tone = state === 'failed' || state === 'unsent' ? 'c-red' : state === 'running' || state === 'sending' ? 'c-ask' : 'c-mute'
+  return (
+    <div className={cx('cmdrow', gap && 'gap', (state === 'sending' || state === 'running') && 'live')} data-msg={msg.id} data-state={state}>
+      <div className="cmdh">
+        <I n="prompt" c="s16" />
+        <code className="cmdc">{(msg.text ?? '').replace(/^\s*!\s*/, '')}</code>
+        <span className={cx('cmds', tone)} role="status">{commandWord[state]}{state === 'unsent' && failed ? ` · ${failed}` : ''}</span>
+      </div>
+      {out && <pre className="cmdo">{out}</pre>}
+      {state === 'unsent' && msg.cid && (
+        <div className="cmdf">
+          <span className="lk" role="button" tabIndex={0} onClick={() => retry(msg.cid!)}>Retry</span>
+          <span className="lk" role="button" tabIndex={0} onClick={() => dropOut(msg.cid!)}>Remove</span>
+        </div>
+      )}
     </div>
   )
 }
@@ -655,6 +680,8 @@ function Messages({ thread }: { thread: Thread }) {
     if (m.at && (!lastAt || new Date(m.at).toDateString() !== new Date(lastAt).toDateString() || m.at - lastAt > QUIET)) out.push(<div key={`t:${k}`} className="time">{dayLabel(m.at)} {clock(m.at)}</div>)
     if (m.at) lastAt = m.at
     const gap = !!prev && prev !== who
+    // a `!` command you ran: its own row (CommandRow)
+    const cmd = commandOf(m, { pending, failed, mark })
     if (m.newSession) {
       out.push(<div key={k} className="time" role="separator">New session</div>)
       continue
@@ -699,6 +726,10 @@ function Messages({ thread }: { thread: Thread }) {
     }
     else if (m.error) out.push(<div key={k} className="ref c-red"><I n="warn" c="s16" /><span>{m.text}</span></div>)
     else if (m.file) out.push(<FileRow key={k} msg={m} chat={stub} gap={gap} />)
+    else if (cmd) {
+      lastRef = ''
+      out.push(<CommandRow key={k} msg={m} state={cmd} failed={failed} gap={gap} />)
+    }
     else if (m.text) {
       lastRef = ''
       out.push(<Bubble key={k} msg={m} chat={stub} thread={thread} gap={gap} pending={pending} failed={failed} mark={mark} />)
@@ -930,12 +961,23 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   // a message sent while the agent works goes in at once (it steers); only Ctrl/Cmd+Enter asks it to wait its turn.
   // The round button and Enter send only what is in the box, never a suggested reply (those are their own bubbles).
   // In a voice call the box takes no text (TEXT_IN_CALL).
+  // a line starting with `!` runs as a command in the agent's own shell (Claude Code, Codex); another agent has none,
+  // so its words don't go and the box offers your own terminal
+  const mode = commandMode(text, pick.agent)
   const go = (wait = false) => {
     if (getState().ui.call && !TEXT_IN_CALL) return
     // a long paste folded into a chip goes as text, exactly as pasted, after what was typed
     const t = joined(text, pastes.map((p) => p.text))
     if (!t && !files?.length) return
+    if (mode === 'cant') return
     if (sg) spent.add(sg.id)
+    if (mode === 'run') {
+      // the command alone, first in the box: a quoted reply, files or a folded paste would go with it and it would be
+      // a message. Those stay in the box for the next message
+      send(key, key, text.trim(), false, true, dictatedInto.delete(key) ? 'dictated' : 'typed')
+      setText('')
+      return
+    }
     send(key, key, t, wait && busy, false, dictatedInto.delete(key) ? 'dictated' : 'typed')
     setText('')
     setPastes(key, () => [])
@@ -1005,10 +1047,26 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
         </div>
       )}
       {!!pastes.length && <PasteChips pastes={pastes} onRemove={(id) => dropPaste(key, id)} onEdit={editPaste} />}
+      {mode && (
+        <div className="fchips" role="status">
+          {mode === 'run' ? (
+            <span className="fchip cmdchip"><I n="prompt" c="s16" />Run as a command</span>
+          ) : (
+            <>
+              <span className="fchip cmdchip cant"><I n="warn" c="s16" />{pickWords(pick).agent} can't run ! commands</span>
+              {has('terminal') && (
+                <button type="button" className="fchip" onClick={() => (thread.task ? toggleTaskTerm(thread.task.id) : toggleSpaceTerm())}>
+                  <I n="prompt" c="s16" />Open your terminal{!phone && <kbd>Ctrl+`</kbd>}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      )}
       <div className="crow">
         <textarea
           ref={ref}
-          className="cin"
+          className={cx('cin', mode && 'mono')}
           rows={1}
           name="message"
           data-box={key}
@@ -1056,7 +1114,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
             <I n="square" c="s16" />
           </button>
         ) : (
-          <button type="button" className="send" aria-label="Send" onClick={() => go()}>
+          <button type="button" className="send" aria-label="Send" disabled={mode === 'cant'} onClick={() => go()}>
             <I n="send" c="s16" />
           </button>
         )}

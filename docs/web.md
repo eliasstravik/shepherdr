@@ -2,6 +2,7 @@
 
 Shepherdr is one web app, the same on a phone, a tablet and a desktop. This page says where it is, who gets in and
 how it runs.
+What a chat's box takes besides messages (`!` commands) and its keys: [The chat](chat.md).
 
 ## Where it is
 

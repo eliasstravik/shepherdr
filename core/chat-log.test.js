@@ -543,3 +543,39 @@ test("a send whose command went on in the background before it ended takes its r
   expect(c.items.filter((x) => x.kind === "sent")).toEqual([]);
   expect(c.items.find((x) => x.kind === "tools").steps.map((s) => [s.id, !!s.relay])).toEqual([["c1", false]]);
 });
+
+// A `!` command the person typed (Claude Code's bash mode, Codex's `!`): its own row, running until what it printed
+// comes, done or failed. The lines are real logs' (Claude Code 2.1.331, Codex 0.163.0).
+test("a ! command in Claude Code is a command row with what it printed", async () => {
+  let k = 0;
+  const u = (content) => ({ parentUuid: null, isSidechain: false, promptId: "p", type: "user", message: { role: "user", content }, uuid: `bang${k++}`, timestamp: at });
+  const c = await read([
+    u("<bash-input>echo hello && ls /nonexist</bash-input>"),
+    u("<bash-stdout></bash-stdout><bash-stderr>hello\nls: cannot access '/nonexist': No such file or directory\n</bash-stderr>"),
+    u("<bash-input>echo hi</bash-input>"),
+    u("<bash-stdout>hi</bash-stdout><bash-stderr></bash-stderr>"),
+    u("<bash-input>true</bash-input>"),
+    u("<bash-stdout>(Bash completed with no output)</bash-stdout><bash-stderr></bash-stderr>"),
+    u('<bash-input>sh -c "exit 3"</bash-input>'),
+    u("<bash-stdout></bash-stdout><bash-stderr></bash-stderr>"),
+    u("<bash-input>sleep 100</bash-input>"),
+  ]);
+  expect(c.items.map((x) => [x.kind, x.text, x.state, x.out])).toEqual([
+    ["command", "echo hello && ls /nonexist", "failed", "hello\nls: cannot access '/nonexist': No such file or directory"],
+    ["command", "echo hi", "done", "hi"],
+    ["command", "true", "done", ""],
+    ["command", 'sh -c "exit 3"', "failed", ""],
+    ["command", "sleep 100", "running", undefined],
+  ]);
+});
+
+test("a ! command in Codex is a command row with its exit code's state", () => {
+  const c = new Conversation("codex");
+  const line = (text) => ({ timestamp: at, type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text }], internal_chat_message_metadata_passthrough: { content_item_kinds: ["shell.user_command"] } } });
+  c.codex(line("<user_shell_command>\n<command>\necho hello && ls /nonexist\n</command>\n<result>\nExit code: 2\nDuration: 0.0373 seconds\nOutput:\nhello\nls: cannot access '/nonexist': No such file or directory\n\n</result>\n</user_shell_command>"), 1);
+  c.codex(line("<user_shell_command>\n<command>\necho hi\n</command>\n<result>\nExit code: 0\nDuration: 0.01 seconds\nOutput:\nhi\n</result>\n</user_shell_command>"), 2);
+  expect(c.items.map((x) => [x.kind, x.text, x.state, x.out])).toEqual([
+    ["command", "echo hello && ls /nonexist", "failed", "hello\nls: cannot access '/nonexist': No such file or directory"],
+    ["command", "echo hi", "done", "hi"],
+  ]);
+});

@@ -96,10 +96,15 @@ export function mentionedIn(text, tasks) {
   });
 }
 
+/** Words that run as a command in the agent's own shell (Claude Code's bash mode, Codex's `!`): they start with `!`. */
+export const isCommand = (text) => /^\s*!/.test(String(text ?? "")) && String(text).trim().length > 1;
+
 // The words as the agent gets them: the reply tag, the task tags, then the person's text. task: a reply to a task
 // (the chat's Reply on a task row): its id on the reply tag, so the chat shows the quoted task; its tag line is in tags.
 /** @param {{ text: string, quote?: string | null, tags?: string, task?: string | null }} m */
 export function messageBody({ text, quote = null, tags = "", task = null }) {
+  // a `!` command runs in the agent's shell only when the `!` comes first: nothing goes before it
+  if (isCommand(text)) return String(text).trim();
   const reply = quote ? `<hc reply-to="${excerpt(quote, 80)}"${task ? ` task="${attr(task)}"` : ""}/>\n` : "";
   return reply + tags + text;
 }

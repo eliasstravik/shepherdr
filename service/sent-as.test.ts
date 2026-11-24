@@ -54,3 +54,7 @@ test("two sent in a row that the agent got as one, glued or with a blank line, a
   expect(sentParts([a, b], { text: `${a.text} and more`, at: 12_000 }, new Set())).toBeUndefined();
   expect(sentParts([a, b], { text: a.text, at: 12_000 }, new Set())).toBeUndefined();
 });
+
+test("a ! command comes back as its row, its words without the space after the !", () => {
+  expect(sentAs([send({ text: "! git status" })], { text: "!git status", at: 10_400 }, new Set())).toBe("c1");
+});
