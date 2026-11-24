@@ -654,8 +654,8 @@ textarea.cin{overflow-y:auto}
 .pal .row[aria-selected="true"]{background:var(--control);color:var(--fg)}
 .pal .row .v{margin-left:8px}
 /* the sheet: areas in two columns where there is room */
-.ksheet .kcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0 24px;max-height:58dvh;overflow-y:auto;align-content:start}
-.ksheet section{display:grid;align-content:start}
+.ksheet .kcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:0 24px;max-height:58dvh;overflow-y:auto;align-content:start}
+.ksheet section{display:grid;align-content:start;min-width:0}
 .krow{display:flex;align-items:center;gap:8px;min-height:var(--row);padding:0 8px;color:var(--sub)}
 .krow .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .krow.off{opacity:.45}

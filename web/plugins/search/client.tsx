@@ -85,6 +85,13 @@ const MODES: Record<string, (i: Item) => boolean> = {
   '@': (i) => i.kind === 'Task',
 }
 
+/** every word typed starts a word of `text`: "set pref" finds Open Settings by "preferences" */
+export function byWords(q: string, text: string): number {
+  const typed = q.toLowerCase().split(/\s+/).filter(Boolean)
+  const words = text.toLowerCase().split(/[\s›·#@/._-]+/).filter(Boolean)
+  return typed.length && typed.every((w) => words.some((x) => x.startsWith(w))) ? 300 : -1
+}
+
 /** the rows for a query: empty, recent picks, then actions on what is in focus, then the commands; typed, every item
  *  ranked by its match, a recent pick a little higher */
 export function rank(q: string, all: { things: Item[]; commands: Item[]; actions: Item[] }, recent: string[]): { label?: string; items: Item[] }[] {
@@ -106,7 +113,8 @@ export function rank(q: string, all: { things: Item[]; commands: Item[]; actions
   }
   const scored = pool
     .map((i) => {
-      const s = Math.max(fuzzy(text, i.label), fuzzy(text, `${i.label} ${i.sub ?? ''} ${i.words ?? ''}`) - 40)
+      // the label by a loose match; its other words (where it is, what else it's called) only by the starts of words
+      const s = Math.max(fuzzy(text, i.label), byWords(text, `${i.sub ?? ''} ${i.words ?? ''}`))
       const r = recent.indexOf(i.key)
       return { i, s: s < 0 ? s : s + (r >= 0 ? 120 - r * 4 : 0) + (i.kind === 'Action' ? 20 : 0) }
     })

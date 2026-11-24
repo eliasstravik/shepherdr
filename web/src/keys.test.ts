@@ -125,4 +125,7 @@ test('fuzzy: the letters in order; whole words, a start and word starts rank hig
   expect(fuzzy('ot', 'Open Tasks')).toBeGreaterThan(fuzzy('ot', 'Show or hide the list'))
   expect(fuzzy('', 'anything')).toBe(0)
   expect(fuzzy('SET', 'Settings › Shortcuts')).toBeGreaterThan(0)
+  // letters scattered mid-word are no match: "sto" isn't Show or hide the list
+  expect(fuzzy('sto', 'Show or hide the list')).toBe(-1)
+  expect(fuzzy('shp', 'shop')).toBeGreaterThan(0)
 })

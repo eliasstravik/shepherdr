@@ -1,7 +1,7 @@
 // The palette's rows (SHEP-470): empty, recent picks first, then actions on what is in focus, then commands; typed, every
 // item by its fuzzy match, a recent one a little higher; "> " only commands, "# " only spaces, "@ " only tasks.
 import { expect, test } from 'bun:test'
-import { rank } from './client.tsx'
+import { byWords, rank } from './client.tsx'
 
 const item = (key: string, kind: string, label: string, sub?: string) => ({ key, kind, label, sub, run: () => undefined }) as never
 const all = {
@@ -31,4 +31,11 @@ test('a prefix keeps to one kind', () => {
   expect(rank('>open', all, [])[0].items.map((i) => i.label).sort()).toEqual(['Open Settings', 'Open Tasks'])
   expect(rank('# ', all, [])[0].items.map((i) => i.label)).toEqual(['shop'])
   expect(rank('@fix', all, [])[0].items.map((i) => i.label)).toEqual(['Fix login'])
+})
+
+test('other words count only by their starts: "pref" finds Open Settings, scattered letters do not', () => {
+  expect(byWords('pref', 'General preferences options')).toBe(300)
+  expect(byWords('sto', 'Go to pane panel list show')).toBe(-1)
+  const withWords = { ...all, commands: [{ key: 'cmd:s', kind: 'Command', label: 'Open Settings', words: 'preferences', run: () => undefined }] as never[] }
+  expect(rank('pref', withWords, [])[0].items.map((i) => i.label)).toEqual(['Open Settings'])
 })

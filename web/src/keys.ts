@@ -194,6 +194,7 @@ export function fuzzy(q: string, text: string): number {
   let score = 0
   let j = 0
   let run = 0
+  let weak = 0
   for (let i = 0; i < s.length; i++) {
     const ch = s[i]
     if (ch === ' ') continue
@@ -201,8 +202,11 @@ export function fuzzy(q: string, text: string): number {
     if (k < 0) return -1
     const start = k === 0 || /[\s›#@/._-]/.test(t[k - 1])
     run = k === j && i > 0 ? run + 1 : 0
+    // a letter found mid-word after a jump: a weak match; too many and it is none
+    if (!start && k !== j && i > 0) weak++
     score += 10 + (start ? 30 : 0) + run * 15 - Math.min(k - j, 10)
     j = k + 1
   }
+  if (weak > 1) return -1
   return score - t.length / 10
 }
