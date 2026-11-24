@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { afterDone, askWhen, dictate, heard, liveSession, micError, MIC, SAY, sounds, SOUND_WAIT, wholeLive, type Phase } from './dictation.ts'
+import { afterDone, ASK_WAIT, askWhen, dictate, heard, liveSession, micError, MIC, SAY, sounds, SOUND_WAIT, wholeLive, type Phase } from './dictation.ts'
 
 // SHEP-10: a failed transcription used to come back as no words at all, so nothing landed in the box and nothing said why
 describe('what the service answered to a recording', () => {
@@ -152,7 +152,7 @@ describe("the mic's failures, in plain words", () => {
     expect(micError(null)).toBe(SAY.noStart)
   })
   test('the words are plain: no codes or names, each a full sentence', () => {
-    for (const w of [SAY.blocked, SAY.noMic, SAY.busy, SAY.noStart, SAY.asking, SAY.notYet, SAY.empty, SAY.unreached, SAY.slow, SAY.silence]) {
+    for (const w of [SAY.blocked, SAY.blockedApp, SAY.noMic, SAY.busy, SAY.noStart, SAY.asking, SAY.notYet, SAY.empty, SAY.unreached, SAY.slow, SAY.silence]) {
       expect(w).toMatch(/^[A-Z].*\.$/)
       expect(w).not.toMatch(/Error|AudioContext|worklet|WebSocket|token|undefined/)
     }
@@ -161,13 +161,14 @@ describe("the mic's failures, in plain words", () => {
   })
 })
 
-// SHEP-334: "it first always shows Allow mic for some reason. I believe I have allowed it."
-describe('1: "Allow the microphone" only when the browser really asks', () => {
-  const watch = (perm: PermissionState | null, answeredAfter: number | null, wait = 40) => {
+// SHEP-334: "it first always shows Allow mic for some reason. I believe I have allowed it." And again in 3.2.14: "it
+// says, 'Allow in your browser,' ... before it starts every single time, even though I've already allowed it."
+describe('1: "Allow the microphone" only while a prompt is really waiting', () => {
+  const watch = (perm: PermissionState | null, answeredAfter: number | null, wait = 40, lies = false) => {
     let asked = -1
     const t0 = Date.now()
     const answered = () => answeredAfter !== null && Date.now() - t0 >= answeredAfter
-    askWhen(Promise.resolve(perm), answered, () => { asked = Date.now() - t0 }, wait)
+    askWhen(Promise.resolve(perm), answered, () => { asked = Date.now() - t0 }, wait, () => lies)
     return () => asked
   }
   test('allowed: never, however slow the microphone is', async () => {
@@ -175,13 +176,25 @@ describe('1: "Allow the microphone" only when the browser really asks', () => {
     await Bun.sleep(80)
     expect(asked()).toBe(-1)
   })
-  test('not yet allowed or blocked: at once', async () => {
-    for (const p of ['prompt', 'denied'] as const) {
-      const asked = watch(p, null)
-      await Bun.sleep(5)
-      expect(asked()).toBeGreaterThanOrEqual(0)
-      expect(asked()).toBeLessThan(30)
-    }
+  test('blocked: no hint (the microphone refuses at once and the error says how to allow it)', async () => {
+    const asked = watch('denied', null)
+    await Bun.sleep(80)
+    expect(asked()).toBe(-1)
+  })
+  test('"prompt" from a browser that then hands the microphone over at once (the Android app): never flashes', async () => {
+    const asked = watch('prompt', 10)
+    await Bun.sleep(80)
+    expect(asked()).toBe(-1)
+  })
+  test('"prompt" with a prompt really waiting for the person: shown once the microphone still hasn’t answered', async () => {
+    const asked = watch('prompt', null)
+    await Bun.sleep(80)
+    expect(asked()).toBeGreaterThanOrEqual(40)
+  })
+  test('"prompt" on a device where it proved untrue before: never', async () => {
+    const asked = watch('prompt', null, 40, true)
+    await Bun.sleep(80)
+    expect(asked()).toBe(-1)
   })
   test('a browser that can’t say: only when the microphone hasn’t answered after a moment', async () => {
     const fast = watch(null, 10)
@@ -197,6 +210,12 @@ describe('1: "Allow the microphone" only when the browser really asks', () => {
     stop()
     await Bun.sleep(50)
     expect(asked).toBe(false)
+  })
+  test('blocked in the Android app: the words are about the app’s permission, not a browser', () => {
+    expect(micError({ name: 'NotAllowedError' }, true)).toBe(SAY.blockedApp)
+    expect(SAY.blockedApp).toContain('Shepherdr')
+    expect(SAY.blockedApp).not.toContain('browser')
+    expect(micError({ name: 'NotAllowedError' }, false)).toBe(SAY.blocked)
   })
 })
 
@@ -236,7 +255,7 @@ describe('the wave shows only once the microphone really hears', () => {
   })
 
   /** a phone's microphone: zeros until `talk()`, then sound; MediaRecorder and the audio graph faked */
-  function phone() {
+  function phone(perm: PermissionState = 'granted') {
     let live = false
     const g = globalThis as any
     const saved = { md: g.navigator?.mediaDevices, MR: g.MediaRecorder, AC: g.AudioContext, WS: g.WebSocket, perm: g.navigator?.permissions }
@@ -261,7 +280,7 @@ describe('the wave shows only once the microphone really hears', () => {
     }
     const track = { stop: () => undefined }
     Object.defineProperty(g.navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => ({ getTracks: () => [track] }) } })
-    Object.defineProperty(g.navigator, 'permissions', { configurable: true, value: { query: async () => ({ state: 'granted' }) } })
+    Object.defineProperty(g.navigator, 'permissions', { configurable: true, value: { query: async () => ({ state: perm }) } })
     g.MediaRecorder = MR
     g.AudioContext = AC
     g.WebSocket = undefined
@@ -288,6 +307,24 @@ describe('the wave shows only once the microphone really hears', () => {
       p.talk()
       await wait(80)
       expect(phases).toContain('on')
+      d.cancel()
+    } finally {
+      p.restore()
+    }
+  })
+
+  // 3.2.14: "it says, 'Allow in your browser,' ... before it starts every single time". The installed Android app's
+  // browser answered 'prompt' though allowed, so the hint showed at once and stayed up until the first real sound.
+  test('the Android app: "prompt" but the microphone comes at once: getting ready stays wordless, no hint ever', async () => {
+    const p = phone('prompt')
+    const phases: Phase[] = []
+    try {
+      const d = dictate(() => undefined, () => undefined, undefined, (x) => phases.push(x))
+      await wait(ASK_WAIT + 300)
+      expect(phases).toEqual(['given'])
+      p.talk()
+      await wait(80)
+      expect(phases).toEqual(['given', 'on'])
       d.cancel()
     } finally {
       p.restore()

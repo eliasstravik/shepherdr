@@ -44,8 +44,10 @@ export const SAY = {
   noMic: 'No microphone was found.',
   busy: 'The microphone is in use by another app. Close it, then try again.',
   noStart: 'The microphone couldn’t start.',
-  asking: 'Allow the microphone when your browser asks, then speak.',
-  notYet: 'The microphone hadn’t started: allow it when your browser asks, then try again.',
+  /** the installed app on Android: its microphone is the phone's setting for the app, not a browser's */
+  blockedApp: 'The microphone is blocked: turn it on in your phone’s Settings › Apps › Shepherdr › Permissions › Microphone.',
+  asking: 'Allow the microphone when asked, then speak.',
+  notYet: 'The microphone hadn’t started: allow it when asked, then try again.',
   empty: 'The recording was empty. Check that the microphone isn’t muted, then try again.',
   unreached: "Shepherdr couldn't be reached.",
   slow: 'Shepherdr took too long to write it down. Try again.',
@@ -67,10 +69,19 @@ export function heard(status: number, body: string): { text: string } | { error:
   return { error: status ? SAY.failedCode(status) : SAY.unreached }
 }
 
+/** the page runs as the app installed on an Android phone (not in a browser tab) */
+export function androidApp(): boolean {
+  try {
+    return /Android/i.test(navigator.userAgent) && (matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || / wv\)/.test(navigator.userAgent))
+  } catch {
+    return false
+  }
+}
+
 /** why the microphone didn't start, in plain words */
-export function micError(e: unknown): string {
+export function micError(e: unknown, app = androidApp()): string {
   const name = (e as { name?: string } | null)?.name
-  if (name === 'NotAllowedError' || name === 'SecurityError') return SAY.blocked
+  if (name === 'NotAllowedError' || name === 'SecurityError') return app ? SAY.blockedApp : SAY.blocked
   if (name === 'NotFoundError' || name === 'OverconstrainedError') return SAY.noMic
   if (name === 'NotReadableError' || name === 'AbortError') return SAY.busy
   return SAY.noStart
@@ -233,11 +244,12 @@ async function running(c: AudioContext): Promise<boolean> {
   return c.state === 'running'
 }
 
-/** how long the microphone may take to answer before, with no way to ask the browser, the page says it is asking */
+/** how long the microphone may take to answer before the page says the browser is asking: a real prompt waits for a
+ *  person (seconds), an allowed microphone answers well before (it was asked for as the finger landed: warmMic) */
 export const ASK_WAIT = 1200
 
 /** The microphone's permission, where the browser can say it without asking (navigator.permissions): 'granted',
- *  'prompt' or 'denied'; null where it can't (then only a slow answer means the browser is asking). */
+ *  'prompt' or 'denied'; null where it can't. */
 export async function micPermission(): Promise<PermissionState | null> {
   try {
     const p = await navigator.permissions?.query({ name: 'microphone' as PermissionName })
@@ -247,17 +259,31 @@ export async function micPermission(): Promise<PermissionState | null> {
   }
 }
 
-/** SHEP-334: "Allow the microphone" only when the browser really asks. It once showed on every press, though the
- *  microphone was allowed long ago (the pill said "Allow mic" until the first audio). With a permission state: at once
- *  when it is 'prompt' or 'denied', never when 'granted'. Without one: only if the microphone hasn't answered after
- *  `wait`. `answered` says whether it has; `ask` shows it. Returns a stop for the wait. */
-export function askWhen(perm: Promise<PermissionState | null>, answered: () => boolean, ask: () => void, wait = ASK_WAIT): () => void {
+/** set once the browser said 'prompt' and the microphone came anyway, with no hint needed: on this device that answer
+ *  is not to be believed (the installed app on Android said 'prompt' on every start, though allowed long ago) */
+const PROMPT_LIES = 'shepherdr.micPromptLies'
+export const promptLies = {
+  get(): boolean {
+    try { return localStorage.getItem(PROMPT_LIES) === '1' } catch { return false }
+  },
+  set() {
+    try { localStorage.setItem(PROMPT_LIES, '1') } catch { /* private mode: asked again next time */ }
+  },
+}
+
+/** "Allow the microphone" only while the browser's prompt is really on screen, waiting for the person. SHEP-334: it
+ *  once showed on every press; in 3.2.14 it flashed again on every start in the installed Android app, whose browser
+ *  answered 'prompt' though the microphone was allowed, and the hint then stayed up until the first real sound.
+ *  Now: never when 'granted'; never when 'denied' (the microphone refuses at once and the error says how to allow it);
+ *  never where 'prompt' has proved untrue before (promptLies); else only once the microphone still hasn't answered
+ *  after `wait` (a granted one answers sooner; a prompt waits for the person). `answered` says whether it has; `ask`
+ *  shows it. Returns a stop for the wait. */
+export function askWhen(perm: Promise<PermissionState | null>, answered: () => boolean, ask: () => void, wait = ASK_WAIT,
+  lies: () => boolean = promptLies.get): () => void {
   let t: ReturnType<typeof setTimeout> | null = null
   let stopped = false
   void perm.then((p) => {
-    if (stopped || answered()) return
-    if (p === 'prompt' || p === 'denied') return ask()
-    if (p === 'granted') return
+    if (stopped || answered() || p === 'granted' || p === 'denied' || (p === 'prompt' && lies())) return
     t = setTimeout(() => { if (!stopped && !answered()) ask() }, wait)
   }, () => undefined)
   return () => { stopped = true; if (t) clearTimeout(t) }
@@ -277,17 +303,20 @@ async function liveTokenFor(): Promise<string | null> {
 /** Starts listening. `end` gets what was heard when it finishes, or null when cancelled; `fail` why it didn't work. Shepherdr 3: the phone records,
  *  the service has ElevenLabs write it down (the window's dictation, the same words on every phone browser).
  *  `timing` (tests, the proof) hears each step after Done: 'live' or 'upload' and how many ms Done to words took.
- *  Phases: 'asking' only when the browser really asks for the microphone (askWhen), 'on' from the first real sound (sounds),
- *  'writing' after Done. Before 'on' the surface is neutral: starting. */
-export type Phase = 'asking' | 'on' | 'writing'
+ *  Phases: 'asking' only when the browser really asks for the microphone (askWhen), 'given' once the microphone is
+ *  handed over (any hint goes at once: a stream is proof it is allowed), 'on' from the first real sound (sounds),
+ *  'writing' after Done. Before 'on' the surface is wordless: starting. */
+export type Phase = 'asking' | 'given' | 'on' | 'writing'
 
 export function dictate(end: (text: string | null) => void, fail: (why: string) => void = () => undefined,
   timing: (how: 'live' | 'upload', ms: number) => void = () => undefined,
-  /** what the surface shows: the browser asking for the microphone, listening, writing it down */
+  /** what the surface shows: the browser asking for the microphone, the microphone given (no hint, still getting
+   *  ready), listening, writing it down */
   phase: (p: Phase) => void = () => undefined,
   /** the person's own words (spaces, machines): the writing is biased towards them (core/voice.js vocabulary) */
   words: string[] = []): Dictation {
   current?.cancel()
+  const startedAt = performance.now()
   let state = 'on' as 'on' | 'finishing' | 'over'
   let mic: MediaStream | null = null
   // made here, inside the tap, so a phone lets it run (see audioContext)
@@ -429,12 +458,16 @@ export function dictate(end: (text: string | null) => void, fail: (why: string) 
     return self
   }
   let answered = false
-  stopAsk = askWhen(micPermission(), () => answered || state !== 'on', () => phase('asking'))
+  const perm = micPermission()
+  stopAsk = askWhen(perm, () => answered || state !== 'on', () => phase('asking'))
   asked
     .then(async (stream) => {
       answered = true
       stopAsk()
       if (state !== 'on') return stream.getTracks().forEach((t) => t.stop())
+      // the browser said 'prompt' yet the microphone came with no prompt answered: don't believe it here again
+      void perm.then((p) => { if (p === 'prompt' && performance.now() - startedAt < ASK_WAIT) promptLies.set() })
+      phase('given')
       mic = stream
       rec = new MediaRecorder(stream)
       rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
