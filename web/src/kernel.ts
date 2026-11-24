@@ -13,6 +13,7 @@ import { OPEN_WITHIN, PONG_WITHIN, retryIn, SAY_LOST_AFTER } from './link.ts'
 import { expire, loadOutbox, prune, saveOutbox, settle, type Outgoing } from './outbox.ts'
 import { setupGuarded } from './guard.tsx'
 import { HttpError, wakeAll } from './uploads.ts'
+import { SHOW_AFTER } from './pending.ts'
 
 /* ---------- the places plugins fill ---------- */
 
@@ -511,29 +512,38 @@ export async function act<T = { ok?: boolean; error?: string; [k: string]: unkno
   return r.json().catch(() => ({})) as Promise<T>
 }
 
-/** an action whose failure is said in a small notice instead of thrown */
-export async function tryAct(a: { type: string } & Record<string, unknown>, done?: string): Promise<boolean> {
+/** an action asked of the server: null when it said yes, else its words why not (never thrown) */
+export async function attempt(a: { type: string } & Record<string, unknown>): Promise<string | null> {
   try {
     const r = await act(a)
-    if (r.ok === false) {
-      notice(r.error || 'That did not work.')
-      return false
-    }
-    if (done) notice(done)
-    return true
+    return r.ok === false ? r.error || 'That did not work.' : null
   } catch (e) {
-    notice(e instanceof Error && e.message ? e.message : 'That did not work.')
-    return false
+    return e instanceof Error && e.message ? e.message : 'That did not work.'
   }
+}
+
+/** an action whose failure is said in a small notice instead of thrown. `doing`: what it does, said in the notice with
+ *  a spinner while it takes longer than a moment (a menu's row is gone once tapped: the notice is its answer) */
+export async function tryAct(a: { type: string } & Record<string, unknown>, done?: string, doing?: string): Promise<boolean> {
+  const busy = doing ? setTimeout(() => notice(doing, 60_000, true), SHOW_AFTER) : null
+  const error = await attempt(a)
+  if (busy) clearTimeout(busy)
+  if (error !== null) notice(error)
+  else if (done) notice(done)
+  else if (doing && noticeText === doing) clearNotice()
+  return error === null
 }
 
 /* a small notice at the top (the design system's toast) */
 let noticeText: string | null = null
+/** the notice says something still going: a spinner beside its words */
+let noticeBusy = false
 let noticeTimer: ReturnType<typeof setTimeout> | null = null
 const noticeListeners = new Set<() => void>()
 /** ms: how long it stays (a longer one for words to read) */
-export function notice(text: string, ms = 2600) {
+export function notice(text: string, ms = 2600, busy = false) {
   noticeText = text
+  noticeBusy = busy
   if (noticeTimer) clearTimeout(noticeTimer)
   noticeTimer = setTimeout(() => {
     noticeText = null
@@ -541,6 +551,12 @@ export function notice(text: string, ms = 2600) {
   }, ms)
   noticeListeners.forEach((l) => l())
 }
+function clearNotice() {
+  if (noticeTimer) clearTimeout(noticeTimer)
+  noticeText = null
+  noticeListeners.forEach((l) => l())
+}
+export const noticeIsBusy = () => noticeBusy
 export const useNotice = () =>
   useSyncExternalStore(
     (l) => {

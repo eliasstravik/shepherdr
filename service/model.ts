@@ -116,6 +116,15 @@ export class Model {
     return this.spaces.some((s) => s.id === id);
   }
 
+  /** A task's list read again now, after the person acted on it (SHEP-450): another machine's lists are otherwise read
+   *  only every 10 s, so its card kept its buttons for up to that long after the server said yes. This machine's are
+   *  watched (fs.watch) and need no help. */
+  async reread(machine: string | null) {
+    if (!machine) return;
+    await this.readLists(machine);
+    this.build();
+  }
+
   private readAt = 0;
   async refresh() {
     this.readAt = Date.now();

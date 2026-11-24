@@ -10,7 +10,9 @@ import { Btn, Empty, I, IB, Row } from '@client/ui.tsx'
 import { dayLabel } from '@plugins/chat/days.ts'
 import { doneWords, isEverything, scheduleLine, schedulesOf, statusWord, taskLine, taskOf, tstate, whereWords, type Schedule } from '@shared/view.ts'
 
-const act = (x: Schedule, op: string, more: Record<string, unknown> = {}) => tryAct({ type: 'automation', op, id: x.id, place: x.place, name: x.name, ...more })
+/** what each does, said with a spinner while it takes longer than a moment (its menu is gone once tapped) */
+const DOING: Record<string, string> = { run: 'Starting a run…', pause: 'Pausing…', resume: 'Resuming…', edit: 'Sending the change…' }
+const act = (x: Schedule, op: string, more: Record<string, unknown> = {}) => tryAct({ type: 'automation', op, id: x.id, place: x.place, name: x.name, ...more }, undefined, DOING[op])
 
 /** Edit: when it runs and what it does (two plain text fields), the space (and so the machine) and the agent. Save
  *  sends the new words to that space's agent, which sets the trigger, exactly as when it is asked in a chat. */

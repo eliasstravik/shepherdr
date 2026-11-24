@@ -37,6 +37,18 @@ p,h2,h3{margin:0}small{font-size:inherit}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:var(--btn);padding:0 12px;border-radius:8px;background:var(--control);font-size:var(--sec);line-height:var(--secl);font-weight:500;white-space:nowrap;flex:none}
 .btn:hover{background:var(--control2)}.btn.s{height:var(--btns);padding:0 10px}
 .btn.pri{background:var(--fg);color:var(--canvas)}.btn.str{background:var(--control2)}.btn.danger{color:var(--red)}
+/* a press shows at once, by touch, mouse or keyboard (Enter and Space press it too): darker, a touch smaller. A button
+   that asks the server keeps that look while it goes (.going), then a spinner and its words say it is busy (.busy,
+   ui.tsx ActBtn); the card's other buttons wait, disabled. No motion with reduced motion. */
+.btn:active:not(:disabled),.btn.going{box-shadow:inset 0 0 0 999px var(--control2)}
+.btn.pri:active:not(:disabled),.btn.pri.going{box-shadow:none;opacity:.8}
+.chip:active:not(:disabled),.chip.going{background:var(--control2)}
+.btn:active:not(:disabled),.chip:active:not(:disabled){transform:scale(.97)}
+.btn.busy,.chip.busy{cursor:progress}.btn.busy .i,.chip.busy .i{margin-left:-2px}
+.chip.busy{display:inline-flex;align-items:center;gap:6px}
+.acterr{display:block;text-align:right}.card .s.c-red{color:var(--red)}
+.toast.busy{display:flex;align-items:center;gap:8px}
+@media(prefers-reduced-motion:reduce){.btn:active:not(:disabled),.chip:active:not(:disabled){transform:none}}
 .ib{display:inline-grid;place-items:center;width:var(--ib);height:var(--ib);border-radius:8px;color:var(--muted);flex:none}
 .ib:hover,.ib[aria-pressed="true"],.ib[aria-expanded="true"]{background:var(--control);color:var(--fg)}
 .cnt{display:inline-block;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--control2);color:var(--fg);font-size:12px;line-height:18px;font-weight:600;text-align:center;font-variant-numeric:tabular-nums;flex:none}
@@ -346,6 +358,11 @@ button.fake .n span,button.fake>.i{color:var(--muted)}
 @media (hover:hover) and (pointer:fine){.sug:hover{background:var(--control)}}
 .sug:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 .app.tap .sug{--sugh:max(var(--hit),var(--send))}
+/* a tapped one lifts away as it sends (chat client.tsx SUG_GO_MS); with reduced motion it just sends */
+.sug:active{transform:scale(.97)}
+.sug.go{animation:sugout .14s cubic-bezier(.4,0,1,1) forwards;pointer-events:none}
+@media(prefers-reduced-motion:reduce){.sug:active{transform:none}}
+@keyframes sugout{to{transform:translateY(-8px) scale(.96);opacity:0}}
 
 /* screens */
 .scr{position:relative;border-radius:12px;overflow:hidden;background:var(--well);box-shadow:inset 0 0 0 1px var(--line2)}

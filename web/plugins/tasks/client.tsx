@@ -5,11 +5,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { PaneFrame, placeholderOf, showList } from '@client/App.tsx'
 import { newSpaceDialog, renameDialog } from '@client/list.tsx'
-import { definePlugin, getState, go, has, maximize, sideHidden, minimize, notice, openTask, registry, setUI, togglePane, tryAct, act, useSnap, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
+import { definePlugin, getState, go, has, maximize, sideHidden, minimize, notice, openTask, registry, setUI, togglePane, tryAct, act, attempt, useSnap, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
 import { confirm, openDialog, openForm, openMenu } from '@client/overlay.tsx'
 import { AgentField, pickFor, type Pick } from '@client/picker.tsx'
 import { edge } from '@client/resize.ts'
-import { Btn, Cnt, cx, Empty, Hd, I, IB, MenuGroup, Row } from '@client/ui.tsx'
+import { ActBtn, ActError, Btn, Cnt, cx, Empty, Hd, I, IB, MenuGroup, Row, useCardActs } from '@client/ui.tsx'
+import { waiting } from '@client/pending.ts'
 import { SpaceIcon } from '@client/space-icon.tsx'
 import type { MergeEvidence, Snapshot, Task } from '@shared/types.ts'
 import { askedWords, isEverything, machineLabel, nowGroups, onBranch, placeDown, reposOf, spaceLabel, spaceOnFolder, spacesOf, etaOf, leftWords, statusWord, taskChat, taskLine, taskWhen, tasksIn, tstate, workKey, workName, workWords, type Repo } from '@shared/view.ts'
@@ -144,7 +145,7 @@ function del(t: Task) {
     ok: 'Delete',
     danger: true,
     run: async () => {
-      if (await tryAct({ type: 'delete', chat: taskChat(t), force: true })) setUI((ui) => ({ ...(ui.task === t.id ? { task: null } : {}), ...(ui.max === t.id ? { max: null } : {}) }))
+      if (await tryAct({ type: 'delete', chat: taskChat(t), force: true }, undefined, 'Deleting…')) setUI((ui) => ({ ...(ui.task === t.id ? { task: null } : {}), ...(ui.max === t.id ? { max: null } : {}) }))
     },
   })
 }
@@ -175,14 +176,14 @@ export function taskMenu(anchor: Element, t: Task, where: 'row' | 'thread') {
     { icon: every ? 'layers' : 'hash', label: `Show in ${spaceLabel(snap, t.place)}`, line: views.length + viewSwitch.length > 0, run: () => go(t.place) },
     ...(t.work ? [{ icon: 'folder' as const, label: `All tasks in ${workName(t)}`, run: () => showRepo(workKey(t)) }] : []),
     ...extra.filter((r) => r.label === 'Show screen'),
-    ...(s === 'next' ? [{ icon: 'folder' as const, label: 'Move to', sub: spacesOf(snap).filter((p) => p.id !== t.place && !p.archived).map((p) => ({ label: spaceLabel(snap, p.id), run: () => void tryAct({ type: 'task-move', chat, place: p.id }) })) }] : []),
+    ...(s === 'next' ? [{ icon: 'folder' as const, label: 'Move to', sub: spacesOf(snap).filter((p) => p.id !== t.place && !p.archived).map((p) => ({ label: spaceLabel(snap, p.id), run: () => void tryAct({ type: 'task-move', chat, place: p.id }, undefined, 'Moving…') })) }] : []),
     // from the menu it closes without merging: "Done · not merged" for a task on its own branch
-    ...(s !== 'done' && s !== 'archived' ? [{ icon: 'check' as const, label: 'Mark as done', run: () => void tryAct({ type: 'close', chat, force: true }) }] : []),
+    ...(s !== 'done' && s !== 'archived' ? [{ icon: 'check' as const, label: 'Mark as done', run: () => void tryAct({ type: 'close', chat, force: true }, undefined, 'Marking as done…') }] : []),
     { icon: 'pen', label: 'Rename', run: () => renameDialog(t.name, (name) => tryAct({ type: 'task-rename', chat, name })) },
     // Stop pauses the agent, like pressing Esc: it drops what it was doing and waits
-    ...(s === 'working' ? [{ icon: 'stop' as const, label: 'Stop', run: () => void tryAct({ type: 'stop', chat }) }] : []),
+    ...(s === 'working' ? [{ icon: 'stop' as const, label: 'Stop', run: () => void tryAct({ type: 'stop', chat }, undefined, 'Stopping…') }] : []),
     ...extra.filter((r) => r.label !== 'Show screen' && r.on === undefined && r.icon !== 'viewswap'),
-    { icon: 'archive', label: t.archived ? 'Unarchive' : 'Archive', line: true, run: () => { void tryAct({ type: 'archive', chat, on: !t.archived }); if (!t.archived) setUI((ui) => ({ ...(ui.task === t.id ? { task: null } : {}), ...(ui.max === t.id ? { max: null } : {}) })) } },
+    { icon: 'archive', label: t.archived ? 'Unarchive' : 'Archive', line: true, run: () => { void tryAct({ type: 'archive', chat, on: !t.archived }, undefined, t.archived ? 'Unarchiving…' : 'Archiving…'); if (!t.archived) setUI((ui) => ({ ...(ui.task === t.id ? { task: null } : {}), ...(ui.max === t.id ? { max: null } : {}) })) } },
     { icon: 'bin', label: 'Delete', danger: true, run: () => del(t) },
   ]
   openMenu(anchor, rows, { label: t.name })
@@ -224,7 +225,7 @@ function startDialog(t: Task) {
             </span>
           </div>
           <AgentField title="This task runs on" machine={machine} pick={pick} onChange={setPick} />
-          <Btn kind="pri" style={{ width: '100%' }} disabled={busy} onClick={() => void start()}>Start task</Btn>
+          <Btn kind="pri" className={busy ? 'busy' : undefined} style={{ width: '100%' }} aria-busy={busy || undefined} onClick={() => void start()}>{busy ? <><I n="working" c="s16" />Starting…</> : 'Start task'}</Btn>
         </>
       )
     },
@@ -269,6 +270,8 @@ export function ReviewCard({ t, ctx }: { t: Task; ctx: 'chat' | 'thread' }) {
   const [fold, setFold] = useState(false)
   const [, bump] = useState(0)
   const Tile = registry.views.tile
+  // its buttons answer at once and wait together (pending.ts): Mark as done holds until the server's state moves on
+  const acts = useCardActs(`review:${t.id}`, `${tstate(t)}|${t.status ?? ''}|${t.mergeFailed ?? ''}`)
   if (!snap) return null
   const s = tstate(t)
   if (s === 'done' || s === 'archived') return <DoneRow>{statusWord(t).word} · {t.name}</DoneRow>
@@ -305,12 +308,19 @@ export function ReviewCard({ t, ctx }: { t: Task; ctx: 'chat' | 'thread' }) {
       {down ? (
         <span className="s">Can't reach {down.name}: this waits until the link is back</span>
       ) : (
-        <div className="acts">
-          <Btn onClick={() => { later.add(t.id); bump((n) => n + 1) }}>Not now</Btn>
-          <Btn kind={ctx === 'chat' ? 'str' : 'pri'} disabled={merging} onClick={() => void tryAct({ type: 'accept', task: t.id })}>
-            {merging ? 'Merging…' : branch ? 'Mark as done and merge' : 'Mark as done'}
-          </Btn>
-        </div>
+        <>
+          <div className="acts">
+            <Btn disabled={waiting(acts.now) || merging} onClick={() => { later.add(t.id); bump((n) => n + 1) }}>Not now</Btn>
+            {merging ? (
+              <Btn kind={ctx === 'chat' ? 'str' : 'pri'} className="busy" aria-disabled aria-busy><I n="working" c="s16" />Merging…</Btn>
+            ) : (
+              <ActBtn acts={acts} id="accept" kind={ctx === 'chat' ? 'str' : 'pri'} busy={branch ? 'Merging…' : 'Marking as done…'} run={() => attempt({ type: 'accept', task: t.id })}>
+                {branch ? 'Mark as done and merge' : 'Mark as done'}
+              </ActBtn>
+            )}
+          </div>
+          <ActError acts={acts} />
+        </>
       )}
     </div>
   )
@@ -319,14 +329,16 @@ export function ReviewCard({ t, ctx }: { t: Task; ctx: 'chat' | 'thread' }) {
 /** An agent that crashed or was cut off is never started again by Shepherdr on its own: a card with the reason and
  *  Restart. Stopped by you: the next message carries on. */
 export function StoppedCard({ t }: { t: Task }) {
+  const acts = useCardActs(`stopped:${t.id}`, `${tstate(t)}|${t.stopped?.why ?? ''}|${t.stopped?.by ?? ''}`)
   if (!t.stopped || t.stopped.by === 'you') return null
   return (
     <div className="card" data-card={`stopped:${t.id}`}>
       <span className="t c-red">Stopped</span>
       <span>{t.stopped.why || (t.stopped.by === 'limit' ? "It hit its plan's limit." : 'Its agent is no longer running.')}</span>
       <div className="acts">
-        <Btn kind="pri" onClick={() => void tryAct({ type: 'task-resume', chat: taskChat(t) })}>Restart</Btn>
+        <ActBtn acts={acts} id="restart" kind="pri" busy="Restarting…" run={() => attempt({ type: 'task-resume', chat: taskChat(t) })}>Restart</ActBtn>
       </div>
+      <ActError acts={acts} />
     </div>
   )
 }

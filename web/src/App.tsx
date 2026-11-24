@@ -5,7 +5,7 @@
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import type { Snapshot } from '@shared/types.ts'
 import { downWords, isEverything, needsCount, placeDown, placeOf, spaceLabel, spaceName, taskOf, type Space } from '@shared/view.ts'
-import { getState, openSettings, registry, setUI, sideHidden, togglePane, useNotice, useSnap, useUI, type Thread } from './kernel.ts'
+import { getState, noticeIsBusy, openSettings, registry, setUI, sideHidden, togglePane, useNotice, useSnap, useUI, type Thread } from './kernel.ts'
 import { List, spaceMenu } from './list.tsx'
 import { HeaderPath } from './where.tsx'
 import { closeTop, Layers } from './overlay.tsx'
@@ -167,7 +167,9 @@ function Bar({ snap }: { snap: Snapshot }) {
 
 function Toast() {
   const text = useNotice()
-  return text ? <div className="toast" role="status">{text}</div> : null
+  // something still going (a menu's action that takes a while): the Working ring beside its words
+  const busy = noticeIsBusy()
+  return text ? <div className={busy ? 'toast busy' : 'toast'} role="status">{busy && <I n="working" c="s16" />}{text}</div> : null
 }
 
 /** a finger is the main pointer (a phone or a tablet): the app takes its touch sizes (SHEP-317) */
