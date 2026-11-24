@@ -121,7 +121,7 @@ Settings › Machines says how each machine is, with its agents, processor, memo
 
 ### Does Shepherdr send my work to a hosted service?
 
-No. Shepherdr runs on your own machine, keeps its files there, talks to your local herdr-core, and reaches your other machines over herdr-core's remote and your own SSH. The web app is served from your own machine to your tailnet only. Your agent CLI still uses its own service as usual, `gh` talks to GitHub, and voice and dictation go through ElevenLabs if you set them up.
+No. Shepherdr runs on your own machine, keeps its files there, talks to your local herdr-core, and reaches your other machines over herdr-core's remote and your own SSH. The web app is served from your own machine to your tailnet only. Your agent CLI still uses its own service as usual, `gh` talks to GitHub, and voice and dictation go through ElevenLabs if you set them up. Its personal analytics, a record of how you use it for you and your agents, stay on your machines and are never sent to anyone, us included ([docs/analytics.md](docs/analytics.md)).
 
 ### Will it touch my branches or worktrees on its own?
 

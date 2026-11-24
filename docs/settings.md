@@ -13,6 +13,7 @@ Settings is one window. Open it from the foot of the list. On a phone it is a li
 | Machines | Each machine's agents, processor, memory and disk. Add a machine. Open desktop, where a machine has one |
 | Usage | How much of each plan your agents have used, with reset times |
 | Plugins | A switch for Terminal, Screens, Voice, Schedules and Reactions ([Plugins](plugins.md)) |
+| Personal analytics | How you use Shepherdr, kept only on your machines: on or off, your numbers, see, export or delete it ([analytics.md](analytics.md)) |
 
 ## Task settings follow the repo
 

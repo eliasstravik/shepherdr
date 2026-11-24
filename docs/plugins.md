@@ -10,6 +10,7 @@ the rest. [`web/plugins.json`](../web/plugins.json) is the list, in order.
 | artifacts | always on | The Artifacts pane, a page's tile in a chat, Mark up | |
 | search | always on | One search for spaces, tasks and artifacts (Ctrl+K) | |
 | alerts | always on | Push alerts, one choice per device | |
+| analytics | always on | Settings › Personal analytics, kept only on your machines ([analytics.md](analytics.md)); its own switch turns recording off | |
 | terminal | yes | Your own terminal in a space or a task, and "View as terminal" | No Terminal menu items |
 | screens | yes | An agent's browser and desktop: watch, Take over, Hand back | No Screen menu item, live picture or card |
 | voice | yes | Voice over the whole app, and dictation in the message box | No voice or mic button |
