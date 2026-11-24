@@ -329,7 +329,7 @@ def words(s):
 # ---- what a task's changes say: one place, where a task list is saved (store.Store.save) ------------------------
 
 def _snap(t):
-    return {"state": t.get("state"), "stopped_by": t.get("stopped_by"), "attention": bool(t.get("attention")),
+    return {"state": t.get("state"), "stopped_by": t.get("stopped_by"), "stopped_at": t.get("stopped_at"), "attention": bool(t.get("attention")),
             "reviews": len(t.get("reviews") or []), "merge_failed": bool(t.get("merge_failed"))}
 
 
@@ -348,7 +348,7 @@ def changes(before, tasks, space_of=None, now_ms=None):
         who = {"agent": t.get("agent"), "model": t.get("model"), "effort": t.get("effort")}
         if was is None:
             out.append(("task.added", {**base, "auto": bool(t.get("automation"))}))
-            was = {"state": None, "stopped_by": None, "attention": False, "reviews": 0, "merge_failed": False}
+            was = {"state": None, "stopped_by": None, "stopped_at": None, "attention": False, "reviews": 0, "merge_failed": False}
         a, b = was["state"], now["state"]
         if a != b:
             if b == "running" and a in (None, "todo", "queued"):
@@ -365,7 +365,7 @@ def changes(before, tasks, space_of=None, now_ms=None):
         if now["stopped_by"] and not was["stopped_by"]:
             out.append(("task.stopped", {**base, "by": now["stopped_by"]}))
         elif was["stopped_by"] and not now["stopped_by"] and b == "running":
-            out.append(("task.carried_on", {**base, "blocked_ms": _since(t.get("stopped_at"), now_ms) if t.get("stopped_at") else None}))
+            out.append(("task.carried_on", {**base, "blocked_ms": _since(was.get("stopped_at"), now_ms)}))
         if now["attention"] and not was["attention"]:
             out.append(("task.needs_you", base))
         elif was["attention"] and not now["attention"]:
