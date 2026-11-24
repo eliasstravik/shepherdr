@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { onFrameSaid } from './client.tsx'
+import { onFrameSaid, spotOf } from './client.tsx'
 
 // A link to another site in an artifact took over its frame and left a dead grey panel. The page's link catcher tells
 // the app instead; the panel and the full-screen view (one Page) open another site in a new tab and the app's own
@@ -31,4 +31,14 @@ test('nothing but a web address opens, and what the frame says of itself is pass
   expect(said({ shepherdr: 'answer', text: 'yes' }).r).toBeNull()
   expect(said(null).r).toBeNull()
   expect(said('page').r).toBeNull()
+})
+
+// Mark up (SHEP-464): the page's catcher says where a tap was, as fractions of the whole page; anything else is no pin.
+test('a pin is only a spot the page said, kept inside the page', () => {
+  expect(spotOf({ shepherdr: 'spot', x: 0.25, y: 0.5 })).toEqual({ x: 0.25, y: 0.5 })
+  expect(spotOf({ shepherdr: 'spot', x: -1, y: 3 })).toEqual({ x: 0, y: 1 })
+  expect(spotOf({ shepherdr: 'spot', x: '0.2', y: 0.5 })).toBeNull()
+  expect(spotOf({ shepherdr: 'spot', x: Number.NaN, y: 0.5 })).toBeNull()
+  expect(spotOf({ shepherdr: 'page' })).toBeNull()
+  expect(spotOf(null)).toBeNull()
 })

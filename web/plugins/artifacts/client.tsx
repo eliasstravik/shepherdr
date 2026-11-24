@@ -160,10 +160,19 @@ export function onFrameSaid(d: unknown, here: string, open: (href: string) => vo
   return m.shepherdr === 'page' || m.shepherdr === 'inside' ? m.shepherdr : null
 }
 
-/** The page, in a frame that cannot reach the app. Marking up: tap the page to drop a pin, then write. A frame that
- *  ends on a page it can't show (another site that refuses frames, sent there by the page's own script) gets a calm
- *  notice with Back to the artifact, never a dead grey panel. */
-function Page({ a, v, markup, pin, setPin }: { a: Artifact; v: number; markup: boolean; pin: { x: number; y: number } | null; setPin: (p: { x: number; y: number } | null) => void }) {
+/** what the page says about a tap while marking up (its link catcher): where on the whole page, as fractions */
+export function spotOf(d: unknown): { x: number; y: number } | null {
+  const m = d as { shepherdr?: unknown; x?: unknown; y?: unknown } | null
+  if (!m || typeof m !== 'object' || m.shepherdr !== 'spot' || typeof m.x !== 'number' || typeof m.y !== 'number' || !Number.isFinite(m.x) || !Number.isFinite(m.y)) return null
+  const f = (n: number) => Math.min(1, Math.max(0, n))
+  return { x: f(m.x), y: f(m.y) }
+}
+
+/** The page, in a frame that cannot reach the app. Marking up: tap the page to drop a pin, then write. The page's own
+ *  link catcher takes the tap and draws the pin (SHEP-464: a layer over the frame stopped it scrolling), so the page
+ *  scrolls as ever while the box is open. A frame that ends on a page it can't show (another site that refuses
+ *  frames, sent there by the page's own script) gets a calm notice with Back to the artifact, never a dead grey panel. */
+function Page({ a, v, markup, setPin }: { a: Artifact; v: number; markup: boolean; setPin: (p: { x: number; y: number } | null) => void }) {
   const frame = useRef<HTMLIFrameElement>(null)
   const [load, setLoad] = useState(0)
   const [lost, setLost] = useState(false)
@@ -177,14 +186,21 @@ function Page({ a, v, markup, pin, setPin }: { a: Artifact; v: number; markup: b
     setLost(false)
     return () => { if (look.current) clearTimeout(look.current) }
   }, [a.id, v, load])
+  // marking up or not, told to the page (again whenever a page of it starts: it says so)
+  const marking = useRef(markup)
+  marking.current = markup
+  const tell = () => frame.current?.contentWindow?.postMessage({ shepherdr: 'markup', on: marking.current }, '*')
+  useEffect(tell, [markup])
   // a page can send the person's answer back to its agent: parent.postMessage({ shepherdr: 'answer', text }, '*')
   useEffect(() => {
     const on = (e: MessageEvent) => {
       if (e.source !== frame.current?.contentWindow) return
       const d = e.data as { shepherdr?: string; text?: unknown } | null
       const what = onFrameSaid(d, location.href, (href) => openLink(href, true), (href) => void window.open(href, '_blank', 'noopener,noreferrer'))
-      if (what === 'page') { said.current = Date.now(); setLost(false) }
+      if (what === 'page') { said.current = Date.now(); setLost(false); tell() }
       else if (what === 'inside') inside.current = true
+      const spot = marking.current ? spotOf(d) : null
+      if (spot) setPin(spot)
       if (d?.shepherdr !== 'answer' || typeof d.text !== 'string' || !d.text.trim()) return
       void tryAct({ type: 'artifact-say', place: a.place, artifact: a.id, v, text: d.text.slice(0, 4000) }, 'Sent to the agent that made it')
     }
@@ -210,19 +226,6 @@ function Page({ a, v, markup, pin, setPin }: { a: Artifact; v: number; markup: b
           <b>Couldn't show this page</b>
           <span>It doesn't open inside Shepherdr.</span>
           <div className="acts"><Btn kind="pri" onClick={() => setLoad(load + 1)}>Back to the artifact</Btn></div>
-        </div>
-      )}
-      {markup && (
-        <div
-          role="button"
-          aria-label="Tap the page where you mean"
-          style={{ position: 'absolute', inset: 0, cursor: 'crosshair' }}
-          onClick={(e) => {
-            const r = e.currentTarget.getBoundingClientRect()
-            setPin({ x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height })
-          }}
-        >
-          {pin && <span className="pinmark" style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%` }} />}
         </div>
       )}
     </div>
@@ -263,7 +266,7 @@ function Open({ a, where }: { a: Artifact; where: 'pane' | 'middle' }) {
       )}
       foot={markup ? <input ref={input} className="inp" name="note" aria-label="Say what to change" placeholder="Say what to change. It goes to the agent that made this." enterKeyHint="send" autoComplete="off" value={note} onChange={(e) => setNote(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void send()} /> : undefined}
     >
-      <Page a={a} v={v} markup={markup} pin={pin} setPin={setPin} />
+      <Page a={a} v={v} markup={markup} setPin={setPin} />
     </PaneFrame>
   )
 }

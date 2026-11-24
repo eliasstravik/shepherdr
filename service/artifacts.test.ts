@@ -264,11 +264,17 @@ test("every page of an artifact starts with its link catcher, in its head and ne
 /** LINKS_JS run on a fake page at `at`: what it told the app, and whether each click was stopped */
 function catcher(at: string) {
   const said: any[] = [];
-  let onClick: (e: any) => void = () => {}, onLoad = () => {};
-  const win: any = { location: new URL(at), URL, addEventListener: (n: string, f: any) => { if (n === "load") onLoad = f; }, document: { baseURI: at, addEventListener: (_: string, f: any) => { onClick = f; } } };
+  let onClick: (e: any) => void = () => {};
+  const on: Record<string, (e?: any) => void> = {};
+  const added: any[] = [];
+  const el = () => { const x: any = { style: {}, setAttribute() {}, remove() { added.splice(added.indexOf(x), 1); } }; return x; };
+  const doc: any = { baseURI: at, addEventListener: (_: string, f: any) => { onClick = f; }, createElement: el,
+    documentElement: { scrollWidth: 400, scrollHeight: 2000, appendChild: (x: any) => added.push(x) } };
+  const win: any = { location: new URL(at), URL, addEventListener: (n: string, f: any) => { on[n] = f; }, document: doc };
   win.parent = { postMessage: (m: any) => said.push(m) };
   win.window = win;
   runInNewContext(LINKS_JS, win);
+  const onLoad = () => on.load!();
   const click = (href: string, more: { target?: string; button?: number; ctrlKey?: boolean } = {}) => {
     const a = { getAttribute: (n: string) => (n === "href" ? href : null), hasAttribute: () => false, target: more.target ?? "" };
     const e = { defaultPrevented: false, button: more.button ?? 0, metaKey: false, ctrlKey: !!more.ctrlKey, shiftKey: false, altKey: false,
@@ -277,7 +283,22 @@ function catcher(at: string) {
     onClick(e);
     return { stopped: e.defaultPrevented, said: [...said] };
   };
-  return { said, click, load: () => onLoad() };
+  /** the app turns Mark up on or off, as the frame's parent (or another window pretends to) */
+  const markup = (v: boolean, from: any = win.parent) => on.message!({ source: from, data: { shepherdr: "markup", on: v } });
+  /** a tap on the page at (x, y) of the whole page: whether it was stopped from doing what it would */
+  const tap = (x: number, y: number) => {
+    const e = { pageX: x, pageY: y, defaultPrevented: false, stopped: false, preventDefault() { this.defaultPrevented = true; }, stopImmediatePropagation() { this.stopped = true; } };
+    said.length = 0;
+    on.click!(e);
+    return { stopped: e.defaultPrevented && e.stopped, said: [...said] };
+  };
+  /** a form sent: whether it was kept from moving the frame */
+  const submit = (action: string | null, target: string | null = null, prevented = false) => {
+    const e = { defaultPrevented: prevented, target: { getAttribute: (n: string) => (n === "action" ? action : n === "target" ? target : null) }, preventDefault() { this.defaultPrevented = true; } };
+    on.submit!(e);
+    return e.defaultPrevented;
+  };
+  return { said, click, load: () => onLoad(), markup, tap, submit, added };
 }
 
 test("in an artifact, another site's link goes to the app (a new tab), never into the frame; its own links stay", () => {
@@ -300,4 +321,43 @@ test("in an artifact, another site's link goes to the app (a new tab), never int
   expect(c.click("mailto:someone@example.test")).toEqual({ stopped: false, said: [] });
   expect(c.click("https://example.com/", { ctrlKey: true })).toEqual({ stopped: false, said: [] });
   expect(c.click("https://example.com/", { button: 1 })).toEqual({ stopped: false, said: [] });
+});
+
+// SHEP-464: Mark up laid a layer over the frame, so the page could not scroll while its box was open: the page's own
+// catcher takes the tap now, draws the pin in the page and says where, and the page scrolls as ever.
+test("marking up, a tap on the page drops a pin there and says where on the whole page; off again, taps are the page's", () => {
+  const c = catcher(`https://box.example.test/shepherdr${page("index.html")}`);
+  expect(c.tap(100, 500)).toEqual({ stopped: false, said: [] });
+  // only the app (the frame's parent) turns it on
+  c.markup(true, {});
+  expect(c.tap(100, 500)).toEqual({ stopped: false, said: [] });
+  c.markup(true);
+  // a style (the crosshair) and, on the tap, the pin
+  expect(c.added.length).toBe(1);
+  expect(c.tap(100, 500)).toEqual({ stopped: true, said: [{ shepherdr: "spot", x: 0.25, y: 0.25 }] });
+  expect(c.added.length).toBe(2);
+  expect(c.added[1].style.left).toBe("100px");
+  expect(c.added[1].style.top).toBe("500px");
+  // a second tap moves the same pin
+  expect(c.tap(200, 1500).said).toEqual([{ shepherdr: "spot", x: 0.5, y: 0.75 }]);
+  expect(c.added.length).toBe(2);
+  // off: the pin and the crosshair go, and a tap is the page's again
+  c.markup(false);
+  expect(c.added.length).toBe(0);
+  expect(c.tap(100, 500)).toEqual({ stopped: false, said: [] });
+});
+
+// SHEP-464: a proof's Reply box (a form whose script sends the answer) went on to send the form too, and the frame
+// ended on the service's "read only" answer: "Couldn't show this page". A form sent to the artifact never moves it.
+test("a form sent to the artifact itself never moves the frame; one to another site, or one its page handles, is left alone", () => {
+  const c = catcher(`https://box.example.test/shepherdr${page("index.html")}`);
+  expect(c.submit(null)).toBe(true);
+  expect(c.submit("")).toBe(true);
+  expect(c.submit("sub/send.html")).toBe(true);
+  expect(c.submit(null, "_self")).toBe(true);
+  // another site, a new tab: as the browser does them
+  expect(c.submit("https://example.com/search")).toBe(false);
+  expect(c.submit(null, "_blank")).toBe(false);
+  // one the page stopped itself stays stopped
+  expect(c.submit(null, null, true)).toBe(true);
 });
