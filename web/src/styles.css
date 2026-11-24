@@ -129,7 +129,6 @@ div.b[data-menu]{cursor:pointer}
 .plines{position:absolute;inset:0;display:flex;flex-direction:column;gap:4px;padding:10px 12px;overflow:hidden;font-size:10px;line-height:1.35;color:var(--sub);text-align:left;-webkit-mask-image:linear-gradient(#000 70%,transparent);mask-image:linear-gradient(#000 70%,transparent)}
 .plines span{flex:none;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}
 .plines .h{font-size:12px;font-weight:600;color:var(--fg);-webkit-line-clamp:2}
-.pinmark{position:absolute;width:20px;height:20px;margin:-10px 0 0 -10px;border-radius:50%;background:var(--fg);box-shadow:0 0 0 2px var(--canvas);pointer-events:none}
 
 /* the emoji list behind + in a message's menu */
 .emolist{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:2px;max-height:46dvh;overflow-y:auto}
