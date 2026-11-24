@@ -8,7 +8,7 @@ import type { Hub } from "./hub.ts";
 import * as V from "../core/voice.js";
 import { keyFor } from "./voice.ts";
 
-const { transcribe, liveTokenRequest, sttError, dictateKeyError } = V as any;
+const { transcribe, liveTokenRequest, sttError, dictateKeyError, checkKey } = V as any;
 
 type Key = { key: string; agent?: string } | { error: string; why: string };
 
@@ -37,6 +37,18 @@ let cache: ReturnType<typeof keyCache> | null = null;
 export const cachedKey = (hub: Pick<Hub, "call">) => (cache ??= keyCache(() => keyFor(hub)));
 /** a refused key: found again next time */
 export const refused = (e: unknown) => { if (/\b401\b|invalid.*key|unauthori/i.test(String((e as Error)?.message ?? e))) cache?.forget(); };
+
+/** a key added, replaced or removed (Settings › Voice or Secrets): found again next time */
+export const forgetKey = () => cache?.forget();
+
+/** Settings › Voice's test: the key found afresh, then one free request to ElevenLabs (core/voice.js checkKey). Only
+ *  its verdict goes back to the page, never the key. */
+export async function checkVoiceKey(hub: Pick<Hub, "call">, fetchFn: typeof fetch = fetch, key = () => cachedKey(hub).get()): Promise<{ ok: boolean; says: string; from?: string; state: string }> {
+  forgetKey();
+  const r = await checkKey(await key(), fetchFn);
+  if (r.state === "refused") forgetKey();
+  return r;
+}
 
 /** words: the person's own (their spaces and machines, from the page; SHEP-334), so the writing gets them right */
 export async function dictate(hub: Pick<Hub, "call">, audio: Blob, fetchFn: typeof fetch = fetch, key = () => cachedKey(hub).get(), words: string[] = []): Promise<string> {

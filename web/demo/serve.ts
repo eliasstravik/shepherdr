@@ -45,6 +45,8 @@ const uploaded = new Map<string, File>()
 const say = (key: string, m: Partial<Message>) => { (chats[key] ??= { key, messages: [], cli: 'claude', top: true }).messages.push({ id: `n${++n}`, who: 'agent', at: Date.now(), ...m } as Message); pushChat(key) }
 
 const analytics = { on: true, noted: false }
+let demoVoiceKey = ''
+
 const H = 3600_000
 function demoAnalytics(days: number) {
   const k = days === 1 ? 0.2 : days === 30 ? 4 : 1
@@ -76,6 +78,18 @@ function action(a: Record<string, any>): unknown {
   if (a.type === 'screen') {
     if (a.op === 'handback' || a.op === 'skip') each((snap) => { const screen = snap.screens?.[a.key]; if (screen?.hands) screen.hands.settled = a.op === 'skip' ? 'skip' : 'done' })
     return { ok: true }
+  }
+  // Settings › Voice: the key kept by name only, and its test (a key with "bad" in it is refused)
+  if (a.type === 'secret' && typeof a.name === 'string') {
+    if (a.name === 'ELEVENLABS_API_KEY') demoVoiceKey = a.value === null ? '' : String(a.value)
+    each((snap) => { if (!snap.config) return; snap.config.secrets = snap.config.secrets.filter((x) => !(x.name === a.name && x.scope === a.level)); if (a.value !== null) snap.config.secrets.push({ name: a.name, scope: a.level, at: Date.now() }) })
+    return { ok: true }
+  }
+  if (a.type === 'voice-check') {
+    if (!demoVoiceKey) return { ok: false, state: 'none', says: 'Voice calls need an ElevenLabs key: add it in Settings › Voice.' }
+    return /bad/i.test(demoVoiceKey)
+      ? { ok: false, state: 'refused', from: 'here', says: "ElevenLabs doesn't accept this key. Copy it again from elevenlabs.io › Developers › API Keys and replace it." }
+      : { ok: true, state: 'works', from: 'here', says: 'Works: ElevenLabs accepts this key.' }
   }
   if (a.type === 'catalog') return { ok: true, catalog: catalog(a.machine) }
   // Settings › Personal analytics: a fictional week (web/plugins/analytics)

@@ -1,7 +1,7 @@
 // Dictation writes a recording down with ElevenLabs speech to text (Scribe), with the key a voice call uses (voiceKey:
 // from the machine that keeps the secrets). The ElevenLabs call is a stand-in here: what it is sent, and each failure's words.
 import { describe, expect, test } from "bun:test";
-import { dictate, fileName, keyCache, liveToken } from "./dictate.ts";
+import { checkVoiceKey, dictate, fileName, keyCache, liveToken } from "./dictate.ts";
 import * as V from "../core/voice.js";
 
 const { voiceKey, KEY_SCRIPT, STT_MODEL } = V as any;
@@ -51,13 +51,13 @@ describe("dictation with ElevenLabs", () => {
   test("no key on the main machine: where to add it, and ElevenLabs isn't asked", async () => {
     const { key } = fromMain(JSON.stringify({ key: "", agent: "" }));
     const el = elevenlabs(200, { text: "x" });
-    await expect(dictate(hub, audio(), el.f, key)).rejects.toThrow("Dictation needs an ElevenLabs key in Settings › Secrets.");
+    await expect(dictate(hub, audio(), el.f, key)).rejects.toThrow("Dictation needs an ElevenLabs key: add it in Settings › Voice.");
     expect(el.sent.length).toBe(0);
   });
 
   test("no key on this machine when it keeps the secrets: the same words", async () => {
     const key = () => voiceKey({ oldFile: () => "", where: async () => ({ here: true }), vault: () => null, ask: async () => null });
-    await expect(dictate(hub, audio(), elevenlabs(200, {}).f, key)).rejects.toThrow("Dictation needs an ElevenLabs key in Settings › Secrets.");
+    await expect(dictate(hub, audio(), elevenlabs(200, {}).f, key)).rejects.toThrow("Dictation needs an ElevenLabs key: add it in Settings › Voice.");
   });
 
   test("the main machine can't be reached: says so", async () => {
@@ -148,4 +148,13 @@ describe("live dictation and the kept key", () => {
     await expect(liveToken(hub, elevenlabs(401, { detail: { message: `bad ${KEY}` } }).f, async () => ({ key: KEY }))).rejects.toThrow("ElevenLabs said: bad …");
     await expect(liveToken(hub, elevenlabs(200, { token: "" }).f, async () => ({ key: KEY }))).rejects.toThrow("ElevenLabs gave no token.");
   });
+});
+
+test("Settings › Voice's test finds the key afresh and gives back only its verdict", async () => {
+  let asked = 0;
+  const key = async () => { asked++; return { key: "fake-elevenlabs-key-for-tests", from: "here" }; };
+  const r = await checkVoiceKey({ call: async () => ({}) } as any, (async () => new Response("{}", { status: 200 })) as any, key);
+  expect(r).toEqual({ ok: true, says: "Works: ElevenLabs accepts this key.", from: "here", state: "works" });
+  expect(asked).toBe(1);
+  expect(JSON.stringify(r)).not.toContain("fake-elevenlabs-key");
 });

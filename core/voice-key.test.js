@@ -74,7 +74,7 @@ test("none named and no key anywhere reachable: the one clear error", async () =
     ask: async (name) => { x.asked.push(name); return name === "off" ? null : '{"key":"","agent":""}'; } });
   const r = await voiceKey(x);
   expect(r).toEqual({ error: NO_KEY, why: "none" });
-  expect(r.error).toStartWith("Voice calls need an ElevenLabs key: add it in Settings › Secrets");
+  expect(r.error).toStartWith("Voice calls need an ElevenLabs key: add it in Settings › Voice");
   expect(x.asked).toEqual(["laptop", "off"]);
 });
 
@@ -171,4 +171,31 @@ test("COUNT_SCRIPT: how many secrets a vault has, never a value", () => {
     expect(JSON.parse(out)).toEqual({ count: 2, remote: true });
     expect(out).not.toContain(KEY);
   } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+// Settings › Voice's test: one free request, its answer in plain words, never the key
+import { checkKey, checkVerdict, CHECK_PATH } from "./voice.js";
+const answer = (status, body = "") => { const seen = []; const f = async (url, init) => { seen.push({ url, init }); return new Response(body, { status }); }; return { f, seen }; };
+
+test("a working key: Works, and the request asks only for one voice agent with the key in its header", async () => {
+  const el = answer(200, JSON.stringify({ agents: [] }));
+  expect(await checkKey({ key: KEY, from: "here" }, el.f)).toEqual({ ok: true, says: "Works: ElevenLabs accepts this key.", from: "here", state: "works" });
+  expect(el.seen[0].url).toEndWith(CHECK_PATH);
+  expect(el.seen[0].url).not.toContain(KEY);
+  expect(el.seen[0].init.headers["xi-api-key"]).toBe(KEY);
+});
+
+test("a refused key, one without voice permission, and no key at all say so plainly", async () => {
+  const bad = await checkKey({ key: KEY, from: "here" }, answer(401, JSON.stringify({ detail: { status: "invalid_api_key", message: "Invalid API key" } })).f);
+  expect(bad).toMatchObject({ ok: false, state: "refused" });
+  expect(bad.says).toStartWith("ElevenLabs doesn't accept this key.");
+  expect(checkVerdict(401, JSON.stringify({ detail: { status: "missing_permissions", message: "The API key you used is missing the permission convai_read" } })).says).toContain("can't use voice agents");
+  expect(await checkKey({ error: NO_KEY, why: "none" })).toEqual({ ok: false, says: NO_KEY, state: "none" });
+  expect((await checkKey({ error: "x", why: "unreachable" })).state).toBe("unreachable");
+});
+
+test("ElevenLabs out of reach: can't check, nothing thrown", async () => {
+  const r = await checkKey({ key: KEY, from: "here" }, async () => { throw new TypeError("fetch failed"); });
+  expect(r).toMatchObject({ ok: false, state: "unreachable" });
+  expect(JSON.stringify(r)).not.toContain(KEY);
 });

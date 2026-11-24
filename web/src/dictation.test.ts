@@ -8,7 +8,7 @@ describe('what the service answered to a recording', () => {
     expect(heard(200, JSON.stringify({ text: '' }))).toEqual({ text: '' })
   })
   test("the service's own reason when it couldn't write it down", () => {
-    expect(heard(400, JSON.stringify({ error: 'Dictation needs an ElevenLabs key in Settings › Secrets.' }))).toEqual({ error: 'Dictation needs an ElevenLabs key in Settings › Secrets.' })
+    expect(heard(400, JSON.stringify({ error: 'Dictation needs an ElevenLabs key: add it in Settings › Voice.' }))).toEqual({ error: 'Dictation needs an ElevenLabs key: add it in Settings › Voice.' })
   })
   test('a page that is not its answer (a proxy, a crash) or no answer at all is an error, never empty words', () => {
     expect(heard(502, '<html>Bad gateway</html>')).toEqual({ error: "Shepherdr couldn't write it down (error 502)." })
@@ -107,7 +107,7 @@ describe('after Done', () => {
     expect(await afterDone(null, upload({ text: ' ' }).f)).toEqual({ error: SAY.silence })
   })
   test("the upload's own failure is what is said", async () => {
-    const key = 'Dictation needs an ElevenLabs key in Settings › Secrets.'
+    const key = 'Dictation needs an ElevenLabs key: add it in Settings › Voice.'
     expect(await afterDone(async () => '', upload({ error: key }).f)).toEqual({ error: key })
     expect(await afterDone(null, () => Promise.reject(new Error('x')))).toEqual({ error: SAY.unreached })
   })

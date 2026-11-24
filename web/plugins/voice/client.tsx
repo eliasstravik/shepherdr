@@ -15,6 +15,7 @@ import { callPhase, callSample, muteCall, sendWhere, startCall, stopCall, type N
 import { wantsCall, withoutVoice } from './launch.ts'
 import { CallMarkView } from './mark.tsx'
 import { resetScreen, screenAction, type Head } from './screen.ts'
+import { NAME as VOICE_PAGE, needsKey, openVoiceSettings, VoiceSettings } from './settings.tsx'
 
 /** what this page shows, told to the call as it changes: its "here" and "this task" */
 function whereNow() {
@@ -85,7 +86,7 @@ export async function voiceNav(nav: Nav): Promise<NavAck> {
     return check(getState().ui.art === id, "the artifact didn't open")
   }
   if (nav.kind === 'settings') {
-    const names = ['General', 'Agents', 'Tasks', 'Secrets', 'Machines', 'Usage', 'Plugins']
+    const names = ['General', 'Agents', 'Tasks', 'Secrets', 'Machines', 'Usage', 'Plugins', VOICE_PAGE]
     const want = str(nav.section).toLowerCase()
     const sec = want ? names.find((n) => n.toLowerCase().includes(want) || want.includes(n.toLowerCase())) : null
     if (want && !sec) return no(`Settings has no page like "${str(nav.section)}": its pages are ${names.join(', ')}`)
@@ -143,7 +144,11 @@ export function toggleCall(resume: string | null = null) {
   resetScreen()
   const fail = (m: string) => {
     endCall()
-    notice(/ElevenLabs key/i.test(m) ? 'Voice needs an ElevenLabs key: ask Shepherdr to add the secret ELEVENLABS_API_KEY.' : m)
+    // no key yet: straight to Settings › Voice, where it is added, instead of only a notice
+    if (needsKey(m)) {
+      openVoiceSettings()
+      notice('Talk needs your ElevenLabs key. Add it here.')
+    } else notice(m)
   }
   void startCall(null, fail, voiceNav, () => getState().snap && sendWhere(whereNow()), (why) => { endCall(); if (why) notice(`Call ended: ${why}.`) }, { title: 'Shepherdr', hangUp: endCall, mute: (on) => { muteCall(on); setUI({ callMuted: on }) } }, () => endCall(), resume).catch(() => fail('Audio could not start on this device.'))
 }
@@ -221,6 +226,7 @@ export default definePlugin({
   name: 'voice',
   setup(reg) {
     reg.overlays.push(CallWhere)
+    reg.settings.push({ name: VOICE_PAGE, icon: 'mic', order: 80, scope: 'all', View: VoiceSettings })
     reg.views.boxEnd = BoxEnd
     reg.voiceWake = () => !getState().ui.call && toggleCall()
     // opened from the home screen's "Talk" shortcut (?voice=1): straight into a call

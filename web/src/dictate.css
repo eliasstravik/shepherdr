@@ -46,3 +46,4 @@
 .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 
 @media(prefers-reduced-motion:reduce){.vsi,.dsurf,.ddot.rec,.dready .ddot{animation:none}.dspin{animation:calm 2s ease-in-out infinite}}
+.derr .lk{flex:none;font:inherit;padding:0;background:none;border:0}

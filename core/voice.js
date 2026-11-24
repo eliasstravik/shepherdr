@@ -403,14 +403,15 @@ export function envLines(text) {
 export const apiError = (status, body) => `ElevenLabs said ${status}${body ? `: ${String(body).slice(0, 300).replace(/[A-Za-z0-9_-]{32,}/g, "…")}` : ""}`;
 
 // ---- the key ------------------------------------------------------------------------------
-// ELEVENLABS_API_KEY lives in Settings › Secrets (Everywhere), in the vault on the machine that keeps the secrets
+// ELEVENLABS_API_KEY lives in Settings › Voice (the same secret as Settings › Secrets' Everywhere ELEVENLABS_API_KEY: one
+// key, two ways to set it; the old secrets/elevenlabs.env file wins over both while it is there), in the vault on the machine that keeps the secrets
 // (`herdr-secret where`; Settings › Secrets › Kept on). A call on another machine reads it from there over herdr-core's
 // link into memory only: it's never written, logged or copied here. The voice agent's id made with it is kept beside it
 // there (secrets/elevenlabs-agent.env, with a tag of the key), so every machine uses the same "Herdr chat" agent.
 
 export const KEY_NAME = "ELEVENLABS_API_KEY";
-export const NO_KEY = "Voice calls need an ElevenLabs key: add it in Settings › Secrets (as ELEVENLABS_API_KEY, for every space).";
-export const noKeyOn = (name) => `Voice calls need an ElevenLabs key: ${name}, which keeps your secrets, has none. Add ELEVENLABS_API_KEY in Settings › Secrets, for every space.`;
+export const NO_KEY = "Voice calls need an ElevenLabs key: add it in Settings › Voice.";
+export const noKeyOn = (name) => `Voice calls need an ElevenLabs key: ${name}, which keeps your secrets, has none. Add it in Settings › Voice.`;
 export const unreachable = (name) => `Can't reach ${name}, which keeps your secrets, for the ElevenLabs key: is it on and linked? Try again in a moment.`;
 
 // Run with python3 on the machine that keeps the secrets: prints {"key", "agent"} (the agent only if made with this
@@ -500,6 +501,32 @@ async function askKey(io, name) {
   return { key: r.key, agent: r.key && typeof r.agent === "string" && /^[\w-]{1,200}$/.test(r.agent) ? r.agent : "", from: name };
 }
 
+// ---- Settings › Voice's test ---------------------------------------------------------------
+// The test asks ElevenLabs for one of the key's voice agents (GET <API>/convai/agents?page_size=1): what a call needs,
+// cheap, and it costs no credits. Its answer in plain words: { ok, says }.
+export const CHECK_PATH = "/convai/agents?page_size=1";
+
+/** what the test's answer from ElevenLabs means (status, body) */
+export function checkVerdict(status, body = "") {
+  if (status >= 200 && status < 300) return { ok: true, says: "Works: ElevenLabs accepts this key." };
+  const text = String(body);
+  if (/missing_permissions|permission/i.test(text)) return { ok: false, says: "ElevenLabs accepts the key, but it can't use voice agents. At elevenlabs.io › Developers › API Keys, edit the key and give it access to ElevenLabs Agents and Speech to Text." };
+  if (status === 401 || /invalid_api_key/i.test(text)) return { ok: false, says: "ElevenLabs doesn't accept this key. Copy it again from elevenlabs.io › Developers › API Keys and replace it." };
+  if (status === 429) return { ok: false, says: "ElevenLabs is busy or your plan is out of credits. Try again later." };
+  return { ok: false, says: sttError(status, text) };
+}
+
+/** the test from where the key came from (voiceKey's answer) and fetchFn: { ok, says, from?, state } with state
+ *  "works" | "refused" | "none" | "unreachable" */
+export async function checkKey(k, fetchFn = fetch) {
+  if ("error" in k) return { ok: false, says: k.error, state: k.why === "none" ? "none" : "unreachable" };
+  let r;
+  try { r = await fetchFn(`${API}${CHECK_PATH}`, { headers: { "xi-api-key": k.key }, redirect: "error", signal: AbortSignal.timeout(10000) }); }
+  catch { return { ok: false, says: "Can't reach ElevenLabs. Check this machine's internet, then try again.", from: k.from, state: "unreachable" }; }
+  const v = checkVerdict(r.status, await r.text().catch(() => ""));
+  return { ...v, from: k.from, state: v.ok ? "works" : "refused" };
+}
+
 // ---- usage -------------------------------------------------------------------------------
 // SHEP-128: what is left of the person's ElevenLabs plan, under Plan usage beside Claude Code's and Codex's (the web's
 // Settings › Machines, the serving machine's block), read with the voice key: GET <API>/user/subscription. Its
@@ -550,7 +577,7 @@ export async function readUsage(key, fetchFn = fetch, now = () => Date.now()) {
 // person writes English and Swedish). The words go into the box to edit; nothing is kept and the key never leaves memory.
 
 export const STT_MODEL = "scribe_v2";
-export const DICTATE_NO_KEY = "Dictation needs an ElevenLabs key in Settings › Secrets.";
+export const DICTATE_NO_KEY = "Dictation needs an ElevenLabs key: add it in Settings › Voice.";
 export const MAX_AUDIO = 20 * 1024 * 1024;
 
 /** A failed key lookup (voiceKey's { error, why }) in dictation's words: no key → where to add it; else as it said. */
