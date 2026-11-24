@@ -59,7 +59,7 @@ puts it back. The machine needs Python 3.8+, herdr-core and Tailscale.
 - The serving machine holds the shared data: the list of spaces and groups, the settings file and the agents'
   instructions. Every other machine's service reads and writes it there, through herdr-core's link.
 - Each machine with a service runs its own schedules and task checks. Push alerts and the glance feed
-  ([glance.md](glance.md)) come from the serving machine only.
+  ([glance.md](glance.md), [native-chat.md](native-chat.md)) come from the serving machine only.
 - Secrets live in one vault, on the serving machine unless you moved them (`shepherdr secrets move-to <machine>`,
   `shepherdr secrets where`).
 - Phones subscribed to the old link's alerts subscribe again on the new one.

@@ -337,6 +337,9 @@ export class Model {
         subagents: worker ? subagentsOf(terminals as any[], worker) : [],
         // what finds its artifacts (core/task-artifacts.js): its proof, its agents' terminals while they ran, their logs
         proof: task.proof?.id ?? null,
+        // its last recorded review round (herdr-task reviews: report and pass passed, changes asked for changes), for the
+        // glance feed's Ready items (SHEP-447)
+        review: ((r) => (r === "changes" ? "changes" : r === "pass" || r === "report" ? "passed" : null))((Array.isArray(task.reviews) ? task.reviews : []).filter((x: any) => ["report", "pass", "changes"].includes(x?.result)).pop()?.result),
         agents: (Array.isArray(task.agents) ? task.agents : []).map((a: any) => ({ address: a.address ?? null, at: a.at ?? 0, ended: a.ended ?? null })),
         logs: (Array.isArray(task.agents) ? task.agents : []).map((a: any) => a.log).filter((x: unknown) => typeof x === "string"),
       };

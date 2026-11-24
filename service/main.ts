@@ -54,7 +54,10 @@ import { Agents } from "./agents.ts";
 import { Machines } from "./machines.ts";
 import { Push, alertsOf, agentAlerts } from "./push.ts";
 import { waiting } from "../web/shared/alerts.ts";
-import { GlanceFeed, glanceOf, openUrlOk } from "./glance.ts";
+import { GlanceFeed, MAX_CHATS, glanceOf, openUrlOk } from "./glance.ts";
+import { chatPage } from "./native-chat.ts";
+import { unreadChats } from "../web/shared/needs-you.ts";
+import type { Watcher } from "./chats.ts";
 import { Shows } from "./show.ts";
 import { dictate, liveToken, cachedKey, refused } from "./dictate.ts";
 import { readUsage } from "../core/voice.js";
@@ -181,11 +184,39 @@ const lastWords = (key: string) => {
   const m = items.findLast((x) => (x.kind === "agent" || x.kind === "sent" || x.kind === "user") && x.text);
   return m ? { who: m.kind === "user" ? "you" as const : "agent" as const, text: m.text as string, ...(m.kind === "agent" ? { suggests: m.suggests as string[] | undefined } : {}) } : null;
 };
+// SHEP-447: an unread Assistant chat's newest words, for the glance feed's chats: Chats reads a chat only while someone
+// follows it, so each unread one is read once per new turn (followed until read, then let go) and its words kept
+const news = new Map<string, { turn: number; said?: ReturnType<typeof lastWords> }>();
+function readNews(snap: any) {
+  const now = unreadChats(snap).slice(0, MAX_CHATS);
+  const keep = new Set(now.map((u) => u.chat));
+  for (const k of news.keys()) if (!keep.has(k)) news.delete(k);
+  for (const u of now) {
+    if (news.get(u.chat)?.turn === u.at) continue;
+    const addr = compat.addrOf(u.chat), chats = live.chats;
+    if (!addr || !chats) continue;
+    const entry: { turn: number; said?: ReturnType<typeof lastWords> } = { turn: u.at };
+    news.set(u.chat, entry);
+    let done = false, cut: ReturnType<typeof setTimeout> | undefined;
+    const w: Watcher = () => {
+      if (done) return;
+      done = true;
+      if (cut) clearTimeout(cut);
+      queueMicrotask(() => chats.unwatch(addr, w));
+      entry.said = lastWords(u.chat);
+      if (entry.said && news.get(u.chat) === entry) model.rebuild();
+    };
+    // never read: tried again on its next turn
+    chats.watch(addr, w);
+    if (!done) cut = setTimeout(() => { if (!done) { done = true; chats.unwatch(addr, w); } }, 15_000);
+  }
+}
+const newsOf = (key: string) => lastWords(key) ?? news.get(key)?.said ?? null;
 function alertNew(snap: any) {
   // their words: service/push.ts alertsOf
   const now = alertsOf(snap, lastSaid);
   // the phone's and watch's glance, with these same words (service/glance.ts)
-  try { glance.set(glanceOf(snap, now, Date.now(), lastWords)); } catch (err) { console.error(`glance: ${(err as Error).message}`); }
+  try { readNews(snap); glance.set(glanceOf(snap, now, Date.now(), newsOf)); } catch (err) { console.error(`glance: ${(err as Error).message}`); }
   waitingNow = { count: waiting(snap).count, tags: [...new Set([...now.values()].filter((x) => x.waits).map((x) => x.tag))] };
   if (alerted) for (const [k, a] of now) if (!alerted.has(k)) void push.send({ ...a, badge: waitingNow.count, open: waitingNow.tags });
   alerted = new Set(now.keys());
@@ -860,7 +891,7 @@ const server = Bun.serve<{ who: string }>({
     const viaTailnet = req.headers.has("tailscale-user-login");
     // the glance feed (SHEP-246) is read by the phone's own app: checked as a write (its origin, x-shepherdr: 1)
     const native = path === "/api/glance" && url.searchParams.get("native") === "1";
-    const pass = gate(req, g, socket, viaTailnet && trustedPeer(srv.requestIP(req)?.port, PORT), path === "/api/glance");
+    const pass = gate(req, g, socket, viaTailnet && trustedPeer(srv.requestIP(req)?.port, PORT), path === "/api/glance" || path === "/api/chat");
     if (!pass.ok) {
       const why = refusedWhy(pass.why);
       if (why !== pass.why && why !== saidPeer) console.error(`web: ${(saidPeer = why)}`);
@@ -1059,6 +1090,18 @@ const server = Bun.serve<{ who: string }>({
       // a stream stays open all day: no idle cut (Bun's 180 s here; the ping comes every 240 s)
       srv.timeout(req, 0);
       return glance.stream(native ? await deviceFrom(req, pass.via) : null, native, req.signal);
+    }
+    if (path === "/api/chat" && req.method === "GET") {
+      // a chat for the phone's and watch's own app (SHEP-447, docs/native-chat.md): a page of its messages, text only,
+      // newest first
+      const chats = live.chats;
+      if (!chats) return json({ error: "not ready yet" }, 503);
+      const key = url.searchParams.get("chat") ?? "";
+      if (!key || key.length > 200) return json({ error: "which chat?" }, 400);
+      const page = await chatPage({ addrOf: (k) => compat.addrOf(k), freshChat: (k) => (compat as any).freshChat?.(k) ?? null, chatOf: (k, r, t) => compat.chat(k, r, t),
+        terminal: (a) => hub.terminals.get(a), watch: (a, w) => chats.watch(a, w), unwatch: (a, w) => chats.unwatch(a, w), earlier: (r) => r.earlier() },
+        key, url.searchParams.get("before") || undefined, Number(url.searchParams.get("limit")) || undefined);
+      return page ? json(page) : json({ error: "no such chat" }, 404);
     }
     if (path === "/api/open" && req.method === "POST") {
       // a tap on the phone app's alert (SHEP-246): the Shepherdr page already open on that device goes there in place, as
