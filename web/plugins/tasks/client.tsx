@@ -399,7 +399,7 @@ function TaskHead({ task: t, where, scrolled }: { task: Task; where: 'chat' | 'p
     >
       {registry.taskHeader.map((h, i) => <h.View key={i} thread={thread} />)}
       <IB icon="dots" label="More" aria-haspopup="menu" onClick={(e) => taskMenu(e.currentTarget, t, 'thread')} />
-      {/* maximized, the space header's own buttons (Tasks, Artifacts) open the pane beside it */}
+      {/* maximized, the space header's own buttons (Artifacts, Tasks) open the pane beside it */}
       {big && !ph && registry.header.map((h, i) => <h.View key={`h${i}`} thread={thread} />)}
       {where === 'pane' && !ph && <IB icon="expand" label="Maximize" onClick={() => maximize(t.id)} />}
       {where === 'pane' && !ph && <IB icon="x" label="Close" onClick={() => togglePane(null)} />}
@@ -721,7 +721,7 @@ function TasksButton() {
 export default definePlugin({
   name: 'tasks',
   setup(reg) {
-    reg.header.push({ order: 30, View: TasksButton })
+    reg.header.push({ order: 50, View: TasksButton })
     reg.bar.push({ order: 10, pane: 'tasks', label: 'Tasks', icon: 'tasks', count: (snap, place) => filterCount(snap, getState().ui.tf, place) })
     reg.panes.push({ id: 'tasks', View: TasksPane })
     reg.views.taskHead = TaskHead
