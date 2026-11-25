@@ -15,7 +15,7 @@ import { appTakes, focusChat, focusTask } from '@client/commands.ts'
 import type { Chat, Task } from '@shared/types.ts'
 import { machineLabel, placeOf, taskChat, taskOf, tasksIn, tstate } from '@shared/view.ts'
 import { fitGrid, following, footTop, LINE, linesFor, shrinkTo, showKeys } from './fit.ts'
-import { spaceTermRow, switchView, taskTermRow, toggleSpaceTerm, toggleTaskTerm, viewRow } from './menu.ts'
+import { followFold, spaceTermRow, switchView, taskTermRow, toggleSpaceTerm, toggleTaskTerm, viewRow } from './menu.ts'
 import { connectTerminal, streamInput } from './stream.ts'
 import { linkLayer, type LinkLayer } from './linklayer.ts'
 import { mirrorFocus } from './focus.ts'
@@ -470,6 +470,8 @@ export default definePlugin({
   name: 'terminal',
   setup(reg) {
     reg.panes.push({ id: 'terminal', View: TerminalPane })
+    // folding or unfolding keeps the open terminal: drawer <-> the phone's Terminal screen
+    followFold()
     reg.drawer.push({ when: (ui, thread) => !ui.phone && (thread.task ? ui.tterm : ui.term), View: Drawer })
     reg.chatBody.push({ when: (ui, thread) => !!ui.aterm[thread.chat], View: AgentTerminal })
     reg.chatTail.push({ order: 25, View: Stuck })
