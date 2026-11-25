@@ -196,6 +196,14 @@ export function taskLine(t: Task): string {
   return t.afterTitle ? afterWords(t) : t.startsAt ? `Starts ${dayTime(t.startsAt)}` : ''
 }
 
+/** an open task's header line (#1473): its list row's words, else its state in a word ("Working", "Up next"), and the
+ *  time left; one line, cut with … where it doesn't fit */
+export function headLine(t: Task): string {
+  const words = taskLine(t) || statusWord(t).word
+  const left = leftWords(etaOf(t))
+  return left && !words.includes(left) ? `${words} · ${left}` : words
+}
+
 /** what an Up next task waits for, short: "Starts after Fix typo", or "Starts after 6 tasks" when it waits for several
  *  (a long title then a cut-off line said less than the count) */
 export function afterWords(t: Pick<Task, 'afterTitle' | 'afterMore'>): string {

@@ -127,6 +127,8 @@ button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"])
 .hp,.hm{min-width:0;overflow:hidden;text-overflow:ellipsis}.hp{flex:0 1 auto}.hp.cut{direction:rtl}.hp bdi{direction:ltr}.hm{flex:none;max-width:60%}.hp:not(.cut){flex:none}.hp:not(.cut)+.hm{flex:0 1 auto;max-width:none}.hm::before{content:"·";padding:0 4px}
 .t1{font-weight:600}.t1,.t2{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .t2{color:var(--muted);font-size:var(--sec);line-height:var(--secl)}
+/* an open task's status line under its title (#1473): its ring, small, then its words, one line cut with … */
+.t2>.hline{display:flex;align-items:center;gap:6px;min-width:0}.hline>.tring{width:14px}.hline>.tring>.i{width:14px;height:14px}.hline>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .tbtn{display:inline-flex;align-items:center;gap:4px;max-width:100%;height:var(--btn);padding:0 8px;margin-left:-4px;border-radius:8px;font-weight:600;min-width:0}
 .tbtn:hover,.tbtn[aria-expanded="true"]{background:var(--control)}.tbtn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* SHEP-326: the call's mark, no words: a live wave of whoever talks, still dots that breathe while it connects */

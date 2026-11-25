@@ -14,7 +14,7 @@ import { waiting } from '@client/pending.ts'
 import { focusBox, focusChat, focusTask } from '@client/commands.ts'
 import { SpaceIcon } from '@client/space-icon.tsx'
 import type { MergeEvidence, Snapshot, Task } from '@shared/types.ts'
-import { askedWords, isEverything, machineLabel, nowGroups, onBranch, placeDown, reposOf, spaceLabel, spaceOnFolder, spacesOf, etaOf, leftWords, statusWord, taskChat, taskLine, taskWhen, tasksIn, tstate, workKey, workName, workWords, type Repo } from '@shared/view.ts'
+import { askedWords, isEverything, machineLabel, nowGroups, onBranch, placeDown, reposOf, spaceLabel, spaceOnFolder, spacesOf, etaOf, headLine, leftWords, statusWord, taskChat, taskLine, taskWhen, tasksIn, tstate, workKey, workName, workWords, type Repo } from '@shared/view.ts'
 import { DoneRow } from '@plugins/chat/cards.tsx'
 import { replyToTask, SlideHint, useSlide } from '@plugins/chat/slide.tsx'
 import { StatusIcon } from './icon.tsx'
@@ -389,12 +389,20 @@ function TaskHead({ task: t, where, scrolled }: { task: Task; where: 'chat' | 'p
   const snap = useSnap()
   const thread: Thread = { chat: taskChat(t), place: t.place, task: t, where }
   const big = where === 'chat'
+  // #1473: how it is doing, live, as its row in the list: its ring and its words (maximized, then its space)
+  const live = (snap && snap.tasks.find((x) => x.id === t.id)) || t
+  const line = headLine(live)
   return (
     <Hd
       back={big ? undefined : { label: 'Back to tasks', run: () => setUI({ task: null }) }}
       lead={big ? <>{hidden && !ph && <IB icon="panel" label="Show the list" onClick={showList} />}<IB icon="shrink" label="Minimize" onClick={minimize} /></> : undefined}
       title={t.name}
-      sub={big && snap ? `Task in ${spaceLabel(snap, t.place)}` : undefined}
+      sub={
+        <span className="hline">
+          <StatusIcon t={live} time="none" />
+          <span>{big && snap ? `${line} · in ${spaceLabel(snap, t.place)}` : line}</span>
+        </span>
+      }
       scrolled={scrolled}
     >
       {registry.taskHeader.map((h, i) => <h.View key={i} thread={thread} />)}
