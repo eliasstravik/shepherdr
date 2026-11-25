@@ -6299,6 +6299,29 @@ class TaskFlow(unittest.TestCase):
         self.assertIn("Resource not accessible", str(e.exception))
         self.assertEqual(self.git(self.root, "--git-dir", remote, "branch", "--list", "task/1"), "")
 
+    def test_ready_pushes_when_its_branch_was_deleted_on_the_remote(self):
+        """#1497: its branch deleted on the remote, the tracking ref still there: the push leases on "not there" (never
+        git's "stale info"). After a merged pull request: said, nothing pushed, never a second one."""
+        import herdr_task.github as github
+        wt, remote = self.task["worktree"], os.path.join(self.root, "remote.git")
+        self.git(self.root, "init", "-q", "--bare", remote)
+        self.git(self.main, "remote", "add", "origin", remote)
+        self.commit(wt, "work", "a.txt")
+        self.git(wt, "push", "-q", "-u", "origin", "task/1")
+        self.git(self.root, "--git-dir", remote, "branch", "-D", "task/1")  # GitHub deleted it; origin/task/1 stays here
+        merged = []
+        self.patch(github, "gh", lambda *a, **k: (True, json.dumps(merged), ""))
+        tip = self.commit(wt, "a follow-up", "a.txt")
+        github.pr_push(self.store, self.task, "o/r")
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "task/1"), tip)
+        self.git(self.root, "--git-dir", remote, "branch", "-D", "task/1")
+        merged.append({"number": 7, "url": "u7", "isCrossRepository": False, "baseRefName": "main", "headRefOid": "abc"})
+        self.commit(wt, "another follow-up", "a.txt")
+        with self.assertRaises(Exception) as e:
+            github.pr_push(self.store, self.task, "o/r")
+        self.assertIn("Pull request #7 for task/1 is already merged", str(e.exception))
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "branch", "--list", "task/1"), "")
+
     def taking(self, prs):
         """A GitHub remote (a bare repo) and gh answering `pr view` from prs ({number: fields}); what gh was asked."""
         import herdr_task.github as github

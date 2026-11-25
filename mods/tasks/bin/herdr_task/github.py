@@ -96,8 +96,18 @@ def pr_push(s, task, repo):
             raise Fail(f"Couldn't take pull request #{pr['number']} out of GitHub's merge queue to push {br}: {err}")
         task["dequeued"] = now()
         task.pop("merge_queued", None)
+    # #1497: its branch gone on the remote (GitHub deletes it once its pull request merged): the lease is "not there",
+    # never the stale tracking ref (git refuses that as "stale info"). A merged pull request's branch takes no more.
+    gone = seen and not there.strip()
+    if gone and to == br:
+        done = pr_merged(task, repo) if repo else None
+        if done:
+            raise Fail(f"Pull request #{done['number']} for {br} is already merged (GitHub deleted its branch), and {br} has "
+                       f"commits since. Put them on a new branch (a new task) rather than a second pull request.")
+    lease = f"--force-with-lease=refs/heads/{br}:" if gone else "--force-with-lease"
+    lease = f"--force-with-lease=refs/heads/{br}:" if gone else "--force-with-lease"
     with released(s):
-        ok, out, err = git(wt, "push", "--force-with-lease", "-u", remote, br) if to == br else \
+        ok, out, err = git(wt, "push", lease, "-u", remote, br) if to == br else \
             git(wt, "push", remote, f"{br}:refs/heads/{to}")
     if not ok:
         raise Fail(f"Couldn't push {br}" + (f" to {to}" if to != br else "") + f": {push_error(out, err)}")
