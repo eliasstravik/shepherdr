@@ -238,7 +238,8 @@ def main():
                        help="one task's setting, a line of its brief's Settings block: review=on|off, review.rounds=1..10, "
                             "review.mustFix=blocker|major|minor, proof=on|off, flags=\"--advisor opus\", merge=\"on its own\"|\"after checks\"|\"ask me first\" (\"\": Settings' again)")
         c.add_argument("--base", help="the branch its worktree branches from and merges into (default: its space's Base branch "
-                                      "setting, else the folder's current branch)")
+                                      "setting, else the folder's current branch); on a started task, edit moves it there: its pull request "
+                                      "retargeted and its own commits rebased (a task on another task's branch moves by itself once that merges)")
         c.add_argument("--branch", help="its branch's exact name, e.g. a ticket's ABC-2137 (default: the folder's Branch names "
                                         "setting, else task/<n>-<title words>); refused when that branch exists already (\"\": the pattern's). "
                                         "Once started, edit takes the existing branch its work is on (in the worktree it's checked out in)")

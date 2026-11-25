@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 
-from . import sandbox
+from . import sandbox, stack
 from .base import Fail, git, guard, now, run, STORE, stop_note, VERSION
 from .settings import (
     agent_argv, agent_key, bare, merge_policy, review_limits, set_opts, set_task, settings_block, settings_for, space_base,
@@ -22,7 +22,7 @@ from .agents import (
 )
 from .sessions import refresh_sessions
 from .github import (already_merged, checks_missing, collision, collision_reason, collision_words, github_unreachable, pr_for_branch, checks_since, drop_branch, expected_checks, finish, gh, github, landed, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
-                     merge_checks, pr_pending, pr_problem, pr_view, queue_refusal, remote_of, update_main, watch_main)
+                     merge_checks, mid_turn, pr_pending, pr_problem, pr_view, queue_refusal, remote_of, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_branch, default_space, folder_for, handoff, launch,
@@ -193,11 +193,12 @@ def ensure_scheduler_quietly():
         pass
 
 
-def set_base(s, t, base, space=None, new=False):
+def set_base(s, t, base, space=None, new=False, args=None):
     """--base: the branch a worktree task branches from and merges into (its pull request's base).
     Without it a new task takes its space's base branch (Shepherdr settings > Tasks > Base branch,
     as Shepherdr's space.base: captured when added, so a later change only touches new tasks);
-    unset, the folder's current branch, kept unmarked. "" goes back to the folder's."""
+    unset, the folder's current branch, kept unmarked. "" goes back to the folder's. A started task moves onto it
+    (restack(): what it did is returned)."""
     if base is None:
         own = space_base(s, space) if new and t.get("mode") == "worktree" else ""
         main = s.loc["folder"]
@@ -209,10 +210,20 @@ def set_base(s, t, base, space=None, new=False):
                            "Change the setting, or pass --base.")
             t["base"], t["base_set"], t["base_by"] = own, True, "space"
         return
-    t.pop("base_by", None)
     base = base.strip()
     if t.get("worktree"):
-        raise Fail(f"{s.name(t)} already has its worktree from {t.get('base')}; its base can't change now.")
+        # #1403: a started task moves: its pull request retargeted, its own commits rebased onto the new base
+        if t.get("mode") != "worktree":
+            raise Fail("--base is for tasks in a worktree; this one works in the folder itself.")
+        if t["state"] == "done":
+            raise Fail(f"{s.name(t)} is done; its base can't change now.")
+        main = s.loc["folder"]
+        base = base or current_base(main)
+        if base == t.get("base"):
+            return None
+        base_ref(main, base)
+        return restack(s, t, base, args=args)
+    t.pop("base_by", None)
     if not base:
         t.pop("base", None)
         t.pop("base_set", None)
@@ -226,6 +237,52 @@ def set_base(s, t, base, space=None, new=False):
         t.pop("base_set", None)
     else:
         t["base"], t["base_set"] = base, True
+
+
+def restack(s, t, into, tip=None, how=None, args=None):
+    """#1403: moves a task onto base `into` (stack.move): its record and pull request, and its branch rebased when
+    nobody works there now (its own agent asking is fine). What is left (a conflict, uncommitted work, an agent
+    mid-turn) goes to its agent: a Ready one back to work with it. Returns what stack.move() did."""
+    me = os.environ.get("HC_TERMINAL_ID")
+    me = bool(me and any(a.get("address") == me for a in t.get("agents") or []))
+    busy = bool(t.get("worktree")) and not me and mid_turn(s, t)
+    res = stack.move(s, t, into, tip, rebase=not busy)
+    res["how"] = how
+    left = res.get("conflict") or res.get("todo")
+    if not res.get("command") or me or not (left or res.get("rebased")):
+        return res
+    msg = stack.words(s, t, res, how)
+    if left and t["state"] == "ready":
+        t["fix_requested"] = t["handed_at"] = now()
+        try:
+            tell(s, t, msg, args)
+        except Fail as e:
+            t["attention"], t["attention_at"] = f"Its base moved to {into}, and its agent couldn't be told: {e}", now()
+            return res
+        back_to_work(s, t, f"its base moved to {into}", f"Moving onto {into}")
+        res["told"] = True
+    elif t["state"] == "running":  # a resting Ready one's agent isn't woken for a move that went through
+        live = workers(s, t)
+        if live:
+            from .news import send_or_hold
+            res["told"] = bool(send_or_hold(live[-1]["address"], msg))
+    return res
+
+
+def moved_words(s, t, res):
+    """edit's line about a started task's move."""
+    if not res:
+        return ""
+    line = f" It now merges into {res['to']}"
+    if res.get("rebased"):
+        line += f"; its branch was rebased onto {res['to']} (only its own commits)"
+    elif res.get("conflict") or res.get("todo"):
+        why = f"conflicts in {', '.join(res['conflict'][:5])}" if res.get("conflict") else res["todo"]
+        line += (f"; its branch wasn't rebased ({why}): in {t.get('worktree')}, run `git fetch` and `{res['command']}`"
+                 + (" (its agent was told)" if res.get("told") else ""))
+    if res.get("pr_error"):
+        line += f"; its pull request couldn't be retargeted: {res['pr_error']}"
+    return line + "."
 
 
 PR_FIELDS = "number,url,state,isCrossRepository,headRefName,headRefOid,baseRefName"
@@ -666,6 +723,17 @@ def cmd_ready(args):
                 raise Fail(f"{wt} has uncommitted changes. Commit them, then run ready again.")
             on_branch(t, wt)
             t["head"] = git(wt, "rev-parse", "HEAD")[1]
+            # #1403: its base, another task's branch, merged (squash too, its branch maybe deleted): it moves onto that
+            # branch's base first, only its own commits rebased there, rather than a pull request into a branch that's gone
+            gone = stack.merged_base(s, t) if stack.stacked(t) and not (t.get("pr") or {}).get("number") else None
+            moved = restack(s, t, gone["into"], gone["tip"], gone["how"], args) if gone else {}
+            if moved.get("rebased"):
+                t["head"] = moved["rebased"]
+            unmoved = (stack.lead(s, t, moved, gone["how"]).capitalize()[:1] + stack.lead(s, t, moved, gone["how"])[1:] + ", but its branch couldn't be rebased there by "
+                       f"Herdr (" + (f"conflicts in {', '.join(moved['conflict'][:8])}" if moved.get("conflict") else moved["todo"]) +
+                       f"). In {wt}: `git fetch`, then `{moved['command']}` (it replays only your own commits), resolve any "
+                       "conflicts, run the checks, commit, and run ready again.") \
+                if moved.get("conflict") or moved.get("todo") else None
             # --pr: its work goes on a pull request already open (#1155), checked before anything changes;
             # else one open from its base branch, the branch the task was started on (#1204).
             take_pr(s, t, getattr(args, "pr", None))
@@ -675,15 +743,15 @@ def cmd_ready(args):
             own_work(s, t)
             # SHEP-320: other tasks run in parallel and may have merged meanwhile: a branch that conflicts with its
             # base's newest is refused here, with what collided, rather than at its merge. Behind but clean passes.
-            c = collision(s, t, fetch=True) if t.get("start") and not (t.get("pr") or {}).get("from_base") else None
+            c = collision(s, t, fetch=True) if t.get("start") and not unmoved and not (t.get("pr") or {}).get("from_base") else None
             collides = (f"{s.name(t)}'s branch conflicts with {c['ref']}, which moved on since it started"
                         + (f" ({', '.join(c['by'][:3])} merged)" if c["by"] else "") + f". {collision_words(c)} "
                         "Then commit and run ready again.") if c else None
         elif getattr(args, "pr", None):
             raise Fail("--pr is for tasks in a worktree; this one works in the folder itself.")
         else:
-            collides = None
-        refused = collides or review_refusal(s, t, wt)
+            collides = unmoved = None
+        refused = unmoved or collides or review_refusal(s, t, wt)
         if refused:
             # Kept (the task's line says why it waits); refused after the store is saved.
             s.dirty = True
@@ -1427,7 +1495,7 @@ def cmd_edit(args):
             q = t.get("queue") or {}
             if q.get("argv") and not q.get("custom"):
                 q["argv"] = worker_argv(s, t, q.get("space"))
-        set_base(s, t, args.base)
+        restacked = set_base(s, t, args.base, args=args)
         set_notes(t, args)
         if args.after is not None:
             set_after(s, t, *parse_after(s, args.after))
@@ -1455,7 +1523,7 @@ def cmd_edit(args):
         ensure_scheduler_quietly()
     say(args, {**v, "rename": left, **({"moved_from": moved} if moved else {})},
         (f"{s.name(t)} moved to {s.loc['folder']} (its key for commands is {s.ref(t)} now)" if moved else f"{s.name(t)} saved")
-        + (f": {v['why']}." if v["status"] == "scheduled" else "."))
+        + (f": {v['why']}." if v["status"] == "scheduled" else ".") + moved_words(s, t, restacked))
 
 
 def cmd_config(args):

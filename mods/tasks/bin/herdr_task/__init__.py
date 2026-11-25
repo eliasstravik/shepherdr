@@ -13,6 +13,7 @@ before it:
                resume.
   github       GitHub and merging: pull requests, checks, and finishing a merged task.
   launch       Starting agents: their argv, labels, brief, tab and coordinator.
+  stack        Stacked tasks: a task on another task's branch moves onto that branch's base once it merges.
   takeover     Which agent CLIs this machine has installed and signed in (cli-check.json).
   store        Where a folder's tasks live (~/.herdr/tasks/<slug>.json) and the locked Store that
                edits them.
