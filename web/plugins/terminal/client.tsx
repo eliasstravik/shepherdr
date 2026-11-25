@@ -18,6 +18,7 @@ import { fitGrid, following, footTop, LINE, linesFor, shrinkTo, showKeys } from 
 import { spaceTermRow, switchView, taskTermRow, toggleSpaceTerm, toggleTaskTerm, viewRow } from './menu.ts'
 import { connectTerminal, streamInput } from './stream.ts'
 import { linkLayer, type LinkLayer } from './linklayer.ts'
+import { mirrorFocus } from './focus.ts'
 import { opens, type Link } from './links.ts'
 
 /** a web page opens the way a chat's link does: a new tab (the outside browser in the Android app), or in the app
@@ -192,6 +193,8 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
         term.textarea.readOnly = true
         term.textarea.tabIndex = -1
       }
+      // the box may already have the keys (opened with Ctrl+`): a solid cursor from the start
+      if (cap.current && document.activeElement === cap.current) mirrorFocus(term.textarea, true)
       link = connectTerminal(
         stream,
         (bytes, done) => term!.write(bytes, () => { done(); landSoon() }),
@@ -268,6 +271,8 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
           autoCorrect="off"
           spellCheck={false}
           enterKeyHint="send"
+          onFocus={() => mirrorFocus(xt.current?.textarea, true)}
+          onBlur={() => mirrorFocus(xt.current?.textarea, false)}
           onWheel={(e) => scrollBy(e.deltaMode === 1 ? e.deltaX * 16 : e.deltaX, e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY)}
           // a link: a click opens it (never focusing the box, so no keys and no keyboard), the mouse over it underlines
           // it, a right click or a held finger opens its menu
