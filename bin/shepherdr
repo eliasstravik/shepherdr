@@ -41,7 +41,7 @@ Shepherdr's own folder is replaced whole on update. Never overwritten: a role in
 goes beside it as <file>.new), a key you set, a file by the button's name that isn't ours (--adopt takes it over).
 What it replaces of yours goes to .local/share/shepherdr/.shepherdr-backup/<time>/ first. While it replaces a helper
 or template, a sync hold (sync-hold in Shepherdr's state folder, and .herdr/sync-hold for older helpers) keeps
-herdr-task from sending them to other machines until `shepherdr doctor` finds the install whole.
+herdr-task from sending them to other machines until the install finds itself whole at its end (else `shepherdr doctor`).
 
 From 3.1 (the Herdr-window layout and its mods): one switch. The update waits while tasks are working (it says which;
 --force switches anyway), then takes out what 3.1 put in the Herdr app (its mods, layout, lib/, core/, bin/, keys and
@@ -163,8 +163,23 @@ def service_file(root, name):
     return os.path.join(where_for(root).path("service"), name)
 
 
+HELD_NOTE = "the sync to other machines is held until `shepherdr doctor` finds the install whole"
+
+
 def hold_paths(root):
     return [os.path.join(root, HOLD), os.path.join(where_for(root).roots["state"], "sync-hold")]
+
+
+def release_hold(root):
+    """Takes the sync hold away: True when there was one."""
+    held = False
+    for p in hold_paths(root):
+        try:
+            os.remove(p)
+            held = True
+        except FileNotFoundError:
+            pass
+    return held
 
 
 def move_data(r, a, home):
@@ -1978,7 +1993,7 @@ def cmd_install(a, update=False):
     if touches_tools and not a.dry_run:
         for p in hold_paths(root):
             atomic_write(p, f"held by shepherdr {VERSION} install at {r.stamp}: run `shepherdr doctor`\n".encode())
-        r.notes.append("the sync to other machines is held until `shepherdr doctor` finds the install whole")
+        r.notes.append(HELD_NOTE)
     # SHEP-295: the running service stops while files move (this is the new installer's side: an older installed
     # copy hands an update over to the source's own bin/shepherdr first, hand_over), and starts again after
     stopped = stop_service(r, home)
@@ -2061,6 +2076,12 @@ def finish_install(a, r, rec, old, src, home, root, actions, old_files, gone, bu
         if old:
             forget_old_record(r)
         whole_bad = install_checks(r, rec)[0]
+        # #1419: a whole install lets the sync go itself (doctor needn't run first); "whole" says so to herdr-task too,
+        # whose sync_held clears a hold this install left (base.sync_held)
+        rec["whole"] = not whole_bad
+        save_record(root, rec)
+        if not whole_bad and release_hold(root):
+            r.notes = [n for n in r.notes if n != HELD_NOTE] + ["the install is whole: the sync to other machines may go again"]
     for n in r.notes + notes:
         say(f"  - {n}")
     if a.dry_run:
@@ -2311,9 +2332,7 @@ def cmd_doctor(a):
         if holds:
             say("  the sync to other machines stays held until these are fixed")
         return 1
-    if holds:
-        for p in holds:
-            os.remove(p)
+    if release_hold(root):
         say("  ✓ whole: the sync to other machines may go again")
     else:
         say("  ✓ whole")

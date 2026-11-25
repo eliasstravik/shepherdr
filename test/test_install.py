@@ -131,11 +131,14 @@ class Install(unittest.TestCase):
         # Codex's approvals come to the chat's card too (SHEP-91)
         codex = json.load(open(self.p(".codex/hooks.json")))
         self.assertIn("/hooks/ask-hook.sh", json.dumps(codex["hooks"]["PermissionRequest"]))
-        # Helpers changed: the sync to other machines is held until doctor passes.
-        self.assertTrue(os.path.exists(self.p(".herdr/sync-hold")))
+        # Helpers changed: the sync to other machines was held while they moved, and a whole install lets it go at
+        # its end, doctor or not (#1419)
+        self.assertNotIn("is held until", out)
+        self.assertIn("the install is whole: the sync to other machines may go again", out)
+        self.assertFalse(os.path.exists(self.p(".herdr/sync-hold")))
+        self.assertIs(rec["whole"], True)
         d = run("doctor", "--root", self.root)
         self.assertIn("whole", d.stdout)
-        self.assertFalse(os.path.exists(self.p(".herdr/sync-hold")))
 
         # Again: nothing changes, no hold, no second hook.
         again = run("install", "--root", self.root, "--yes").stdout
@@ -428,6 +431,7 @@ class Install(unittest.TestCase):
             self.assertNotIn("  done. Next:", up)
             self.assertIn("has no SHEP block", run("doctor", "--root", self.root, ok=False).stdout)
             self.assertTrue(os.path.exists(self.p(".herdr/sync-hold")), "the sync stays held")
+            self.assertIs(json.load(open(self.p(SHARE, "installed.json")))["whole"], False)
             # the fixed release goes in over it, and doctor passes
             up = run("update", "--root", self.root, "--yes", "--source", ROOT).stdout
             self.assertIn("  done. Next:", up)

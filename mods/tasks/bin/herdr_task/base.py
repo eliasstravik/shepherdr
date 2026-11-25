@@ -61,14 +61,36 @@ SYNC_HOLDS = (SYNC_HOLD, os.path.join(HOME, ".herdr", "sync-hold"))
 
 
 def sync_held():
-    """Why copies to other machines wait now (the hold's first line), or None."""
+    """Why copies to other machines wait now (the hold's first line), or None. A hold whose install got to its end
+    whole (installed.json's "at" is the hold's stamp, and not "whole": false) goes here and now (#1419): older
+    installers left it for `shepherdr doctor` to take away."""
     for p in SYNC_HOLDS:
         try:
             with open(p) as f:
-                return f.readline().strip() or "held by Shepherdr's installer"
+                line = f.readline().strip()
         except OSError:
             continue
+        if _install_done(line):
+            for q in SYNC_HOLDS:
+                try:
+                    os.remove(q)
+                except OSError:
+                    pass
+            return None
+        return line or "held by Shepherdr's installer"
     return None
+
+
+def _install_done(line):
+    m = re.search(r" install at (\S+?):", line)
+    if not m:
+        return False
+    try:
+        with open(os.path.join(SHARE, "installed.json")) as f:
+            rec = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return isinstance(rec, dict) and rec.get("at") == m.group(1) and rec.get("whole") is not False
 
 
 # The web app's optional plugins (Settings › Plugins; service/next.ts PLUGINS): one switched off is in Everywhere's
