@@ -2,12 +2,16 @@
 // tailscaled (root) or by this machine's owner: another user on the machine could reach 127.0.0.1 and send the
 // header itself. Linux reads the kernel's socket table; macOS asks netstat and ps. Only the exact connection counts (caller
 // 127.0.0.1:<port> to the service's 127.0.0.1:<service>, established); none, or more than one owner: not believed.
+// macOS 27 gives a service no netstat table (GitHub #777): then lsof (lsofPeer). Tailscale itself can't vouch: its
+// headers (Tailscale-User-Login, X-Forwarded-For) are plain text anyone here can send, and `tailscale whois` doesn't know
+// serve's own 127.0.0.1 port ("peer not found", checked on 1.104).
 import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "./spawn.ts";
 
 const ME = process.getuid?.() ?? -1;
 const NETSTAT = ["/usr/sbin/netstat", "/usr/bin/netstat"].find((p) => existsSync(p)) ?? "netstat";
 const PS = ["/bin/ps", "/usr/bin/ps"].find((p) => existsSync(p)) ?? "ps";
+const LSOF = ["/usr/sbin/lsof", "/usr/bin/lsof", "/bin/lsof"].find((p) => existsSync(p)) ?? "lsof";
 const LOOP4 = "0100007F";                              // 127.0.0.1 as /proc/net/tcp writes it
 const LOOP6 = "0000000000000000FFFF00000100007F";      // ::ffff:127.0.0.1 in tcp6
 const hex = (n: number) => n.toString(16).toUpperCase().padStart(4, "0");
@@ -31,6 +35,7 @@ export function peerUid(port: number, service: number): number | null {
     // process of every socket (process:pid), and ps says whose it is. Both in /usr/sbin and /bin, which launchd's PATH
     // for the service may lack; neither answering: not believed.
     const pids = darwinPids(port, service);
+    if (peerProblem) return null; // no table: trustedPeer asks lsof
     for (const pid of pids) {
       let out = "";
       try { out = spawnSync([PS, "-o", "uid=", "-p", String(pid)], { stdout: "pipe", stderr: "ignore" }).stdout.toString().trim(); } catch {}
@@ -83,11 +88,62 @@ export function netstatProblem(out: string, code: number | null, err: string): s
   return `netstat gave no socket table here (${why})`;
 }
 /** The 403's words: "not from Tailscale", with why when this Mac couldn't look. */
-export const refusedWhy = (why: string) => (why === "not from Tailscale" && peerProblem ? `${why}: can't see who connected: ${peerProblem}` : why);
+export const refusedWhy = (why: string) =>
+  (why === "not from Tailscale" && peerProblem ? `${why}: can't see who connected: ${peerProblem}${lsofProblem ? `; ${lsofProblem}` : ""}` : why);
+/** Why the lsof way didn't vouch either, or null. */
+export let lsofProblem: string | null = null;
 
 /** Tailscale (root) or the owner. */
 export const trustedPeer = (port: number | undefined, service: number) => {
   if (!port) return false;
   const uid = peerUid(port, service);
-  return uid === 0 || (uid !== null && uid === ME);
+  if (uid === 0 || (uid !== null && uid === ME)) return true;
+  return process.platform === "darwin" && peerProblem !== null && lsofPeer(port, service, run) !== null;
 };
+
+const run = (argv: string[]) => {
+  try { return spawnSync(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore" }).stdout.toString(); } catch { return ""; }
+};
+
+/** lsof -F's sockets: [pid, uid, "local->remote"] for each socket line. */
+export function lsofSockets(text: string): [number, number, string][] {
+  const out: [number, number, string][] = [];
+  let pid = -1, uid = -1;
+  for (const l of text.split("\n")) {
+    if (l[0] === "p") { pid = Number(l.slice(1)); uid = -1; }
+    else if (l[0] === "u") uid = Number(l.slice(1));
+    else if (l[0] === "n" && pid > 0) out.push([pid, uid, l.slice(1)]);
+  }
+  return out;
+}
+
+/** The uids of processes run by another person: a login account (macOS: 501 and up) other than the owner. */
+export const otherPeople = (ps: string, me = ME) =>
+  [...new Set(ps.split("\n").map((x) => x.trim()).filter((x) => /^\d+$/.test(x)).map(Number))].filter((u) => u >= 501 && u < 2 ** 31 && u !== me);
+
+/** macOS without a netstat table (GitHub #777): who holds the caller's side, by lsof. lsof sees every socket of this
+ *  user and none of another's (root's, another person's), and always this service's own side of the connection:
+ *  - the caller's side seen: the owner's ("owner", the uid lsof gives must be the owner's);
+ *  - not seen: another account holds it. Tailscale's extension runs as root; it counts as Tailscale only when no
+ *    other person has a process on this Mac (ps lists everyone's) and the connection is still up after ps looked,
+ *    so the holder was alive while ps listed it ("system").
+ *  lsof not seeing the service's own side means it can't look here: null, as for anything else. */
+export function lsofPeer(port: number, service: number, exec: (argv: string[]) => string, me = ME, self = process.pid): "owner" | "system" | null {
+  const look = () => {
+    const socks = lsofSockets(exec([LSOF, "-nP", `-iTCP@127.0.0.1:${port}`, "-sTCP:ESTABLISHED", "-Fpun"]));
+    const ours = socks.some(([pid, , n]) => pid === self && n === `127.0.0.1:${service}->127.0.0.1:${port}`);
+    const callers = socks.filter(([, , n]) => n === `127.0.0.1:${port}->127.0.0.1:${service}`).map(([, uid]) => uid);
+    return { ours, callers };
+  };
+  const say = (why: string | null) => ((lsofProblem = why), null);
+  const first = look();
+  if (!first.ours) return say("lsof didn't see the connection either");
+  if (first.callers.length) return first.callers.every((u) => u === me) ? ((lsofProblem = null), "owner") : say("another user opened it");
+  const ps = exec([PS, "-axo", "uid="]);
+  if (!ps.split("\n").some((x) => x.trim() === String(me))) return say("ps gave no process list"); // ps must list us too
+  if (otherPeople(ps, me).length) return say("another person has processes on this Mac, so a hidden caller could be theirs");
+  const again = look();
+  if (!again.ours || again.callers.length) return say("the connection changed while looking");
+  lsofProblem = null;
+  return "system";
+}
