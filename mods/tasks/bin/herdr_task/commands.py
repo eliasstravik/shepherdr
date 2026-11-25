@@ -825,14 +825,14 @@ def work_tree(s, t, folder=None):
         return None, None
     main = s.loc["folder"]
     trees = worktree_list(main)
-    br = t.get("branch")
+    br = t.get("branch") if t.get("mode") == "worktree" else None
     if br:
         tree = next((w for w in trees if w["branch"] == br), None)
         if tree:
             return tree["path"], "HEAD"
         if git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{br}")[0]:
             return main, f"refs/heads/{br}"
-    if t.get("mode") != "worktree":
+    if not br:
         others = [os.path.realpath(w["path"]) for w in trees if os.path.realpath(w["path"]) != os.path.realpath(main)]
         for p in (folder, os.getcwd()):
             if not p:
