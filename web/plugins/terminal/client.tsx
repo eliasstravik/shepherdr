@@ -19,6 +19,7 @@ import { spaceTermRow, switchView, taskTermRow, toggleSpaceTerm, toggleTaskTerm,
 import { connectTerminal, streamInput } from './stream.ts'
 import { linkLayer, type LinkLayer } from './linklayer.ts'
 import { mirrorFocus } from './focus.ts'
+import { focusAfterKey } from './keyrow.ts'
 import { opens, type Link } from './links.ts'
 
 /** a web page opens the way a chat's link does: a new tab (the outside browser in the Android app), or in the app
@@ -111,6 +112,8 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
   const [ctrl, setCtrl] = useState(false)
   const ctrlRef = useRef(false)
   ctrlRef.current = ctrl
+  /** what pressed the key row last: 'touch', 'pen', 'mouse', or '' for a key press on its button */
+  const pointer = useRef('')
 
   useEffect(() => {
     let gone = false
@@ -250,9 +253,15 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
     if (press.current) clearTimeout(press.current.timer)
     press.current = null
   }
+  /** after a press of the key row: a mouse click gives the terminal the keys; a finger's tap leaves the on-screen
+   *  keyboard as it was */
+  const afterKey = () => {
+    if (focusAfterKey(pointer.current)) cap.current?.focus()
+    pointer.current = ''
+  }
   const sendKey = (k: string) => {
     streamInput(stream, { type: 'keys', keys: [k] })
-    cap.current?.focus()
+    afterKey()
   }
   return (
     <>
@@ -361,9 +370,9 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
         />
       </div>
       {showKeys(phone, coarse) && (
-        <div className="keys">
+        <div className="keys" onPointerDown={(e) => { pointer.current = e.pointerType }} onMouseDown={(e) => e.preventDefault()}>
           {([['esc', 'esc'], ['tab', 'tab']] as const).map(([l, k]) => <button type="button" key={l} aria-label={`${l} key`} onClick={() => sendKey(k)}>{l}</button>)}
-          <button type="button" aria-label="ctrl key" aria-pressed={ctrl} style={ctrl ? { background: 'rgb(255 255 255/.3)' } : undefined} onClick={() => { setCtrl(!ctrl); cap.current?.focus() }}>ctrl</button>
+          <button type="button" aria-label="ctrl key" aria-pressed={ctrl} style={ctrl ? { background: 'rgb(255 255 255/.3)' } : undefined} onClick={() => { setCtrl(!ctrl); afterKey() }}>ctrl</button>
           {([['←', 'left'], ['↑', 'up'], ['↓', 'down'], ['→', 'right']] as const).map(([l, k]) => <button type="button" key={k} aria-label={`${k} arrow key`} onClick={() => sendKey(k)}>{l}</button>)}
           <button type="button" aria-label="enter key" onClick={() => sendKey('enter')}>↵</button>
         </div>
