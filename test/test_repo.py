@@ -221,17 +221,21 @@ console.log(JSON.stringify(out));"""
         css = open(J("web/src/ds.css")).read()
         light = re.search(r":root\{color-scheme:light;--canvas:(#[0-9a-f]+);", css)
         dark = re.search(r':root\[data-theme="dark"\]\{color-scheme:dark;--canvas:(#[0-9a-f]+);', css)
-        self.assertTrue(light and dark, "ds.css sets color-scheme with --canvas for light and dark")
+        night = re.search(r':root\[data-theme="night"\]\{color-scheme:dark;--canvas:(#[0-9a-f]+);', css)
+        self.assertTrue(light and dark and night, "ds.css sets color-scheme with --canvas for light, dark and night")
         self.assertIn('@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){color-scheme:dark;--canvas:' + dark[1] + ";", css)
         self.assertIn("html{background:var(--canvas);", css)
         full = lambda c: "#" + "".join(ch * 2 for ch in c[1:]) if len(c) == 4 else c
-        L, D = full(light[1]), full(dark[1])
+        L, D, N = full(light[1]), full(dark[1]), full(night[1])
+        # Night (#1505) is true black for OLED: the page, the bars and the installed app's window alike
+        self.assertEqual(N, "#000000")
         html = open(J("web/index.html")).read()
         head = html[: html.index("</head>")]
         style = head[head.index("<style>") : head.index("</style>")]
         self.assertLess(head.index("<style>"), head.index("<script"), "the canvas comes before any script")
         self.assertIn("html{color-scheme:light;background:%s}" % L, style)
         self.assertIn('html:not([data-theme="light"]){color-scheme:dark;background:%s}' % D, style)
+        self.assertIn('html[data-theme="night"]{color-scheme:dark;background:%s}' % N, style)
         self.assertIn('html[data-theme="dark"]{color-scheme:dark;background:%s}' % D, style)
         self.assertIn('<meta name="color-scheme" content="light dark" />', head)
         # SHEP-341: the browser's bar is right with no script, by media, and the script sets every one of them
@@ -239,21 +243,24 @@ console.log(JSON.stringify(out));"""
         self.assertIn('<meta name="theme-color" media="(prefers-color-scheme: dark)" content="%s" />' % D, head)
         self.assertEqual(head.count('name="theme-color"'), 2)
         self.assertIn("querySelectorAll('meta[name=theme-color]')", head)
-        self.assertIn("dark ? '%s' : '%s'" % (D, L), head)
+        self.assertIn("night ? '%s' : dark ? '%s' : '%s'" % (N, D, L), head)
         self.assertIn("interactive-widget=resizes-content", head)
         self.assertIn("viewport-fit=cover", head)
         prefs = open(J("web/src/prefs.ts")).read()
-        self.assertIn("const BAR = { light: '%s', dark: '%s' }" % (L, D), prefs)
+        self.assertIn("const BAR = { light: '%s', dark: '%s', night: '%s' }" % (L, D, N), prefs)
+        self.assertIn("bar.content = BAR[look()]", prefs)
         self.assertIn("querySelectorAll<HTMLMetaElement>('meta[name=theme-color]')", prefs)
         # SHEP-341: the manifest linked with no script is dark, the app's own: an installed Android app keeps the one
         # it was installed with and paints the window under the gesture bar in its background_color (the white strip
         # of 3.2.2, whose default manifest was white). Light swaps in manifest-light. The same URL stays dark, so an
         # app installed from it sees the new colours at its next manifest check and Chrome updates it.
         self.assertIn('<link rel="manifest" href="manifest.webmanifest"', head)
-        self.assertIn("const MANIFEST = { light: 'manifest-light.webmanifest', dark: 'manifest.webmanifest' }", prefs)
-        self.assertIn("if (!dark) document.querySelector('link[rel=manifest]').setAttribute('href', 'manifest-light.webmanifest')", head)
+        self.assertIn("const MANIFEST = { light: 'manifest-light.webmanifest', dark: 'manifest.webmanifest', night: 'manifest-night.webmanifest' }", prefs)
+        self.assertIn("if (!dark || night) document.querySelector('link[rel=manifest]').setAttribute('href', night ? 'manifest-night.webmanifest' : 'manifest-light.webmanifest')", head)
         md = json.load(open(J("web/public/manifest.webmanifest")))
         ml = json.load(open(J("web/public/manifest-light.webmanifest")))
+        mn = json.load(open(J("web/public/manifest-night.webmanifest")))
+        self.assertEqual((mn["background_color"], mn["theme_color"]), (N, N))
         # 3.2.2's dark one, still linked by a page loaded before this: the same as the default
         self.assertEqual(json.load(open(J("web/public/manifest-dark.webmanifest"))), md)
         self.assertEqual((ml["background_color"], ml["theme_color"]), (L, L))
@@ -261,8 +268,9 @@ console.log(JSON.stringify(out));"""
         # the same app in either (the same id: a new id would install a second app): only the colours differ
         self.assertEqual(md["id"], "./")
         for k in ("background_color", "theme_color"):
-            ml.pop(k), md.pop(k)
+            ml.pop(k), md.pop(k), mn.pop(k)
         self.assertEqual(ml, md)
+        self.assertEqual(mn, md)
         # the bottom under the gesture bar: the phone's bottom bar runs under it, and without that bar (a tablet, an
         # unfolded phone) the layout keeps the inset clear, painted by the page's canvas
         self.assertIn(".bar{padding-bottom:calc(12px + env(safe-area-inset-bottom))}", css)
