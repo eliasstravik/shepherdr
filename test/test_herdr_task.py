@@ -6827,18 +6827,27 @@ class DoubleStart(unittest.TestCase):
         self.run_cmd(self.commands.cmd_start, id="1", now=True)
         self.assertEqual(len(self.task(1)["agents"]), 2)
 
-    def test_reads_never_wait_for_a_busy_list_and_a_status_gives_up(self):
-        """#1130: the scheduler (or any slow command) holding the list's lock kept show, list and status waiting for
-        minutes. Reads go on at once (saves replace the list whole); a status gives up after a short wait, saying so."""
+    def hold_list(self):
         import fcntl
-        import time
-        from unittest import mock
-        self.add("Busy")
         with self.store_mod.Store(self.store_mod.locate(self.folder), write=False) as s:
             lock = os.path.join(self.store_mod.STORE, "." + os.path.basename(s.path) + ".lock")
         held = open(lock, "a")
         self.addCleanup(held.close)
         fcntl.flock(held, fcntl.LOCK_EX)
+        return held
+
+    def test_reads_never_wait_for_a_busy_list_and_a_status_is_kept(self):
+        """#1130: the scheduler (or any slow command) holding the list's lock kept show, list and status waiting for
+        minutes. Reads go on at once (saves replace the list whole). #1490: a status gives up waiting after a short
+        while but is never dropped: kept aside, the list's next holder puts the newest one on its task."""
+        import fcntl
+        import time
+        from unittest import mock
+        self.add("Busy")
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            s.find(1)["state"] = "running"
+            s.dirty = True
+        held = self.hold_list()
         t = time.time()
         self.assertEqual(self.task(1)["title"], "Busy")
         shown = self.run_cmd(self.commands.cmd_show, id="1")
@@ -6846,14 +6855,70 @@ class DoubleStart(unittest.TestCase):
         listed = self.run_cmd(self.commands.cmd_list, all=False, archived=False)
         self.assertIn("Busy", json.dumps(listed))
         self.assertLess(time.time() - t, 5)
-        with mock.patch.object(self.commands, "STATUS_WAIT", 0.5), self.assertRaises(self.Fail) as e:
-            self.run_cmd(self.commands.cmd_status, id="1", text="Working", done=None, left=None)
-        self.assertIn("is busy", str(e.exception))
-        self.assertIn("nothing was changed", str(e.exception))
+        with mock.patch.object(self.commands, "STATUS_WAIT", 0.3):
+            first = self.run_cmd(self.commands.cmd_status, id="1", text="Reading the code", done=10, left="20m")
+            second = self.run_cmd(self.commands.cmd_status, id="1", text="Writing the fix", done=40, left="10m")
+        self.assertTrue(first["queued"] and second["queued"])
+        self.assertEqual(second["progress"]["text"], "Writing the fix")
+        self.assertNotIn("progress", self.task(1))  # not on the list while it's held
         fcntl.flock(held, fcntl.LOCK_UN)
+        # the next holder (the scheduler's next pass, any command) puts the newest one on: nothing was lost
+        with self.store_mod.Store(self.store_mod.locate(self.folder)):
+            pass
+        self.assertEqual((self.task(1)["progress"]["text"], self.task(1)["progress"]["done"]), ("Writing the fix", 40))
+        # and only once: a newer status said directly isn't replaced by a stale one
+        direct = self.run_cmd(self.commands.cmd_status, id="1", text="Running the tests", done=80, left="5m")
+        self.assertNotIn("queued", direct)
+        with self.store_mod.Store(self.store_mod.locate(self.folder)):
+            pass
+        self.assertEqual(self.task(1)["progress"]["text"], "Running the tests")
         # free again: a read that learns something saves it, as before
         with self.store_mod.Store(self.store_mod.locate(self.folder), write="try") as s:
             self.assertTrue(s.write)
+
+    def test_a_queued_status_for_a_task_not_at_work_is_refused(self):
+        """#1490: the queue keeps only what a free list would have taken."""
+        from unittest import mock
+        self.add("Idle")
+        self.hold_list()
+        with mock.patch.object(self.commands, "STATUS_WAIT", 0.3), self.assertRaises(self.Fail) as e:
+            self.run_cmd(self.commands.cmd_status, id="1", text="Working", done=None, left=None)
+        self.assertIn("isn't being worked on", str(e.exception))
+
+    def test_the_scheduler_asks_github_with_the_list_free(self):
+        """#1490: the scheduler held the list across a few gh calls per Ready task (seconds each on a busy machine),
+        and agents' status lines gave up behind it. GitHub is asked first with the list let go: a status said
+        meanwhile lands at once, and the tick then uses that answer without asking again."""
+        import fcntl
+        from unittest import mock
+        self.add("Ready one")
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            t = s.find(1)
+            t.update(state="ready", worktree=self.folder, mode="worktree", branch="b",
+                     pr={"number": 7, "repo": "o/r", "checked": 0})
+            s.dirty = True
+        asked, said = [], []
+        view = {"state": "OPEN", "statusCheckRollup": [], "headRefOid": "abc"}
+
+        def pr_view(t):
+            lock = os.path.join(self.store_mod.STORE, "." + os.path.basename(s.path) + ".lock")
+            with open(lock, "a") as f:
+                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)  # raises if the list were held
+                fcntl.flock(f, fcntl.LOCK_UN)
+            said.append(self.run_cmd(self.commands.cmd_status, id="1", text="Answering a review", done=90, left="2m"))
+            asked.append(t["pr"]["number"])
+            return view
+
+        with mock.patch.object(self.tick, "pr_view", pr_view), \
+                mock.patch.object(self.tick.ghnews_mod, "pr_comments", lambda *a: []), \
+                self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            found = self.tick.prefetch(s)
+            with self.tick.answered(found):
+                got = self.tick.answer("view", "o/r", 7)
+                self.assertIs(self.tick.answer("view", "o/r", 7), self.tick._ASK)  # used once
+        self.assertEqual((asked, got), ([7], view))
+        self.assertNotIn("queued", said[0])
+        self.assertEqual(self.task(1)["progress"]["text"], "Answering a review")
 
     def test_a_here_start_in_another_worktree_is_refused(self):
         """#1210: start --here --folder <a worktree of the repo> ran in the repo's own folder, on another branch. It

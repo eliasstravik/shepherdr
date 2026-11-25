@@ -17,8 +17,9 @@ from .agents import (
 )
 from .provider import provider_cut, provider_error
 from .sessions import find_lost_logs, refresh_sessions
-from .github import (already_merged, BEHIND, checks_state, collision, collision_reason, collision_words, CHECKS_NEVER, checks_missing, checks_since, drop_branch, merge_checks, expected_checks, finish, github, merged_here, needs_approval, note_checks, pr_for_branch, pr_merged, pr_pending, pr_problem,
-                     pr_view, pr_wait, queue_dropped_why, queue_entry, queue_merge, queue_refusal, unqueue, tidy_done, tidy_due, update_main, watch_main)
+from . import github as github_mod, ghnews as ghnews_mod
+from .github import (_ASK, _unsettled, already_merged, answer, answered, BEHIND, checks_state, collision, collision_reason, collision_words, CHECKS_NEVER, checks_missing, checks_since, drop_branch, merge_checks, expected_checks, finish, github, merged_here, needs_approval, note_checks, pr_for_branch, pr_merged, pr_pending, pr_problem,
+                     pr_view, pr_wait, queue_dropped_why, released, queue_entry, queue_merge, queue_refusal, unqueue, tidy_done, tidy_due, update_main, watch_main)
 from .launch import default_space
 from .store import locate, read_list, Store, store_files
 from .queues import machine_hold, refresh_ext, set_hold, waiting_ext, waiting_for
@@ -27,7 +28,7 @@ from .browsers import browser_pass
 from .output import progress_clock, say
 from .commands import back_to_work, begin, merge_failed, merge_now, merge_waits, MERGE_FAILED, workers
 from .news import news_pass
-from .ghnews import held_by_base, main_pass, pr_deliver, pr_news, resting
+from .ghnews import held_by_base, main_pass, pr_deliver, pr_news, PR_NEWS_EVERY, resting
 from .systemic import dropped, systemic_pass
 from .scheduler import SCHEDULER
 from .revive import record_pass
@@ -148,7 +149,8 @@ def facts(s, t, report):
             return
         pr["checked"] = now()
         s.dirty = True
-        v = pr_view(t)
+        v = answer("view", pr.get("repo"), pr.get("number"))
+        v = pr_view(t) if v is _ASK else v
         if not v:
             return
         note_checks(s, t, v)
@@ -290,7 +292,8 @@ def seen_pr(s, t):
     t["pr_looked"] = now()
     s.dirty = True
     repo = github(s)
-    found = pr_for_branch(t, repo) if repo else None
+    found = answer("branch", repo, t["branch"]) if repo else None
+    found = pr_for_branch(t, repo) if found is _ASK else found
     if found:
         t["pr_seen"] = {"number": found["number"], "url": found["url"], "repo": repo}
     elif repo:
@@ -410,9 +413,59 @@ def heads_up(s, t, report):
         report.setdefault("collides", []).append(s.ref(t))
 
 
+def prefetch(s):
+    """#1490: what this turn's facts() will ask GitHub (a pull request's view, its required checks, its comments; a
+    Working task's pull request opened by its agent), asked first with the list's lock let go: a few gh calls per
+    task, seconds each on a busy machine, held every other herdr-task here (a status line) past its wait. Returns
+    the answers for github.answered(); a task that changed meanwhile only asks again under the lock."""
+    asks = []
+    for t in s.data["tasks"]:
+        if not (t.get("worktree") and t["state"] in ("running", "ready")):
+            continue
+        pr = t.get("pr")
+        if pr:
+            if pr.get("number") and pr.get("repo") and now() - pr.get("checked", 0) >= PR_EVERY:
+                asks.append(json.loads(json.dumps(t)))
+        elif t["state"] == "running" and t.get("mode") == "worktree" and t.get("branch") \
+                and now() - t.get("pr_looked", 0) >= PR_OPEN_EVERY:
+            asks.append(json.loads(json.dumps(t)))
+    if not asks:
+        return {}
+    repo = github(s) if any(not t.get("pr") for t in asks) else None
+    found = {}
+    with released(s):
+        for t in asks:
+            pr = t.get("pr")
+            if not pr:
+                if repo:
+                    found[("branch", repo, t["branch"])] = pr_for_branch(t, repo)
+                continue
+            key = (pr["repo"], pr["number"])
+            v = found[("view",) + key] = pr_view(t)
+            if not isinstance(v, dict):
+                continue
+            if t.get("auto_merge") and any(_unsettled(c) for c in v.get("statusCheckRollup") or []):
+                found[("required",) + key] = github_mod.required_checks(t)
+            w = pr.get("watch") or {}
+            if t["state"] == "ready" and v.get("state") == "OPEN" and (
+                    w.get("since") != (t.get("ready_at") or 0) or now() - (w.get("checked") or 0) >= PR_NEWS_EVERY):
+                found[("comments",) + key] = ghnews_mod.pr_comments(pr["repo"], pr["number"])
+    return found
+
+
 def tick_store(s, report):
     """One folder's turn: Ready tasks back at work are Working again, merged tasks become done,
     auto-merges go when they can, and queued tasks start once what they wait for is done."""
+    try:
+        found = prefetch(s)
+    except Exception as e:  # never stops the tick: each asks under the lock as before
+        report.setdefault("github_error", []).append(f"prefetch: {e}")
+        found = {}
+    with answered(found):
+        tick_turn(s, report)
+
+
+def tick_turn(s, report):
     for t in s.data["tasks"]:
         if t["state"] == "ready":
             back_pass(s, t, report)

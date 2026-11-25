@@ -7,7 +7,7 @@ import re
 
 from .base import now
 from .agents import status_word
-from .github import BAD, collision, collision_words, gh
+from .github import _ASK, answer, BAD, collision, collision_words, gh
 from .launch import coordinator_in
 from .commands import workers
 from .news import news_send
@@ -51,6 +51,9 @@ def when(text):
 def pr_comments(repo, n):
     """A pull request's published reviews and comments with words, oldest first: {id, at, who,
     body, url, state?, where?}; None when GitHub didn't answer. Pending reviews are left out."""
+    found = answer("comments", repo, n)
+    if found is not _ASK:
+        return found
     reviews = api_pages(f"repos/{repo}/pulls/{n}/reviews")
     lines = api_pages(f"repos/{repo}/pulls/{n}/comments")
     notes = api_pages(f"repos/{repo}/issues/{n}/comments")
