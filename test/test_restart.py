@@ -193,5 +193,57 @@ class Bash32(unittest.TestCase):
         self.assertIn("herdr.agent=claude", args)
 
 
+BARE_HC = r"""#!/usr/bin/env bash
+case $1 in
+  get) echo '{"address":"t2","cwd":"/tmp","labels":{"herdr.space":"s1","herdr.tab":"t1"}}' ;;
+  run) printf '%s\n' "$@" >"$FAKE_DIR/run-args"
+       for a in "$@"; do f="$HOME/.config/herdr-core/templates/$a.md"; [ -f "$f" ] && cp "$f" "$FAKE_DIR/one.md"; done
+       echo '{"address":"t9","first_message":{"sent":true}}' ;;
+esac
+"""
+
+
+class BarePath(unittest.TestCase):
+    """GitHub #1431: a herdr-core started outside a login shell (launchd, ssh) runs restart.sh, and every terminal it
+    starts, with only /usr/bin:/bin. hc and claude live in ~/.local/bin: the script finds hc there, and the new agent's
+    command finds claude where a fresh start does (core/clean-env.js AGENT_PATH)."""
+
+    def restart(self, env):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        own = os.path.join(d, ".local", "bin")
+        os.makedirs(own)
+        os.makedirs(os.path.join(d, ".config", "herdr-core", "templates"))
+        for name, body in (("hc", BARE_HC), ("claude", "#!/bin/sh\necho \"claude ran $*\"\n")):
+            with open(os.path.join(own, name), "w") as f:
+                f.write(body)
+            os.chmod(os.path.join(own, name), 0o755)
+        jq = shutil.which("jq")
+        os.symlink(jq, os.path.join(own, "jq"))   # wherever jq is, not on the bare PATH unless it's in /usr/bin
+        bare = {"PATH": "/usr/bin:/bin", "HOME": d}
+        r = subprocess.run(["bash", SCRIPT, "t2", json.dumps(["claude", "--model", "sonnet"])],
+                           env={**bare, "FAKE_DIR": d, **env}, capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "t9")
+        return d, bare, read(os.path.join(d, "run-args")).split("\n")
+
+    def test_resume(self):
+        d, bare, args = self.restart({"HERDR_RESTART_RESUME": "1"})
+        cmd = args[args.index("--") + 1:-1]
+        ran = subprocess.run(cmd, env=bare, capture_output=True, text=True, timeout=30)
+        self.assertEqual(ran.stdout.strip(), "claude ran --model sonnet", ran.stderr)
+
+    def test_same_path_as_a_fresh_start(self):
+        js = re.search(r"export const AGENT_PATH = `(.*)`;", read(os.path.join(ROOT, "core", "clean-env.js"))).group(1)
+        sh = re.search(r"^apath='(.*)'$", read(SCRIPT), re.M).group(1)
+        self.assertEqual(sh, js.replace("\\$", "$"))
+
+    def test_handoff(self):
+        d, bare, _ = self.restart({})
+        line = next(x for x in read(os.path.join(d, "one.md")).splitlines() if x.startswith("command: "))
+        ran = subprocess.run(["sh", "-c", line[len("command: "):]], env=bare, capture_output=True, text=True, timeout=30)
+        self.assertEqual(ran.stdout.strip(), "claude ran --model sonnet", ran.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

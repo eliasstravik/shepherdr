@@ -12,6 +12,11 @@
 #   HERDR_RESTART_RESUME=1          argv resumes the same conversation: no handoff is sent.
 set -u
 old=$1 argv=${2:-}
+# #1431: a herdr-core started outside a login shell (launchd, ssh) runs this, and each terminal it starts, with only
+# /usr/bin:/bin: hc, jq and the agent CLIs are looked for where they install too, after its own PATH. The same line
+# as core/clean-env.js AGENT_PATH (test_restart keeps them equal); the new agent's command gets it as well.
+apath='PATH="${PATH:+$PATH:}$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin"; export PATH;'
+eval "$apath"
 # Another machine's agent (<machine>/<address>): this script runs there (its logs, templates and hc are
 # that machine's), carried over hc like any cross-machine command; the new address comes back as
 # <machine>/<address>, as this side names it.
@@ -128,7 +133,7 @@ argv_cmd() { local a; cmd=(); while IFS= read -r a; do cmd+=("$a"); done < <(jq 
 if [ -n "${HERDR_RESTART_RESUME:-}" ] && [ -n "$argv" ]; then
   argv_cmd
   [ ${#cmd[@]} -gt 0 ] || exit 1
-  new=$(hc run --bg --json --no-parent --cwd "$cwd" "${labels[@]}" --label "herdr.agent=$(basename "${cmd[0]}")" -- sh -c "$clean"' exec "$@"' herdr-clean "${cmd[@]}" | jq -r '.address // empty')
+  new=$(hc run --bg --json --no-parent --cwd "$cwd" "${labels[@]}" --label "herdr.agent=$(basename "${cmd[0]}")" -- sh -c "$clean $apath"' exec "$@"' herdr-clean "${cmd[@]}" | jq -r '.address // empty')
 elif [ -z "$argv" ] && [ "$role" = coordinator ] && [ -z "$own" ]; then
   new=$(hc run --bg --json --no-parent --cwd "$cwd" "${labels[@]}" assistant "$handoff" | jq -r .address)
 else
@@ -152,7 +157,7 @@ else
   # handoff goes in a one-off template, removed once it has started.
   one=herdr-handoff-$$
   file=$tdir/$one.md
-  { printf -- '---\nname: %s\ndescription: A one-off Herdr handoff, removed after use.\ncommand: %s\n---\n' "$one" "$clean exec $line"
+  { printf -- '---\nname: %s\ndescription: A one-off Herdr handoff, removed after use.\ncommand: %s\n---\n' "$one" "$clean $apath exec $line"
     printf '%s\n' "$msg"; } >"$file"
   out=$(hc run --bg --json --no-parent --cwd "$cwd" "${labels[@]}" --label "herdr.agent=$key" "$one")
   rm -f "$file"
