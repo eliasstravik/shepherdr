@@ -26,7 +26,8 @@ from .queues import machine_hold, refresh_ext, set_hold, waiting_ext, waiting_fo
 from .archive import archive_pass
 from .browsers import browser_pass
 from .output import progress_clock, say
-from .commands import back_to_work, begin, merge_failed, merge_now, merge_waits, MERGE_FAILED, workers
+from .commands import back_to_work, begin, merge_failed, merge_now, merge_waits, MERGE_FAILED, restack, workers
+from . import stack
 from .news import news_pass
 from .ghnews import held_by_base, main_pass, pr_deliver, pr_news, PR_NEWS_EVERY, resting
 from .systemic import dropped, systemic_pass
@@ -453,6 +454,22 @@ def prefetch(s):
     return found
 
 
+def stack_pass(s, t, report):
+    """#1403: a stacked task (its base another task's branch) whose base merged moves onto that branch's base: its task
+    here says so at once, GitHub (a squash merge, its branch deleted on the remote) every few minutes."""
+    ask = stack.due(t)
+    if ask:
+        t["base_looked"] = now()
+        s.dirty = True
+    gone = stack.merged_base(s, t, ask_github=ask)
+    if not gone:
+        return
+    res = restack(s, t, gone["into"], gone["tip"], gone["how"])
+    report.setdefault("restacked", []).append({
+        "task": s.ref(t), "from": res["from"], "to": res["to"],
+        **{k: res[k] for k in ("rebased", "conflict", "todo", "told", "pr_error") if res.get(k)}})
+
+
 def tick_store(s, report):
     """One folder's turn: Ready tasks back at work are Working again, merged tasks become done,
     auto-merges go when they can, and queued tasks start once what they wait for is done."""
@@ -471,6 +488,11 @@ def tick_turn(s, report):
             back_pass(s, t, report)
         elif t["state"] == "running" and (t.get("back") or {}).get("auto"):
             settle_back(s, t, report)
+        if stack.stacked(t):
+            try:
+                stack_pass(s, t, report)
+            except Exception as e:  # never stops the tick
+                report.setdefault("github_error", []).append(f"{s.ref(t)}: {e}")
         if t.get("base_moved"):
             try:
                 heads_up(s, t, report)

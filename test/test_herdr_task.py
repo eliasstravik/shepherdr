@@ -10677,3 +10677,172 @@ class ReviewerThatNeverAnswers(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StackedTasks(unittest.TestCase):
+    """#1403: a task whose base is another task's branch moves onto that branch's base by itself once it merges (squash
+    too, its branch deleted on the remote too): its record, its pull request retargeted, only its own commits rebased;
+    a conflict goes to its agent; edit --base works on a started task. A real throwaway origin, clone and worktrees."""
+    setUp_ = ParallelCollisions.setUp
+    patch, git, write, commit = ParallelCollisions.patch, ParallelCollisions.git, ParallelCollisions.write, ParallelCollisions.commit
+
+    def setUp(self):
+        self.setUp_()
+        import herdr_task.stack as stack
+        import herdr_task.news as news
+        self.stack, self.asked, self.sent = stack, [], []
+        self.merged_prs = []  # what the fake gh lists for a head branch
+        self.patch(stack, "github", lambda s: "o/r")
+        self.patch(self.github, "queue_entry", lambda t: None)
+        self.patch(self.commands, "mid_turn", lambda s, t: False)
+        self.patch(self.commands, "workers", lambda s, t: [{"address": f"t{t['id']}"}])
+        self.patch(news, "send_or_hold", lambda address, text, how="send": (self.sent.append((address, text)), True)[1])
+
+        def gh(*args, cwd=None):
+            self.asked.append(args)
+            if args[:2] == ("pr", "list"):
+                return True, json.dumps(self.merged_prs), ""
+            return True, "", ""
+        self.patch(stack, "gh", gh)
+
+    def stacked_pair(self, child_line="B", child_state="ready", parent_done=True):
+        """Task 1 on main (app.txt's middle line "A"), pushed; task 2 on task 1's branch, adding child.txt (and changing
+        app.txt's last line when child_line is "conflict"). Task 1 then squash-merges on origin and its branch goes."""
+        a = ParallelCollisions.task(self, 1, "A")
+        self.git(a["worktree"], "push", "-q", "origin", "task/1")
+        wt = os.path.join(self.root, "wt2")
+        self.git(self.main, "worktree", "add", "-q", "-b", "task/2", wt, "task/1")
+        self.write(wt, "child.txt", child_line + "\n")
+        if child_line == "conflict":
+            self.write(wt, "app.txt", "title\nA\nchild end\n")
+        own = self.commit(wt, "task 2")
+        b = {"id": 2, "title": "Task 2", "state": child_state, "mode": "worktree", "worktree": wt, "branch": "task/2",
+             "base": "task/1", "base_set": True, "start": a["start"], "agents": [], "head": own}
+        self.store.data["tasks"].append(b)
+        tip = self.git(self.main, "rev-parse", "task/1")
+        a["own"] = a["head"] = tip
+        ParallelCollisions.merge_first(self, a, "Task 1 (#11)")
+        self.git(self.main, "push", "-q", "origin", "--delete", "task/1")
+        if parent_done:
+            a["state"], a["merged"] = "done", True
+            self.git(self.main, "worktree", "remove", "--force", a["worktree"])
+            self.git(self.main, "branch", "-D", "task/1")
+        return a, b
+
+    def own_commits(self, b):
+        self.git(self.main, "fetch", "-q", "origin")
+        return self.git(b["worktree"], "log", "--format=%s", "origin/main..HEAD").splitlines()
+
+    def test_a_ready_task_moves_onto_main_once_its_base_squash_merged(self):
+        a, b = self.stacked_pair()
+        b["pr"] = {"number": 22, "url": "u", "repo": "o/r"}
+        self.git(b["worktree"], "push", "-q", "origin", "task/2")
+        self.assertEqual(len(self.own_commits(b)), 2)  # task 1's commit too: squash-merged, not in main as itself
+        report = {}
+        self.tick.stack_pass(self.store, b, report)
+        self.assertEqual((b["base"], b.get("base_set")), ("main", None))
+        self.assertEqual(self.own_commits(b), ["task 2"])  # only its own commit, on main's newest
+        self.assertEqual(b["head"], self.git(b["worktree"], "rev-parse", "HEAD"))
+        self.assertIn(("pr", "edit", "22", "--repo", "o/r", "--base", "main"), self.asked)
+        self.assertEqual(self.git(self.origin, "rev-parse", "task/2"), b["head"])  # its pull request got it
+        self.assertEqual(report["restacked"][0]["to"], "main")
+        self.assertEqual(b["state"], "ready")
+        self.assertEqual(self.sent, [])  # resting Ready agent: nothing to do for it
+        # once moved, nothing more to do
+        report = {}
+        self.tick.stack_pass(self.store, b, report)
+        self.assertNotIn("restacked", report)
+
+    def test_a_working_task_hears_it_was_moved(self):
+        a, b = self.stacked_pair(child_state="running")
+        self.tick.stack_pass(self.store, b, {})
+        self.assertEqual(self.own_commits(b), ["task 2"])
+        self.assertIn("your base branch task/1 merged", self.sent[0][1])
+        self.assertIn("Herdr rebased your branch task/2 onto main", self.sent[0][1])
+
+    def test_an_agent_mid_turn_is_told_the_command_and_its_branch_left_alone(self):
+        a, b = self.stacked_pair(child_state="running")
+        before = self.git(b["worktree"], "rev-parse", "HEAD")
+        self.patch(self.commands, "mid_turn", lambda s, t: True)
+        self.tick.stack_pass(self.store, b, {})
+        self.assertEqual(b["base"], "main")
+        self.assertEqual(self.git(b["worktree"], "rev-parse", "HEAD"), before)
+        self.assertIn(f"git rebase --onto origin/main {a['own']}", self.sent[0][1])
+
+    def test_a_conflict_goes_back_to_its_agent_and_the_branch_is_untouched(self):
+        a, b = self.stacked_pair(child_line="conflict")
+        self.write(self.other, "app.txt", "title\nA\nmain end\n")
+        self.commit(self.other, "main changes the end")
+        self.git(self.other, "push", "-q", "origin", "main")
+        before = self.git(b["worktree"], "rev-parse", "HEAD")
+        report = {}
+        self.tick.stack_pass(self.store, b, report)
+        self.assertEqual(report["restacked"][0]["conflict"], ["app.txt"])
+        self.assertEqual(self.git(b["worktree"], "rev-parse", "HEAD"), before)
+        self.assertEqual(self.git(b["worktree"], "status", "--porcelain"), "")  # the rebase was undone
+        self.assertEqual(b["state"], "running")  # back to work with it
+        self.assertIn("conflicts in app.txt", self.told[0])
+        self.assertIn("git rebase --onto origin/main", self.told[0])
+
+    def test_github_says_it_merged_when_its_task_is_not_here(self):
+        a, b = self.stacked_pair(parent_done=False)
+        self.store.data["tasks"].remove(a)
+        self.merged_prs = [{"number": 11, "state": "MERGED", "isCrossRepository": False, "baseRefName": "main",
+                            "headRefOid": a["own"]}]
+        self.tick.stack_pass(self.store, b, {})
+        self.assertEqual(b["base"], "main")
+        self.assertEqual(self.own_commits(b), ["task 2"])
+        self.assertEqual(self.stack.merged_base(self.store, b), None)  # main: no more pull request from task/1 matters
+
+    def test_a_merged_branch_still_on_the_remote_stays_a_base(self):
+        """A long-lived branch (a develop whose release pull request merged) is never left."""
+        a, b = self.stacked_pair(parent_done=False)
+        self.store.data["tasks"].remove(a)
+        self.git(self.main, "push", "-q", "origin", f"{a['own']}:refs/heads/task/1")
+        self.merged_prs = [{"number": 11, "state": "MERGED", "isCrossRepository": False, "baseRefName": "main",
+                            "headRefOid": a["own"]}]
+        self.assertIsNone(self.stack.merged_base(self.store, b))
+        self.merged_prs = [{"number": 12, "state": "OPEN", "isCrossRepository": False, "baseRefName": "main"}] + self.merged_prs
+        self.git(self.main, "push", "-q", "origin", "--delete", "task/1")
+        self.assertIsNone(self.stack.merged_base(self.store, b))  # one still open from it
+
+    def test_its_task_not_merged_yet_keeps_it_there(self):
+        a, b = self.stacked_pair(parent_done=False)
+        a["state"] = "ready"
+        self.assertIsNone(self.stack.merged_base(self.store, b))
+        self.assertFalse(self.stack.stacked({**b, "base_by": "space"}))
+        self.assertFalse(self.stack.stacked({**b, "pr": {"from_base": True}}))
+
+    def test_edit_base_on_a_started_task(self):
+        a, b = self.stacked_pair(child_state="running")
+        args = types.SimpleNamespace(id="2", base="main", title=None, prompt=None, prompt_file=None, after=None, at=None,
+                                     in_=None, here=False, worktree=False, space=None, branch=None, pr=None, move_to=None)
+        self.patch(self.commands, "set_opts", lambda *a, **k: None)
+        self.patch(self.commands, "set_notes", lambda *a, **k: None)
+        self.patch(self.commands, "task_tabs", lambda s, t: [])
+        self.patch(self.commands, "name_tabs", lambda x: [])
+        self.patch(self.commands, "view", lambda s, t, live=None: {**t, "status": t["state"]})
+        self.commands.cmd_edit(args)
+        self.assertEqual(b["base"], "main")
+        self.assertEqual(self.own_commits(b), ["task 2"])
+        self.assertIn("It now merges into main; its branch was rebased onto main", self.said[-1][2])
+        with self.assertRaises(self.commands.Fail):
+            self.commands.set_base(self.store, b, "no-such-branch")
+        b["state"] = "done"
+        with self.assertRaises(self.commands.Fail):
+            self.commands.set_base(self.store, b, "task/x")
+
+    def test_ready_moves_it_first_and_says_what_is_left_on_a_conflict(self):
+        a, b = self.stacked_pair(child_line="conflict", child_state="running")
+        self.write(self.other, "app.txt", "title\nA\nmain end\n")
+        self.commit(self.other, "main changes the end")
+        self.git(self.other, "push", "-q", "origin", "main")
+        self.patch(self.commands, "ready_words", lambda args: ("Done", None))
+        self.patch(self.commands, "review_refusal", lambda s, t, wt: None)
+        args = types.SimpleNamespace(id="2", nothing=False, told=None, pr=None, pr_title=None, pr_body=None, draft=False)
+        with self.assertRaises(self.commands.Fail) as e:
+            self.commands.cmd_ready(args)
+        self.assertIn("Your base branch task/1 merged", str(e.exception))
+        self.assertIn("git rebase --onto origin/main", str(e.exception))
+        self.assertEqual(b["base"], "main")
+        self.assertEqual(b["state"], "running")
