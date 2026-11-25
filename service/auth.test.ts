@@ -150,6 +150,46 @@ test("macOS: netstat giving no socket table is said in the refusal, not a bare '
   expect(netstatProblem("", null, "")).toContain("didn't run");
 });
 
+describe("macOS 27, no netstat table: lsof and ps (GitHub #777)", () => {
+  // recorded: lsof -nP -iTCP@127.0.0.1:<caller> -sTCP:ESTABLISHED -Fpun, as the service's user
+  const ours = "p87948\nu501\nf7\nn127.0.0.1:7788->127.0.0.1:56078\n";
+  const mine = "p3083\nu501\nf12\nn127.0.0.1:56078->127.0.0.1:7788\n";
+  const ps = (...uids: number[]) => uids.map((u) => `  ${u}`).join("\n") + "\n";
+  const runner = (lsof: string[], psOut: string) => (argv: string[]) => (argv[0].endsWith("ps") ? psOut : lsof.shift() ?? "");
+  const peer = async (lsof: string[], psOut: string) => (await import("./peer.ts")).lsofPeer(56078, 7788, runner(lsof, psOut), 501, 87948);
+
+  test("reads lsof -F: pid, uid and each socket", async () => {
+    const { lsofSockets } = await import("./peer.ts");
+    expect(lsofSockets(ours + mine)).toEqual([[87948, 501, "127.0.0.1:7788->127.0.0.1:56078"], [3083, 501, "127.0.0.1:56078->127.0.0.1:7788"]]);
+  });
+  test("the caller's side held by the owner: trusted", async () => expect(await peer([ours + mine], ps(0, 501))).toBe("owner"));
+  test("held by another user lsof can see (as root would): refused", async () =>
+    expect(await peer([ours + mine.replace("u501", "u502")], ps(0, 501))).toBe(null));
+  test("hidden from lsof (root: Tailscale's extension) with no other person here: trusted", async () =>
+    expect(await peer([ours, ours], ps(0, 0, 88, 501, 501, 4294967294))).toBe("system"));
+  test("hidden, but another person has processes on this Mac: refused", async () => {
+    expect(await peer([ours, ours], ps(0, 501, 502))).toBe(null);
+  });
+  test("lsof can't see the service's own side: refused", async () => expect(await peer(["", ""], ps(0, 501))).toBe(null));
+  test("ps lists nobody (not even us): refused", async () => expect(await peer([ours, ours], "")).toBe(null));
+  test("the connection went away while ps looked: refused", async () => expect(await peer([ours, ""], ps(0, 501))).toBe(null));
+  test.skipIf(!["/usr/sbin/lsof", "/usr/bin/lsof", "/bin/lsof"].some((f) => require("node:fs").existsSync(f)))("a real lsof sees the owner's own connection", async () => {
+    const { lsofPeer } = await import("./peer.ts");
+    const exec = (argv: string[]) => Bun.spawnSync(argv, { stdout: "pipe", stderr: "ignore" }).stdout.toString();
+    let seen: string | null = "unset";
+    const srv = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(req, s) {
+      seen = lsofPeer(s.requestIP(req)!.port, srv.port!, exec, process.getuid!(), process.pid);
+      return new Response("ok");
+    } });
+    try { await (await fetch(`http://127.0.0.1:${srv.port}/`)).text(); } finally { srv.stop(true); }
+    expect(seen).toBe("owner");
+  });
+  test("another person: a login account other than the owner", async () => {
+    const { otherPeople } = await import("./peer.ts");
+    expect(otherPeople(ps(0, 88, 501, 502, 4294967294), 501)).toEqual([502]);
+  });
+});
+
 describe("health's id only to this machine's callers (GitHub #635)", () => {
   test("the window on 127.0.0.1 by the service's port", () => expect(localCaller(local(), 7788)).toBe(true));
   test("not through tailscale serve", () => expect(localCaller(tailnet(), 7788)).toBe(false));
