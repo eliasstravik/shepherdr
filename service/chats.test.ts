@@ -144,3 +144,18 @@ test("a chat asked for before a restarted service knows its agent comes once it 
   for (let i = 0; i < 40 && got.at(-1)?.said?.length !== 2; i++) await Bun.sleep(100);
   expect(got.at(-1)?.said).toEqual(["answered while you were away", "and this"]);
 });
+
+// An open chat kept showing "working" when its agent finished with no new line in its log: a status-only change
+// (working to done, same words) is news for its pages too.
+test("an open chat is told when its agent finishes without writing to its log", async () => {
+  const h = hub();
+  feed(h, "restarted", "t6", { address: "t6", state: "live", argv: ["claude"], cwd: "/work/demo", labels: {}, status: { state: "working" }, foreground: { name: "claude", pid: 4242, argv: ["claude"], cwd: "/work/demo" } });
+  const chats = new Chats(h);
+  const seen: (string | null)[] = [];
+  chats.watch("t6", (_r, t) => seen.push(t?.status?.state ?? null));
+  for (let i = 0; i < 30 && seen.at(-1) !== "working"; i++) await Bun.sleep(100);
+  expect(seen.at(-1)).toBe("working");
+  feed(h, "status", "t6", { status: { state: "done" } });
+  for (let i = 0; i < 30 && seen.at(-1) !== "done"; i++) await Bun.sleep(100);
+  expect(seen.at(-1)).toBe("done");
+});

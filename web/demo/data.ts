@@ -256,6 +256,8 @@ export const chats: Record<string, Chat> = Object.fromEntries(
       me('Use /ui to fix', { reply: { text: 'Dependency check started on its schedule in #shop. It found 3 packages behind and is updating them. Supercalifragilisticexpialidociouslylongwordwithoutanybreaks', who: 'agent' }, reactions: [{ emoji: '👍', by: 'them' }] }),
       me('Pinned to https://example.com/releases/2026/november/checkout-redesign-final-final-v2-with-the-bigger-button and Pneumonoultramicroscopicsilicovolcanoconiosis too', { reactions: [{ emoji: '🎉', by: 'both' }] }),
       a('Noted: https://example.com/releases/2026/november/checkout-redesign-final-final-v2-with-the-bigger-button is the one, and Pneumonoultramicroscopicsilicovolcanoconiosis stays.', { reactions: [{ emoji: '👍', by: 'me' }] }),
+      // a wide table (#1442): readable columns that scroll sideways in their box on a phone, never one letter wide
+      a('The broken links I found:\n\n| # | Page | Old link | New link | Status | Redirect | Last edited | Owner | Next step |\n|---|---|---|---|---|---|---|---|---|\n| 1 | November recipes roundup | `/2025/11/recipes` | `/archive/2025/november-recipes` | Broken (404) | Missing | 3 weeks ago | Sam | Add a permanent redirect and update the sidebar link |\n| 2 | Shop | `/shop/old` | `/shop` | Moved | 301 | today | Alex | None |'),
       // links to the app itself, as `herdr-artifact link` prints them: they open in the app (SHEP-339)
       a('The quotes are compared: [Supplier quotes compared](APP/?artifact=a-quotes). Its task: [Compare supplier quotes](APP/?task=NOTES-4). The [shop space](APP/?place=p:mac-mini:shop). The suppliers\' own site: [example.com](https://example.com/), the sheet: [`quotes/compare.csv`](https://example.com/compare.csv).', { suggests: ['Show me what needs me', 'Start the Adyen paperwork anyway, just in case', 'status?'] }),
     ], sonnet),
@@ -269,7 +271,8 @@ export const chats: Record<string, Chat> = Object.fromEntries(
     chat(P.notes, [], sonnet),
     chat(P.garden, [a('GARDEN-3 is in progress, about 20 minutes left.'), { id: `m${++n}`, who: 'agent', news: { task: 'vm:GARDEN-4', ref: 'GARDEN-4', mark: 'needs', what: '', text: 'I need an image library to resize the photos.' } }, ask('q-pil', 'Run a command', byPhoto, ['Allow once', 'Decline'], { command: 'pip install pillow' })], gpt),
     chat('SHOP-14/worker', [a('I compared both for the shop. Stripe is already used for your invoices. Adyen gets cheaper above 50k a month but needs two weeks of paperwork.'), ...payQ().map((x, i) => (i ? x : { ...x, suggests: ['Go with Stripe', 'Compare the fees again'] }))], opus),
-    chat('SHOP-12/worker', [a('Search is done. I added an index and cached the top queries.', { suggests: ['Looks good, merge it', 'Show me the diff', 'status?'] })], opus),
+    // said after it handed in (#1475): its Ready card still comes last
+    chat('SHOP-12/worker', [a('Search is done. I added an index and cached the top queries.', { at: NOW - 8 * hour - min }), me('Does it still find misspelled names?', { at: NOW - hour }), a('Yes: the fuzzy match runs before the cache. I added a test for it.', { at: NOW - hour + 2 * min, suggests: ['Looks good, merge it', 'Show me the diff', 'status?'] })], opus),
     chat('BLOG-12/worker', [ask('scr-t42-1', 'Trust this folder?', undefined, ['Trust this folder and start', 'No, stop the task'], { press: true, noNote: true,
       trust: { cli: 'Claude Code', folder: '/Users/sam/dev/blog', waits: "Claude Code won't start in /Users/sam/dev/blog until you trust this folder.", allows: "Trusting it lets the folder's project settings and hooks run." } })], opus),
     chat('BLOG-10/worker', [a('Fixed it straight in the blog folder, as this space is set up.')], opus),

@@ -96,9 +96,11 @@ class ReplyRow(unittest.TestCase):
         self.assertRegex(css, r"\.sugs\{[^}]*margin:0 -4px 4px[;}]")
         self.assertRegex(css, r"\.sugs\{[^}]*padding:4px[;}]")
         self.assertRegex(css, r"\.sugs\{[^}]*mask-image:linear-gradient\(to right,transparent,#000 var\(--fl\)")
-        # the chat's bottom edge fades instead of slicing, and never over a terminal
-        self.assertIn(":is(.chat,.pane)>.foot:has(>.cbox)::before{", css)
-        self.assertIn(":is(.chat,.pane):has(>.scroll>.msgs>.tw)>.foot::before{display:none}", css)
+        # the chat's bottom edge fades instead of slicing, and never over a terminal: a mask on what scrolls, leaving
+        # the scroll bar's strip out, never a layer over it (#1499: a band one shade off, a dimmed scroll bar)
+        self.assertIn(":is(.chat,.pane):has(>.foot>.cbox):not(:has(>.scroll>.msgs>.tw))>.scroll{", css)
+        self.assertRegex(css, r"\.foot>\.cbox\):not[^{]*\{[^}]*mask:linear-gradient\(#000,#000\) right/var\(--sbw,0px\) 100% no-repeat,linear-gradient\(to bottom,#000 calc\(100% - 16px\),transparent\)")
+        self.assertNotIn(":is(.chat,.pane)>.foot:has(>.cbox)::before{", css)
         client = open(os.path.join(ROOT, "web", "plugins", "chat", "client.tsx"), encoding="utf-8").read()
         self.assertIn("keepAtEnd(sc, box, () => stuck.current)", client)
         self.assertIn("rowEdges(row.current)", client)

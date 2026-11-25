@@ -13,8 +13,8 @@ import { ActBtn, ActError, Btn, Cnt, cx, Empty, Hd, I, IB, MenuGroup, Row, useCa
 import { waiting } from '@client/pending.ts'
 import { focusBox, focusChat, focusTask } from '@client/commands.ts'
 import { SpaceIcon } from '@client/space-icon.tsx'
-import type { MergeEvidence, Snapshot, Task } from '@shared/types.ts'
-import { askedWords, isEverything, machineLabel, nowGroups, onBranch, placeDown, reposOf, spaceLabel, spaceOnFolder, spacesOf, etaOf, leftWords, statusWord, taskChat, taskLine, taskWhen, tasksIn, tstate, workKey, workName, workWords, type Repo } from '@shared/view.ts'
+import type { MergeEvidence, Message, Snapshot, Task } from '@shared/types.ts'
+import { askedWords, isEverything, machineLabel, nowGroups, onBranch, placeDown, reposOf, spaceLabel, spaceOnFolder, spacesOf, etaOf, headLine, leftWords, statusWord, taskChat, taskLine, taskWhen, tasksIn, tstate, workKey, workName, workWords, type Repo } from '@shared/view.ts'
 import { DoneRow } from '@plugins/chat/cards.tsx'
 import { replyToTask, SlideHint, useSlide } from '@plugins/chat/slide.tsx'
 import { StatusIcon } from './icon.tsx'
@@ -352,19 +352,20 @@ export function StoppedCard({ t }: { t: Task }) {
 
 /** In a chat: the cards of the tasks that need the person there (a review, a stopped agent), each where it came up.
  *  The app puts them there from each task's status, not an agent. In a task: its own review or stopped card. */
-function taskCards(snap: Snapshot, thread: Thread): { key: string; at?: number; past?: boolean; node: ReactNode }[] {
+function taskCards(snap: Snapshot, thread: Thread): { key: string; at?: number; past?: boolean; after?: (m: Message) => boolean; node: ReactNode }[] {
   // a task handed in: its card while it waits, and where the card was, one quiet line once it is done
   const reviewing = (t: Task) => tstate(t) === 'ready' || t.status === 'merging' || !!t.accepting || (tstate(t) === 'done' && !t.quiet && !!t.needsAtWas)
   const halted = (t: Task) => tstate(t) === 'ask' && !!t.stopped && t.stopped.by !== 'you'
   if (thread.task) {
     const t = thread.task
     // each where it came up among the messages, never held at the end (SHEP-419)
-    return [...(reviewing(t) ? [{ key: `review:${t.id}`, at: t.needsAt ?? t.needsAtWas, past: tstate(t) === 'done', node: <ReviewCard t={t} ctx="thread" /> }] : []), ...(halted(t) ? [{ key: `stopped:${t.id}`, at: t.needsAt, node: <StoppedCard t={t} /> }] : [])]
+    // a Ready card still waiting goes below what was said after it (#1475)
+    return [...(reviewing(t) ? [{ key: `review:${t.id}`, at: t.needsAt ?? t.needsAtWas, past: tstate(t) === 'done', after: () => true, node: <ReviewCard t={t} ctx="thread" /> }] : []), ...(halted(t) ? [{ key: `stopped:${t.id}`, at: t.needsAt, node: <StoppedCard t={t} /> }] : [])]
   }
   // cards stay in the chat that asked (SHEP-325): a space's Tasks also holds what works in its folder, its chat does not
   const mine = tasksIn(snap, thread.place).filter((t) => isEverything(snap, thread.place) || t.place === thread.place)
   return [
-    ...mine.filter(reviewing).map((t, i) => ({ key: `review:${t.id}`, at: snap.demo ? new Date().setHours(7, 30, 0, i + 1) : t.needsAt ?? t.needsAtWas, past: tstate(t) === 'done', node: <ReviewCard t={t} ctx="chat" /> })),
+    ...mine.filter(reviewing).map((t, i) => ({ key: `review:${t.id}`, at: snap.demo ? new Date().setHours(7, 30, 0, i + 1) : t.needsAt ?? t.needsAtWas, past: tstate(t) === 'done', after: (m: Message) => m.news?.task === t.id, node: <ReviewCard t={t} ctx="chat" /> })),
     ...mine.filter(halted).map((t) => ({
       key: `stopped:${t.id}`,
       at: t.needsAt,
@@ -389,12 +390,20 @@ function TaskHead({ task: t, where, scrolled }: { task: Task; where: 'chat' | 'p
   const snap = useSnap()
   const thread: Thread = { chat: taskChat(t), place: t.place, task: t, where }
   const big = where === 'chat'
+  // #1473: how it is doing, live, as its row in the list: its ring and its words (maximized, then its space)
+  const live = (snap && snap.tasks.find((x) => x.id === t.id)) || t
+  const line = headLine(live)
   return (
     <Hd
       back={big ? undefined : { label: 'Back to tasks', run: () => setUI({ task: null }) }}
       lead={big ? <>{hidden && !ph && <IB icon="panel" label="Show the list" onClick={showList} />}<IB icon="shrink" label="Minimize" onClick={minimize} /></> : undefined}
       title={t.name}
-      sub={big && snap ? `Task in ${spaceLabel(snap, t.place)}` : undefined}
+      sub={
+        <span className="hline">
+          <StatusIcon t={live} time="none" />
+          <span>{big && snap ? `${line} · in ${spaceLabel(snap, t.place)}` : line}</span>
+        </span>
+      }
       scrolled={scrolled}
     >
       {registry.taskHeader.map((h, i) => <h.View key={i} thread={thread} />)}

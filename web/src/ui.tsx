@@ -198,7 +198,7 @@ export function Empty({ title, children }: { title?: string; children: ReactNode
   )
 }
 
-/** a header draws its bottom line only once what is under it has scrolled */
+/** a header draws its bottom line only once what is under it has scrolled; the element knows its scroll bar's width (--sbw) */
 export function useScrolled(ref: RefObject<HTMLElement | null>): boolean {
   const [sc, setSc] = useState(false)
   useEffect(() => {
@@ -207,7 +207,15 @@ export function useScrolled(ref: RefObject<HTMLElement | null>): boolean {
     const on = () => setSc(el.scrollTop > 4)
     on()
     el.addEventListener('scroll', on, { passive: true })
-    return () => el.removeEventListener('scroll', on)
+    // the scroll bar's width (0 where it overlays): the fade above the message box leaves its strip out (#1499)
+    const bar = () => el.style.setProperty('--sbw', `${el.offsetWidth - el.clientWidth}px`)
+    bar()
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(bar)
+    ro?.observe(el)
+    return () => {
+      el.removeEventListener('scroll', on)
+      ro?.disconnect()
+    }
   }, [ref])
   return sc
 }

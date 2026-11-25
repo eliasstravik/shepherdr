@@ -127,6 +127,8 @@ button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"])
 .hp,.hm{min-width:0;overflow:hidden;text-overflow:ellipsis}.hp{flex:0 1 auto}.hp.cut{direction:rtl}.hp bdi{direction:ltr}.hm{flex:none;max-width:60%}.hp:not(.cut){flex:none}.hp:not(.cut)+.hm{flex:0 1 auto;max-width:none}.hm::before{content:"·";padding:0 4px}
 .t1{font-weight:600}.t1,.t2{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .t2{color:var(--muted);font-size:var(--sec);line-height:var(--secl)}
+/* an open task's status line under its title (#1473): its ring, small, then its words, one line cut with … */
+.t2>.hline{display:flex;align-items:center;gap:6px;min-width:0}.hline>.tring{width:14px}.hline>.tring>.i{width:14px;height:14px}.hline>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .tbtn{display:inline-flex;align-items:center;gap:4px;max-width:100%;height:var(--btn);padding:0 8px;margin-left:-4px;border-radius:8px;font-weight:600;min-width:0}
 .tbtn:hover,.tbtn[aria-expanded="true"]{background:var(--control)}.tbtn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* SHEP-326: the call's mark, no words: a live wave of whoever talks, still dots that breathe while it connects */
@@ -363,11 +365,18 @@ button.fake .n span,button.fake>.i{color:var(--muted)}
 .sugs{--fl:0px;--fr:0px;display:flex;align-items:center;gap:8px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;margin:0 -4px 4px;padding:4px;-webkit-mask-image:linear-gradient(to right,transparent,#000 var(--fl),#000 calc(100% - var(--fr)),transparent);mask-image:linear-gradient(to right,transparent,#000 var(--fl),#000 calc(100% - var(--fr)),transparent)}
 /* the chat's bottom edge, above the box and the replies: what scrolls under it fades over 16 px (the list's own
    bottom gap, so at the end nothing is faded) instead of being sliced. Only over a chat with its box, never a terminal. A space's chat and
-   a task's (in the middle or in the side pane) alike. */
+   a task's (in the middle or in the side pane) alike.
+   #1499: a mask on what scrolls, not a layer over it (a layer rounded one shade off the background into a band and
+   dimmed the scroll bar's end); the scroll bar's own strip (--sbw: ui.tsx useScrolled) stays out of it. */
 :is(.chat,.pane)>.foot{position:relative}
-:is(.chat,.pane)>.foot:has(>.cbox)::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:16px;background:linear-gradient(to bottom,transparent,var(--canvas));pointer-events:none}
-:is(.chat,.pane):has(>.scroll>.msgs>.tw)>.foot::before{display:none}
+:is(.chat,.pane):has(>.foot>.cbox):not(:has(>.scroll>.msgs>.tw))>.scroll{-webkit-mask:linear-gradient(#000,#000) right/var(--sbw,0px) 100% no-repeat,linear-gradient(to bottom,#000 calc(100% - 16px),transparent);mask:linear-gradient(#000,#000) right/var(--sbw,0px) 100% no-repeat,linear-gradient(to bottom,#000 calc(100% - 16px),transparent)}
 .sugs::-webkit-scrollbar{display:none}
+/* #1504: scrolled up away from the chat's end, a round ↓ floats over the chat's bottom right, above the box and its
+   lines; its count is the messages that came since (the app's badge). A tap glides back to the newest. */
+.toend{position:absolute;right:4px;bottom:calc(100% + 12px);z-index:2;display:grid;place-items:center;width:40px;height:40px;border-radius:50%;background:var(--overlay);color:var(--sub);box-shadow:inset 0 0 0 1px var(--line2),var(--shadow);animation:fade .15s ease-out}
+.toend::after{content:"";position:absolute;inset:-4px;border-radius:50%}
+.toend .cnt{position:absolute;top:-6px;right:-6px;min-width:18px;background:var(--fg);color:var(--canvas);box-shadow:0 0 0 2px var(--canvas)}
+@media(hover:hover){.toend:hover{color:var(--fg);background:var(--raised)}}
 .sug{--sugh:max(36px,var(--send));flex:none;max-width:min(280px,78%);min-width:var(--sugh);min-height:var(--sugh);padding:2px 14px;border-radius:calc(var(--sugh)/2);text-align:center;box-shadow:inset 0 0 0 1px var(--line2);background:var(--canvas);color:var(--sub);font-size:var(--sec);line-height:var(--secl);overflow-wrap:anywhere;text-wrap:balance;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:pan-x}
 @media (hover:hover) and (pointer:fine){.sug:hover{background:var(--control)}}
 .sug:focus-visible{outline:2px solid var(--blue);outline-offset:2px}

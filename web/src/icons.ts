@@ -74,6 +74,7 @@ export const IC = {
   "agent": "<rect x=\"4\" y=\"6\" width=\"12\" height=\"9\" rx=\"2\"/><path d=\"M10 3.5V6M7.5 10v.2M12.5 10v.2\"/>",
   "keyboard": "<rect x=\"2.5\" y=\"5\" width=\"15\" height=\"10\" rx=\"2\"/><path d=\"M5.5 8h.1M8.5 8h.1M11.5 8h.1M14.5 8h.1M5.5 10.5h.1M14.5 10.5h.1M7.5 12.5h5\"/>",
   "up": "<path d=\"m6.5 12 3.5-3.5 3.5 3.5\"/>",
+  "toend": "<path d=\"M10 4v12M5 11l5 5 5-5\"/>",
 } as const
 
 export type IconName = keyof typeof IC
