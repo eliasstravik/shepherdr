@@ -218,6 +218,9 @@ def argv_for(pick):
         perm = PERM_ACROSS["codex"].get(pick.get("perm"), pick.get("perm"))
         if perm == "full":
             a.append("--dangerously-bypass-approvals-and-sandbox")
+        elif perm == "approve":
+            # #1464: Codex's Approve for me (workspace-write, on-request, its own automatic review answers its asks)
+            a.append("--approve-for-me")
         elif perm == "read-only":
             a += ["-s", "read-only", "-a", "on-request"]
         elif perm:
@@ -228,8 +231,8 @@ def argv_for(pick):
 
 # Permission modes as each CLI has them, and a mode carried to the other CLI when a task's agent
 # changes: its nearest mode there, else that CLI's default (core/agents.js PERM_ACROSS, #758, #1219).
-PERMS = {"claude": ("manual", "auto", "acceptEdits", "plan", "bypassPermissions"), "codex": ("read-only", "auto", "full")}
-PERM_ACROSS = {"claude": {"read-only": "plan", "auto": "auto", "full": "bypassPermissions"},
+PERMS = {"claude": ("manual", "auto", "acceptEdits", "plan", "bypassPermissions"), "codex": ("read-only", "auto", "approve", "full")}
+PERM_ACROSS = {"claude": {"read-only": "plan", "auto": "auto", "approve": "auto", "full": "bypassPermissions"},
                "codex": {"plan": "read-only", "auto": "auto", "acceptEdits": "auto", "bypassPermissions": "full"}}
 PERM_DEFAULT = {"codex": "auto"}
 
@@ -251,6 +254,8 @@ def argv_perm(argv):
         return "bypassPermissions"
     if "--dangerously-bypass-approvals-and-sandbox" in argv or "--yolo" in argv:
         return "full"
+    if "--approve-for-me" in argv or "--not-so-yolo" in argv:
+        return "approve"
     for i, a in enumerate(argv[:-1]):
         nxt = argv[i + 1]
         if a == "--permission-mode":
@@ -357,7 +362,8 @@ SPEEDS = {"regular": False, "fast": True, "ultrafast": "ultrafast"}
 SPEED_VALUES = {"regular": "regular", "standard": "regular", "normal": "regular", "off": "regular", "fast": "fast", "on": "fast",
                 "ultrafast": "ultrafast", "ultra-fast": "ultrafast", "ultra fast": "ultrafast"}
 PERM_VALUES = {"default": "manual", "ask": "manual", "accept edits": "acceptEdits", "accept-edits": "acceptEdits", "bypass": "bypassPermissions",
-               "full access": "full", "read only": "read-only", "readonly": "read-only"}
+               "full access": "full", "read only": "read-only", "readonly": "read-only",
+               "approve for me": "approve", "approve-for-me": "approve"}
 EFFORTS = {"none", "minimal", "lowest", "low", "medium", "high", "xhigh", "max", "ultra"}
 ONOFF = {"on": "on", "yes": "on", "true": "on", "1": "on", "off": "off", "no": "off", "false": "off", "0": "off"}
 

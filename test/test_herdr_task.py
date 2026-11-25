@@ -5549,20 +5549,20 @@ class CodexAsksOnTheCard(unittest.TestCase):
     """SHEP-91: a Codex worker's PermissionRequest hook (`herdr-task _allow`) allows its own commands, and hands anything
     else to the chat's card (ask-hook.sh, marked HERDR_ASK_CHAINED), waiting as long as the card does."""
 
-    def run_allow(self, command, hook, home=None):
+    def run_allow(self, command, hook, home=None, auto_review=False):
         app = tempfile.mkdtemp()   # Shepherdr's own folder (SHARE) for this run
         if hook is not None:
             os.makedirs(os.path.join(app, "hooks"))
             with open(os.path.join(app, "hooks", "ask-hook.sh"), "w") as f:
                 f.write(hook)
         code = ("import sys, types, argparse; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
-                "from herdr_task.launch import cmd_allow; cmd_allow(argparse.Namespace(command='/x/herdr-task'))")
+                "from herdr_task.launch import cmd_allow; cmd_allow(argparse.Namespace(command='/x/herdr-task', auto_review=sys.argv[2] == '1'))")
         req = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}, "turn_id": "t1"})
         # its own SHARE and HOME: else cmd_allow would run this checkout's hooks/ask-hook.sh, or fall back to
         # ~/.local/share/herdr/ask's copy, and the real one files a real card for this test and waits on it forever (SHEP-147)
         env = {**os.environ, "SHEPHERDR_SHARE": app, "HOME": home or app}
         env.pop("HERDR_ASK_CHAINED", None)
-        return subprocess.run([sys.executable, "-c", code, BIN], input=req, capture_output=True, text=True, env=env)
+        return subprocess.run([sys.executable, "-c", code, BIN, "1" if auto_review else "0"], input=req, capture_output=True, text=True, env=env)
 
     def test_its_own_command_never_asks(self):
         out = self.run_allow("/x/herdr-task status SHEP-1 hi", 'echo "should not run"')
@@ -5576,6 +5576,38 @@ class CodexAsksOnTheCard(unittest.TestCase):
         # no card answer (answered in the terminal, or no chat hook installed): no decision, Codex asks itself
         self.assertEqual(self.run_allow("rm -rf build", "exit 0").stdout, "")
         self.assertEqual(self.run_allow("rm -rf build", None).stdout, "")
+
+    def test_approve_for_me_leaves_the_rest_to_codex_review(self):
+        """#1464: a worker on Codex's Approve for me. Codex runs this hook before its own review (checked on 0.163.0:
+        no decision here, its review then allowed a plain network call and refused sending a file out), so the card
+        is never asked; its own commands are still allowed at once."""
+        card = 'echo \'{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"card"}}}\''
+        self.assertEqual(self.run_allow("curl -sI https://example.com", card, auto_review=True).stdout, "")
+        out = self.run_allow("/x/herdr-task status SHEP-1 hi", card, auto_review=True)
+        self.assertEqual(json.loads(out.stdout)["hookSpecificOutput"]["decision"], {"behavior": "allow"}, out.stderr)
+        sys.path.insert(0, BIN)
+        from herdr_task import launch, settings, flags
+        argv = launch.own_argv(settings.argv_for({"agent": "codex", "perm": "approve"}))
+        hook = next(a for a in argv if a.startswith("hooks.PermissionRequest="))
+        self.assertIn(" --auto-review", hook)
+        self.assertIn("--approve-for-me", argv)
+        self.assertNotIn("workspace-write", argv)
+        self.assertNotIn("--auto-review", next(a for a in launch.own_argv(["codex", "-s", "workspace-write"]) if a.startswith("hooks.PermissionRequest=")))
+        # read back, and carried across: Claude's nearest is its auto mode
+        self.assertEqual(settings.argv_perm(argv), "approve")
+        self.assertEqual(settings.perm_across("approve", "claude"), "auto")
+        self.assertEqual(settings.perm_across("approve", "codex"), "approve")
+        # it's a permission pick, not an extra flag
+        for bad in ("--approve-for-me", "-c approvals_reviewer=auto_review"):
+            with self.assertRaises(Exception) as e:
+                flags.parse("codex", bad)
+            self.assertIn("Approve for me", str(e.exception))
+        # the command Codex runs, as written: no decision, no card
+        env = {**os.environ, "SHEPHERDR_SHARE": tempfile.mkdtemp(), "HOME": tempfile.mkdtemp()}
+        import shlex
+        r = subprocess.run(shlex.split(launch.ask_command("/x/herdr-task", sandboxed=True, auto_review=True)),
+                           input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "curl x"}}), capture_output=True, text=True, env=env)
+        self.assertEqual((r.returncode, r.stdout), (0, ""), r.stderr)
 
     def test_without_an_app_hook_the_synced_copy_answers(self):
         """SHEP-147: a machine that only runs tasks has no install of its own; cmd_allow falls back to the copy a sync left in
@@ -9533,6 +9565,12 @@ class Next32(unittest.TestCase):
             self.run_cmd(self.commands.cmd_edit, id="2", speed="warp", **base)
         with self.assertRaises(self.Fail):
             self.run_cmd(self.commands.cmd_edit, id="2", permission="root", **base)
+        # #1464: Codex's Approve for me, for one task, by its id or its words
+        for word in ("approve", "Approve for me"):
+            self.run_cmd(self.commands.cmd_edit, id="1", permission=word, **base)
+            self.assertEqual(self.task(1)["perm"], "approve")
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            self.assertIn("--approve-for-me", settings.worker_argv(s, s.find(1), "sp1", agent="codex"))
 
     # ---- Instructions: gone (SHEP-319), agents read AGENTS.md / CLAUDE.md natively ----
 

@@ -15,6 +15,17 @@ Settings is one window. Open it from the foot of the list. On a phone it is a li
 | Plugins | A switch for Terminal, Screens, Voice, Schedules and Reactions ([Plugins](plugins.md)) |
 | Personal analytics | How you use Shepherdr, kept only on your machines: on or off, your numbers, see, export or delete it ([analytics.md](analytics.md)) |
 
+## Permissions
+
+Permissions in the picker lists the agent's own modes. Claude Code: Default, Auto, Accept edits, Plan, Bypass. Codex:
+Read only, Auto, Approve for me, Full access.
+
+Codex's Approve for me starts it with `--approve-for-me`. It works in the folder as Auto does, but when it needs more
+(the network, a file outside the folder), Codex's own automatic review answers instead of you: a safe step runs, a
+risky one is refused and the agent tells you why and asks. No permission card waits on you first. It is the nearest to
+Claude Code's Auto, and a switch between the two CLIs carries it that way. It needs a Codex that has `--approve-for-me`
+(0.163 has it). For one task: `herdr-task add|edit|start <task> --permission approve`.
+
 ## Task settings follow the repo
 
 The settings that shape a task (Tasks and Reviews run on, Review, Merge, Proof, base branch, branch names, worktrees,

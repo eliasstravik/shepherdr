@@ -220,6 +220,21 @@ test("#1219: a switch carries the old agent's permission in the new CLI's words"
   expect(argvFor({ agent: "claude", perm: "acceptEdits" }, { agent: "claude", argv: [] }).argv.join(" ")).toContain("--permission-mode acceptEdits");
 });
 
+test("#1464: Codex's Approve for me starts with --approve-for-me, reads back, resumes with it and carries to Claude's auto", () => {
+  const { argv } = argvFor({ agent: "codex", perm: "approve" }, { agent: "codex", argv: [] });
+  expect(argv).toContain("--approve-for-me");
+  // it sets the sandbox and approvals itself (Codex refuses -s or -a beside it)
+  expect(argv).not.toContain("-s");
+  expect(argv).not.toContain("-a");
+  expect(current("codex", argv, {}, {}).perm).toBe("approve");
+  expect(current("codex", ["codex", "-s", "workspace-write"], {}, {}).perm).toBe("auto");
+  // a restart on Codex with the same session resumes with it, and it isn't an extra flag of the person's
+  const again = argvFor({ agent: "codex", perm: "approve" }, { agent: "codex", argv, session: "s1" });
+  expect(again.argv.filter((a) => a === "--approve-for-me")).toHaveLength(1);
+  expect(extraFlags("codex", argv)).toEqual([]);
+  expect(AGall.permAcross("approve", "claude")).toBe("auto");
+});
+
 // SHEP-298: what an Assistant really runs, never Settings: its CLI's arguments, its log, its resume label once it ended
 test("liveAgent names the model the terminal runs, from its CLI's arguments, else its resume label, and a /model from its log", () => {
   const { liveAgent, argvOf } = AGall;

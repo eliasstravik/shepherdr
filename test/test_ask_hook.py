@@ -131,6 +131,19 @@ class AskHook(unittest.TestCase):
         p.wait()
         p.stdout.close()
 
+    def test_codex_on_approve_for_me_gets_no_card(self):
+        # #1464: an Assistant on Codex's Approve for me: Codex runs this before its own review, which answers, so no
+        # card waits on the person; the same Codex on Auto still asks on it
+        self.term({"state": "live", "status": "working", "argv": ["codex", "--no-daemon", "--approve-for-me"]})
+        self.assertEqual(self.out(self.start()), b"")
+        self.assertIsNone(self.waiting(0.2))
+        self.term({"state": "live", "status": "working", "argv": ["codex", "--no-daemon", "-s", "workspace-write", "-a", "on-request"]})
+        p = self.start()
+        self.assertIsNotNone(self.waiting())
+        p.kill()
+        p.wait()
+        p.stdout.close()
+
     def test_a_brief_that_names_the_hook_is_no_worker_hook(self):
         # only the --settings that follows the flag counts, not any argument that mentions it
         self.term({"state": "live", "status": "working", "argv": ["claude", "fix ` _allow --command ` in launch.py"]})

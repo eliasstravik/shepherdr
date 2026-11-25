@@ -76,11 +76,13 @@ def own_rules(path):
     return rules
 
 
-def ask_command(path, sandboxed=False):
+def ask_command(path, sandboxed=False, auto_review=False):
     """The PermissionRequest hook every task worker gets at launch (`herdr-task _allow`): its own
     commands allowed, anything else (a permission, its question tool, a plan) on the chat's card.
-    sandboxed (Codex's): its proof and commits also run escalated, so they're its own too (#866)."""
-    return f"{shlex.quote(sys.executable)} {shlex.quote(ENTRY)} _allow --command {shlex.quote(path)}" + (" --sandboxed" if sandboxed else "")
+    sandboxed (Codex's): its proof and commits also run escalated, so they're its own too (#866).
+    auto_review (Codex's Approve for me, #1464): no card, Codex's own review answers the rest."""
+    return (f"{shlex.quote(sys.executable)} {shlex.quote(ENTRY)} _allow --command {shlex.quote(path)}"
+            + (" --sandboxed" if sandboxed else "") + (" --auto-review" if auto_review else ""))
 
 
 def artifact_path():
@@ -134,7 +136,9 @@ def own_argv(argv, folder=None):
             return out
         return out[:1] + ["--settings", json.dumps(merged)] + out[1:]
     if k == "codex":
-        hook = ask_command(path, sandboxed=True)
+        # #1464: Approve for me. Codex runs this hook before its own review: a card here would wait on the person
+        # for what the review answers by itself, so the hook then only allows the worker's own commands.
+        hook = ask_command(path, sandboxed=True, auto_review=any(a in ("--approve-for-me", "--not-so-yolo") for a in out))
         # Codex runs a new hook only once trusted. This one hook's trust comes with it, for this
         # launch only: Codex's own key and hash for a -c hook (codex-rs/hooks discovery.rs
         # hook_hash, config fingerprint.rs version_for_toml), so no other hook is trusted by it.
@@ -357,7 +361,8 @@ def ask_card(raw):
 def cmd_allow(args):
     """The PermissionRequest hook of a task worker (Claude Code and Codex, own_argv): allows this
     launch's own herdr-task commands; anything else goes to the chat's card (ask_card), and without
-    one's answer the agent asks the person in its terminal as usual."""
+    one's answer the agent asks the person in its terminal as usual. --auto-review (Codex's Approve
+    for me): no card, Codex's own review answers."""
     raw = sys.stdin.buffer.read(1 << 20)
     try:
         data = json.loads(raw or b"{}")
@@ -372,6 +377,10 @@ def cmd_allow(args):
         cmd = cmd[2] if len(cmd) == 3 and cmd[1] in ("-c", "-lc") else shlex.join(cmd)
     if own_command(args.command, cmd, getattr(args, "sandboxed", False)):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}))
+        return
+    if getattr(args, "auto_review", False):
+        # #1464: Codex's Approve for me. No decision: its automatic review answers (a safe step runs, a risky one is
+        # refused and the worker is told to ask the person), never a card waiting on the person first.
         return
     out = ask_card(raw)
     if out:
