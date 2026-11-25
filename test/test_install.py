@@ -77,6 +77,36 @@ def assert_notices(t, root, names):
 DATA_PLACES = (".config/shepherdr/", ".local/share/shepherdr/", ".local/state/shepherdr/", ".cache/shepherdr/", ".herdr/")
 
 
+class HelperOutput(unittest.TestCase):
+    """#1429: a helper's output that isn't UTF-8 (agent-desktop's first download wrote a 0x80 byte) never stops the
+    install: herdr-desktop's and herdr-browser's --install and --status are read with what can't be decoded replaced."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="shepherdr-bytes-")
+        os.makedirs(os.path.join(self.root, SHARE, "bin"))
+        for name, ready in (("herdr-desktop", "agent-desktop is ready"), ("herdr-browser", "agent-browser is ready")):
+            with open(os.path.join(self.root, SHARE, "bin", name), "w") as f:
+                f.write(f"printf 'odd \\200 byte\\n' >&2\necho '{name}: {ready}'\n")
+        self.sh = installer()
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_odd_bytes_from_a_helper(self):
+        r = self.sh.Run(self.root, False)
+        said = io.StringIO()
+        with contextlib.redirect_stdout(said), mock.patch.object(self.sh, "browser_env", lambda root: dict(os.environ)):
+            self.sh.ensure_agent_desktop(r, True)
+            self.sh.ensure_agent_browser(r, True)
+            desktop = self.sh.agent_desktop_state(self.root, True)
+            browser = self.sh.agent_browser_state(self.root)
+        self.assertIn("agent-desktop is ready", said.getvalue())
+        self.assertIn("agent-browser is ready", said.getvalue())
+        self.assertIn("odd \ufffd byte", " ".join(r.notes))
+        self.assertIsInstance(desktop, list)
+        self.assertTrue(browser is None or isinstance(browser, str))
+
+
 class Install(unittest.TestCase):
     """One kind of install (3.2): everything under .local/share/shepherdr, helper links in .local/bin, the role
     instructions, the agents' hooks; in a Herdr app, only the Open Shepherdr button and its one key."""

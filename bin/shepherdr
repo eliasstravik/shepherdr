@@ -1316,9 +1316,9 @@ def ensure_agent_browser(r, home):
     if r.dry:
         say("  agent-browser: would make sure it's here (herdr-browser --install)")
         return
-    try:
-        p = subprocess.run(["sh", hb, "--install"], capture_output=True, text=True, env=browser_env(r.root),
-                           stdin=subprocess.DEVNULL, timeout=1200)
+    try:   # what can't be decoded is replaced: a helper's odd byte never stops the install (#1429)
+        p = subprocess.run(["sh", hb, "--install"], capture_output=True, text=True, errors="replace",
+                           env=browser_env(r.root), stdin=subprocess.DEVNULL, timeout=1200)
         out = (p.stdout.strip() or p.stderr.strip()).splitlines()
         line = out[-1] if out else ""
         ok = p.returncode == 0
@@ -1354,9 +1354,9 @@ def ensure_agent_desktop(r, home):
     if r.dry:
         say("  agent-desktop: would make sure it's here (herdr-desktop --install)")
         return
-    try:
-        p = subprocess.run(["sh", hd, "--install"], capture_output=True, text=True, env=browser_env(r.root),
-                           stdin=subprocess.DEVNULL, timeout=900)
+    try:   # what can't be decoded is replaced: a helper's odd byte never stops the install (#1429)
+        p = subprocess.run(["sh", hd, "--install"], capture_output=True, text=True, errors="replace",
+                           env=browser_env(r.root), stdin=subprocess.DEVNULL, timeout=900)
         ok = p.returncode == 0
         out = [x.replace("herdr-desktop: ", "", 1) for x in (p.stdout + "\n" + p.stderr).splitlines()
                if x.strip() and not x.startswith(("herdr-desktop: installing", "herdr-desktop: downloading"))]
@@ -1391,8 +1391,8 @@ def agent_desktop_state(root, root_is_home):
     if not hd or browser_off(root):
         return []
     try:
-        p = subprocess.run(["sh", hd, "--status"], capture_output=True, text=True, env=browser_env(root),
-                           stdin=subprocess.DEVNULL, timeout=60)
+        p = subprocess.run(["sh", hd, "--status"], capture_output=True, text=True, errors="replace",
+                           env=browser_env(root), stdin=subprocess.DEVNULL, timeout=60)
         st = json.loads(p.stdout)
     except (OSError, ValueError, subprocess.SubprocessError):
         return ["the agents' desktop: herdr-desktop --status didn't answer"]
@@ -1434,8 +1434,8 @@ def agent_browser_state(root):
     if not hb or browser_off(root):
         return None
     try:
-        p = subprocess.run(["sh", hb, "--status"], capture_output=True, text=True, env=browser_env(root),
-                           stdin=subprocess.DEVNULL, timeout=30)
+        p = subprocess.run(["sh", hb, "--status"], capture_output=True, text=True, errors="replace",
+                           env=browser_env(root), stdin=subprocess.DEVNULL, timeout=30)
         st = json.loads(p.stdout)
     except (OSError, ValueError, subprocess.SubprocessError):
         return "the task browser: herdr-browser --status didn't answer"
