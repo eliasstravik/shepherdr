@@ -4192,10 +4192,6 @@ class GitNeverAsksForAPassword(unittest.TestCase):
         self.assertIn("git can't sign in to the remote", err)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CleanEnv(unittest.TestCase):
     """SHEP-86: herdr-core's holder hands every terminal the environment it was started with, so a holder started from
     inside Claude Code would hand each agent that session's markers (transcripts off, no folder-trust prompt). A task's
@@ -5674,7 +5670,11 @@ class CodexAsksOnTheCard(unittest.TestCase):
                   "hc run --bg --name demo-1-review -- codex --no-daemon --sandbox read-only --ask-for-approval never "
                   "-c sandbox_mode=\"danger-full-access\" x",
                   "hc run --bg --name demo-1-review -- sh -c 'rm -rf /'", "hc run --bg --name x -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash x",
-                  "hc kill t15q", "hc send demo-1-review hi", "hc keys t15q enter", "hc keys demo-1-review --text 'rm -rf /'"]
+                  "hc kill t15q", "hc send demo-1-review hi", "hc keys t15q enter", "hc keys demo-1-review --text 'rm -rf /'",
+                  # #1458: only its own templates folder, never another
+                  "hc run --bg --name demo-1-review -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --strict-mcp-config --add-dir=/ x",
+                  "hc run --bg --name demo-1-review -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --strict-mcp-config --add-dir= x",
+                  "hc run --bg --name demo-1-review -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --strict-mcp-config --add-dir /etc x"]
             for c in yes:
                 self.assertTrue(own(c), c)
             for c in no:
@@ -8061,7 +8061,8 @@ class CodexBatch278(unittest.TestCase):
     def test_claude_in_the_system_folders_needs_nothing(self):
         self.patch(self.settings.shutil, "which", lambda name: f"/usr/bin/{name}")
         self.assertEqual(self.settings.reviewer_command("claude"),
-                         'env ${CLAUDE_CONFIG_DIR:+"CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR"} claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --strict-mcp-config')
+                         'env ${CLAUDE_CONFIG_DIR:+"CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR"} claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --strict-mcp-config '
+                         '--add-dir=' + self.settings.TEMPLATES)
 
     # ---- #1131 #1181 -----------------------------------------------------------------------------
     def test_a_claude_reviewer_gets_the_workers_profile_never_plan_mode(self):
@@ -8078,6 +8079,8 @@ class CodexBatch278(unittest.TestCase):
             self.assertEqual(out.splitlines()[0], want, out)
             self.assertIn("arg=--tools=Read,Grep,Glob,Bash", out)
             self.assertEqual(out.splitlines()[-1], "arg=review it")
+            # #1458: it can read its own instructions (templates/reviewer.md), outside the task's folder
+            self.assertIn("arg=--add-dir=" + self.settings.TEMPLATES, out)
 
     def test_a_codex_worker_s_review_run_is_still_its_own(self):
         bin_dir = self.nvm()
@@ -10345,3 +10348,135 @@ class BackgroundWorkIsNoTurn(unittest.TestCase):
             self.assertEqual(self.base.hc_json("get", "t2")["status"]["state"], "working")
         # only the working Claude Codes are read in full, never the Codex one
         self.assertNotIn(("get", "t3"), asked)
+
+
+class ReviewerThatNeverAnswers(unittest.TestCase):
+    """#1439, #1450: a reviewer that never started (nothing on its screen), froze on its first turn or ended in an
+    error was waited on for many minutes, then counted as a round. Each tick now ends a stuck one and tells its worker
+    once, with why and what to do next. A fake hc: nothing real runs."""
+
+    def setUp(self):
+        import shutil
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.reviewers as reviewers
+        import herdr_task.tick as tick
+        import herdr_task.news as news
+        self.rv = reviewers
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.clock = [10_000_000]
+        self.screens, self.records, self.killed, self.sent = {}, {}, [], []
+        ls = lambda: {"terminals": [{"address": a, "state": "live"} for a in self.records]}  # noqa: E731
+
+        def hc_json(*args):
+            if args[0] == "ls":
+                self.assertEqual(args[1:], ("--label", "herdr.role=reviewer"))
+                return ls()
+            return self.records.get(args[1])
+
+        def kill(verb, k):
+            self.killed.append(k["address"])
+            self.records.pop(k["address"], None)
+            return subprocess.CompletedProcess([], 0)
+        for target, name, value in ((reviewers, "STATE", os.path.join(self.tmp, ".reviewers.json")), (reviewers, "STORE", self.tmp),
+                                    (reviewers, "hc_json", hc_json), (reviewers, "now", lambda: self.clock[0]),
+                                    (tick, "quiet_hc", kill), (news, "send_or_hold", lambda a, m: self.sent.append((a, m)) or "sent"),
+                                    (reviewers.shutil, "which", lambda name: "/usr/bin/" + name)):
+            p = mock.patch.object(target, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def reviewer(self, address, agent="codex", **k):
+        self.records[address] = dict({"address": address, "name": f"shop-{address}-review", "parent": "t1", "state": "live",
+                                      "created_ms": self.clock[0], "turn": 0, "cwd": self.tmp, "agent": agent,
+                                      "labels": {"herdr.role": "reviewer", "herdr.agent": agent, "herdr.task": "dev-shop#1"}}, **k)
+
+    def tick(self, seconds=0):
+        self.clock[0] += seconds * 1000
+        report = {}
+        self.rv.reviewer_pass(report, read=lambda a: self.screens.get(a, ""))
+        return report.get("reviewers", [])
+
+    def test_one_that_never_starts_is_ended_and_its_worker_told_once(self):
+        self.reviewer("t5")
+        self.assertEqual(self.tick(30), [])
+        self.assertEqual(self.tick(30), [])
+        got = self.tick(40)
+        self.assertEqual(got, [{"reviewer": "shop-t5-review", "why": "blank", "task": "dev-shop#1", "ended": True}])
+        self.assertEqual(self.killed, ["t5"])
+        (to, msg), = self.sent
+        self.assertEqual(to, "t1")
+        self.assertIn("never started", msg)
+        self.assertIn("no review round: don't record it with reviewed", msg)
+        self.assertIn("I ended it.", msg)
+        self.assertIn("the other CLI instead, its command `env", msg)
+        self.assertIn("claude --permission-mode dontAsk", msg)
+        self.assertIn("question tool", msg)
+        self.assertEqual(self.tick(60), [])
+        self.assertEqual(len(self.sent), 1)
+
+    def test_a_mac_hears_of_the_hidden_permission_prompt(self):
+        from unittest import mock
+        self.reviewer("t5")
+        with mock.patch.object(self.rv.platform, "system", return_value="Darwin"):
+            self.tick(100)
+        self.assertIn("system permission prompt for codex", self.sent[0][1])
+        self.sent.clear()
+        self.reviewer("t6", agent="claude")
+        with mock.patch.object(self.rv.platform, "system", return_value="Darwin"):
+            self.tick(100)
+        self.assertNotIn("permission prompt", self.sent[0][1])
+        self.assertIn("codex --no-daemon", self.sent[0][1])
+
+    def test_one_frozen_on_its_first_turn_is_ended_but_one_at_work_is_not(self):
+        self.reviewer("t5")
+        self.reviewer("t6")
+        for i in range(12):
+            # a timer ticking is no change; files read are
+            self.screens["t5"] = f"› review it\n\n• Working ({i}m {i * 7}s • esc to interrupt)\n\n  100% context left"
+            self.screens["t6"] = f"• Working ({i}m)\n• Ran git diff main -- file{'x' * i}.py"
+            got = self.tick(30)
+            if i < 10:
+                self.assertEqual(got, [], i)
+        self.assertEqual(self.killed, ["t5"])
+        msg = self.sent[0][1]
+        self.assertIn("froze before its first answer", msg)
+        self.assertIn('its last line: "100% context left"', msg)
+
+    def test_one_that_finished_a_turn_is_left_alone(self):
+        self.reviewer("t5", turn=1)
+        self.screens["t5"] = "Must fix: none"
+        for _ in range(15):
+            self.assertEqual(self.tick(30), [])
+        self.assertEqual(self.killed, [])
+
+    def test_an_error_is_no_round_and_stays_to_be_read(self):
+        """#1450: a reply cut off by the provider's filter ends the turn in an error, before any findings."""
+        self.reviewer("t5", turn=1, status={"app": "codex", "state": "error", "msg": "This content can't be shown"})
+        self.screens["t5"] = "This content can't be shown"
+        got = self.tick(5)
+        self.assertEqual(got[0]["why"], "error")
+        self.assertFalse(got[0]["ended"])
+        self.assertEqual(self.killed, [])
+        msg = self.sent[0][1]
+        self.assertIn('ended in an error before its findings ("This content can\'t be shown")', msg)
+        self.assertIn("`hc read shop-t5-review`", msg)
+        self.assertIn("don't record it with reviewed", msg)
+        self.assertEqual(self.tick(30), [])
+
+    def test_nothing_to_watch_costs_one_ls(self):
+        self.assertEqual(self.tick(30), [])
+        self.assertFalse(os.path.exists(self.rv.STATE))
+
+    def test_the_brief_says_a_failed_reviewer_is_no_round(self):
+        from herdr_task import templates
+        with open(os.path.join(ROOT, "templates", "worker.md")) as f:
+            installed = f.read()
+        for words in (templates.WORKER_MD, installed):
+            self.assertIn(templates.NOROUND_RULE, words)
+        self.assertIn(templates.WORKER_MD_BEFORE_NOROUND, templates.OLD_WORKERS)
+
+
+if __name__ == "__main__":
+    unittest.main()

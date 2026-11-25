@@ -766,6 +766,12 @@ def cmd_tick(args):
     except Exception as e:  # never stops the queue
         report["stopped_error"] = str(e)
     try:
+        # #1439, #1450: a reviewer that never started, froze or failed: its worker hears it at once
+        from .reviewers import reviewer_pass
+        reviewer_pass(report)
+    except Exception as e:  # never stops the queue
+        report["reviewers_error"] = str(e)
+    try:
         archive_pass(report, args.folder)
     except Exception as e:  # never stops the queue
         report["archive_error"] = str(e)
