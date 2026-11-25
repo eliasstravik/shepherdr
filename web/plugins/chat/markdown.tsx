@@ -45,6 +45,8 @@ export function toHtml(text: string, link?: (a: HTMLAnchorElement, kind: 'space'
     pre.replaceWith(box)
     box.append(pre, btn)
   }
+  // #1442: a table cell holding a sentence keeps a readable width; the table scrolls sideways in its box instead
+  for (const cell of root.querySelectorAll('td, th')) if ((cell.textContent ?? '').trim().length > 24) cell.classList.add('long')
   for (const code of root.querySelectorAll('code')) {
     // a bit of code inside a link is the link's
     if (code.closest('pre, a')) continue
