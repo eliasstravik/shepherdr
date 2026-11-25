@@ -316,18 +316,9 @@ export class Compat {
   agents: { info(addr: string, reader: any): Promise<unknown>; restart(addr: string, reader: any, pick: any): Promise<string>; revive?(addr: string, reader: any): Promise<string>; choices(machine: string | null): Promise<unknown>; ownDefaults(): Promise<{ claude: unknown; codex: unknown }> } | null = null;
 
   /** Agents' secret asks (service/secrets.ts), set by main. */
-  secrets: { asks(): { address: string; name: string; why: string }[] } | null = null;
+  secrets: { asks(): { address: string; name: string; why: string; id: string; at: number }[]; endsOf?(address: string): { id: string; name: string; at: number; how: string }[] } | null = null;
 
   /** A secret ask as 2.1's masked card: kept for this space, this machine, or Everywhere. */
-  /** when a secret ask was first seen (its labels hold no time), so its card keeps its place */
-  private asked = new Map<string, number>();
-  askedAt(id: string) {
-    if (!this.asked.has(id)) {
-      if (this.asked.size > 500) this.asked.clear();
-      this.asked.set(id, Date.now());
-    }
-    return this.asked.get(id)!;
-  }
   secretAsk(a: { address: string; name: string; why: string }) {
     const t: any = (this as any).terminalsOf?.(a.address);
     const sp = ["herdr.space", "herdr.task.space", "herdr.coordinator.space"].map((k) => t?.labels?.[k]).find(Boolean);
@@ -390,6 +381,13 @@ export class Compat {
   }
 
   addrOf(key: string) { return this.chats.get(key) ?? null; }
+
+  /** Whether this agent is a task's worker whose task has finished (Ready, merging, done or archived): what it asked
+   *  for no longer waits (Secrets.sweep). */
+  workerFinished(addr: string) {
+    const r = this.rows.find((x) => x.worker === addr);
+    return !!r && (!!r.archived || ["ready", "merging", "done"].includes(r.section));
+  }
 
   snapshot(input: { host: string; user: string; machines: { name: string; here: boolean; state: string; why?: string }[]; spaces: Space[]; sections: any[]; rows: Row[]; artifacts?: any[]; settings?: SettingSection[]; offPlugins?: string[]; automations?: any[] }): Snapshot {
     const { host, spaces, rows } = input;
@@ -505,7 +503,7 @@ export class Compat {
       if (!key) continue;
       const task = key.endsWith("/worker") ? key.slice(0, -7) : undefined;
       const place = task ? tasks.find((x) => x.id === task)?.place ?? "" : places.find((p) => p.chat === key)?.id ?? "";
-      needs.push({ id: `secret:${a.address}:${a.name}`, chat: key, place, ...(task ? { task } : {}), at: Date.now(), secret: this.secretAsk(a) });
+      needs.push({ id: a.id, chat: key, place, ...(task ? { task } : {}), at: a.at, secret: this.secretAsk(a) });
     }
 
     // #1441: an agent at its CLI's folder-trust screen (a task's, its reviewer or helper, an Assistant): Needs you with
@@ -788,12 +786,14 @@ export class Compat {
     const cardsFrom = messages.length;
     for (const a of addr ? this.asks?.of(addr) ?? [] : []) messages.push({ id: `ask:${a.id}`, who: "agent", at: a.at, question: this.question(a, key) });
     if (codexCard) messages.push({ id: `ask:cq:${codexCard.id}`, who: "agent", at: codexCard.at ?? Date.now(), question: codexQuestion(codexCard, key) });
-    for (const a of (this.secrets?.asks() ?? []).filter((x) => x.address === addr)) messages.push({ id: `secret:${a.address}:${a.name}`, who: "agent", at: this.askedAt(`secret:${a.address}:${a.name}`), secret: this.secretAsk(a) } as Message);
+    for (const a of (this.secrets?.asks() ?? []).filter((x) => x.address === addr)) messages.push({ id: a.id, who: "agent", at: a.at, secret: this.secretAsk(a) } as Message);
     // asks that closed, as the window's quiet lines ("✓ Run: npm test · Allowed in the chat"); a question's own line is
     // its "Asked you" box, from the log
     const watch = (this as any).watch;
     const quiet = (id: string, at: number, text: string): Message => ({ id, who: "agent", at, ended: text });
     if (addr) for (const e of (this.asks as any)?.endsOf?.(addr) ?? []) if (e.kind !== "questions") messages.push(quiet(`ae:${e.id}`, e.at, `${e.title} · ${e.how}`));
+    // secret asks that closed by themselves (withdrawn, their agent gone, their task finished): "No longer needed"
+    if (addr) for (const e of this.secrets?.endsOf?.(addr) ?? []) messages.push(quiet(`ae:${e.id}`, e.at, `A secret: ${e.name} · ${e.how}`));
     // its start screens (core/screens.js): an open one as its card, the rest a line saying how they went
     const screens = (who: string, ref: string | null, by?: { ref: string; title: string; chat: string }) => {
       for (const c of watch?.cardsOf?.(who) ?? []) {
@@ -813,7 +813,8 @@ export class Compat {
       const by = { ref: r.ref, title: r.title, chat: `${taskId(r)}/worker` };
       const a = (this.asks?.of(r.worker) ?? []).sort((p: any, q: any) => p.at - q.at)[0];
       if (a) messages.push({ id: `ask:${a.id}`, who: "agent", at: a.at, question: { ...this.question(a, key), by } as any });
-      else for (const s of (this.secrets?.asks() ?? []).filter((x) => x.address === r.worker)) messages.push({ id: `secret:${s.address}:${s.name}`, who: "agent", at: this.askedAt(`secret:${s.address}:${s.name}`), secret: { ...this.secretAsk(s), by } } as Message);
+      else for (const s of (this.secrets?.asks() ?? []).filter((x) => x.address === r.worker)) messages.push({ id: s.id, who: "agent", at: s.at, secret: { ...this.secretAsk(s), by } } as Message);
+      for (const e of this.secrets?.endsOf?.(r.worker) ?? []) messages.push(quiet(`ae:${e.id}`, e.at, `${r.title} · A secret: ${e.name} · ${e.how}`));
       // SHEP-322: by its title, never its key
       for (const e of (this.asks as any)?.endsOf?.(r.worker) ?? []) messages.push(quiet(`ae:${e.id}`, e.at, `${r.title} · ${e.title} · ${e.how}`));
       screens(r.worker, r.title, by);
