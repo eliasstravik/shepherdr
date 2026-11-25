@@ -31,7 +31,9 @@ function Keeper() {
     document.addEventListener('visibilitychange', on)
     return () => document.removeEventListener('visibilitychange', on)
   }, [])
-  const count = snap ? needsCount(snap) : 0
+  // off screen the service sends only this count (service/live.ts), not the snapshot
+  const told = useStore((s) => s.needs)
+  const count = !visible && told !== null ? told : snap ? needsCount(snap) : 0
   const keep = snap && visible ? keptTags(snap, visibleChats(ui, snap)).join('\n') : null
   useEffect(() => {
     if (snap) showCount(count)
