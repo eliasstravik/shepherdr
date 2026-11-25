@@ -725,6 +725,15 @@ def cmd_ready(args):
             how = f"pull request #{gone['number']} is merged" if gone else f"its work is already in {t.get('base') or 'main'}"
             say(args, v, f"{s.name(t)}: {how}; done.")
             return
+        if wt and not os.path.isdir(wt) and not t.get("nothing_to_merge"):
+            # #1426: its worktree removed (after a merge, say) and its work not in its base: said, never a pull request
+            # or a merge from a folder that isn't there.
+            main, br, base = s.loc["folder"], t.get("branch"), t.get("base") or "main"
+            q = shlex.quote
+            has = br and git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")[0]
+            raise Fail(f"{s.name(t)}'s worktree {wt} is gone, and its work isn't in {base}. "
+                       + (f"Bring it back (git -C {q(main)} worktree add {q(wt)} {br}), then run ready again." if has else
+                          f"Its branch {br} is gone too: nothing is left here to merge. Tell the person."))
         msg = finalize(s, t)
         # Its own background work still running (SHEP-148): the task shows Working until it ends.
         # #1093: named, and Codex's only while something of its own really runs (ended ones never listed)

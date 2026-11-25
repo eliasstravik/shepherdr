@@ -2724,6 +2724,36 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         self.assertNotIn("pr", self.task)
         self.assertNotIn(("pr", "create"), calls)
 
+    # #1426: a release task reopened after its pull request squash-merged, its worktree and branch removed: ready again is
+    # done (never a crash on its missing head); its work not merged and its worktree gone: said plainly.
+    def test_ready_after_its_worktree_and_branch_went_is_done(self):
+        from unittest import mock
+        import herdr_task.github as github
+        own = self.change(self.task["worktree"], "release notes")
+        self.commands.own_work(self.store, self.task)
+        self.squash_into_main()
+        self.git(self.main, "worktree", "remove", self.task["worktree"])
+        self.git(self.main, "branch", "-D", "task/1")
+        self.task.update(state="running", head=None, kept_open=True, was_merged=True,
+                         pr={"number": 704, "url": "https://github.com/o/r/pull/704", "repo": "o/r"})
+        self.github([])
+        with mock.patch.object(github, "pr_view", lambda t: {"state": "MERGED", "headRefOid": own, "mergeCommit": {"oid": "f00"}}):
+            self.assertEqual(self.ready_now(), ("done", True))
+
+    def test_ready_after_its_worktree_went_says_so(self):
+        from herdr_task.base import Fail
+        self.change(self.task["worktree"], "not merged anywhere")
+        self.git(self.main, "worktree", "remove", self.task["worktree"])
+        self.github([])
+        with self.assertRaises(Fail) as e:
+            self.ready_now()
+        self.assertIn("worktree", str(e.exception))
+        self.assertIn("worktree add", str(e.exception))
+        self.git(self.main, "branch", "-D", "task/1")
+        with self.assertRaises(Fail) as e:
+            self.ready_now()
+        self.assertIn("Its branch task/1 is gone too", str(e.exception))
+
     # SHEP-96: a task with no commits beyond its base (research, an artifact only) still waits in
     # Ready for the person's Accept, its words kept; Accept just marks it done and cleans up.
     def ready_said(self, summary="Found three options.", details="- Read five sources"):

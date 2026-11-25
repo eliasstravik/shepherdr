@@ -105,7 +105,6 @@ def pr_push(s, task, repo):
             raise Fail(f"Pull request #{done['number']} for {br} is already merged (GitHub deleted its branch), and {br} has "
                        f"commits since. Put them on a new branch (a new task) rather than a second pull request.")
     lease = f"--force-with-lease=refs/heads/{br}:" if gone else "--force-with-lease"
-    lease = f"--force-with-lease=refs/heads/{br}:" if gone else "--force-with-lease"
     with released(s):
         ok, out, err = git(wt, "push", lease, "-u", remote, br) if to == br else \
             git(wt, "push", remote, f"{br}:refs/heads/{to}")
@@ -338,14 +337,20 @@ def landed(s, task):
     if not own_work(s, task):
         return False
     main, base = s.loc["folder"], task.get("base") or "main"
-    ok, tip, _ = git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{task.get('branch')}")
-    tip = tip if ok and tip else task.get("head")
+    tip = last_tip(s, task)
     for ref in (base, f"refs/remotes/{remote_of(main)}/{base}"):
         ok, tree, _ = git(main, "merge-tree", "--write-tree", ref, tip)
         has, have, _ = git(main, "rev-parse", "--verify", "--quiet", f"{ref}^{{tree}}")
         if ok and has and tree and tree.split()[0] == have:
             return True
     return False
+
+
+def last_tip(s, task):
+    """The task branch's last commit: its branch here, else the one it said ready at, else its own work last seen
+    (#1426: its branch deleted after a merge, and a reopened task's head is gone too); None when none is known."""
+    ok, tip, _ = git(s.loc["folder"], "rev-parse", "--verify", "--quiet", f"refs/heads/{task.get('branch')}")
+    return (tip if ok and tip else None) or task.get("head") or task.get("own") or None
 
 
 def already_merged(s, task):
@@ -355,11 +360,10 @@ def already_merged(s, task):
     if merged_here(s, task):
         return {}
     repo = github(s)
-    tip = task.get("head")
     if repo:
         main = s.loc["folder"]
         git(main, "fetch", "--quiet", remote_of(main), task.get("base") or "main")
-        tip = git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{task.get('branch')}")[1] or tip
+        tip = last_tip(s, task)
         if task.get("pr"):
             v = pr_view(task)
             if v and v.get("state") == "MERGED" and v.get("headRefOid") == tip:
