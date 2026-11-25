@@ -499,7 +499,10 @@ html,body{height:100%}body{padding:0;overflow:hidden}
 @media(prefers-reduced-motion:reduce){.i.turn{animation:calm 2.4s ease-in-out infinite}.wsign{animation-name:fade}.wdots i{animation:calm 2.4s ease-in-out infinite}.wdots i:nth-child(2){animation-delay:.4s}.wdots i:nth-child(3){animation-delay:.8s}.sheet.in,.drawer.in,.pop.in,.dlg.in,.win.in,.lbox.in{animation:none}.tg i{transition:none}}
 
 textarea.cin{overflow-y:auto}
-.pane .scroll>.tdr .tw{flex:1;display:flex;flex-direction:column}
+.pane .scroll>.tdr .tw{flex:1;display:flex;flex-direction:column;min-height:0}
+/* the page shrinking for an on-screen keyboard (an unfolded foldable, a tablet) shrinks the terminal, down to a few rows,
+   rather than pushing its key row under the keyboard: the chat gives its room first */
+.col>.tdr{display:flex;flex-direction:column;min-height:0}.col>.tdr>.tw{display:flex;flex-direction:column;min-height:0}.col>.tdr .termbox{min-height:64px}.col>.tdr>.tbar{flex:none}
 .srch .list{max-height:56dvh;overflow-y:auto}
 
 /* attachments: square thumbnails in one row that scrolls sideways (the message box, what you sent), and the preview */

@@ -66,7 +66,7 @@ div.b[data-menu]{cursor:pointer}
 
 /* a real terminal (xterm) in the dark drawer */
 .termbox{position:relative;height:var(--term-h,170px);min-height:0;padding:8px 0 8px 16px;background:var(--term);overflow:auto;scrollbar-color:rgb(255 255 255/.25) transparent;scrollbar-width:thin}
-.termbox.fill{flex:1;height:auto;min-height:240px}
+.termbox.fill{flex:1;height:auto;min-height:64px}
 .termbox .xterm{height:100%}
 .termbox .xterm-viewport{background:transparent!important}
 /* an agent's terminal fills the chat's place exactly: it scrolls its own history, the chat around it doesn't */

@@ -2,7 +2,7 @@
 // your own shell (the drawer under the chat; the whole screen on a phone), checked while that is open, and a second
 // tap closes it again. Ctrl+` does the same for a space. Below a line, View as terminal / View as chat swaps this chat
 // for its agent's own terminal.
-import { getState, setUI, type MenuRow, type UI } from '@client/kernel.ts'
+import { getState, setUI, subscribe, type MenuRow, type UI } from '@client/kernel.ts'
 
 /** a space's own shell: open now? */
 export const spaceTermOn = (ui: Pick<UI, 'phone' | 'pane' | 'termTask' | 'term'>) => (ui.phone ? ui.pane === 'terminal' && !ui.termTask : ui.term)
@@ -36,4 +36,35 @@ export function switchView(chat: string, on: boolean) {
 export function viewRow(ui: Pick<UI, 'aterm'>, chat: string, line = false): MenuRow {
   const term = !!ui.aterm[chat]
   return { icon: 'viewswap', label: term ? 'View as chat' : 'View as terminal', ...(term ? { value: 'Terminal now' } : {}), cmd: 'terminal.view', line, run: () => switchView(chat, !term) }
+}
+
+/** Folding or unfolding (the layout crossing 767 px) keeps your one open terminal: the drawer under the chat or the
+ *  task becomes the phone's whole-screen Terminal, and back, never lost and never two. A task's goes with its task;
+ *  unfolding brings back the pane the terminal covered. What to set for the layout just switched to, if anything. */
+export function carryTerm(ui: Pick<UI, 'phone' | 'pane' | 'task' | 'term' | 'tterm' | 'termTask'>, covered: string | null): Partial<UI> | null {
+  if (ui.phone) {
+    if (ui.tterm && ui.pane === 'tasks' && ui.task) return { pane: 'terminal', termTask: true, tterm: false }
+    if (ui.term) return { pane: 'terminal', termTask: false, term: false }
+    return null
+  }
+  if (ui.pane !== 'terminal') return null
+  return ui.termTask ? { pane: 'tasks', tterm: true, termTask: false } : { pane: covered === 'terminal' ? null : covered, term: true }
+}
+
+/** watch the layout and carry the open terminal over each fold (the plugin's setup starts it) */
+export function followFold() {
+  let { phone, pane } = getState().ui
+  let covered: string | null = null
+  return subscribe(() => {
+    const ui = getState().ui
+    if (ui.pane !== pane) {
+      // the pane the phone's terminal took the screen from, to come back to on unfolding
+      if (ui.pane === 'terminal') covered = pane
+      pane = ui.pane
+    }
+    if (ui.phone === phone) return
+    phone = ui.phone
+    const next = carryTerm(ui, covered)
+    if (next) setUI(next)
+  })
 }

@@ -44,3 +44,12 @@ export function footTop(last: number, rowPx: number, boxHeight: number, maxTop: 
 export function following(scrollTop: number, foot: number, rowPx: number) {
   return scrollTop >= foot - rowPx
 }
+
+/** A terminal open on two pages (a phone and a desktop) has one size, set by the page you used last. A size arriving
+ *  that this page didn't ask for, while it isn't waiting on an ask of its own, means another page set it: this page
+ *  then only shrinks to fit until you use it again. asked/wanted: the size this page asked for and the one it is about
+ *  to ask for ('cols x rows', '' for none); first: the size the terminal had when this page opened it, which takes
+ *  nothing. */
+export function sizeTaken(asked: string, wanted: string, cols: number, rows: number, first = false) {
+  return !first && wanted === asked && `${cols}x${rows}` !== asked
+}

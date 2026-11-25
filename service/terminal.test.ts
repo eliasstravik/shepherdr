@@ -5,12 +5,12 @@ import { keyBytes, terminalBridge } from "./terminal.ts";
 // A terminal bridge over a stand-in core: every attach's input is recorded per attach, and terminal.keys calls too.
 function bridge(own = false) {
   const hub = new Hub("hc");
-  const typed: string[] = [], calls: [string, any][] = [], attaches: { observe: boolean; size: string; input: string[]; resized: string[]; closed: boolean }[] = [];
+  const typed: string[] = [], calls: [string, any][] = [], attaches: { observe: boolean; size: string; input: string[]; resized: string[]; closed: boolean; receive: any }[] = [];
   const live = { address: "t1", state: "live", pid: 7, cols: 80, rows: 24 };
   (hub as any).terminals = new Map([["t1", live]]);
   const core = {
-    attach: async (_t: string, _receive: unknown, c: number, r: number, options: { observe?: boolean } = {}) => {
-      const log = { observe: !!options.observe, size: `${c}x${r}`, input: [] as string[], resized: [] as string[], closed: false };
+    attach: async (_t: string, receive: unknown, c: number, r: number, options: { observe?: boolean } = {}) => {
+      const log = { observe: !!options.observe, size: `${c}x${r}`, input: [] as string[], resized: [] as string[], closed: false, receive };
       attaches.push(log);
       return {
         input: (b: Uint8Array) => { log.input.push(new TextDecoder().decode(b)); typed.push(new TextDecoder().decode(b)); },
@@ -22,7 +22,8 @@ function bridge(own = false) {
   };
   (hub as any).client = core;
   const sent: any[] = [];
-  const ws = { send: (d: string) => sent.push(JSON.parse(d)), close() {}, buffered: () => 0 };
+  const page = { closed: false };
+  const ws = { send: (d: string | Uint8Array) => { if (typeof d === "string") sent.push(JSON.parse(d)); }, close() { page.closed = true; }, buffered: () => 0 };
   const b = terminalBridge(hub, "t1", ws as any, own);
   let id = 0;
   const say = (m: object) => b.message(JSON.stringify({ ...m, id: ++id }));
@@ -30,7 +31,7 @@ function bridge(own = false) {
     const tick = () => (sent.filter((m) => m.type === "ack").length === id ? done() : setTimeout(tick, 1));
     tick();
   });
-  return { say, acked, calls, typed, attaches, live, end: () => b.end() };
+  return { say, acked, calls, typed, attaches, live, sent, page, hub, end: () => b.end() };
 }
 
 test("keys after typed text go down the same typing stream, in order, with no terminal.keys call", async () => {
@@ -114,4 +115,50 @@ test("a resize out of bounds is ignored, not obeyed", async () => {
   await t.acked();
   expect(t.attaches.filter((a) => !a.observe)).toEqual([]);
   t.end();
+});
+
+// #1500: Ctrl+D or exit in your own shell closes the terminal; a dropped stream still reconnects
+const finished = (t: ReturnType<typeof bridge>) => {
+  t.live.state = "finished";
+  (t.hub as any).emit({ type: "finished", terminal: "t1", data: {} });
+};
+
+test("your own shell ending tells the page so (it closes the terminal instead of starting a new shell)", async () => {
+  const t = bridge(true);
+  t.say({ type: "open" });
+  await t.acked();
+  finished(t);
+  expect(t.sent.filter((m) => m.type === "ended")).toHaveLength(1);
+  expect(t.page.closed).toBe(true);
+});
+
+test("the stream ending just before herdr-core says the shell finished still tells the page", async () => {
+  const t = bridge(true);
+  t.say({ type: "open" });
+  await t.acked();
+  t.attaches[0].receive.close();
+  expect(t.page.closed).toBe(false);
+  finished(t);
+  expect(t.sent.some((m) => m.type === "ended")).toBe(true);
+  expect(t.page.closed).toBe(true);
+});
+
+test("a stream that drops while the shell lives closes without ended, so the page reconnects", async () => {
+  const t = bridge(true);
+  t.say({ type: "open" });
+  await t.acked();
+  t.attaches[0].receive.close();
+  await new Promise((r) => setTimeout(r, 1100));
+  expect(t.page.closed).toBe(true);
+  expect(t.sent.some((m) => m.type === "ended")).toBe(false);
+});
+
+test("an agent's terminal finishing never says ended (only your own shell closes)", async () => {
+  const t = bridge(false);
+  t.say({ type: "open" });
+  await t.acked();
+  finished(t);
+  t.attaches[0].receive.close();
+  expect(t.page.closed).toBe(true);
+  expect(t.sent.some((m) => m.type === "ended")).toBe(false);
 });

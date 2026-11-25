@@ -2,7 +2,7 @@
 // while its view is open, and the same row takes you back to the chat.
 import { beforeEach, expect, test } from 'bun:test'
 import { getState, setUI } from '@client/kernel.ts'
-import { spaceTermRow, taskTermRow, viewRow } from './menu.ts'
+import { followFold, spaceTermRow, taskTermRow, viewRow } from './menu.ts'
 import { screenKey, screenRow } from '../screens/menu.ts'
 
 beforeEach(() => setUI({ phone: false, term: false, tterm: false, pane: null, termTask: false, scr: null, task: null }))
@@ -81,4 +81,48 @@ test('View as terminal / View as chat: its own swap icon apart from Terminal, be
   back.run!()
   expect(getState().ui.aterm.c1).toBe(false)
   expect(viewRow(getState().ui, 'c1').label).toBe('View as terminal')
+})
+
+// #1502: folding or unfolding keeps your one open terminal, never lost and never two
+test("folding moves the open drawer to the phone's Terminal screen, and unfolding moves it back", () => {
+  const stop = followFold()
+  try {
+    setUI({ term: true })
+    setUI({ phone: true })
+    expect(getState().ui).toMatchObject({ pane: 'terminal', termTask: false, term: false })
+    setUI({ phone: false })
+    expect(getState().ui).toMatchObject({ pane: null, term: true })
+    // the issue's steps: open wide, narrow (one shows), reopen is a toggle off, widen: none twice
+    setUI({ phone: true })
+    expect(spaceTermRow(getState().ui).on).toBe(true)
+  } finally { stop() }
+})
+
+test("a task's terminal goes with its task, and the pane the terminal covered comes back", () => {
+  const stop = followFold()
+  try {
+    setUI({ pane: 'tasks', task: 't1', tterm: true })
+    setUI({ phone: true })
+    expect(getState().ui).toMatchObject({ pane: 'terminal', termTask: true, tterm: false, task: 't1' })
+    setUI({ phone: false })
+    expect(getState().ui).toMatchObject({ pane: 'tasks', tterm: true, termTask: false })
+    // the space's drawer over the Artifacts pane: folded the terminal takes the screen, unfolded Artifacts is back
+    setUI({ pane: 'artifacts', tterm: false, term: true })
+    setUI({ phone: true })
+    expect(getState().ui.pane).toBe('terminal')
+    setUI({ phone: false })
+    expect(getState().ui).toMatchObject({ pane: 'artifacts', term: true })
+  } finally { stop() }
+})
+
+test('a terminal closed on the folded screen stays closed when you unfold', () => {
+  const stop = followFold()
+  try {
+    setUI({ term: true })
+    setUI({ phone: true })
+    spaceTermRow(getState().ui).run!()
+    expect(getState().ui.pane).toBe(null)
+    setUI({ phone: false })
+    expect(getState().ui).toMatchObject({ pane: null, term: false })
+  } finally { stop() }
 })

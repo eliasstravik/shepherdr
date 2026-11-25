@@ -14,10 +14,12 @@ import { copyText } from '@client/copy.ts'
 import { appTakes, focusChat, focusTask } from '@client/commands.ts'
 import type { Chat, Task } from '@shared/types.ts'
 import { machineLabel, placeOf, taskChat, taskOf, tasksIn, tstate } from '@shared/view.ts'
-import { fitGrid, following, footTop, LINE, linesFor, shrinkTo, showKeys } from './fit.ts'
-import { spaceTermRow, switchView, taskTermRow, toggleSpaceTerm, toggleTaskTerm, viewRow } from './menu.ts'
+import { fitGrid, following, footTop, LINE, linesFor, shrinkTo, showKeys, sizeTaken } from './fit.ts'
+import { followFold, spaceTermRow, switchView, taskTermRow, toggleSpaceTerm, toggleTaskTerm, viewRow } from './menu.ts'
 import { connectTerminal, streamInput } from './stream.ts'
 import { linkLayer, type LinkLayer } from './linklayer.ts'
+import { mirrorFocus } from './focus.ts'
+import { focusAfterKey } from './keyrow.ts'
 import { opens, type Link } from './links.ts'
 
 /** a web page opens the way a chat's link does: a new tab (the outside browser in the Android app), or in the app
@@ -93,7 +95,7 @@ const useCoarse = () => useSyncExternalStore(onCoarse, () => typeof matchMedia =
  *  least the pane's): herdr sends only the screen, never older lines, so its tall screen is the history you scroll
  *  up through. It opens at the last line shown and follows new output, unless you scroll up; back down, it follows
  *  again. */
-function Term({ stream, fill }: { stream: string; fill?: boolean }) {
+function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; onEnd?: () => void }) {
   const phone = useUI((u) => u.phone)
   const coarse = useCoarse()
   const own = stream.startsWith('sh:')
@@ -110,6 +112,11 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
   const [ctrl, setCtrl] = useState(false)
   const ctrlRef = useRef(false)
   ctrlRef.current = ctrl
+  const claim = useRef(() => {})
+  const endRef = useRef(onEnd)
+  endRef.current = onEnd
+  /** what pressed the key row last: 'touch', 'pen', 'mouse', or '' for a key press on its button */
+  const pointer = useRef('')
 
   useEffect(() => {
     let gone = false
@@ -117,6 +124,10 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
     let link: { close(): void } | null = null
     let cols = 80, rows = 24, natural = 0
     let asked = '', wanted = '', opened = false, follow = true, moving = 0, frame = 0
+    // this page sets the terminal's size only while it is the one you used last (opened it here, typed, tapped or
+    // clicked in it); another page's size, once it arrives, makes this one only shrink to fit, so two pages never trade
+    // sizes back and forth. A hidden tab never takes it.
+    let owner = typeof document === 'undefined' || !document.hidden, sizes = 0
     let later: ReturnType<typeof setTimeout> | undefined
     const el = box.current
     /** a character's width and a row's height per px of font, as xterm really draws them (it rounds to the screen's
@@ -166,7 +177,7 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
       const grid = fitGrid(w, h, cell, line)
       const want = own ? grid : { cols: grid.cols, rows: Math.max(grid.rows, Math.min(200, natural || grid.rows)) }
       const key = `${want.cols}x${want.rows}`
-      if (opened && key !== asked && key !== wanted) {
+      if (opened && owner && key !== asked && key !== wanted) {
         // a drag, a rotation or the keyboard sends many sizes: ask for the last one
         wanted = key
         clearTimeout(later)
@@ -192,6 +203,8 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
         term.textarea.readOnly = true
         term.textarea.tabIndex = -1
       }
+      // the box may already have the keys (opened with Ctrl+`): a solid cursor from the start
+      if (cap.current && document.activeElement === cap.current) mirrorFocus(term.textarea, true)
       link = connectTerminal(
         stream,
         (bytes, done) => term!.write(bytes, () => { done(); landSoon() }),
@@ -199,11 +212,14 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
           term!.reset()
           follow = true
           asked = wanted = ''
+          sizes = 0
           natural = 0
         },
         (c, r) => {
           // the size it had before this page asked for one: an agent keeps that height
           if (!asked && !wanted) natural = r
+          // another page set it: that one is in use now
+          if (sizeTaken(asked, wanted, c, r, ++sizes === 1)) owner = false
           cols = c
           rows = r
           term!.resize(c, r)
@@ -211,9 +227,19 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
           fit()
         },
         setStatus,
+        // your own shell ended (Ctrl+D, exit): its drawer or screen closes
+        () => endRef.current?.(),
       )
       fit()
     })
+    // you used this page's terminal: it takes the size again (once, with no back and forth)
+    claim.current = () => {
+      if (owner) return
+      owner = true
+      clearTimeout(later)
+      asked = wanted = ''
+      fit()
+    }
     const ro = new ResizeObserver(fit)
     if (el) ro.observe(el)
     return () => {
@@ -227,6 +253,7 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
       links.current = null
       term?.dispose()
       xt.current = null
+      claim.current = () => {}
     }
   }, [stream, own])
 
@@ -247,9 +274,15 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
     if (press.current) clearTimeout(press.current.timer)
     press.current = null
   }
+  /** after a press of the key row: a mouse click gives the terminal the keys; a finger's tap leaves the on-screen
+   *  keyboard as it was */
+  const afterKey = () => {
+    if (focusAfterKey(pointer.current)) cap.current?.focus()
+    pointer.current = ''
+  }
   const sendKey = (k: string) => {
     streamInput(stream, { type: 'keys', keys: [k] })
-    cap.current?.focus()
+    afterKey()
   }
   return (
     <>
@@ -268,6 +301,8 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
           autoCorrect="off"
           spellCheck={false}
           enterKeyHint="send"
+          onFocus={() => { mirrorFocus(xt.current?.textarea, true); claim.current() }}
+          onBlur={() => mirrorFocus(xt.current?.textarea, false)}
           onWheel={(e) => scrollBy(e.deltaMode === 1 ? e.deltaX * 16 : e.deltaX, e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY)}
           // a link: a click opens it (never focusing the box, so no keys and no keyboard), the mouse over it underlines
           // it, a right click or a held finger opens its menu
@@ -278,6 +313,7 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
           }}
           onMouseLeave={() => links.current?.hover(null)}
           onMouseDown={(e) => {
+            claim.current()
             if (e.button === 0 && linkAt(e)) e.preventDefault()
           }}
           onClick={(e) => {
@@ -295,6 +331,7 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
             linkMenu(l, links.current?.rect(l) ?? null)
           }}
           onTouchStart={(e) => {
+            claim.current()
             const t = e.touches[0]
             scrolling.current = { carry: 0, x: t.clientX, y: t.clientY }
             unpress()
@@ -329,6 +366,7 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
             scrolling.current.y = y
           }}
           onKeyDown={(e) => {
+            claim.current()
             // the app's own few keys pass (commands that say `terminal`): Cmd+K the palette, Ctrl+` your terminal
             if (appTakes(e.nativeEvent)) return
             if (e.nativeEvent.isComposing || e.keyCode === 229) return
@@ -356,9 +394,9 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
         />
       </div>
       {showKeys(phone, coarse) && (
-        <div className="keys">
+        <div className="keys" onPointerDown={(e) => { pointer.current = e.pointerType; claim.current() }} onMouseDown={(e) => e.preventDefault()}>
           {([['esc', 'esc'], ['tab', 'tab']] as const).map(([l, k]) => <button type="button" key={l} aria-label={`${l} key`} onClick={() => sendKey(k)}>{l}</button>)}
-          <button type="button" aria-label="ctrl key" aria-pressed={ctrl} style={ctrl ? { background: 'rgb(255 255 255/.3)' } : undefined} onClick={() => { setCtrl(!ctrl); cap.current?.focus() }}>ctrl</button>
+          <button type="button" aria-label="ctrl key" aria-pressed={ctrl} style={ctrl ? { background: 'rgb(255 255 255/.3)' } : undefined} onClick={() => { setCtrl(!ctrl); afterKey() }}>ctrl</button>
           {([['←', 'left'], ['↑', 'up'], ['↓', 'down'], ['→', 'right']] as const).map(([l, k]) => <button type="button" key={k} aria-label={`${k} arrow key`} onClick={() => sendKey(k)}>{l}</button>)}
           <button type="button" aria-label="enter key" onClick={() => sendKey('enter')}>↵</button>
         </div>
@@ -377,13 +415,14 @@ function whereOf(thread: Thread) {
 
 /** your own terminal, in the drawer under a chat or a task */
 function Drawer({ thread }: { thread: Thread }) {
+  const close = () => setUI(thread.task ? { tterm: false } : { term: false })
   return (
     <>
       <div className="tbar">
         <span>{whereOf(thread)}</span>
-        <IB icon="x" label="Close the terminal" onClick={() => setUI(thread.task ? { tterm: false } : { term: false })} />
+        <IB icon="x" label="Close the terminal" onClick={close} />
       </div>
-      <Term stream={shellKey(thread)} />
+      <Term stream={shellKey(thread)} onEnd={close} />
     </>
   )
 }
@@ -397,14 +436,15 @@ function TerminalPane() {
   const p = placeOf(snap, ui.at)
   if (!p) return null
   const thread: Thread = t ? { chat: taskChat(t), place: t.place, task: t, where: 'pane' } : { chat: p.chat, place: p.id, where: 'pane' }
+  const close = () => setUI(t ? { pane: 'tasks' } : { pane: null })
   return (
     <PaneFrame flush head={() => (t ? <Hd back={{ label: 'Back to the task', run: () => setUI({ pane: 'tasks' }) }} title="Terminal" sub={t.name} /> : <Hd title="Terminal" pad={12} />)}>
       <div className="tdr" style={{ border: 0 }}>
         <div className="tbar">
           <span>{whereOf(thread)}</span>
-          <IB icon="x" label="Close the terminal" onClick={() => setUI(t ? { pane: 'tasks' } : { pane: null })} />
+          <IB icon="x" label="Close the terminal" onClick={close} />
         </div>
-        <Term stream={shellKey(thread)} fill />
+        <Term stream={shellKey(thread)} fill onEnd={close} />
       </div>
     </PaneFrame>
   )
@@ -450,6 +490,8 @@ export default definePlugin({
   name: 'terminal',
   setup(reg) {
     reg.panes.push({ id: 'terminal', View: TerminalPane })
+    // folding or unfolding keeps the open terminal: drawer <-> the phone's Terminal screen
+    followFold()
     reg.drawer.push({ when: (ui, thread) => !ui.phone && (thread.task ? ui.tterm : ui.term), View: Drawer })
     reg.chatBody.push({ when: (ui, thread) => !!ui.aterm[thread.chat], View: AgentTerminal })
     reg.chatTail.push({ order: 25, View: Stuck })
