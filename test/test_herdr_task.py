@@ -9330,6 +9330,47 @@ class OwnSession(unittest.TestCase):
         got = self.base(HC_SOCKET="/tmp/x/other.sock")
         self.assertIn("HC_SOCKET is /tmp/x/other.sock", got["guard"])
 
+    def test_a_socket_the_config_pins_is_shepherdrs_own(self):
+        """#1507: herdr-core's config pins one socket for every session (`socket = ".../default/default.sock"`): Shepherdr's
+        core listens there, and its task terminals carry that socket. Their own herdr-task calls go through; without the
+        pin the same terminal is refused, saying the machine is wrong, not the agent."""
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp, ignore_errors=True))
+        sock = os.path.join(tmp, "state", "default", "default.sock")
+        os.makedirs(os.path.join(tmp, "herdr-core"))
+        cfg = os.path.join(tmp, "herdr-core", "config.toml")
+        with open(cfg, "w") as f:
+            f.write(f'socket = "{sock}"\n')
+        vm = dict(XDG_CONFIG_HOME=tmp, HC_SESSION="shepherdr", HERDR_GUARD_SESSION="shepherdr", HC_SOCKET=sock,
+                  HC_TERMINAL_SOCKET=sock, HC_TERMINAL_ID="t5")
+        got = self.base(**vm)
+        self.assertEqual((got["hc"], got["id"], got["foreign"], got["why"], got["guard"]), ("shepherdr", "t5", False, None, None))
+        os.remove(cfg)
+        got = self.base(**vm)
+        self.assertIn('herdr-core session "default"\'s socket, not Shepherdr\'s own (shepherdr.sock)', got["guard"])
+        self.assertIn("the machine needs a fix, not you", got["guard"])
+        self.assertIn("herdr-task machines sync", got["guard"])
+        got = self.base(HC_SOCKET="/tmp/x/other.sock", HERDR_GUARD_SESSION="")  # a shell, not a task's terminal
+        self.assertIn("This shell's environment is wrong: unset HC_SOCKET", got["guard"])
+
+    def test_a_task_agents_own_commands_share_one_check(self):
+        """#1507: reviewed went through while status, ready and feedback were refused. All four make the same check first."""
+        code = ("import argparse, json, os, sys; sys.dont_write_bytecode = True; sys.path.insert(0, sys.argv[1]);"
+                "from herdr_task import base, commands, feedback; out = {}\n"
+                "for name, fn in (('status', commands.cmd_status), ('ready', commands.cmd_ready), ('reviewed', commands.cmd_reviewed),"
+                " ('feedback', feedback.cmd_feedback)):\n"
+                " try:\n  fn(argparse.Namespace()); out[name] = None\n"
+                " except base.Fail as e:\n  out[name] = str(e)\n"
+                " except Exception as e:\n  out[name] = 'past the check: ' + type(e).__name__\n"
+                "print(json.dumps(out))")
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("HC_", "SHEPHERDR_SESSION"))}
+        r = subprocess.run([sys.executable, "-c", code, BIN], env={**env, "HC_SOCKET": "/tmp/x/other.sock"}, capture_output=True, text=True)
+        got = json.loads(r.stdout)
+        self.assertEqual(len(set(got.values())), 1, got)
+        self.assertTrue(got["reviewed"].startswith("refusing to run herdr-task: HC_SOCKET is /tmp/x/other.sock"), got)
+        r = subprocess.run([sys.executable, "-c", code, BIN], env=env, capture_output=True, text=True)
+        self.assertTrue(all(not (v or "").startswith("refusing") for v in json.loads(r.stdout).values()), r.stdout)
+
     def test_a_tests_own_session_by_name(self):
         got = self.base(SHEPHERDR_SESSION="shep292-test-9")
         self.assertEqual((got["session"], got["hc"], got["guard"]), ("shep292-test-9", "shep292-test-9", None))

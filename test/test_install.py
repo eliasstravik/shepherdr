@@ -1704,3 +1704,33 @@ class RemoteSwitchGuard(unittest.TestCase):
             result = mod.remote_working_tasks("/fake/home", run=lambda *a, **kw: subprocess.CompletedProcess(a, 1, "", "offline"))
         self.assertEqual(result, ["linked machines: cannot check their tasks"])
         self.assertIsInstance(result[0], mod.UncheckedMachine)
+
+
+class DoctorSyncedMachines(unittest.TestCase):
+    """#1507: doctor says when herdr-core's config pins one socket for every session, and which other machines' last
+    sync found current files but something that stops task agents there."""
+
+    def test_a_pinned_socket_and_a_machine_that_needs_a_fix(self):
+        mod = installer()
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, True)
+        cfg = os.path.join(root, "cfg", "herdr-core")
+        os.makedirs(cfg)
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": os.path.join(root, "cfg")}):
+            self.assertIsNone(mod.pinned_socket_problem())
+            with open(os.path.join(cfg, "config.toml"), "w") as f:
+                f.write('[x]\nsocket = "/elsewhere.sock"\n')
+            self.assertIsNone(mod.pinned_socket_problem())   # only a top-level line pins
+            with open(os.path.join(cfg, "config.toml"), "w") as f:
+                f.write('socket = "/s/default/default.sock"\n')
+            got = mod.pinned_socket_problem()
+        self.assertIn('pins every herdr-core session\'s socket to "/s/default/default.sock"', got)
+        self.assertIn("hc server stop", got)
+        tasks = mod.where_for(root).path("tasks")
+        os.makedirs(tasks, exist_ok=True)
+        with open(os.path.join(tasks, ".machines.json"), "w") as f:
+            json.dump({"machines": {"vm-demo": {"state": "needs-fix", "details": ["its link leads to 'default'"]},
+                                    "laptop": {"state": "current", "details": []}}}, f)
+        got = mod.machines_needing_fix(root)
+        self.assertEqual(got, ["vm-demo needs a fix (its last sync): its link leads to 'default'. "
+                               "`herdr-task machines sync vm-demo` checks again"])

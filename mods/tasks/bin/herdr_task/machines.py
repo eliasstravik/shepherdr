@@ -311,6 +311,39 @@ def main_here():
         if rec.get("id"):
             return rec.get("id") == me
     return False
+# #1507: what file shas can't see. The session of the core that runs this (hc exec gives its own HC_SESSION; none: the
+# default one), a socket herdr-core's config pins for every session, and the herdr-task the person's shell (where task
+# agents start, launch.in_shell) really runs, with its version.
+cfg = P(".config/herdr-core/config.toml")
+pin = None
+try:
+    for ln in open(cfg).read().splitlines():
+        ln = ln.strip()
+        if ln.startswith("["):
+            break
+        if ln.startswith("socket") and "=" in ln and ln.split("=", 1)[0].strip() == "socket":
+            pin = os.path.expanduser(ln.split("=", 1)[1].strip().strip("\"'"))
+            break
+except Exception:
+    pass
+def dated(p):
+    try:
+        return time.strftime("%Y-%m-%d", time.localtime(os.path.getmtime(p)))
+    except Exception:
+        return None
+found = None
+try:
+    sh = os.environ.get("SHELL") or "/bin/sh"
+    r = subprocess.run([sh, "-lic" if platform.system() == "Darwin" else "-ic", "command -v herdr-task"], stdout=subprocess.PIPE,
+                       stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=20)
+    found = next((l for l in reversed(r.stdout.decode(errors="replace").splitlines()) if l.startswith("/")), None)
+except Exception:
+    pass
+ours = P(".local/bin/herdr-task")
+# herdr-task --version says only its protocol ("1"): another copy is told by its content, and dated
+out["health"] = {"session": os.environ.get("HC_SESSION") or "default", "pin": pin, "config": cfg,
+                 "herdr_task": found, "herdr_task_date": dated(found) if found else None,
+                 "other_copy": bool(found) and os.path.realpath(found) != os.path.realpath(ours) and sha(found) != sha(ours)}
 if x["op"] == "install" and not source:
     for t in x["touch"]:
         if t.get("unless_main") and main_here():
@@ -395,7 +428,54 @@ def _verdict(res):
     return ("failed" if any(s.startswith("failed") for s in bad.values()) else "drift"), [f"{os.path.basename(p)}{' (link)' if p in res['links'] else ''}: {s}" for p, s in sorted(bad.items())]
 
 
-def sync_machine(machine, m, op="install", force=False):
+def problems(machine, link, health):
+    """What keeps task agents on that machine from working although its files are current (#1507), each with its fix:
+    [str]. link: this machine's hc link row for it; health: INSTALL's "health" there."""
+    out = []
+    sess = (link or {}).get("session") or "default"
+    target = (link or {}).get("target") or machine
+    if sess != SESSION:
+        out.append(f"its link here leads to herdr-core's {sess!r} session there, not Shepherdr's own ({SESSION}): link it again with "
+                   f"`HC_SESSION={SESSION} hc machine rm {machine}` then `HC_SESSION={SESSION} hc machine add {target} --name {machine} "
+                   f"--session {SESSION}`")
+    h = health or {}
+    if h.get("pin"):
+        out.append(f"{h.get('config') or 'herdr-core config.toml'} there pins every session's socket to {h['pin']} (its `socket =` "
+                   f"line): Shepherdr's core and the Herdr app's share one socket, so that machine's task terminals carry another "
+                   f"session's socket. With no task running there, remove that line (`hc exec --on {machine} -- sed -i.bak '/^socket *=/d' "
+                   f"{h.get('config')}`), stop the core on the old socket (`hc exec --on {machine} -- env HC_SOCKET={h['pin']} hc server "
+                   f"stop`: the exec ends with it), and the next call starts Shepherdr's own there (`herdr-task machines sync {machine}`)")
+    elif sess == SESSION and h.get("session") and h["session"] != SESSION:
+        out.append(f"its core there runs as herdr-core session {h['session']!r}, where Shepherdr's own ({SESSION}) should answer: "
+                   f"its hc may be too old to keep sessions apart: `HC_SESSION={SESSION} hc machine update {machine}`, then sync again")
+    if h.get("other_copy"):
+        out.append(f"the herdr-task its shell (and so every task agent there) runs is {h.get('herdr_task')}"
+                   f"{' from ' + h['herdr_task_date'] if h.get('herdr_task_date') else ''}, an older or other copy than the synced "
+                   "~/.local/bin/herdr-task: remove that copy there, or put ~/.local/bin first on its PATH")
+    return out
+
+
+def no_assistant(machine, assistants):
+    """A note (never the machine's state: a machine may run tasks only) when no Assistant runs there, else None."""
+    if assistants is None or assistants:
+        return None
+    return (f"no Assistant runs there (the reach map's last look): its tasks start only from here (`herdr-task --on {machine} …`), "
+            "and nothing there answers tell-assistant; open its home space in the web app to start one")
+
+
+def _assistants_on(machine):
+    """The live Assistants straight over the link named `machine`, from the reach map's cached view (never a new look,
+    which can take a minute), or None when there is none."""
+    d = _reach_cache()
+    if not d or not isinstance(d.get("graph"), dict):
+        return None
+    try:
+        return [a for n in nodes(d["graph"]) if route_text(n["route"]) == machine for a in n["node"].get("assistants") or []]
+    except Exception:  # noqa: BLE001 - an odd map only leaves this out
+        return None
+
+
+def sync_machine(machine, m, op="install", force=False, link=None):
     """Checks or installs the tools on one machine: {machine, state, details, ...}; state is
     current, drift (some file isn't: details say which and why), failed or unreachable."""
     me = {"from": core_name(), "version": m["version"], "stamp": STAMP, "force": force, "links": m["links"], "touch": m["touch"],
@@ -421,6 +501,13 @@ def sync_machine(machine, m, op="install", force=False):
     # what a helper installs itself: said, never the machine's state (an offline machine stays current, and says why)
     ens = res.get("ensure") or {}
     details = details + [f"{_ENSURED.get(p, os.path.basename(p))}: {s}" for p, s in sorted(ens.items()) if s not in ("ready", "installed")]
+    # #1507: current files on a machine whose agents are refused aren't "current"
+    fix = problems(machine, link, res.get("health")) if state in ("current", "source") else []
+    if fix:
+        state, details = "needs-fix", details + fix
+    note = no_assistant(machine, _assistants_on(machine))
+    if note:
+        details = details + [note]
     return {"machine": machine, "state": state, "details": details, "version": m["version"], "installed": (res.get("stamp") or {}).get("version"),
             "os": res.get("os"), "python": res.get("python"),
             "changed": sorted([p for p, s in {**res["files"], **res["links"]}.items() if s == "installed"] +
@@ -477,7 +564,7 @@ def sync(names=None, op="install", force=False):
         if held:
             out[name] = {"machine": name, "state": "held", "details": [f"{held} (shepherdr doctor lets it go)"], "version": m["version"]}
             return
-        out[name] = sync_machine(name, m, op, force) if links[name].get("state") == "connected" else \
+        out[name] = sync_machine(name, m, op, force, links[name]) if links[name].get("state") == "connected" else \
             {"machine": name, "state": "unreachable", "version": m["version"], "details": [f"herdr-core link {links[name].get('state')}" + (
                 f": {STALE_WORDS} (`herdr-task carry-over` links it again)" if stale_why(links[name].get("why")) else "")]}
     threads = [threading.Thread(target=one, args=(n,)) for n in targets]
@@ -491,7 +578,7 @@ def sync(names=None, op="install", force=False):
         for r in rows:
             e = d.setdefault("machines", {}).setdefault(r["machine"], {})
             e.update({"state": r["state"], "checked": now(), "details": r["details"]})
-            if r["state"] in ("current", "source", "unsupported"):
+            if r["state"] in ("current", "source", "unsupported", "needs-fix"):
                 e["synced"] = m["version"]
             elif e.get("synced") == m["version"]:
                 e.pop("synced")
@@ -652,10 +739,10 @@ def cmd_machines(args):
         else:
             print(f"Tools here: version {r['version']}." if r["machines"] else "No other machines connected here.")
             for x in r["machines"]:
-                word = {"current": "current", "source": "holds the source (left alone)", "drift": "out of date", "failed": "failed", "unreachable": "can't reach", "held": "held", "unsupported": "not supported"}.get(x["state"], x["state"])
+                word = {"current": "current", "source": "holds the source (left alone)", "drift": "out of date", "needs-fix": "files current, but it needs a fix", "failed": "failed", "unreachable": "can't reach", "held": "held", "unsupported": "not supported"}.get(x["state"], x["state"])
                 more = f" (updated {len(x['changed'])} file(s))" if x.get("changed") else ""
                 print(f"  {x['machine']}: {word}{more}" + "".join(f"\n      {d}" for d in x["details"]))
-        if args.check and any(x["state"] not in ("current", "source") for x in r["machines"]):
+        if args.check and any(x["state"] not in ("current", "source") for x in r["machines"]):  # needs-fix too
             raise SystemExit(1)
 
 

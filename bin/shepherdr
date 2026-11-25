@@ -158,6 +158,35 @@ def unit_session_problem(root):
             "session, outside Shepherdr. Run `shepherdr update` (or the install again) to write it")
 
 
+def pinned_socket_problem():
+    """#1507: doctor's words when herdr-core's config pins one socket for every session (a top-level `socket =`), else
+    None. Then Shepherdr's own core and the Herdr app's default one share that socket, and task terminals carry it."""
+    x = os.environ.get("XDG_CONFIG_HOME") or ""
+    cfg = os.path.join(x if x.startswith("/") else os.path.join(real_home(), ".config"), "herdr-core", "config.toml")
+    for ln in (read(cfg) or b"").decode(errors="replace").splitlines():
+        ln = ln.strip()
+        if ln.startswith("["):
+            break
+        if "=" in ln and ln.split("=", 1)[0].strip() == "socket":
+            return (f"{cfg} pins every herdr-core session's socket to {ln.split('=', 1)[1].strip()}: Shepherdr's core ({SESSION}) "
+                    "and the Herdr app's share it, and task agents' own herdr-task calls can be refused. With no task running, "
+                    f"remove that line, then stop the core on the old socket (`HC_SOCKET={ln.split('=', 1)[1].strip()} hc server "
+                    "stop`): Shepherdr's service starts its own again")
+    return None
+
+
+def machines_needing_fix(root):
+    """#1507: the other machines whose last sync found current files but something that stops task agents there (herdr-task
+    machines sync's "needs-fix"), each with what it found and the fix."""
+    d = json_file(os.path.join(where_for(root).path("tasks"), ".machines.json")) or {}
+    out = []
+    for name, e in sorted(((d.get("machines") or {}) if isinstance(d, dict) else {}).items()):
+        if isinstance(e, dict) and e.get("state") == "needs-fix":
+            out.append(f"{name} needs a fix (its last sync): " + "; ".join(str(x) for x in e.get("details") or [])
+                       + f". `herdr-task machines sync {name}` checks again")
+    return out
+
+
 def service_file(root, name):
     """A file of the service's own (service.json, web.json, ...): Shepherdr's state folder once moved, else ~/.herdr/shepherdr."""
     return os.path.join(where_for(root).path("service"), name)
@@ -2302,6 +2331,10 @@ def cmd_doctor(a):
     if unit_bad:
         (warn if managed_unit(root) else bad).append(unit_bad)
     if home:
+        pin = pinned_socket_problem()
+        if pin:
+            bad.append(pin)
+        warn += machines_needing_fix(root)
         agents_bad = agents_left_behind(root)
         bad += agents_bad
         bad += records_naming_nobody(root)
