@@ -363,10 +363,11 @@ button.fake .n span,button.fake>.i{color:var(--muted)}
 .sugs{--fl:0px;--fr:0px;display:flex;align-items:center;gap:8px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;margin:0 -4px 4px;padding:4px;-webkit-mask-image:linear-gradient(to right,transparent,#000 var(--fl),#000 calc(100% - var(--fr)),transparent);mask-image:linear-gradient(to right,transparent,#000 var(--fl),#000 calc(100% - var(--fr)),transparent)}
 /* the chat's bottom edge, above the box and the replies: what scrolls under it fades over 16 px (the list's own
    bottom gap, so at the end nothing is faded) instead of being sliced. Only over a chat with its box, never a terminal. A space's chat and
-   a task's (in the middle or in the side pane) alike. */
+   a task's (in the middle or in the side pane) alike.
+   #1499: a mask on what scrolls, not a layer over it (a layer rounded one shade off the background into a band and
+   dimmed the scroll bar's end); the scroll bar's own strip (--sbw: ui.tsx useScrolled) stays out of it. */
 :is(.chat,.pane)>.foot{position:relative}
-:is(.chat,.pane)>.foot:has(>.cbox)::before{content:"";position:absolute;left:0;right:0;bottom:100%;height:16px;background:linear-gradient(to bottom,transparent,var(--canvas));pointer-events:none}
-:is(.chat,.pane):has(>.scroll>.msgs>.tw)>.foot::before{display:none}
+:is(.chat,.pane):has(>.foot>.cbox):not(:has(>.scroll>.msgs>.tw))>.scroll{-webkit-mask:linear-gradient(#000,#000) right/var(--sbw,0px) 100% no-repeat,linear-gradient(to bottom,#000 calc(100% - 16px),transparent);mask:linear-gradient(#000,#000) right/var(--sbw,0px) 100% no-repeat,linear-gradient(to bottom,#000 calc(100% - 16px),transparent)}
 .sugs::-webkit-scrollbar{display:none}
 .sug{--sugh:max(36px,var(--send));flex:none;max-width:min(280px,78%);min-width:var(--sugh);min-height:var(--sugh);padding:2px 14px;border-radius:calc(var(--sugh)/2);text-align:center;box-shadow:inset 0 0 0 1px var(--line2);background:var(--canvas);color:var(--sub);font-size:var(--sec);line-height:var(--secl);overflow-wrap:anywhere;text-wrap:balance;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:pan-x}
 @media (hover:hover) and (pointer:fine){.sug:hover{background:var(--control)}}
