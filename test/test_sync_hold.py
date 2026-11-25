@@ -154,7 +154,7 @@ class Hold(unittest.TestCase):
             self.held(on)
             synced, spawned, state = [], [], {"seen": "v2", "seen_at": 0, "machines": {}}
             with mock.patch.object(machines, "connected_machines", lambda: links), mock.patch.object(machines, "manifest", lambda: man), \
-                    mock.patch.object(machines, "sync_machine", lambda n, m, op, force: synced.append(n) or {"machine": n, "state": "current", "details": [], "version": "v2"}), \
+                    mock.patch.object(machines, "sync_machine", lambda n, m, op, force, link=None: synced.append(n) or {"machine": n, "state": "current", "details": [], "version": "v2"}), \
                     mock.patch.object(machines, "_save_state", lambda fn: fn(state)), \
                     mock.patch.object(machines, "_spawn", lambda argv, log: spawned.append(argv)), \
                     mock.patch.object(machines, "_busy", lambda n: False), mock.patch.object(machines, "_reach_cache", lambda: {"at": machines.now()}):

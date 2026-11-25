@@ -434,7 +434,7 @@ def problems(machine, link, health):
     out = []
     sess = (link or {}).get("session") or "default"
     target = (link or {}).get("target") or machine
-    if sess != SESSION:
+    if link is not None and sess != SESSION:   # no link row given (a caller that doesn't know it): not judged
         out.append(f"its link here leads to herdr-core's {sess!r} session there, not Shepherdr's own ({SESSION}): link it again with "
                    f"`HC_SESSION={SESSION} hc machine rm {machine}` then `HC_SESSION={SESSION} hc machine add {target} --name {machine} "
                    f"--session {SESSION}`")
@@ -445,7 +445,7 @@ def problems(machine, link, health):
                    f"session's socket. With no task running there, remove that line (`hc exec --on {machine} -- sed -i.bak '/^socket *=/d' "
                    f"{h.get('config')}`), stop the core on the old socket (`hc exec --on {machine} -- env HC_SOCKET={h['pin']} hc server "
                    f"stop`: the exec ends with it), and the next call starts Shepherdr's own there (`herdr-task machines sync {machine}`)")
-    elif sess == SESSION and h.get("session") and h["session"] != SESSION:
+    elif (link is None or sess == SESSION) and h.get("session") and h["session"] != SESSION:
         out.append(f"its core there runs as herdr-core session {h['session']!r}, where Shepherdr's own ({SESSION}) should answer: "
                    f"its hc may be too old to keep sessions apart: `HC_SESSION={SESSION} hc machine update {machine}`, then sync again")
     if h.get("other_copy"):
@@ -564,7 +564,7 @@ def sync(names=None, op="install", force=False):
         if held:
             out[name] = {"machine": name, "state": "held", "details": [f"{held} (shepherdr doctor lets it go)"], "version": m["version"]}
             return
-        out[name] = sync_machine(name, m, op, force, links[name]) if links[name].get("state") == "connected" else \
+        out[name] = sync_machine(name, m, op, force, link=links[name]) if links[name].get("state") == "connected" else \
             {"machine": name, "state": "unreachable", "version": m["version"], "details": [f"herdr-core link {links[name].get('state')}" + (
                 f": {STALE_WORDS} (`herdr-task carry-over` links it again)" if stale_why(links[name].get("why")) else "")]}
     threads = [threading.Thread(target=one, args=(n,)) for n in targets]
