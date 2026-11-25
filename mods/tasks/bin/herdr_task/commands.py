@@ -313,7 +313,8 @@ def cmd_show(args):
         # Back at work since it said ready: saved at once, so the Accept card (which reads this)
         # says it's Working, not Ready.
         if busy_again(t, live):
-            back_to_work(s, t, "its agent is at work again")
+            # #1489: its agent's own turn, as tick's back_pass() says it: Ready again once that turn changes nothing
+            back_to_work(s, t, "its agent is at work again", auto=True)
         v = view(s, t, live)
         if t["state"] == "queued":
             v["reason"] = queue_reason(s, t)
@@ -1028,6 +1029,12 @@ def cmd_review_more(args):
             told = live[-1]["address"] if r and not kept else None
             held = r == "held"
         v = view(s, t)
+    # #1494: read back from the list as saved, so a round that didn't stick is said, never a silent "may now use"
+    with open_store(args, write=False) as s:
+        now_rounds = review_limits(s, s.find(args.id))[1]
+    if now_rounds != rounds + 1:
+        raise Fail(f"{s.name(t)} still has {now_rounds} review rounds after adding one (it had {rounds}): the task list "
+                   f"of {s.loc['folder']} didn't keep it. Run review-more again; if it says this again, it's a Shepherdr bug.")
     # #1207: "told" only once it went; held (someone writes to that agent) is said, as when it couldn't go
     if kept:
         end = (f"; its agent had stopped, so nothing was typed to it: the message is kept and goes to it once "
@@ -1041,8 +1048,9 @@ def cmd_review_more(args):
         end = f"; couldn't send it to {live[-1]['address']}: tell it yourself."
     else:
         end = "; no agent is running to tell."
-    say(args, {**v, "rounds": rounds + 1, "told": None if held else told, "held": told if held else None, **({"kept": True} if kept else {})},
-        f"{s.name(t)} may now use {rounds + 1} review rounds" + end)
+    say(args, {**v, "rounds": rounds + 1, "was": rounds, "used": used, "told": None if held else told, "held": told if held else None,
+               **({"kept": True} if kept else {})},
+        f"{s.name(t)} may now use {rounds + 1} review rounds (was {rounds}, {used} used)" + end)
 
 
 def parse_left(text):
