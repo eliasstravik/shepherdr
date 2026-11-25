@@ -4204,6 +4204,131 @@ class ReviewedNamesItsCommit(unittest.TestCase):
         self.assertNotIn("reviews", self.task)
 
 
+class ReviewedFindsTheTaskWorktree(unittest.TestCase):
+    """#1443/#1444: a task added to work in the folder itself, the folder on an unrelated branch, its worker in a
+    worktree of its own on a branch off main. reviewed checks and stamps that branch, never the folder's HEAD; edit
+    --branch adopts the existing branch; add warns. A throwaway git repo; hc and gh are never run."""
+
+    def setUp(self):
+        import argparse
+        import shutil
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.commands as commands
+        import herdr_task.launch as launch
+        self.commands, self.launch, self.argparse, self.mock = commands, launch, argparse, mock
+        self.root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.root, True)
+        self.main, self.wt = os.path.join(self.root, "repo"), os.path.join(self.root, "mine")
+        self.git(self.root, "init", "-q", "-b", "main", self.main)
+        for k, v in (("user.name", "T"), ("user.email", "t@example.com"), ("commit.gpgsign", "false")):
+            self.git(self.main, "config", k, v)
+        self.git(self.main, "commit", "-q", "--allow-empty", "-m", "base")
+        self.git(self.main, "switch", "-q", "-c", "unrelated")
+        self.git(self.main, "commit", "-q", "--allow-empty", "-m", "someone else's work")
+        self.unrelated = self.git(self.main, "rev-parse", "HEAD")
+        self.git(self.main, "worktree", "add", "-q", "-b", "fix", self.wt, "main")
+        self.git(self.wt, "commit", "-q", "--allow-empty", "-m", "the fix")
+        self.fix = self.git(self.wt, "rev-parse", "HEAD")
+        self.store = Store([{"id": 1, "title": "Reactions", "state": "running", "mode": "here", "agents": [],
+                             "review_gate": True, "started": 0, "folder_start": self.unrelated}])
+        self.store.loc["folder"] = self.main
+        self.task = self.store.data["tasks"][0]
+        self.said = []
+        for name, value in (("open_store", lambda args, write=True, wait=None: self.store), ("view", lambda s, t, live=None: {**t, "status": t["state"]}),
+                            ("say", lambda a, v, text=None: self.said.append(text)), ("review_limits", lambda *a: (True, 3))):
+            p = mock.patch.object(commands, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        here = os.getcwd()
+        self.addCleanup(os.chdir, here)
+        os.chdir(self.main)
+
+    def git(self, cwd, *args):
+        return subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, check=True).stdout.strip()
+
+    def reviewed(self, commit=None, folder=None):
+        self.commands.cmd_reviewed(self.argparse.Namespace(id="SHEP-1", json=True, folder=folder, report="clean",
+                                                           commit=commit))
+        return self.task["reviews"][-1]["head"]
+
+    def test_commit_from_the_workers_worktree_is_accepted(self):
+        self.assertEqual(self.reviewed(self.fix, folder=self.wt), self.fix)
+
+    def test_commit_named_from_inside_the_worktree(self):
+        os.chdir(self.wt)
+        self.assertEqual(self.reviewed(self.fix[:9], folder=self.main), self.fix)
+
+    def test_without_commit_stamps_the_worktree_head_not_the_folders(self):
+        self.assertEqual(self.reviewed(folder=self.wt), self.fix)
+        self.assertNotEqual(self.task["reviews"][-1]["head"], self.unrelated)
+        self.assertIn(f"fix in {self.wt}", self.said[-1])
+
+    def test_from_the_folder_a_commit_elsewhere_is_refused_with_the_way_out(self):
+        with self.assertRaises(self.commands.Fail) as e:
+            self.reviewed(self.fix)
+        self.assertIn("edit SHEP-1 --branch", str(e.exception))
+        self.assertNotIn("reviews", self.task)
+
+    def test_ready_never_calls_an_untouched_folder_nothing_to_review_while_work_is_elsewhere(self):
+        self.assertTrue(self.commands.unchanged_folder(self.store, self.task))
+        os.chdir(self.wt)
+        self.assertFalse(self.commands.unchanged_folder(self.store, self.task))
+
+    def edit(self, **kw):
+        args = dict(id="SHEP-1", json=True, folder=None, title=None, prompt=None, prompt_file=None, base=None, after=None,
+                    at=None, in_=None, here=False, worktree=False, branch=None, pr=None, space=None, move_to=None)
+        args.update(kw)
+        with self.mock.patch.object(self.commands, "set_opts", lambda *a, **k: None), \
+                self.mock.patch.object(self.commands, "set_notes", lambda *a, **k: None), \
+                self.mock.patch.object(self.commands, "take_pr", lambda *a, **k: None), \
+                self.mock.patch.object(self.launch, "branch_problem", lambda *a: None):
+            self.commands.cmd_edit(self.argparse.Namespace(**args))
+
+    def test_edit_branch_adopts_the_existing_branch_once_started(self):
+        self.edit(worktree=True, branch="fix")
+        t = self.task
+        self.assertEqual((t["mode"], t["branch"], os.path.realpath(t["worktree"]), t["base"]),
+                         ("worktree", "fix", os.path.realpath(self.wt), "main"))
+        self.assertEqual(t["start"], self.git(self.main, "rev-parse", "main"))
+        self.assertNotIn("folder_start", t)
+        # from the folder, without --commit: the branch's newest commit, never the folder's HEAD
+        self.assertEqual(self.reviewed(), self.fix)
+        t["head"] = self.fix
+        self.assertIsNone(self.commands.review_refusal(self.store, t, t["worktree"]))
+
+    def test_edit_branch_checked_out_nowhere_gets_a_worktree(self):
+        self.git(self.main, "branch", "lonely", "main")
+        made = []
+        def folder_for(s, t):
+            made.append(t["branch"])
+            t["worktree"] = self.wt
+        with self.mock.patch.object(self.launch, "folder_for", folder_for):
+            self.edit(branch="lonely")
+        self.assertEqual((made, self.task["mode"]), (["lonely"], "worktree"))
+
+    def test_edit_branch_refuses_a_missing_branch_or_another_tasks(self):
+        with self.assertRaises(self.commands.Fail):
+            self.edit(branch="no-such-branch")
+        self.store.data["tasks"].append({"id": 2, "title": "Other", "state": "running", "branch": "fix", "agents": []})
+        with self.assertRaises(self.commands.Fail) as e:
+            self.edit(branch="fix")
+        self.assertIn('"Other"', str(e.exception))
+        self.assertEqual(self.task["mode"], "here")
+
+    def test_edit_branch_refused_once_ready(self):
+        self.task["state"] = "ready"
+        with self.assertRaises(self.commands.Fail):
+            self.edit(branch="fix")
+
+    def test_add_warns_when_the_folder_is_on_another_branch(self):
+        warn = self.commands.shared_branch_warning(self.store, self.task)
+        self.assertIn("is on unrelated, not main", warn)
+        self.assertIsNone(self.commands.shared_branch_warning(self.store, {**self.task, "mode": "worktree"}))
+        self.git(self.main, "switch", "-q", "main")
+        self.assertIsNone(self.commands.shared_branch_warning(self.store, self.task))
+
+
 class GitNeverAsksForAPassword(unittest.TestCase):
     """#1260: herdr-task's fetch or push to an HTTPS remote with no credential helper waited hours for a username
     on the terminal, and every herdr-task call for that folder hung. It fails at once and says why instead."""

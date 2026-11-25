@@ -823,10 +823,13 @@ def branch_taken(s, t, name):
 def set_branch(s, t, name):
     """--branch: the task's exact branch name (#570), e.g. a ticket's ABC-2137, instead of its
     folder's pattern. Checked as git does, and refused when that branch exists already (here, on
-    the remote, or another task's): never a silent suffix. "" goes back to the pattern."""
+    the remote, or another task's): never a silent suffix. "" goes back to the pattern. #1443: once the task has
+    started, an existing branch its work is on is adopted (adopt_branch)."""
     if name is None:
         return
     name = name.strip()
+    if name and t.get("state") not in ("todo", "scheduled", "queued", None):
+        return adopt_branch(s, t, name)
     if t.get("worktree"):
         if name == t.get("branch"):
             return
@@ -959,20 +962,88 @@ def fence_node(root):
         pass
 
 
+def worktree_list(main):
+    """Every worktree git has registered for the repo at main, the main checkout first: [{path, head, branch}]
+    (branch None when detached); prunable ones (their folder gone) left out."""
+    ok, out, _ = git(main, "worktree", "list", "--porcelain")
+    trees = []
+    for block in out.split("\n\n") if ok else []:
+        rows = dict((ln.split(" ", 1) + [""])[:2] for ln in block.splitlines() if ln.strip())
+        if rows.get("worktree") and "prunable" not in rows and "bare" not in rows:
+            ref = rows.get("branch") or ""
+            trees.append({"path": rows["worktree"], "head": rows.get("HEAD"),
+                          "branch": ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else None})
+    return trees
+
+
 def registered_worktree(main, path):
     """The worktree git has registered at path for the repo at main ({path, head, branch}: branch
     None when detached), when its folder is there; else None."""
     if not os.path.isdir(path):
         return None
-    ok, out, _ = git(main, "worktree", "list", "--porcelain")
     want = os.path.realpath(path)
-    for block in out.split("\n\n") if ok else []:
-        rows = dict((ln.split(" ", 1) + [""])[:2] for ln in block.splitlines() if ln.strip())
-        if rows.get("worktree") and os.path.realpath(rows["worktree"]) == want and "prunable" not in rows:
-            ref = rows.get("branch") or ""
-            return {"path": path, "head": rows.get("HEAD"),
-                    "branch": ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else None}
+    for w in worktree_list(main):
+        if os.path.realpath(w["path"]) == want:
+            return {**w, "path": path}
     return None
+
+
+def checked_out(main, branch):
+    """#1443: the worktree (main checkout included) where branch is checked out, else None."""
+    return next((w for w in worktree_list(main) if branch and w["branch"] == branch), None)
+
+
+def default_branch(main):
+    """The repo's main line: its remote's HEAD (origin/HEAD), else a local main or master; None when unknown."""
+    remote = remote_of(main)
+    ok, ref, _ = git(main, "symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD")
+    if ok and ref.startswith(remote + "/"):
+        return ref[len(remote) + 1:]
+    for b in ("main", "master"):
+        if git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{b}")[0]:
+            return b
+    return None
+
+
+def adopt_branch(s, t, name):
+    """#1443: a started task pointed at an existing branch, the one its work is really on (a worker that made its own
+    worktree and branch, its task added to work in a shared folder on another branch). It becomes a worktree task on
+    that branch: in the worktree the branch is checked out in, else a new one; reviewed and ready then check that
+    branch, and ready pushes it and opens its pull request. Its earlier worktree, if any, is left as it is."""
+    if t["state"] in ("ready", "done"):
+        raise Fail(f"{s.name(t)} is {'in Ready' if t['state'] == 'ready' else 'done'}: its branch can change only while "
+                   "it is worked on.")
+    if s.loc["kind"] != "repo":
+        raise Fail("Worktrees need a git repo.")
+    main = s.loc["folder"]
+    if t.get("mode") == "worktree" and name == t.get("branch") and t.get("worktree") and os.path.isdir(t["worktree"]):
+        return
+    problem = branch_problem(main, name)
+    if problem:
+        raise Fail(problem)
+    for o in s.data.get("tasks") or []:
+        if o is not t and o.get("branch") == name and o.get("state") != "done":
+            raise Fail(f"Branch {name}: the task {s.name(o)} already uses it.")
+    if not git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{name}")[0]:
+        try:
+            base_ref(main, name)  # only on the remote: fetched, with a local branch made to track it
+        except Fail:
+            raise Fail(f"{s.name(t)} has started, so --branch takes the existing branch its work is on, and there is no "
+                       f"branch {name} here or on {remote_of(main)}. Check its name with git branch -a.")
+    tree = checked_out(main, name)
+    if tree and os.path.realpath(tree["path"]) == os.path.realpath(main):
+        raise Fail(f"{name} is checked out in {main} itself, the folder the task list belongs to: a task can't own that "
+                   f"checkout. Switch the folder to another branch (or make a worktree for {name}), then try again.")
+    base = t.get("base") or default_branch(main) or current_base(main)
+    t.update(mode="worktree", branch=name, base=base)
+    t.pop("folder_start", None)
+    if tree:
+        t["worktree"] = tree["path"]
+    else:
+        t.pop("worktree", None)
+        folder_for(s, t)  # its branch exists: a worktree on it
+    t["start"] = git(main, "merge-base", base, name)[1] or t.get("start") or git(main, "rev-parse", name)[1]
+    s.dirty = True
 
 
 # ---- Before the agent starts (#1197, SHEP-272) -------------------------------------------------

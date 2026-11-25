@@ -240,7 +240,8 @@ def main():
         c.add_argument("--base", help="the branch its worktree branches from and merges into (default: its space's Base branch "
                                       "setting, else the folder's current branch)")
         c.add_argument("--branch", help="its branch's exact name, e.g. a ticket's ABC-2137 (default: the folder's Branch names "
-                                        "setting, else task/<n>-<title words>); refused when that branch exists already (\"\": the pattern's)")
+                                        "setting, else task/<n>-<title words>); refused when that branch exists already (\"\": the pattern's). "
+                                        "Once started, edit takes the existing branch its work is on (in the worktree it's checked out in)")
         c.add_argument("--pr", help="take a pull request already open, by its number (#1155): its review, checks and Accept go there "
                                 "instead of a new one, and ready pushes to its branch (\"\" lets go)")
 
@@ -320,7 +321,8 @@ def main():
     c = cmd("reviewed", cmd_reviewed, "a task's agent records one review round of its current commit (Review: on): ready then "
                                       "accepts that commit; uses one of its Review rounds")
     c.add_argument("--report", help="the round's findings in a line (levels, what was fixed)")
-    c.add_argument("--commit", help="the commit the round reviewed, when fixes were committed since (default: HEAD)")
+    c.add_argument("--commit", help="the commit the round reviewed, when fixes were committed since (default: the newest commit of "
+                                         "the task's branch, wherever it is checked out)")
     cmd("review-more", cmd_review_more, "the Assistant gives a task one more review round, once all are used (never its own agent)")
     c = cmd("status", cmd_status, "a task's agent says what it's doing now, at the start, each natural step and at least every 5 minutes: status 4 \"Fixing the two failing tests\" --done 40 --left 5m")
     c.add_argument("text", help=f"what it is doing, at most {ROW_MAX} characters to show uncut on a phone, a few plain words "
