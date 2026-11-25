@@ -54,10 +54,17 @@ def detail(k):
     return hc_json("get", k["address"]) or k
 
 
+def prog_name(name):
+    """A foreground program's own name: its path's last part, and Nix's makeWrapper's ".claude-wrapped" as "claude"
+    (#1410). The same as core/send.js progName()."""
+    base = os.path.basename(str(name or ""))
+    return base[1:-len("-wrapped")] if base.startswith(".") and base.endswith("-wrapped") and len(base) > 9 else base
+
+
 def agent_running(k):
     fg = k.get("foreground") or {}
     if fg.get("name"):
-        if os.path.basename(fg["name"]) not in SHELLS:
+        if prog_name(fg["name"]) not in SHELLS:
             return True
         # fish keeps the agent its child, in its own process group (#780): the terminal's foreground
         # stays the shell running its launch command (fish -ic "claude …; exec fish -i") the whole
@@ -78,7 +85,7 @@ def front(k):
     if not k or k.get("state") != "live":
         return "gone"
     fg = k.get("foreground") or {}
-    name = os.path.basename(str(fg.get("name") or ""))
+    name = prog_name(fg.get("name"))
     if not name:
         # not told (an older hc's record): hc ls's own word for its program, else as before (core/send.js: null)
         return "shell" if os.path.basename(str(k.get("agent") or "")) in SHELLS else "agent"

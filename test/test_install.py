@@ -77,6 +77,36 @@ def assert_notices(t, root, names):
 DATA_PLACES = (".config/shepherdr/", ".local/share/shepherdr/", ".local/state/shepherdr/", ".cache/shepherdr/", ".herdr/")
 
 
+class HelperOutput(unittest.TestCase):
+    """#1429: a helper's output that isn't UTF-8 (agent-desktop's first download wrote a 0x80 byte) never stops the
+    install: herdr-desktop's and herdr-browser's --install and --status are read with what can't be decoded replaced."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="shepherdr-bytes-")
+        os.makedirs(os.path.join(self.root, SHARE, "bin"))
+        for name, ready in (("herdr-desktop", "agent-desktop is ready"), ("herdr-browser", "agent-browser is ready")):
+            with open(os.path.join(self.root, SHARE, "bin", name), "w") as f:
+                f.write(f"printf 'odd \\200 byte\\n' >&2\necho '{name}: {ready}'\n")
+        self.sh = installer()
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def test_odd_bytes_from_a_helper(self):
+        r = self.sh.Run(self.root, False)
+        said = io.StringIO()
+        with contextlib.redirect_stdout(said), mock.patch.object(self.sh, "browser_env", lambda root: dict(os.environ)):
+            self.sh.ensure_agent_desktop(r, True)
+            self.sh.ensure_agent_browser(r, True)
+            desktop = self.sh.agent_desktop_state(self.root, True)
+            browser = self.sh.agent_browser_state(self.root)
+        self.assertIn("agent-desktop is ready", said.getvalue())
+        self.assertIn("agent-browser is ready", said.getvalue())
+        self.assertIn("odd \ufffd byte", " ".join(r.notes))
+        self.assertIsInstance(desktop, list)
+        self.assertTrue(browser is None or isinstance(browser, str))
+
+
 class Install(unittest.TestCase):
     """One kind of install (3.2): everything under .local/share/shepherdr, helper links in .local/bin, the role
     instructions, the agents' hooks; in a Herdr app, only the Open Shepherdr button and its one key."""
@@ -131,11 +161,14 @@ class Install(unittest.TestCase):
         # Codex's approvals come to the chat's card too (SHEP-91)
         codex = json.load(open(self.p(".codex/hooks.json")))
         self.assertIn("/hooks/ask-hook.sh", json.dumps(codex["hooks"]["PermissionRequest"]))
-        # Helpers changed: the sync to other machines is held until doctor passes.
-        self.assertTrue(os.path.exists(self.p(".herdr/sync-hold")))
+        # Helpers changed: the sync to other machines was held while they moved, and a whole install lets it go at
+        # its end, doctor or not (#1419)
+        self.assertNotIn("is held until", out)
+        self.assertIn("the install is whole: the sync to other machines may go again", out)
+        self.assertFalse(os.path.exists(self.p(".herdr/sync-hold")))
+        self.assertIs(rec["whole"], True)
         d = run("doctor", "--root", self.root)
         self.assertIn("whole", d.stdout)
-        self.assertFalse(os.path.exists(self.p(".herdr/sync-hold")))
 
         # Again: nothing changes, no hold, no second hook.
         again = run("install", "--root", self.root, "--yes").stdout
@@ -409,6 +442,21 @@ class Install(unittest.TestCase):
         finally:
             shutil.rmtree(src, ignore_errors=True)
 
+    def test_the_installed_copy_uninstalls_to_its_end(self):
+        """#1430: the installed shepherdr removes its own herdr_task, then still needs layout.py (the sync hold's and
+        the data folders' paths): uninstall finishes and takes away everything it lists."""
+        run("install", "--root", self.root, "--yes")
+        with open(self.p(".herdr/sync-hold"), "w") as f:
+            f.write("held\n")
+        own = self.p(SHARE, "bin", "shepherdr")
+        p = subprocess.run([sys.executable, own, "uninstall", "--root", self.root], capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("Shepherdr uninstalled", p.stdout)
+        self.assertFalse(os.path.exists(self.p(".herdr/sync-hold")))
+        self.assertFalse(os.path.exists(self.p(RECORD)))
+        self.assertFalse(os.path.exists(self.p(SHARE, "mods")), "its emptied folders go too")
+
     def test_update_says_loudly_when_the_install_is_not_whole(self):
         """An update that goes in but leaves doctor failing says so at its end, with the ✗ lines and no 'done' (#905):
         here a helper whose SHEP block isn't layout.py's."""
@@ -428,6 +476,7 @@ class Install(unittest.TestCase):
             self.assertNotIn("  done. Next:", up)
             self.assertIn("has no SHEP block", run("doctor", "--root", self.root, ok=False).stdout)
             self.assertTrue(os.path.exists(self.p(".herdr/sync-hold")), "the sync stays held")
+            self.assertIs(json.load(open(self.p(SHARE, "installed.json")))["whole"], False)
             # the fixed release goes in over it, and doctor passes
             up = run("update", "--root", self.root, "--yes", "--source", ROOT).stdout
             self.assertIn("  done. Next:", up)

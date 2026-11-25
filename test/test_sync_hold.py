@@ -4,6 +4,7 @@ run a command there, and `herdr-secret install --on`. Every hc call is swapped f
 nothing reaches a machine and nothing runs with another HOME."""
 import home_guard  # noqa: F401  (first: every test on a throwaway home, never the real one)
 import importlib.machinery
+import json
 import importlib.util
 import os
 import shutil
@@ -87,6 +88,29 @@ class Hold(unittest.TestCase):
             else:
                 self.assertEqual(len(calls.writes()), 1)
                 self.assertEqual(len(secrets), 1)
+
+    def test_a_hold_whose_install_finished_goes(self):
+        """#1419: an install that got to its end whole left its hold (older installers wanted `shepherdr doctor`):
+        herdr-task takes it away; one whose install isn't done, or isn't whole, stays."""
+        share = os.path.join(self.dir, "share")
+        os.makedirs(share)
+
+        def record(**rec):
+            with open(os.path.join(share, "installed.json"), "w") as f:
+                json.dump(rec, f)
+
+        line = "held by shepherdr 3.2.18 install at 20261125-101500: run `shepherdr doctor`"
+        with mock.patch.object(base, "SHARE", share):
+            for rec, held in (({}, True), ({"at": "20261124-090000"}, True), ({"at": "20261125-101500", "whole": False}, True),
+                              ({"at": "20261125-101500"}, False), ({"at": "20261125-101500", "whole": True}, False)):
+                with open(self.hold, "w") as f:
+                    f.write(line + "\n")
+                record(**rec)
+                self.assertEqual(base.sync_held(), line if held else None, rec)
+                self.assertEqual(os.path.exists(self.hold), held, rec)
+            os.remove(os.path.join(share, "installed.json"))
+            self.held()
+            self.assertTrue(base.sync_held(), "no record: still held")
 
     def test_herdr_task_missing_there_while_held(self):
         self.held()

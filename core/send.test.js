@@ -353,6 +353,11 @@ test("inFront: a plain shell, a shell running the agent, the agent, another prog
   expect(inFront(live({ name: "claude", argv: ["claude"] }, { "herdr.agent": "claude" }))).toBe("agent");
   expect(inFront(live({ name: "node", argv: ["node", "codex"] }, { "herdr.agent": "codex" }))).toBe("agent");
   expect(inFront(live({ name: "vim", argv: ["vim"] }, { "herdr.agent": "claude" }))).toBe("other");
+  // #1410: Nix's makeWrapper runs the real program as .<name>-wrapped
+  expect(inFront(live({ name: ".claude-wrapped" }, { "herdr.agent": "claude" }))).toBe("agent");
+  expect(inFront(live({ name: "/nix/store/x/bin/.codex-wrapped" }, { "herdr.agent": "codex" }))).toBe("agent");
+  expect(inFront(live({ name: ".vim-wrapped" }, { "herdr.agent": "claude" }))).toBe("other");
+  expect(inFront(live({ name: ".zsh-wrapped", argv: ["zsh"] }))).toBe("shell");
   expect(inFront({ state: "finished" })).toBe("gone");
   expect(inFront(null)).toBe("gone");
   expect(inFront({ state: "live" })).toBeNull();

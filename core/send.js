@@ -16,6 +16,10 @@ import { excerpt } from "./chat-log.js";
 export const SHELL = /^(ba|z|fi|da|k|tc|c)?sh$|^nu$|^pwsh$|^powershell$|^xonsh$|^elvish$/;
 const RUNTIMES = new Set(["node", "bun", "deno"]); // a CLI run as a script shows its runtime's name
 
+/** A foreground program's own name: its path's last part, and Nix's makeWrapper's ".claude-wrapped" as "claude"
+ *  (#1410). The same as herdr-task's agents.prog_name() and core/agents.js liveTaskAgent's. */
+export const progName = (name) => String(name ?? "").split("/").pop().replace(/^\.(.+)-wrapped$/, "$1");
+
 /** A shell's argv that runs a command (-c, -ic, -lic, --command), not a plain shell (herdr-task's runs_command()). */
 export function runsCommand(argv) {
   if (!Array.isArray(argv)) return true; // unknown: as before, its status decides
@@ -32,7 +36,7 @@ export function runsCommand(argv) {
 export function inFront(k) {
   if (!k || k.state !== "live") return "gone";
   const fg = k.foreground;
-  const name = String(fg?.name ?? "").split("/").pop();
+  const name = progName(fg?.name);
   if (!name) return null;
   if (SHELL.test(name)) return runsCommand(fg?.argv) ? "agent" : "shell";
   const kind = k.labels?.["herdr.agent"];

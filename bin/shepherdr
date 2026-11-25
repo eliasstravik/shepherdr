@@ -41,7 +41,7 @@ Shepherdr's own folder is replaced whole on update. Never overwritten: a role in
 goes beside it as <file>.new), a key you set, a file by the button's name that isn't ours (--adopt takes it over).
 What it replaces of yours goes to .local/share/shepherdr/.shepherdr-backup/<time>/ first. While it replaces a helper
 or template, a sync hold (sync-hold in Shepherdr's state folder, and .herdr/sync-hold for older helpers) keeps
-herdr-task from sending them to other machines until `shepherdr doctor` finds the install whole.
+herdr-task from sending them to other machines until the install finds itself whole at its end (else `shepherdr doctor`).
 
 From 3.1 (the Herdr-window layout and its mods): one switch. The update waits while tasks are working (it says which;
 --force switches anyway), then takes out what 3.1 put in the Herdr app (its mods, layout, lib/, core/, bin/, keys and
@@ -163,8 +163,23 @@ def service_file(root, name):
     return os.path.join(where_for(root).path("service"), name)
 
 
+HELD_NOTE = "the sync to other machines is held until `shepherdr doctor` finds the install whole"
+
+
 def hold_paths(root):
     return [os.path.join(root, HOLD), os.path.join(where_for(root).roots["state"], "sync-hold")]
+
+
+def release_hold(root):
+    """Takes the sync hold away: True when there was one."""
+    held = False
+    for p in hold_paths(root):
+        try:
+            os.remove(p)
+            held = True
+        except FileNotFoundError:
+            pass
+    return held
 
 
 def move_data(r, a, home):
@@ -1301,9 +1316,9 @@ def ensure_agent_browser(r, home):
     if r.dry:
         say("  agent-browser: would make sure it's here (herdr-browser --install)")
         return
-    try:
-        p = subprocess.run(["sh", hb, "--install"], capture_output=True, text=True, env=browser_env(r.root),
-                           stdin=subprocess.DEVNULL, timeout=1200)
+    try:   # what can't be decoded is replaced: a helper's odd byte never stops the install (#1429)
+        p = subprocess.run(["sh", hb, "--install"], capture_output=True, text=True, errors="replace",
+                           env=browser_env(r.root), stdin=subprocess.DEVNULL, timeout=1200)
         out = (p.stdout.strip() or p.stderr.strip()).splitlines()
         line = out[-1] if out else ""
         ok = p.returncode == 0
@@ -1339,9 +1354,9 @@ def ensure_agent_desktop(r, home):
     if r.dry:
         say("  agent-desktop: would make sure it's here (herdr-desktop --install)")
         return
-    try:
-        p = subprocess.run(["sh", hd, "--install"], capture_output=True, text=True, env=browser_env(r.root),
-                           stdin=subprocess.DEVNULL, timeout=900)
+    try:   # what can't be decoded is replaced: a helper's odd byte never stops the install (#1429)
+        p = subprocess.run(["sh", hd, "--install"], capture_output=True, text=True, errors="replace",
+                           env=browser_env(r.root), stdin=subprocess.DEVNULL, timeout=900)
         ok = p.returncode == 0
         out = [x.replace("herdr-desktop: ", "", 1) for x in (p.stdout + "\n" + p.stderr).splitlines()
                if x.strip() and not x.startswith(("herdr-desktop: installing", "herdr-desktop: downloading"))]
@@ -1376,8 +1391,8 @@ def agent_desktop_state(root, root_is_home):
     if not hd or browser_off(root):
         return []
     try:
-        p = subprocess.run(["sh", hd, "--status"], capture_output=True, text=True, env=browser_env(root),
-                           stdin=subprocess.DEVNULL, timeout=60)
+        p = subprocess.run(["sh", hd, "--status"], capture_output=True, text=True, errors="replace",
+                           env=browser_env(root), stdin=subprocess.DEVNULL, timeout=60)
         st = json.loads(p.stdout)
     except (OSError, ValueError, subprocess.SubprocessError):
         return ["the agents' desktop: herdr-desktop --status didn't answer"]
@@ -1419,8 +1434,8 @@ def agent_browser_state(root):
     if not hb or browser_off(root):
         return None
     try:
-        p = subprocess.run(["sh", hb, "--status"], capture_output=True, text=True, env=browser_env(root),
-                           stdin=subprocess.DEVNULL, timeout=30)
+        p = subprocess.run(["sh", hb, "--status"], capture_output=True, text=True, errors="replace",
+                           env=browser_env(root), stdin=subprocess.DEVNULL, timeout=30)
         st = json.loads(p.stdout)
     except (OSError, ValueError, subprocess.SubprocessError):
         return "the task browser: herdr-browser --status didn't answer"
@@ -1978,7 +1993,7 @@ def cmd_install(a, update=False):
     if touches_tools and not a.dry_run:
         for p in hold_paths(root):
             atomic_write(p, f"held by shepherdr {VERSION} install at {r.stamp}: run `shepherdr doctor`\n".encode())
-        r.notes.append("the sync to other machines is held until `shepherdr doctor` finds the install whole")
+        r.notes.append(HELD_NOTE)
     # SHEP-295: the running service stops while files move (this is the new installer's side: an older installed
     # copy hands an update over to the source's own bin/shepherdr first, hand_over), and starts again after
     stopped = stop_service(r, home)
@@ -2061,6 +2076,12 @@ def finish_install(a, r, rec, old, src, home, root, actions, old_files, gone, bu
         if old:
             forget_old_record(r)
         whole_bad = install_checks(r, rec)[0]
+        # #1419: a whole install lets the sync go itself (doctor needn't run first); "whole" says so to herdr-task too,
+        # whose sync_held clears a hold this install left (base.sync_held)
+        rec["whole"] = not whole_bad
+        save_record(root, rec)
+        if not whole_bad and release_hold(root):
+            r.notes = [n for n in r.notes if n != HELD_NOTE] + ["the install is whole: the sync to other machines may go again"]
     for n in r.notes + notes:
         say(f"  - {n}")
     if a.dry_run:
@@ -2311,9 +2332,7 @@ def cmd_doctor(a):
         if holds:
             say("  the sync to other machines stays held until these are fixed")
         return 1
-    if holds:
-        for p in holds:
-            os.remove(p)
+    if release_hold(root):
         say("  ✓ whole: the sync to other machines may go again")
     else:
         say("  ✓ whole")
@@ -2364,6 +2383,9 @@ def cmd_uninstall(a):
     if not rec and not old:
         raise Stop(f"Shepherdr isn't installed under {root}")
     r = Run(root, a.dry_run)
+    # #1430: layout.py lives in the herdr_task this removes, and the hold's, the share's and the data folders' paths
+    # come from it after: imported now, while it's still here
+    layout_mod()
     rec = rec or {}
     links = dict(rec.get("links") or {})
     if old:
