@@ -1,5 +1,61 @@
 # Changelog
 
+## 3.2.19
+
+A Night theme in true black, a card to trust a folder and start, Codex's Approve for me, quieter tabs, and many small
+fixes to the chat, the web terminal, tasks and the install.
+
+### Look
+
+- Settings has a fourth theme, Night: a true black page for OLED screens, with the browser's and phone's bars
+  black too. System still picks Light or Dark.
+- The Tasks button sits last in the header, where its pane's Close lands.
+
+### Chat
+
+- Multi-question card answers reach the agent as the options you picked, never as "[object Object]".
+- An agent stopped at Claude Code's or Codex's "trust this folder" screen shows a Needs you card: Trust this folder
+  and start, or No. It is never automatic, and it reaches the phone and the watch.
+- A round button jumps to the newest message when you scroll up, with how many are new; End does it too.
+- An open chat stops showing working as soon as its agent finishes.
+- Wide tables keep readable columns and scroll sideways on a phone.
+- The fade above the message box no longer leaves a band at high zoom or dims the scroll bar.
+- An open task's header shows its live status line under its title, and a waiting Ready card moves below messages
+  said after it.
+
+### Web terminal
+
+- The terminal you type in shows a solid blinking cursor.
+- The key row no longer brings up the phone's keyboard, and stays above it on a foldable.
+- Ctrl+D or `exit` closes your own terminal instead of starting a new shell.
+- Folding or unfolding keeps the open terminal, and a terminal open on two screens keeps one size.
+
+### Tasks
+
+- Codex has a fourth permission, Approve for me: Codex's own review answers its requests, and a risky one is refused
+  with the agent told to ask you.
+- Ready, review state and status lines are no longer lost on a busy machine.
+- A reviewer can read its own instructions, and one that never starts or freezes is caught and tried again.
+- A task stacked on another task's branch moves onto that branch's base once it merges, and a started task's base
+  can be changed.
+- Ready and done work after a merge: after GitHub deleted the branch, after the worktree went, or after a rebase or
+  squash by hand.
+- reviewed and ready find the task's own branch wherever it is checked out.
+- A taken-over Codex task reads its own log, never another folder's, and a schedule set to run "here" refuses a linked
+  worktree instead of running in the main folder.
+
+### Machines
+
+- On a synced machine whose herdr-core pins one socket for every session, task agents' status and ready work again;
+  sync and `shepherdr doctor` say what to fix.
+- Open tabs and machine lists send only changes, and a tab in the background pauses: far less traffic.
+- On macOS 27 the web app lets your tailnet in again (it no longer needs netstat).
+
+### Install and update
+
+- An update lets the sync to other machines go by itself, without a `shepherdr doctor` first.
+- An odd byte from a helper no longer stops the install, and uninstall finishes when run from the installed copy.
+
 ## 3.2.18
 
 A Cmd+K palette and shortcuts for everything, long pastes fold away, `!` commands show in the chat, and the chat
