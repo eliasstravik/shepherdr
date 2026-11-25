@@ -2724,6 +2724,38 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         self.assertNotIn("pr", self.task)
         self.assertNotIn(("pr", "create"), calls)
 
+    # #1486: its agent merged it by hand (the merge steps: rebase, fast-forward, worktree and branch removed), then done:
+    # merged, also after a rebase, a squash, or a plain fast-forward; never when its work isn't in main.
+    def merged_by_hand(self, how):
+        import argparse
+        wt = self.task["worktree"]
+        self.task["head"] = self.change(wt, "reactions on the left")
+        self.commands.own_work(self.store, self.task)  # what ready keeps
+        self.task["state"] = "ready"
+        if how == "rebase":
+            self.commit(self.main, "another task merged meanwhile")
+            self.git(wt, "rebase", "-q", "main")
+        if how == "squash":
+            self.squash_into_main()
+        elif how != "none":
+            self.git(self.main, "merge", "-q", "--ff-only", "task/1")
+        self.git(self.main, "worktree", "remove", wt)
+        self.git(self.main, "branch", "-D", "task/1")
+        self.commands.cmd_state(argparse.Namespace(id="SHEP-1", json=True, folder=None), "done")
+        return self.task["state"], bool(self.task.get("merged")), bool(self.task.get("closed_unmerged"))
+
+    def test_done_after_a_fast_forward_by_hand_is_merged(self):
+        self.assertEqual(self.merged_by_hand("ff"), ("done", True, False))
+
+    def test_done_after_a_rebase_and_fast_forward_by_hand_is_merged(self):
+        self.assertEqual(self.merged_by_hand("rebase"), ("done", True, False))
+
+    def test_done_after_a_squash_by_hand_is_merged(self):
+        self.assertEqual(self.merged_by_hand("squash"), ("done", True, False))
+
+    def test_done_with_its_work_not_in_main_is_not_merged(self):
+        self.assertEqual(self.merged_by_hand("none"), ("done", False, True))
+
     # #1426: a release task reopened after its pull request squash-merged, its worktree and branch removed: ready again is
     # done (never a crash on its missing head); its work not merged and its worktree gone: said plainly.
     def test_ready_after_its_worktree_and_branch_went_is_done(self):

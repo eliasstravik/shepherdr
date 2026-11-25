@@ -21,7 +21,7 @@ from .agents import (
     status_word, STATUSES, SUMMARY_MAX, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
-from .github import (already_merged, checks_missing, collision, collision_reason, collision_words, github_unreachable, pr_for_branch, checks_since, drop_branch, expected_checks, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
+from .github import (already_merged, checks_missing, collision, collision_reason, collision_words, github_unreachable, pr_for_branch, checks_since, drop_branch, expected_checks, finish, gh, github, landed, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
                      merge_checks, pr_pending, pr_problem, pr_view, queue_refusal, remote_of, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
@@ -1210,7 +1210,7 @@ def cmd_state(args, state):
             for k in ("reviews", "review", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "merge_asked", "merge_queued", "closed_unmerged",
                       "quiet", "told", "told_sent"):
                 t.pop(k, None)
-        if state == "done" and (t.get("was_merged") or (t.get("worktree") and merged_here(s, t))):
+        if state == "done" and (t.get("was_merged") or (t.get("worktree") and (merged_here(s, t) or landed(s, t)))):
             # SHEP-423: reopened after it merged (to tag a release, say), then done again: still merged. Squash-merged on
             # GitHub, merged_here can't tell, and it was filed "Done · not merged": a schedule listening for "merged" missed it.
             t["merged"] = True
