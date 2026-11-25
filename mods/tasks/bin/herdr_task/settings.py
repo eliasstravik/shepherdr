@@ -659,6 +659,9 @@ def reviewer_command(who, model=None, effort=None, folder=None):
         # take the prompt after it as a tool.
         # #1269: none of the person's MCP servers either: their tool lists can fill its context before it reads a file.
         a = ["claude", "--permission-mode", "dontAsk", "--tools=" + REVIEW_TOOLS, "--strict-mcp-config"]
+        # #1458: don't-ask mode refuses a Read outside its folder, and its instructions (the brief points it at
+        # templates/reviewer.md) are outside it. As one word, as --tools: --add-dir takes a list too.
+        a += ["--add-dir=" + TEMPLATES]
         a += ["--model", model] if model else []
         a += ["--effort", effort] if effort else []
         # #1131: hc run gives it hc's environment, not the worker's: the worker's own Claude profile, when it has one

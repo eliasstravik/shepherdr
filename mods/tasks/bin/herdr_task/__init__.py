@@ -29,6 +29,8 @@ before it:
                groups): the Assistant told once, fix requests held till it is green again.
   tick         Tick: one pass over the tasks (start queued ones, finish merged ones, note the
                ones whose agent stopped).
+  reviewers    A worker's reviewer that never started, froze or failed: ended, and its worker
+               told why and what next.
   machines     Other machines: the task tools kept in step there (sync), the reach map hop by
                hop, the Assistants on every reachable machine and messages between them.
   automations  Schedules, stored as automations (a saved task added again by a time or an
