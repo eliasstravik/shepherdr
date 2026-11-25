@@ -271,7 +271,8 @@ export const chats: Record<string, Chat> = Object.fromEntries(
     chat(P.notes, [], sonnet),
     chat(P.garden, [a('GARDEN-3 is in progress, about 20 minutes left.'), { id: `m${++n}`, who: 'agent', news: { task: 'vm:GARDEN-4', ref: 'GARDEN-4', mark: 'needs', what: '', text: 'I need an image library to resize the photos.' } }, ask('q-pil', 'Run a command', byPhoto, ['Allow once', 'Decline'], { command: 'pip install pillow' })], gpt),
     chat('SHOP-14/worker', [a('I compared both for the shop. Stripe is already used for your invoices. Adyen gets cheaper above 50k a month but needs two weeks of paperwork.'), ...payQ().map((x, i) => (i ? x : { ...x, suggests: ['Go with Stripe', 'Compare the fees again'] }))], opus),
-    chat('SHOP-12/worker', [a('Search is done. I added an index and cached the top queries.', { suggests: ['Looks good, merge it', 'Show me the diff', 'status?'] })], opus),
+    // said after it handed in (#1475): its Ready card still comes last
+    chat('SHOP-12/worker', [a('Search is done. I added an index and cached the top queries.', { at: NOW - 8 * hour - min }), me('Does it still find misspelled names?', { at: NOW - hour }), a('Yes: the fuzzy match runs before the cache. I added a test for it.', { at: NOW - hour + 2 * min, suggests: ['Looks good, merge it', 'Show me the diff', 'status?'] })], opus),
     chat('BLOG-12/worker', [ask('scr-t42-1', 'Trust this folder?', undefined, ['Trust this folder and start', 'No, stop the task'], { press: true, noNote: true,
       trust: { cli: 'Claude Code', folder: '/Users/sam/dev/blog', waits: "Claude Code won't start in /Users/sam/dev/blog until you trust this folder.", allows: "Trusting it lets the folder's project settings and hooks run." } })], opus),
     chat('BLOG-10/worker', [a('Fixed it straight in the blog folder, as this space is set up.')], opus),

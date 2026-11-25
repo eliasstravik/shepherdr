@@ -34,7 +34,7 @@ import { ReplyPress, repliesHidden, suggestionOf, suggestionsOn } from './sugges
 import { BoxThumb, openPreview, SentThumb, sourcesOf } from './thumbs.tsx'
 import { heldStep, signOf } from './typing.ts'
 import { newsRow, type NewsRow } from './news.ts'
-import { cardsNow, stillLoading, TRIES, wantsEarlier } from './hold.ts'
+import { cardsAfter, cardsNow, stillLoading, TRIES, wantsEarlier } from './hold.ts'
 import { outOfView, setAway, useAway, type Waiting } from './away.ts'
 import { keepAtEnd, rowEdges } from './stick.ts'
 import { OFF_PX, isOffEnd, newSince, onEnd, setOffEnd, toEnd, useOffEnd } from './newest.ts'
@@ -690,7 +690,7 @@ function Messages({ thread }: { thread: Thread }) {
   let lastEnded = ''
   // the app's own cards (a review, a stopped agent), each where it came up among the messages
   // none while its messages are still on their way: never a wall of task rows standing in for the chat (SHEP-445)
-  const cards = cardsNow(registry.chatCards.flatMap((c) => c.cards(snap, thread)), chat, tried).sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity))
+  const cards = cardsAfter(cardsNow(registry.chatCards.flatMap((c) => c.cards(snap, thread)), chat, tried), rows.map((r) => r.msg)).sort((a, b) => (a.at ?? Infinity) - (b.at ?? Infinity))
   // what you sent still shows at once; the rest waits with the cards
   const held = stillLoading(chat, tried)
   const cardsUntil = (at: number) => {

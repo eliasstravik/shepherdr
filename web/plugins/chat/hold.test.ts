@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Chat, Message } from '@shared/types.ts'
-import { cardsNow, ENOUGH, stillLoading, TRIES, wantsEarlier } from './hold.ts'
+import { cardsAfter, cardsNow, ENOUGH, stillLoading, TRIES, wantsEarlier } from './hold.ts'
 
 const msg = (id: string, at: number, more: Partial<Message> = {}): Message => ({ id, who: 'agent', at, text: 'Hi', ...more })
 const news = (id: string, at: number): Message => msg(id, at, { text: undefined, news: { task: 't', ref: 'T-1', mark: 'other', what: 'news', text: 'x' } })
@@ -42,4 +42,19 @@ test('a newest page of task rows only: earlier pages, held as loading until a re
   expect(wantsEarlier(chat([news('n1', 1)], { top: true }), 0)).toBe(false)
   expect(wantsEarlier(rows, TRIES)).toBe(false)
   expect(stillLoading(rows, TRIES)).toBe(false)
+})
+
+// #1475: a Ready card stayed where the task first said ready, above what was said after it
+test('a waiting card goes below the newest later message it follows; a done line and its earlier ones stay', () => {
+  const msgs = [{ at: 100 }, { at: 200, news: { task: 'T-1' } }, { at: 300, news: { task: 'T-2' } }, { at: 400 }] as Message[]
+  const any = () => true
+  expect(cardsAfter([{ key: 'r', at: 150, after: any }], msgs)[0]!.at).toBe(401)
+  // in a space's chat, only its own task's rows
+  expect(cardsAfter([{ key: 'r', at: 150, after: (m) => m.news?.task === 'T-1' }], msgs)[0]!.at).toBe(201)
+  // a row of the same moment (its own "ready" line) keeps the order it had
+  expect(cardsAfter([{ key: 'r', at: 200, after: (m) => m.news?.task === 'T-1' }], msgs)[0]!.at).toBe(200)
+  // a past card (Done) and a card without `after` keep their place
+  expect(cardsAfter([{ key: 'd', at: 150, past: true, after: any }, { key: 's', at: 150 }], msgs).map((c) => c.at)).toEqual([150, 150])
+  // nothing later: unchanged
+  expect(cardsAfter([{ key: 'r', at: 500, after: any }], msgs)[0]!.at).toBe(500)
 })
