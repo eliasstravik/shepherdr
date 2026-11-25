@@ -28,33 +28,34 @@ const hue = (h: string) => {
   return (x * 60 + 360) % 360
 }
 
-// the three theme blocks: light, dark by the device, dark by the app's own switch
-const themes = ds.split('\n').filter((l) => /^(:root\{|@media\(prefers-color-scheme:dark\)|:root\[data-theme="dark"\])/.test(l))
+// the four theme blocks: light, dark by the device, dark by the app's own switch, night (true black, #1505)
+const themes = ds.split('\n').filter((l) => /^(:root\{|@media\(prefers-color-scheme:dark\)|:root\[data-theme="(dark|night)"\])/.test(l))
 const tok = (block: string, name: string) => {
   const h = block.match(new RegExp(`--${name}:(#(?:[0-9a-f]{6}|[0-9a-f]{3}))[;}]`))?.[1]
   return h?.length === 4 ? '#' + [...h.slice(1)].map((c) => c + c).join('') : h
 }
 
-test('every theme names a link blue, and the two dark ones agree', () => {
-  expect(themes).toHaveLength(3)
+test('every theme names a link blue, and the dark ones and night agree', () => {
+  expect(themes).toHaveLength(4)
   for (const t of themes) expect(tok(t, 'link')).toMatch(/^#[0-9a-f]{6}$/)
   expect(tok(themes[1]!, 'link')).toBe(tok(themes[2]!, 'link')!)
+  expect(tok(themes[3]!, 'link')).toBe(tok(themes[2]!, 'link')!)
 })
 
-test('the link blue reads on every bubble and surface it sits on, in both themes (AA and then some: 4.5:1 or more)', () => {
-  const [light, dark] = [themes[0]!, themes[2]!]
+test('the link blue reads on every bubble and surface it sits on, in every theme (AA and then some: 4.5:1 or more)', () => {
+  const [light, dark, night] = [themes[0]!, themes[2]!, themes[3]!]
   const surfaces = (t: string, isDark: boolean) => {
     const canvas = tok(t, 'canvas')!
     // the person's own bubble is see-through white over the canvas in dark, a grey in light
     const mine = isDark ? over(canvas, true, Number(t.match(/--mine:rgb\(255 255 255\/(\.\d+)\)/)![1])) : tok(t, 'mine')!
     return [canvas, tok(t, 'well')!, tok(t, 'raised')!, tok(t, 'overlay')!, tok(t, 'rx')!, mine]
   }
-  for (const [t, isDark] of [[light, false], [dark, true]] as const)
+  for (const [t, isDark] of [[light, false], [dark, true], [night, true]] as const)
     for (const bg of surfaces(t, isDark)) expect(contrast(tok(t, 'link')!, bg)).toBeGreaterThanOrEqual(4.5)
 })
 
 test("the link blue is its own colour: not the app's other blue, nor a status's amber or red", () => {
-  for (const t of [themes[0]!, themes[2]!]) {
+  for (const t of [themes[0]!, themes[2]!, themes[3]!]) {
     const link = tok(t, 'link')!
     expect(link).not.toBe(tok(t, 'blue')!)
     expect(Math.abs(hue(link) - hue(tok(t, 'blue')!))).toBeGreaterThan(15)
@@ -90,4 +91,28 @@ test('artifact pages and the guide give links the same blue', () => {
   }
   expect(contrast(l, '#ffffff')).toBeGreaterThanOrEqual(4.5)
   expect(contrast(d, '#111111')).toBeGreaterThanOrEqual(4.5)
+})
+
+// Night (#1505): true black for OLED, and still layered: each surface steps up from the page so cards, bubbles and
+// menus read apart without shadows, and the words read on every one of them
+test('night: a black page, its layers told apart, and the words read on each', () => {
+  const night = themes[3]!
+  expect(night).toContain('color-scheme:dark')
+  expect(tok(night, 'canvas')).toBe('#000000')
+  const alpha = (n: string) => Number(night.match(new RegExp(`--${n}:rgb\\(255 255 255\\/(\\.\\d+)\\)`))![1])
+  const mine = over('#000000', true, alpha('mine'))
+  const layers = ['#000000', tok(night, 'well')!, tok(night, 'overlay')!, tok(night, 'raised')!, tok(night, 'rx')!, mine]
+  // each a little lighter than the one under it, never the same
+  for (let i = 1; i < layers.length; i++) expect(lum(layers[i]!)).toBeGreaterThan(lum(layers[i - 1]!))
+  // the cards and bubbles lift off the page by more than a hair (1.1:1 or more)
+  for (const l of [tok(night, 'raised')!, tok(night, 'rx')!, mine]) expect(contrast(l, '#000000')).toBeGreaterThan(1.1)
+  // hairlines a little stronger than Dark's, as nothing casts a shadow on black
+  expect(alpha('line')).toBeGreaterThan(Number(themes[2]!.match(/--line:rgb\(255 255 255\/(\.\d+)\)/)![1]))
+  expect(alpha('line2')).toBeGreaterThan(Number(themes[2]!.match(/--line2:rgb\(255 255 255\/(\.\d+)\)/)![1]))
+  // words: the body and the second lines AA on every layer, the grey AA on all but the person's own bubble
+  for (const l of layers) {
+    expect(contrast(tok(night, 'fg')!, l)).toBeGreaterThanOrEqual(7)
+    expect(contrast(tok(night, 'sub')!, l)).toBeGreaterThanOrEqual(4.5)
+    expect(contrast(tok(night, 'muted')!, l)).toBeGreaterThanOrEqual(4.5)
+  }
 })
