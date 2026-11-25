@@ -208,6 +208,7 @@ class Store:
         self.loc, self.write, self.best_effort = loc, bool(write), write == "try"
         self.slug, self.path = store_path(loc["folder"])
         self.dirty = self.read_only = False
+        self.read_as = None   # the list as read or saved last (save() writes when it differs)
         self.wait = wait  # seconds a change waits for the lock before it gives up (None: as long as it takes)
 
     def __enter__(self):
@@ -265,7 +266,13 @@ class Store:
                     n += 1
                 d["prefix"] = base if n == 1 else f"{base}{n}"
                 self.dirty = self.new_prefix = bool(d["tasks"]) or os.path.exists(self.path)
+        self.read_as = self.text() if self.write else None
         return self
+
+    def text(self):
+        # compact (#1175: the panels read every list through one capped exec; indented, a busy list was
+        # a third spaces); ASCII-escaped still, since readers open it in the locale's encoding
+        return json.dumps(self.data, separators=(",", ":"))
 
     def take_lock(self):
         try:
@@ -329,17 +336,19 @@ class Store:
         return changed
 
     def save(self):
-        if self.write and self.lock and self.take_progress():
+        """Writes the list when anything in it changed since it was read or saved, flagged (`dirty`) or not
+        (#1489, #1488: ready's head, set without `dirty`, was dropped when released() read the list again)."""
+        if not self.write:
+            return
+        if self.lock and self.take_progress():
             self.dirty = True
-        if self.write and self.dirty:
+        text = self.text()
+        if self.dirty or text != self.read_as:
             tmp = f"{self.path}.{os.getpid()}.tmp"
             with open(tmp, "w") as f:
-                # compact (#1175: the panels read every list through one capped exec; indented, a busy list was
-                # a third spaces); ASCII-escaped still, since readers open it in the locale's encoding
-                json.dump(self.data, f, separators=(",", ":"))
-                f.write("\n")
+                f.write(text + "\n")
             os.replace(tmp, self.path)
-            self.dirty = False
+            self.dirty, self.read_as = False, text
             # personal analytics (analytics.py): what changed, as ids and timings, on this machine only
             if self.before is not None:
                 analytics.saved(self.before, self.data)
@@ -381,8 +390,10 @@ class Store:
                 self.data.update(fresh)
                 # what others changed meanwhile, they recorded themselves
                 self.before = analytics.snapshot(tasks)
-            # Saved again on the way out: the caller goes on changing its task without saying so.
-            self.dirty = True
+                # what is on disk now: anything the caller changes after this is saved on the way out (save())
+                self.read_as = self.text()
+            else:
+                self.dirty = True   # unreadable just now: what this command holds is saved on the way out
 
     def __exit__(self, kind, *_):
         try:

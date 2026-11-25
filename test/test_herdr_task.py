@@ -6998,6 +6998,99 @@ class ReadyMergeGit(unittest.TestCase):
             t = s.find("1")
             self.assertEqual((t["pr"]["number"], t["progress"]["text"]), (7, "said by another command"))
 
+    def test_a_change_made_without_dirty_survives_released(self):
+        """#1489: a field set without `dirty` (ready's head) was dropped when released() read the list again."""
+        import herdr_task.store as store
+        self.patch(store, "STORE", os.path.join(self.root, "tasks"))
+        loc = {"folder": self.main, "kind": "repo", "name": "repo", "common": os.path.join(self.main, ".git")}
+        with store.Store(loc) as s:
+            s.data["tasks"] = [dict(self.task, id=1)]
+            s.dirty = True
+        with store.Store(loc) as s:
+            t = s.find("1")
+            t["head"] = "abc"
+            with s.released():
+                pass
+            self.assertEqual(t["head"], "abc")
+            t["summary"] = "after"
+        with store.Store(loc, write=False) as s:
+            self.assertEqual((s.find("1")["head"], s.find("1")["summary"]), ("abc", "after"))
+
+    def ready_on_disk(self, rounds):
+        """A worktree task with review on (`rounds` at first) on a real list on disk, ready's GitHub steps stubbed;
+        its base has a remote, so ready's collision check fetches with the list let go (released())."""
+        import herdr_task.store as store
+        self.patch(store, "STORE", os.path.join(self.root, "tasks"))
+        self.patch(self.commands, "open_store", store.open_store)
+        self.patch(self.commands, "review_limits", lambda s, t: (True, rounds + int(t.get("review_rounds_added") or 0)))
+        self.patch(self.commands, "caller_labels", lambda: {})
+        self.patch(self.commands, "workers", lambda s, t: [])
+        for name in ("base_pr", "pr_words", "refresh_sessions", "watch_main", "update_main"):
+            self.patch(self.commands, name, lambda *a, **k: None)
+        self.patch(self.commands, "finalize", lambda s, t: (t.update(state="ready"), setattr(s, "dirty", True), "ready")[2])
+        self.patch(self.commands, "already_merged", lambda s, t: None)
+        self.patch(self.commands, "find_proof", lambda s, t, proof: None)
+        self.remote()
+        self.git(self.main, "push", "-q", "origin", "main")
+        loc = {"folder": self.main, "kind": "repo", "name": "repo", "common": os.path.join(self.main, ".git")}
+        with store.Store(loc) as s:
+            s.data["tasks"] = [dict(self.task, id=1, review_gate=True)]
+            s.dirty = True
+            prefix = s.prefix
+        return loc, f"{prefix}-1"
+
+    def ready_args(self, ref, **kw):
+        return self.args(id=ref, folder=self.main, summary="Done.", details=None, proof=None, agents_md=None, pr=None,
+                         nothing=False, told=None, **kw)
+
+    def reviewed_args(self, ref, commit):
+        return self.args(id=ref, folder=self.main, report="no findings", commit=commit)
+
+    def test_ready_keeps_its_head_and_takes_two_rounds_on_one_commit(self):
+        """#1488, #1489: ready set the task's head, its fetch let the list go and read it again, and the head was lost:
+        two rounds recorded on HEAD were refused ("isn't reviewed"), and a task taken back to work by a chat message
+        never came back to Ready (settle_back() needs that head)."""
+        import herdr_task.store as store
+        loc, ref = self.ready_on_disk(rounds=1)
+        wt = self.task["worktree"]
+        a = self.commit(wt, "work", "a.txt")
+        self.commands.cmd_reviewed(self.reviewed_args(ref, a))
+        b = self.commit(wt, "fix round 1's majors", "a.txt")
+        import herdr_task.github as github
+
+        def tick():   # the tick saw the branch's newest commit first: ready's own_work flags nothing
+            with store.Store(loc) as s:
+                github.own_work(s, s.find(ref))
+        tick()
+        with self.assertRaises(self.commands.Fail):
+            self.commands.cmd_ready(self.ready_args(ref))   # its fix isn't reviewed, rounds used
+        self.commands.cmd_review_more(self.args(id=ref, folder=self.main))
+        self.assertIn("may now use 2 review rounds (was 1, 1 used)", self.said[-1])
+        self.commands.cmd_reviewed(self.reviewed_args(ref, b))
+        self.commands.cmd_review_more(self.args(id=ref, folder=self.main))
+        self.commands.cmd_reviewed(self.reviewed_args(ref, b))  # a third round, on the same commit
+        tick()
+        self.commands.cmd_ready(self.ready_args(ref))
+        with store.Store(loc, write=False) as s:
+            t = s.find(ref)
+            self.assertEqual((t["state"], t["head"]), ("ready", b))
+            self.assertEqual([r["head"] for r in t["reviews"]], [a, b, b])
+            self.assertEqual(t["review_rounds_added"], 2)
+
+    def test_review_more_says_when_the_round_did_not_stick(self):
+        """#1494: review-more said nothing while the round wasn't there after; now it reads the list back."""
+        import herdr_task.store as store
+        loc, ref = self.ready_on_disk(rounds=1)
+        self.commands.cmd_reviewed(self.reviewed_args(ref, self.commit(self.task["worktree"], "work", "a.txt")))
+        real = store.Store.save
+        self.patch(store.Store, "save", lambda s: None)
+        with self.assertRaises(self.commands.Fail) as e:
+            self.commands.cmd_review_more(self.args(id=ref, folder=self.main))
+        self.assertIn("still has 1 review rounds after adding one", str(e.exception))
+        self.patch(store.Store, "save", real)
+        self.commands.cmd_review_more(self.args(id=ref, folder=self.main))
+        self.assertIn("(was 1, 1 used)", self.said[-1])
+
     def test_a_second_ready_updates_the_pull_request_description(self):
         """#1004: the open pull request Herdr opened gets this ready's details; one a person wrote is left alone."""
         import herdr_task.github as github
@@ -8820,9 +8913,10 @@ class ReadyAndPrFlow(unittest.TestCase):
         import herdr_task.news as news
         self.task["reviews"] = [{"round": 1, "result": "report", "at": 2, "head": "abc"}]
         self.patch(self.commands, "caller_labels", lambda: {})
-        self.patch(self.commands, "review_limits", lambda s, t: (True, 1))
+        self.patch(self.commands, "review_limits", lambda s, t: (True, 1 + int(t.get("review_rounds_added") or 0)))
         self.patch(self.commands, "workers", lambda s, t: [{"address": "t9"}])
         for r, word in (("held", "held"), ("sent", "told t9"), (None, "couldn't send it")):
+            self.task.pop("review_rounds_added", None)
             self.patch(news, "send_or_hold", lambda address, text, how="send", r=r: r)
             self.said.clear()
             self.commands.cmd_review_more(self.args())
