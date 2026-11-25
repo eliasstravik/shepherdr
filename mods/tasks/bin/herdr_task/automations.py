@@ -13,7 +13,7 @@ import threading
 import time
 
 from . import analytics
-from .base import ENTRY, Fail, guard, hc_json, layout, now, plugin_off, STORE, WHERE
+from .base import ENTRY, Fail, git, guard, hc_json, layout, now, plugin_off, STORE, WHERE
 from .when import parse_at
 from .settings import bare, set_task, settings_for, SET_KEYS, worker_argv, worktrees_on
 from .agents import agent_running, live_agents, starting, status_of, task_status
@@ -351,7 +351,22 @@ def auto_line(v):
     err = (f"  ! {v['last_error']['message']}" if v.get("last_error") else
            f"  ~ {v['from_error']['message']} ({v['from_error']['misses']} round(s) so far)" if v.get("from_error") else "")
     heard = f"; {v['heard_words']}" if v.get("heard_words") else ""
-    return f"{v['title']}  ({v['trigger']}; {state}{heard}{'; may update Shepherdr' if v.get('may_update') else ''}){err}  [key {v['ref']}]"
+    here = f"; runs in {v['folder']}" if v.get("mode") == "here" and v.get("folder") else ""
+    return f"{v['title']}  ({v['trigger']}; {state}{here}{heard}{'; may update Shepherdr' if v.get('may_update') else ''}){err}  [key {v['ref']}]"
+
+
+def linked_worktree(s, args):
+    """#1446: the folder this command names (--folder, else the current one) when it is a linked worktree of
+    the repo whose list it works on, else None. A repo's schedules live in its one list and run in its main
+    folder, so --here from a linked worktree would quietly run somewhere else."""
+    if s.loc["kind"] != "repo":
+        return None
+    path = os.path.realpath(os.path.expanduser(getattr(args, "folder", None) or os.getcwd()))
+    ok, out, _ = git(path, "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel")
+    lines = out.split("\n") if ok else []
+    if len(lines) != 2 or os.path.realpath(lines[0]) != os.path.realpath(s.loc.get("common") or ""):
+        return None
+    return lines[1] if os.path.realpath(lines[1]) != os.path.realpath(s.loc["folder"]) else None
 
 
 def set_auto_fields(s, a, args, adding=False):
@@ -389,6 +404,11 @@ def set_auto_fields(s, a, args, adding=False):
     if args.here or args.worktree:
         if args.worktree and s.loc["kind"] != "repo":
             raise Fail("Worktrees need a git repo.")
+        linked = args.here and linked_worktree(s, args)
+        if linked:
+            raise Fail(f"{linked} is a linked worktree of {s.loc['folder']}, and a repo keeps one list of schedules, so "
+                       f"--here would run in {s.loc['folder']}, not {linked}. Nothing was changed. Without --here each run gets "
+                       "a worktree of its own; for a folder with settings of its own, use a separate clone.")
         a["mode"] = "here" if args.here else "worktree"
     if args.space:
         a["space"] = bare(args.space)

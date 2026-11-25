@@ -6477,6 +6477,34 @@ class TaskFlow(unittest.TestCase):
         t = automations.fire(self.store, a, "every")
         self.assertEqual(t["set"], {"review": "off"})
 
+    def test_an_automation_refuses_here_from_a_linked_worktree(self):
+        """#1446: a repo's schedules run in its main folder, so --here naming a linked worktree is refused
+        instead of quietly running in the main checkout; auto show says where a --here schedule runs."""
+        import argparse
+        from herdr_task import automations, base
+        wt = self.task["worktree"]
+        self.store.loc.update(kind="repo", common=self.git(self.main, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+        none = dict(title=None, prompt=None, prompt_file=None, every=None, on="ready", match=None, from_=None, agent=None,
+                    space=None, parent=None, set=None)
+        a = {"id": 1, "title": "Job", "prompt": "Sweep", "mode": "worktree"}
+        with self.assertRaises(base.Fail) as e:
+            automations.set_auto_fields(self.store, a, argparse.Namespace(**none, folder=wt, here=True, worktree=False))
+        self.assertIn("linked worktree", str(e.exception))
+        self.assertEqual(a["mode"], "worktree")  # nothing changed
+        here = os.getcwd()
+        os.chdir(wt)  # the same from inside it, with no --folder
+        self.addCleanup(os.chdir, here)
+        with self.assertRaises(base.Fail):
+            automations.set_auto_fields(self.store, a, argparse.Namespace(**none, folder=None, here=True, worktree=False))
+        # a worktree of its own per run from there is fine, and --here from the main folder
+        automations.set_auto_fields(self.store, a, argparse.Namespace(**none, folder=wt, here=False, worktree=True))
+        self.assertEqual(a["mode"], "worktree")
+        automations.set_auto_fields(self.store, a, argparse.Namespace(**none, folder=self.main, here=True, worktree=False))
+        self.assertEqual(a["mode"], "here")
+        v = {"title": "Job", "trigger": "daily 09:47", "paused": False, "enabled": True, "ref": "SHEP-A1", "mode": "here", "folder": self.main}
+        self.assertIn(f"runs in {self.main}", automations.auto_line(v))
+        self.assertNotIn("runs in", automations.auto_line({**v, "mode": "worktree"}))
+
     def test_a_folder_task_that_changed_nothing_needs_no_review(self):
         """#744: a task in the folder itself, still on the commit it started at with nothing changed: nothing to review."""
         self.settings({"everywhere": {"tasks": {"review_rounds": 3}}})
