@@ -1,6 +1,7 @@
 // The view model every source (live herdr, demo) fills and the screen draws.
 // Plain JSON both ways: the server sends a Snapshot and chat contents; the client sends Actions.
 import type { BrowserNote } from './browser.ts'
+import type { ChatPatch, SnapPatch } from './patch.ts'
 
 /** Status marks: red needs you, green ready, green turning ring merging, amber working, grey ring idle or to do, grey
  * clock queued, grey check done, dashed ring unreachable. */
@@ -1428,6 +1429,11 @@ export interface TermScreen {
 export type ServerEvent =
   | { type: 'snapshot'; snapshot: Snapshot }
   | { type: 'chat'; chat: Chat }
+  /** what changed since the snapshot and the chat the page has (web/shared/patch.ts, #1468) */
+  | { type: 'patch'; patch: SnapPatch }
+  | ({ type: 'chatp'; key: string } & ChatPatch)
+  /** a page off screen hears only this: how many things need the person (its title and app icon) */
+  | { type: 'needs'; n: number }
   | ({ type: 'terminal'; chat: string } & TermScreen)
   | { type: 'offline'; since: number }
   /** the build of the web app the server serves, and its version: a screen on another build updates (SHEP-337) */

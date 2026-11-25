@@ -17,8 +17,25 @@ import { spawn } from "./spawn.ts";
 import { withLinks } from "./artifact-links.ts";
 export { LINKS_JS, withLinks } from "./artifact-links.ts";
 
-// Every registry on a machine, each followed by a record separator.
-const READ_ARTS = SH + 'cd "$SHEP_ARTIFACTS" 2>/dev/null || exit 0; for f in *.json .*.json; do [ -f "$f" ] && cat "$f" && printf "\\n\\036\\n"; done; true';
+// Every registry on a machine, each followed by a record separator. With python3 there, a first line stamps its
+// registries (each file's name, size and change time), and when that is the stamp given ($1, the last read's) nothing
+// follows: an unchanged machine sends a line, not its whole list, every 15 s (#1468).
+export const STAMP_PY = `import os, sys
+names = sorted(n for n in os.listdir(".") if n.endswith(".json") and os.path.isfile(n))
+stamp = "s" + ",".join("%s:%d:%d" % (n, os.stat(n).st_size, os.stat(n).st_mtime_ns) for n in names)
+import hashlib
+stamp = "s" + hashlib.sha1(stamp.encode("utf-8", "replace")).hexdigest()[:16]
+sys.stdout.write(stamp + "\\n")
+sys.exit(3 if stamp == sys.argv[1] else 0)
+`;
+export const READ_ARTS = SH + 'cd "$SHEP_ARTIFACTS" 2>/dev/null || exit 0; if command -v python3 >/dev/null 2>&1; then python3 -c "$1" "$2"; [ $? = 3 ] && exit 0; fi; for f in *.json .*.json; do [ -f "$f" ] && cat "$f" && printf "\\n\\036\\n"; done; true';
+/** READ_ARTS's output: its stamp (none from a machine without python3) and the registries, or same: unchanged */
+export function artsRead(out: string, last: string | null): { stamp: string | null; same: boolean; body: string } {
+  const m = /^(s[0-9a-f]{16})\n/.exec(out);
+  const stamp = m ? m[1]! : null;
+  const body = m ? out.slice(m[0].length) : out;
+  return { stamp, same: !!stamp && stamp === last && !body.trim(), body };
+}
 const MACHINE = /^[\w.-]{1,64}$/;
 const ID = /^\w[\w.-]{0,119}$/;
 
@@ -156,22 +173,31 @@ export class Artifacts {
 
   /** Every connected other machine's artifacts, each marked with its machine and its folder's name there; one out of
    *  reach keeps what it last listed until it is gone from the machines. */
+  /** each other machine's registries' stamp at its last read; the machines being read now (never twice at once) */
+  private stamps = new Map<string, string>();
+  private readingThere = new Set<string>();
   async readThere() {
     const now = this.machines();
-    for (const m of [...this.there.keys()]) if (!now.includes(m)) this.there.delete(m);
+    for (const m of [...this.there.keys()]) if (!now.includes(m)) { this.there.delete(m); this.stamps.delete(m); }
     await Promise.all(now.map(async (m) => {
+      if (this.readingThere.has(m)) return;
+      this.readingThere.add(m);
       try {
-        const r = await this.exec(m, ["sh", "-c", READ_ARTS]);
+        const last = this.there.has(m) ? this.stamps.get(m) ?? null : null;
+        const r = await this.exec(m, ["sh", "-c", READ_ARTS, "sh", STAMP_PY, last ?? "-"]);
         if (r.code !== 0) return;
+        const got = artsRead(r.out.toString("utf8"), last);
+        if (got.same) return;
+        if (got.stamp) this.stamps.set(m, got.stamp); else this.stamps.delete(m);
         const found: Art[] = [];
-        for (const part of r.out.toString("utf8").split("\x1e")) {
+        for (const part of got.body.split("\x1e")) {
           try {
             const reg = JSON.parse(part);
             for (const a of reg.artifacts ?? []) if (a?.id) found.push({ ...a, folder: a.folder ?? reg.folder, folderName: reg.name, machine: m });
           } catch {}
         }
         this.there.set(m, found.sort((a, b) => (b.at ?? 0) - (a.at ?? 0)));
-      } catch {}
+      } catch {} finally { this.readingThere.delete(m); }
     }));
     this.publish();
   }

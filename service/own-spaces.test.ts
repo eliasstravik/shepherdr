@@ -167,7 +167,7 @@ test("the model carries the window's spaces over once per machine, then never re
   expect(doc.spaces).toMatchObject([{ id: "sp1", name: "demo", folder: "/home/someone/dev/demo", machine: null }]);
   expect(doc[IMPORTED]).toEqual([""]);
   // its group still points at it
-  expect(put.spaces.spaces.map((s: any) => [s.id, s.section])).toEqual([["sp1", "g1"]]);
+  expect(m.spaces.map((s: any) => [s.id, s.section])).toEqual([["sp1", "g1"]]);
   // vm connects later: carried over then; this computer's document isn't read again
   machines = [{ name: "vm", state: "connected" }];
   await refresh();
@@ -179,11 +179,11 @@ test("the model carries the window's spaces over once per machine, then never re
   // with another machine, this computer gets its own ~ space beside Everything, unnamed, once (3.2.8)
   expect(doc.spaces.filter((s: any) => s.folder === HOME)).toMatchObject([{ id: "home" }, { id: "tilde", name: "", folder: HOME, machine: null }]);
   expect(doc.spaces.findIndex((s: any) => s.id === "tilde")).toBe(doc.spaces.findIndex((s: any) => s.id === "home") + 1);
-  expect(put.spaces.spaces.map((s: any) => s.id).sort()).toEqual(["home", "sp1", "tilde", "vm/sp1"]);
+  expect(m.spaces.map((s: any) => s.id).sort()).toEqual(["home", "sp1", "tilde", "vm/sp1"]);
   // removed since: it stays removed (the ~ space too)
   doc.spaces = doc.spaces.filter((s: any) => s.machine !== "vm" && s.id !== "tilde");
   await refresh();
-  expect(put.spaces.spaces.map((s: any) => s.id).sort()).toEqual(["home", "sp1"]);
+  expect(m.spaces.map((s: any) => s.id).sort()).toEqual(["home", "sp1"]);
   expect(doc.spaces.filter((s: any) => s.id === "home").length).toBe(1);
   expect(read).toEqual(["here", "vm"]);
   // a home space written another way (a trailing slash) is Everything already: no second one is made (SHEP-296)

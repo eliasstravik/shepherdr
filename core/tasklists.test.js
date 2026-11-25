@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PANEL_WARN, READ_LISTS, READ_PANEL, SLIM_CUT, panelArgs, panelLists } from "./tasklists.js";
+import { PANEL_WARN, READ_CHANGES, READ_LISTS, READ_PANEL, SLIM_CUT, changedLists, changesArgs, panelArgs, panelLists } from "./tasklists.js";
 
 // #1175: the panels read every list through one exec, which Herdr cuts at 8 MiB (and the window's runtime gave up on
 // a 6 MiB string): a busy list of archived tasks with their whole prompts left the Tasks panel empty, saying nothing.
@@ -79,4 +79,51 @@ test("without python3 there, every file whole as before", () => {
 test("a read near what Herdr passes back says so", () => {
   expect(panelLists("x".repeat(PANEL_WARN + 1)).warn).toContain("very big");
   expect(panelLists("").warn).toBe(null);
+});
+
+// #1468: the service read every list whole every 10 s, megabytes over a home connection. It reads only what changed.
+const readChanges = (h, files, path = process.env.PATH) =>
+  Bun.spawnSync(["sh", "-c", READ_CHANGES, ...changesArgs(files)], { env: { HOME: h, PATH: path } }).stdout.toString();
+
+test("the service's read: an unchanged list is one line, a changed one sends only its changed tasks", () => {
+  const { h, dir } = home();
+  writeFileSync(join(dir, "busy.json"), JSON.stringify(busy));
+  writeFileSync(join(dir, ".news.json"), JSON.stringify([1, 2]));
+  const out1 = readChanges(h);
+  const first = changedLists(out1);
+  expect(first.stale).toBe(false);
+  expect(first.lists.map((l) => [l.slug, l.tasks.length])).toEqual([["busy", 300]]);
+  // what the service never uses stays out; what it shows stays whole (the brief's first message)
+  expect(first.lists[0].tasks[0].agents_md).toBeUndefined();
+  expect(first.lists[0].tasks[0].prompt).toBe(prompt);
+  expect(first.lists[0].tasks[0]["#"]).toBeUndefined();
+  const same = readChanges(h, first.files);
+  expect(same.length).toBeLessThan(100);
+  expect(changedLists(same, first.files).lists).toEqual(first.lists);
+  // one task's status changes: that task comes, the other 299 as their hashes
+  const next = { ...busy, tasks: busy.tasks.map((t, i) => (i === 290 ? { ...t, progress: { text: "step 2" } } : t)) };
+  writeFileSync(join(dir, "busy.json"), JSON.stringify(next));
+  utimesSync(join(dir, "busy.json"), new Date(), new Date(Date.now() + 5000));
+  const out3 = readChanges(h, first.files);
+  expect(out3.length).toBeLessThan(out1.length / 20);
+  const third = changedLists(out3, first.files);
+  const { agents_md: _, ...want } = next.tasks[290];
+  expect(third.lists[0].tasks[290]).toEqual(want);
+  expect(third.lists[0].tasks[0]).toBe(first.lists[0].tasks[0]);
+  expect(third.lists[0].tasks.length).toBe(300);
+});
+
+test("the service's read: a hash it doesn't have says read again; without python3, every list whole", () => {
+  const { h, dir } = home();
+  writeFileSync(join(dir, "a.json"), JSON.stringify({ folder: "/a", tasks: [{ id: 1, title: "one" }, { id: 2, title: "two" }] }));
+  const first = changedLists(readChanges(h));
+  writeFileSync(join(dir, "a.json"), JSON.stringify({ folder: "/a", tasks: [{ id: 1, title: "one" }, { id: 2, title: "2" }] }));
+  utimesSync(join(dir, "a.json"), new Date(), new Date(Date.now() + 5000));
+  const lost = new Map([...first.files].map(([n, f]) => [n, { ...f, byHash: new Map() }]));
+  expect(changedLists(readChanges(h, first.files), lost).stale).toBe(true);
+  const bin = mkdtempSync(join(tmpdir(), "shep-bin-"));
+  for (const t of ["sh", "cat"]) symlinkSync(Bun.which(t), join(bin, t));
+  const plain = changedLists(readChanges(h, first.files, bin), first.files);
+  expect(plain.stale).toBe(false);
+  expect(plain.lists.map((l) => l.tasks.map((t) => t.title))).toEqual([["one", "2"]]);
 });

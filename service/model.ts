@@ -1,5 +1,5 @@
 // What the web app shows, built with the shared core: the spaces (the service's own list, the shared document's
-// "spaces"), their Assistants and unread marks, and every task list (herdr-task's files, through READ_LISTS) with each
+// "spaces"), their Assistants and unread marks, and every task list (herdr-task's files, through READ_CHANGES) with each
 // task's status from its live agents. Kept fresh from herdr-core's events, the local task folder's changes, and a slow
 // poll for other machines.
 import { watch, existsSync } from "node:fs";
@@ -8,7 +8,7 @@ import { CoreClient } from "./hc/client.ts";
 import type { Hub } from "./hub.ts";
 import { readDue, type Live } from "./live.ts";
 import { where } from "./paths.ts";
-import { READ_LISTS, taskLists } from "../core/tasklists.js";
+import { READ_CHANGES, changesArgs, changedLists } from "../core/tasklists.js";
 import { carryOver, IMPORTED } from "./carry-over.ts";
 import { HOME } from "./paths.ts";
 import * as T from "../core/tasks.js";
@@ -268,11 +268,35 @@ export class Model {
     } catch {} finally { this.carrying = false; }
   }
 
-  private async readLists(m: string | null) {
+  /** each machine's list files as last read (core/tasklists.js changedLists): the next read sends only what changed */
+  private files = new Map<string | null, Map<string, any>>();
+  /** each machine's read now running, and whether another was asked for meanwhile: reads never overlap (#1468: on a
+   *  slow link they piled up, each sending every list whole) */
+  private reading = new Map<string | null, { done: Promise<void>; again: boolean }>();
+  private readLists(m: string | null): Promise<void> {
+    const now = this.reading.get(m);
+    // one is running: one more after it (what changed meanwhile), however many ask
+    if (now) { now.again = true; return now.done; }
+    const run = { done: Promise.resolve(), again: false };
+    run.done = (async () => {
+      try {
+        do { run.again = false; await this.readOnce(m); } while (run.again);
+      } finally { this.reading.delete(m); }
+    })();
+    this.reading.set(m, run);
+    return run.done;
+  }
+  private async readOnce(m: string | null, retry = true): Promise<void> {
     try {
-      const r = await sh(this.hub, READ_LISTS, [], m);
+      const r = await sh(this.hub, READ_CHANGES, changesArgs(this.files.get(m)), m);
       if (r.code !== 0) return;
-      this.lists.set(m, taskLists(r.stdout).map((d: any) => ({ ...d, machine: m, prefix: d.prefix || autoPrefix(d.folder), tasks: Array.isArray(d.tasks) ? d.tasks : [] })));
+      const got = changedLists(r.stdout, this.files.get(m));
+      if (got.stale) {
+        // it named a task this side doesn't have: read it all again, once
+        this.files.delete(m);
+        if (retry) return this.readOnce(m, false);
+      } else this.files.set(m, got.files);
+      this.lists.set(m, got.lists.map((d: any) => ({ ...d, machine: m, prefix: d.prefix || autoPrefix(d.folder), tasks: Array.isArray(d.tasks) ? d.tasks : [] })));
     } catch {}
   }
 
@@ -355,7 +379,6 @@ export class Model {
     }));
     this.rows = rows;
     this.prompts = prompts;
-    this.live.put("tasks", rows);
     // a task in its grace before Needs you (core GRACE_MS): built again the moment it ends, not up to 10 s later
     if (this.settleTimer) clearTimeout(this.settleTimer);
     this.settleTimer = settles < Infinity ? setTimeout(() => { this.settleTimer = null; this.soon(); }, Math.max(0, settles - Date.now()) + 50) : null;
@@ -383,7 +406,6 @@ export class Model {
     });
     this.spaces = spaces;
     void this.readGit(spaces);
-    this.live.put("spaces", { spaces, sections: bar.sections });
     // each list's schedules (herdr-task auto), with the folder and machine they belong to
     const automations = lists.flatMap((l: any) => (Array.isArray(l.automations) ? l.automations : []).map((a: any) => ({ ...a, folder: l.folder, machine: l.machine ?? null, list: l.name })));
     this.onBuild?.({ spaces, sections: bar.sections, rows, machines: this.machines, known: this.known, automations });

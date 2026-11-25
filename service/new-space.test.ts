@@ -88,7 +88,7 @@ test("the snapshot has the new space before the page is answered", async () => {
   expect(await m.waitSpace("vmb/sp9")).toBe(false);
   doc.spaces = [...doc.spaces, { id: "sp9", name: "crescendo", folder: "/srv/crescendo", machine: "vmb" }];
   expect(await m.waitSpace("vmb/sp9")).toBe(true);
-  expect(put.spaces.spaces.map((s: any) => s.id)).toEqual(["vmb/sp1", "vmb/sp9"]);
+  expect(m.spaces.map((s: any) => s.id)).toEqual(["vmb/sp1", "vmb/sp9"]);
 });
 
 test("New space in a folder that has its space (a home folder too) opens that one, never a second (SHEP-296)", async () => {
