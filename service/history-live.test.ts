@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { Live } from "./live.ts";
+import { chatApply } from "../web/shared/patch.ts";
 
 test("old chat appears before the new session, then stays when its assistant starts", () => {
   const callbacks = new Map<string, Function>();
@@ -14,7 +15,12 @@ test("old chat appears before the new session, then stays when its assistant sta
     freshChat: () => ({ key: "p:sp1", messages: [], cli: "claude", fresh: true }),
     chat: (_: string, reader: any) => ({ key: "p:sp1", messages: reader.messages, cli: "claude", top: !reader.earlier, earlier: !!reader.earlier }),
   } as any;
-  const ws: any = { data: {}, readyState: 1, send: (text: string) => sent.push(JSON.parse(text)) };
+  // a chat goes whole once, then as what changed (#1468): rebuilt here as the page does
+  const ws: any = { data: {}, readyState: 1, send: (text: string) => {
+    const m = JSON.parse(text);
+    if (m.type === "chatp") return sent.push({ type: "chat", chat: chatApply(sent.at(-1)?.chat, m) });
+    sent.push(m);
+  } };
   (live as any).watch(ws, ["p:sp1"]);
   callbacks.get("log:|claude|/old.jsonl")!({ messages: [{ id: "old", who: "you", text: "Before" }] }, null);
   expect(sent.at(-1).chat.messages.map((m: any) => m.id)).toEqual(["old", "history-boundary"]);
