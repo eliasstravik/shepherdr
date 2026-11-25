@@ -40,7 +40,7 @@ Settings › Plugins has the switches. They are kept as `everywhere.plugins_off`
 | Place | What goes there |
 |---|---|
 | `views` | The parts of a thread: `messages`, `box`, `taskHead`, `taskTop`, `scheduled`, `tile`, `search` |
-| `header`, `taskHeader` | Buttons in a chat's or a task's header (Tasks, Artifacts, voice; Terminal and Screen are menu rows) |
+| `header`, `taskHeader` | Buttons in a chat's or a task's header (Artifacts, then Tasks last where its pane's Close lands; Terminal and Screen are menu rows) |
 | `panes` | What the right-hand pane can show |
 | `bar` | The phone's bottom bar |
 | `spaceMenu`, `taskMenu`, `messageMenu` | Rows of a space's, a task's and a message's menu |
