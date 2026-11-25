@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { fitGrid, following, fontFor, footTop, linesFor, shrinkTo, showKeys } from './fit.ts'
+import { fitGrid, following, fontFor, footTop, linesFor, shrinkTo, showKeys, sizeTaken } from './fit.ts'
 
 const CELL = 0.6 // a monospace character is about 0.6 of its font size wide
 
@@ -56,4 +56,16 @@ test('scrolling moves whole lines and carries the rest, so slow swipes still scr
   expect(linesFor(8, 10, 16)).toEqual([1, 2])
   expect(linesFor(0, -40, 16)).toEqual([-2, -8])
   expect(linesFor(0, 5, 16)).toEqual([0, 5])
+})
+
+test('a terminal on two pages: a size this page did not ask for means another page took it (#1498)', () => {
+  // this page asked for 50x40 and got it: still its size
+  expect(sizeTaken('50x40', '50x40', 50, 40)).toBe(false)
+  // the desktop then set 140x30: this page only shrinks to fit from now on
+  expect(sizeTaken('50x40', '50x40', 140, 30)).toBe(true)
+  // the size it had when this page opened it takes nothing; another page's before this one asked does
+  expect(sizeTaken('', '', 80, 24, true)).toBe(false)
+  expect(sizeTaken('', '', 140, 30)).toBe(true)
+  // an ask on its way: a size arriving meanwhile takes nothing
+  expect(sizeTaken('50x40', '60x40', 50, 40)).toBe(false)
 })

@@ -14,7 +14,7 @@ import { copyText } from '@client/copy.ts'
 import { appTakes, focusChat, focusTask } from '@client/commands.ts'
 import type { Chat, Task } from '@shared/types.ts'
 import { machineLabel, placeOf, taskChat, taskOf, tasksIn, tstate } from '@shared/view.ts'
-import { fitGrid, following, footTop, LINE, linesFor, shrinkTo, showKeys } from './fit.ts'
+import { fitGrid, following, footTop, LINE, linesFor, shrinkTo, showKeys, sizeTaken } from './fit.ts'
 import { followFold, spaceTermRow, switchView, taskTermRow, toggleSpaceTerm, toggleTaskTerm, viewRow } from './menu.ts'
 import { connectTerminal, streamInput } from './stream.ts'
 import { linkLayer, type LinkLayer } from './linklayer.ts'
@@ -112,6 +112,7 @@ function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; onEnd?:
   const [ctrl, setCtrl] = useState(false)
   const ctrlRef = useRef(false)
   ctrlRef.current = ctrl
+  const claim = useRef(() => {})
   const endRef = useRef(onEnd)
   endRef.current = onEnd
   /** what pressed the key row last: 'touch', 'pen', 'mouse', or '' for a key press on its button */
@@ -123,6 +124,10 @@ function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; onEnd?:
     let link: { close(): void } | null = null
     let cols = 80, rows = 24, natural = 0
     let asked = '', wanted = '', opened = false, follow = true, moving = 0, frame = 0
+    // this page sets the terminal's size only while it is the one you used last (opened it here, typed, tapped or
+    // clicked in it); another page's size, once it arrives, makes this one only shrink to fit, so two pages never trade
+    // sizes back and forth. A hidden tab never takes it.
+    let owner = typeof document === 'undefined' || !document.hidden, sizes = 0
     let later: ReturnType<typeof setTimeout> | undefined
     const el = box.current
     /** a character's width and a row's height per px of font, as xterm really draws them (it rounds to the screen's
@@ -172,7 +177,7 @@ function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; onEnd?:
       const grid = fitGrid(w, h, cell, line)
       const want = own ? grid : { cols: grid.cols, rows: Math.max(grid.rows, Math.min(200, natural || grid.rows)) }
       const key = `${want.cols}x${want.rows}`
-      if (opened && key !== asked && key !== wanted) {
+      if (opened && owner && key !== asked && key !== wanted) {
         // a drag, a rotation or the keyboard sends many sizes: ask for the last one
         wanted = key
         clearTimeout(later)
@@ -207,11 +212,14 @@ function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; onEnd?:
           term!.reset()
           follow = true
           asked = wanted = ''
+          sizes = 0
           natural = 0
         },
         (c, r) => {
           // the size it had before this page asked for one: an agent keeps that height
           if (!asked && !wanted) natural = r
+          // another page set it: that one is in use now
+          if (sizeTaken(asked, wanted, c, r, ++sizes === 1)) owner = false
           cols = c
           rows = r
           term!.resize(c, r)
@@ -224,6 +232,14 @@ function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; onEnd?:
       )
       fit()
     })
+    // you used this page's terminal: it takes the size again (once, with no back and forth)
+    claim.current = () => {
+      if (owner) return
+      owner = true
+      clearTimeout(later)
+      asked = wanted = ''
+      fit()
+    }
     const ro = new ResizeObserver(fit)
     if (el) ro.observe(el)
     return () => {
@@ -237,6 +253,7 @@ function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; onEnd?:
       links.current = null
       term?.dispose()
       xt.current = null
+      claim.current = () => {}
     }
   }, [stream, own])
 
@@ -284,7 +301,7 @@ function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; onEnd?:
           autoCorrect="off"
           spellCheck={false}
           enterKeyHint="send"
-          onFocus={() => mirrorFocus(xt.current?.textarea, true)}
+          onFocus={() => { mirrorFocus(xt.current?.textarea, true); claim.current() }}
           onBlur={() => mirrorFocus(xt.current?.textarea, false)}
           onWheel={(e) => scrollBy(e.deltaMode === 1 ? e.deltaX * 16 : e.deltaX, e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY)}
           // a link: a click opens it (never focusing the box, so no keys and no keyboard), the mouse over it underlines
@@ -296,6 +313,7 @@ function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; onEnd?:
           }}
           onMouseLeave={() => links.current?.hover(null)}
           onMouseDown={(e) => {
+            claim.current()
             if (e.button === 0 && linkAt(e)) e.preventDefault()
           }}
           onClick={(e) => {
@@ -313,6 +331,7 @@ function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; onEnd?:
             linkMenu(l, links.current?.rect(l) ?? null)
           }}
           onTouchStart={(e) => {
+            claim.current()
             const t = e.touches[0]
             scrolling.current = { carry: 0, x: t.clientX, y: t.clientY }
             unpress()
@@ -347,6 +366,7 @@ function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; onEnd?:
             scrolling.current.y = y
           }}
           onKeyDown={(e) => {
+            claim.current()
             // the app's own few keys pass (commands that say `terminal`): Cmd+K the palette, Ctrl+` your terminal
             if (appTakes(e.nativeEvent)) return
             if (e.nativeEvent.isComposing || e.keyCode === 229) return
@@ -374,7 +394,7 @@ function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; onEnd?:
         />
       </div>
       {showKeys(phone, coarse) && (
-        <div className="keys" onPointerDown={(e) => { pointer.current = e.pointerType }} onMouseDown={(e) => e.preventDefault()}>
+        <div className="keys" onPointerDown={(e) => { pointer.current = e.pointerType; claim.current() }} onMouseDown={(e) => e.preventDefault()}>
           {([['esc', 'esc'], ['tab', 'tab']] as const).map(([l, k]) => <button type="button" key={l} aria-label={`${l} key`} onClick={() => sendKey(k)}>{l}</button>)}
           <button type="button" aria-label="ctrl key" aria-pressed={ctrl} style={ctrl ? { background: 'rgb(255 255 255/.3)' } : undefined} onClick={() => { setCtrl(!ctrl); afterKey() }}>ctrl</button>
           {([['←', 'left'], ['↑', 'up'], ['↓', 'down'], ['→', 'right']] as const).map(([l, k]) => <button type="button" key={k} aria-label={`${k} arrow key`} onClick={() => sendKey(k)}>{l}</button>)}

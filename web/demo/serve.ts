@@ -244,6 +244,8 @@ Bun.serve<Sock['data'], never>({
     const url = new URL(req.url)
     const path = url.pathname.replace(/^\/[\w-]+(?=\/api\/)/, '')
     if (path === '/api/screen') return server.upgrade(req, { data: { mode: 'normal', watch: [], screen: url.searchParams.get('key') ?? '' } as any }) ? undefined : new Response('no', { status: 400 })
+    // how many times each stand-in terminal was resized (a check for pages trading sizes)
+    if (path === '/demo/resizes') return Response.json(Object.fromEntries(termResizes))
     if (path === '/api/terminal') return server.upgrade(req, { data: { mode: 'normal', watch: [], term: url.searchParams.get('chat') ?? '' } as any }) ? undefined : new Response('no', { status: 400 })
     if (path === '/api/ws') {
       // which day to show: the page was opened with ?case=empty or ?case=down (kept in a cookie: the app rewrites its address)
@@ -302,7 +304,18 @@ Bun.serve<Sock['data'], never>({
         // a stand-in terminal: it shows a prompt and echoes what is typed; nothing runs
         const m = JSON.parse(String(raw)) as { type: string; id: number; text?: string; keys?: string[] }
         const say = (t: string) => ws.send(new TextEncoder().encode(t))
-        if (m.type === 'open') { ws.send(JSON.stringify({ type: 'size', cols: 100, rows: 12 })); say(TERM_LINKS + 'sam@mac-mini shop % ') }
+        const term = (ws.data as any).term as string
+        if (m.type === 'open') {
+          termPages.set(term, (termPages.get(term) ?? new Set()).add(ws))
+          const at = termSizes.get(term) ?? { cols: 100, rows: 12 }
+          ws.send(JSON.stringify({ type: 'size', ...at })); say(TERM_LINKS + 'sam@mac-mini shop % ')
+        }
+        // a page asks for its pane's size: the terminal takes it, and every page showing it is told, as herdr-core does
+        else if (m.type === 'resize' && m.cols && m.rows) {
+          termSizes.set(term, { cols: m.cols, rows: m.rows })
+          termResizes.set(term, (termResizes.get(term) ?? 0) + 1)
+          for (const p of termPages.get(term) ?? []) p.send(JSON.stringify({ type: 'size', cols: m.cols, rows: m.rows }))
+        }
         else if (m.type === 'text') say(m.text ?? '')
         else if (m.type === 'keys' && m.keys?.includes('enter')) say("\r\n(this demo doesn't run commands)\r\nsam@mac-mini shop % ")
         // Ctrl+D ends the shell: the page closes the terminal, as the service tells it for a real one
@@ -317,10 +330,15 @@ Bun.serve<Sock['data'], never>({
       for (const key of ws.data.watch) ws.send(JSON.stringify({ type: 'chat', chat: chatFor(ws as unknown as Sock, key) }))
     },
     close(ws) {
+      termPages.get((ws.data as any).term)?.delete(ws)
       socks.delete(ws as unknown as Sock)
     },
   },
 })
+// the stand-in terminals' sizes and the pages showing each
+const termSizes = new Map<string, { cols: number; rows: number }>()
+const termPages = new Map<string, Set<{ send(d: string): unknown }>>()
+const termResizes = new Map<string, number>()
 /** what the stand-in terminal shows first: links of each kind, a sign-in address broken over three lines at its 100
  *  columns as Claude Code does, one the program marks (OSC 8) and a file: one that is only copied */
 const SIGN_IN = 'https://claude.ai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fconsole.anthropic.com%2Foauth%2Fcode%2Fcallback&scope=org%3Acreate_api_key+user%3Aprofile&state=Zx9_-kq'
