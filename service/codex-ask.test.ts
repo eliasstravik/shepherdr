@@ -65,3 +65,16 @@ test("Dismiss is Esc; Answer in terminal presses nothing", async () => {
   expect(await A.answerCodex("t7", QS, { terminal: true })).toBeNull();
   expect(pressed()).toEqual(["keys t7 esc"]);
 });
+
+// GitHub #1428: the card's steps as it sends them ({ choice }, { other }), not words: each pressed as its choice
+test("a several-question card's picks as the card sends them: number keys, own words in the notes", async () => {
+  fresh(PICKER);
+  expect(await A.answerCodex("t7", QS, { answers: [{ choice: 1 }, { choice: 0 }] })).toBeNull();
+  expect(pressed()).toEqual(["keys t7 2", "keys t7 1"]);
+  fresh(PICKER);
+  expect(await A.answerCodex("t7", QS, { answers: [{ choice: 0 }, { other: "Medium" }] })).toBeNull();
+  expect(pressed()).toEqual(["keys t7 1", "keys t7 down down tab", "send --force t7 Medium"]);
+  fresh(PICKER);
+  await expect(A.answerCodex("t7", QS, { answers: [{ choice: 0 }, { choices: [] }] })).rejects.toThrow("Answer every question first.");
+  expect(pressed()).toEqual([]);
+});

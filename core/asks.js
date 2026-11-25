@@ -86,6 +86,29 @@ export const answer = (req, label) => out({ behavior: "allow", updatedInput: { .
 // option picked, and the person's note.
 export const answers = (req, map, annotations) => out({ behavior: "allow", updatedInput: { ...(req.tool_input ?? {}), answers: map,
   ...(annotations && Object.keys(annotations).length ? { annotations } : {}) } });
+// One question's answer as the words Claude or Codex hears (GitHub #1428): a card's step is a pick ({ choice: i }),
+// several picks ({ choices: [i, ...] }, joined with ", "), the person's own words ({ other } or a plain string), as
+// written. names: that question's option names in order. "" for anything else, so a missing answer is still refused.
+export function stepWords(step, names) {
+  if (typeof step === "string") return step.trim();
+  if (!step || typeof step !== "object") return "";
+  if (typeof step.other === "string" && step.other.trim()) return step.other.trim();
+  const picks = Array.isArray(step.choices) ? step.choices : typeof step.choice === "number" ? [step.choice] : [];
+  return picks.filter((i) => Number.isInteger(i)).map((i) => names?.[i]).filter((n) => typeof n === "string" && n).join(", ");
+}
+// A card's answer as sent (a step for each question, from the web app, a phone's alert or the watch), kept as picks or
+// words, never turned into text before the question's names are known: each a string (at most max characters), or
+// { choice } / { choices } / { other }. Anything else becomes "".
+export function steps(list, max = 4000) {
+  return (Array.isArray(list) ? list.slice(0, 20) : []).map((x) => {
+    if (typeof x === "string") return x.slice(0, max);
+    if (!x || typeof x !== "object") return "";
+    if (typeof x.other === "string") return { other: x.other.slice(0, max) };
+    if (Array.isArray(x.choices)) return { choices: x.choices.filter((n) => Number.isInteger(n)).slice(0, 50) };
+    if (Number.isInteger(x.choice)) return { choice: x.choice };
+    return "";
+  });
+}
 // The annotations of a question card's answers: each question's picked option's preview (one pick), and a note for the
 // first question when the person wrote one. w: words(req); map: as answers() takes it.
 export function annotationsOf(w, map, note) {
