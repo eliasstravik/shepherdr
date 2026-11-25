@@ -219,7 +219,7 @@ export function setConfig(place: string, key: string, value: unknown, scope?: { 
 
 const PERM_ABOUT: Record<string, Record<string, string>> = {
   claude: { manual: "Asks before edits and commands", default: "Asks before edits and commands", acceptEdits: "Edits files without asking", plan: "Plans first and changes nothing", auto: "Decides by itself what is safe to run", bypassPermissions: "Never asks" },
-  codex: { "read-only": "Reads, and asks before anything else", auto: "Works in the folder, asks before leaving it", full: "Never asks" },
+  codex: { "read-only": "Reads, and asks before anything else", auto: "Works in the folder, asks before leaving it", approve: "Its own review allows safe steps, asks you about risky ones", full: "Never asks" },
 };
 const PERM_LABEL: Record<string, string> = { manual: "Default", bypassPermissions: "Bypass" };
 

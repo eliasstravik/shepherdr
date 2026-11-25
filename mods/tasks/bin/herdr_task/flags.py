@@ -70,7 +70,8 @@ CODEX_SHORT = {"-c": "--config", "-i": "--image", "-p": "--profile", "-m": "--mo
 _PERM = "Shepherdr sets the sandbox and approvals from Settings › Agents (Task agent)"
 CODEX_REFUSED = {
     "--model": f"{_SET} model: use --model (or --set model=...)", "--sandbox": _PERM, "--ask-for-approval": _PERM,
-    "--dangerously-bypass-approvals-and-sandbox": _PERM + ": pick Full access there", "--approve-for-me": _PERM,
+    "--dangerously-bypass-approvals-and-sandbox": _PERM + ": pick Full access there", "--approve-for-me": _PERM + ": pick Approve for me there",
+    "--not-so-yolo": _PERM + ": pick Approve for me there",
     "--full-auto": _PERM, "--no-daemon": "Shepherdr passes it already",
     "--remote": "a task's agent runs on its own app server (--no-daemon)", "--remote-auth-token-env": "a task's agent runs on its own app server (--no-daemon)",
     "--cd": "Shepherdr starts the agent in the task's folder", "--worktree": "Shepherdr gives each task its own worktree already",
@@ -81,7 +82,7 @@ CODEX_REFUSED = {
 # -c keys Shepherdr sets itself.
 CODEX_KEYS = {"model": f"{_SET} model: use --model", "model_reasoning_effort": f"{_SET} effort: use --effort",
               "service_tier": "Shepherdr sets the speed from Settings › Agents (Task agent)", "sandbox_mode": _PERM,
-              "approval_policy": _PERM, "projects": "Shepherdr trusts the task's folder itself",
+              "approval_policy": _PERM, "approvals_reviewer": _PERM + ": pick Approve for me there", "projects": "Shepherdr trusts the task's folder itself",
               "hooks": "Shepherdr sets the chat's question card's hook itself"}
 
 TABLES = {"claude": (CLAUDE, CLAUDE_SHORT, CLAUDE_REFUSED), "codex": (CODEX, CODEX_SHORT, CODEX_REFUSED)}

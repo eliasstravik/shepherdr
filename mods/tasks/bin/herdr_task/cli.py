@@ -247,7 +247,7 @@ def main():
     def pick_opts(c):
         c.add_argument("--speed", help="its agent's speed, where its model has more than one: regular, fast, ultrafast (default: Settings')")
         c.add_argument("--permission", help="its agent's permission mode, in its CLI's words: Claude Code's default, acceptEdits, plan, "
-                                            "auto, bypassPermissions; Codex's read-only, auto, full (\"\": Settings' again)")
+                                            "auto, bypassPermissions; Codex's read-only, auto, approve (Approve for me), full (\"\": Settings' again)")
 
     def agent_opts(c):
         c.add_argument("--agent", help="agent key (claude, codex, ...)")
@@ -534,6 +534,7 @@ def main():
     c = sub.add_parser("_allow")  # Codex's PermissionRequest hook (own_argv)
     c.add_argument("--command", required=True)
     c.add_argument("--sandboxed", action="store_true")  # Codex's: its proof and commits run escalated (#866)
+    c.add_argument("--auto-review", action="store_true")  # Codex's Approve for me: its own review answers the rest (#1464)
     c.set_defaults(fn=cmd_allow, json=False)
     c = sub.add_parser("_outbox")  # another machine fetching the Assistants' answers left here for it (machines.replies_pass)
     c.add_argument("--for", dest="for_", required=True)
