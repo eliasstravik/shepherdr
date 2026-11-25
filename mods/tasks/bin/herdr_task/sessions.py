@@ -190,9 +190,10 @@ def _words(content):
     return ""
 
 
-def _start(path):
+def _start(path, cwd=None):
     """(when, first message) a log starts with: Claude Code's first user entry, Codex's session_meta
-    and first user message. (None, "") if it has none in its first lines."""
+    and first user message. (None, "") if it has none in its first lines. cwd, a list, gets the folder
+    Codex's session_meta recorded (#1433)."""
     at, said = None, ""
     try:
         with open(path, errors="replace") as f:
@@ -206,6 +207,8 @@ def _start(path):
                 p = o.get("payload") or {}
                 if o.get("type") == "session_meta":
                     at = at or _ms(p.get("timestamp") or o.get("timestamp"))
+                    if cwd is not None and p.get("cwd"):
+                        cwd.append(p["cwd"])
                 elif o.get("type") == "user" and not o.get("isMeta"):
                     at = at or _ms(o.get("timestamp"))
                     said = _words((o.get("message") or {}).get("content"))
@@ -237,7 +240,9 @@ def log_by_session(kind, sid):
 def find_log(a, ref, folders, taken=()):
     """The log of agent `a` (a task's agents[] row) of task `ref` (SHEP-26), run in one of `folders`,
     or None: by its session when it has one, else the earliest log of its kind that started from
-    its launch on (until it ended) and whose first message names its task."""
+    its launch on (until it ended), whose first message names its task and, for Codex (one folder for
+    every day's rollouts), that ran in one of `folders`: another task's reviewer whose prompt names
+    this task is not its log (#1433)."""
     import glob
     kind = "codex" if a.get("agent") == "codex" else "claude"
     if a.get("session"):
@@ -253,6 +258,7 @@ def find_log(a, ref, folders, taken=()):
     else:
         files = [f for h in claude_homes() for d in dict.fromkeys(x for x in folders if x) for f in glob.glob(os.path.join(project_dir(d, h), "*.jsonl"))]
     named = re.compile(rf"(?<![\w-]){re.escape(ref)}(?![\w-])")
+    here = {os.path.realpath(x) for x in folders if x}
     best = None
     for f in files:
         if f in taken:
@@ -262,9 +268,12 @@ def find_log(a, ref, folders, taken=()):
                 continue  # last written before it started
         except OSError:
             continue
-        start, said = _start(f)
+        cwd = []
+        start, said = _start(f, cwd)
         if start is None or not (at - LOOK_BACK_MS <= start <= end) or not named.search(said):
             continue
+        if kind == "codex" and not (cwd and os.path.realpath(cwd[0]) in here):
+            continue  # another folder's session (or one with no folder recorded)
         if not best or start < best[0]:
             best = (start, f)
     return best[1] if best else None

@@ -4796,19 +4796,38 @@ class LostLogs(unittest.TestCase):
         self.sessions.find_lost_logs(self.store(t), t)
         self.assertEqual(t["agents"][0]["log"], mine)
 
-    def test_a_codex_rollout(self):
+    def codex_log(self, n, after, cwd, first):
         import datetime
         day = datetime.date.fromtimestamp(self.at / 1000)
         d = os.path.join(self.home, ".codex", "sessions", f"{day:%Y}", f"{day:%m}", f"{day:%d}")
-        os.makedirs(d)
-        f = os.path.join(d, "rollout-2026-11-05T10-00-00-0199aaaa-bbbb-cccc-dddd-eeeeeeeeeeee.jsonl")
+        os.makedirs(d, exist_ok=True)
+        f = os.path.join(d, f"rollout-2026-11-05T10-00-0{n}-0199aaaa-bbbb-cccc-dddd-eeeeeeeeeee{n}.jsonl")
         with open(f, "w") as fh:
-            fh.write(json.dumps({"timestamp": self.stamp(self.at + 800), "type": "session_meta", "payload": {"id": "x", "timestamp": self.stamp(self.at + 800), "cwd": self.folder}}) + "\n")
-            fh.write(json.dumps({"timestamp": self.stamp(self.at + 900), "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<environment_context>…</environment_context>"}]}}) + "\n")
-            fh.write(json.dumps({"timestamp": self.stamp(self.at + 900), "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Your task, ELIA-5:\nSay hi"}]}}) + "\n")
+            fh.write(json.dumps({"timestamp": self.stamp(self.at + after), "type": "session_meta", "payload": {"id": "x", "timestamp": self.stamp(self.at + after), "cwd": cwd}}) + "\n")
+            fh.write(json.dumps({"timestamp": self.stamp(self.at + after + 100), "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "<environment_context>…</environment_context>"}]}}) + "\n")
+            fh.write(json.dumps({"timestamp": self.stamp(self.at + after + 100), "type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": first}]}}) + "\n")
+        return f
+
+    def test_a_codex_rollout(self):
+        f = self.codex_log(0, 800, self.folder, "Your task, ELIA-5:\nSay hi")
         t = {"id": 5, "state": "done", "agents": [{"address": "t1", "agent": "codex", "at": self.at, "ended": self.at + 60000}]}
         self.sessions.find_lost_logs(self.store(t), t)
         self.assertEqual(t["agents"][0]["log"], f)
+
+    def test_a_codex_rollout_from_another_tasks_worktree_is_not_its_log(self):
+        # #1433: another task's reviewer, started first in its own worktree, whose prompt names this task: every
+        # day's Codex rollouts share one folder, so only the folder it recorded tells them apart
+        self.codex_log(1, 300, "/Users/me/worktrees/elia-4", "Review ELIA-4 (it follows ELIA-5's change)")
+        mine = self.codex_log(2, 800, "/Users/me/worktrees/elia-5", "Your task, ELIA-5:\nSay hi")
+        t = {"id": 5, "state": "done", "worktree": "/Users/me/worktrees/elia-5",
+             "agents": [{"address": "t1", "agent": "codex", "at": self.at, "ended": self.at + 60000}]}
+        self.sessions.find_lost_logs(self.store(t), t)
+        self.assertEqual(t["agents"][0]["log"], mine)
+        # and none rather than the other folder's when its own was never written
+        os.remove(mine)
+        t["agents"][0].pop("log"), t["agents"][0].pop("log_looked")
+        self.sessions.find_lost_logs(self.store(t), t)
+        self.assertNotIn("log", t["agents"][0])
 
     def test_no_log_left_is_looked_for_once_and_stays_none(self):
         self.claude_log("before", self.at - 7200000, "Your task, ELIA-5:\nan older run")  # started long before this agent
