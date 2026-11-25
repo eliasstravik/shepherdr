@@ -12,6 +12,7 @@ import { WORDS } from "../core/chat-view.js";
 import { settle } from "../core/pending.js";
 import * as AGa from "../core/agents.js";
 import { answerCodex } from "./codex-ask.ts";
+import { steps as answerSteps } from "../core/asks.js";
 const { CHOICE_KEY, choiceOf, withChoice, speedOf } = AGa as any;
 import * as SP from "../core/spaces.js";
 import { iconValue } from "../core/space-icon.js";
@@ -347,7 +348,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     await (compat.asks as any).answer(str(b.question, 200), { choice: typeof b.choice === "number" ? b.choice : undefined,
       choices: Array.isArray(b.choices) ? b.choices.filter((n: unknown) => typeof n === "number") : undefined,
       note: typeof b.note === "string" ? b.note.slice(0, 4000) : undefined, other: typeof b.other === "string" ? b.other.slice(0, 4000) : undefined,
-      answers: Array.isArray(b.answers) ? b.answers.slice(0, 20).map((x: unknown) => String(x ?? "").slice(0, 4000)) : undefined,
+      answers: Array.isArray(b.answers) ? answerSteps(b.answers) : undefined,
       terminal: b.terminal === true, talk: b.talk === true, dismiss: b.dismiss === true });
     return { ok: true };
   }

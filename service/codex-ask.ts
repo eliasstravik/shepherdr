@@ -17,7 +17,7 @@ export async function answerCodex(hc: Hc, addr: string, questions: any[], b: any
     const q = questions[i];
     return typeof b.other === "string" && b.other.trim() ? b.other : typeof b.choice === "number" ? q.choices[b.choice]?.label : undefined;
   };
-  const answers = questions.length > 1 ? (Array.isArray(b.answers) ? b.answers.map((x: unknown) => String(x ?? "")) : []) : [said(0) ?? ""];
+  const answers = questions.length > 1 ? (Array.isArray(b.answers) ? b.answers.map((x: unknown, i: number) => AS.stepWords(x, questions[i]?.choices.map((c: any) => c.label))) : []) : [said(0) ?? ""];
   const steps = AS.codexSteps(questions, answers);
   if (!steps) throw new Error(questions.length > 1 ? "Answer every question first." : "Pick an answer first.");
   for (const step of steps) {
