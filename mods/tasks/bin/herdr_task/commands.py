@@ -11,7 +11,7 @@ import sys
 import time
 
 from . import sandbox, stack
-from .base import Fail, git, guard, now, run, STORE, stop_note, VERSION
+from .base import Fail, git, guard, now, own_core_check, run, STORE, stop_note, VERSION
 from .settings import (
     agent_argv, agent_key, bare, merge_policy, review_limits, set_opts, set_task, settings_block, settings_for, space_base,
     task_settings, worker_argv, worktrees_on, setting_sources, SET_BY,
@@ -707,6 +707,7 @@ def quiet_ready(args):
 
 
 def cmd_ready(args):
+    own_core_check()
     if getattr(args, "nothing", False) or getattr(args, "told", None) is not None:
         return quiet_ready(args)
     said, details = ready_words(args)
@@ -1012,6 +1013,7 @@ def cmd_reviewed(args):
     """A task's agent records one review round of its current commit (its own review: a helper agent
     it started as its hc child, as its brief says). Uses one of its Review rounds; `ready` then accepts that
     commit. Out of rounds it is refused: only the Assistant adds one (review-more)."""
+    own_core_check()
     with open_store(args) as s:
         t = s.find(args.id)
         if t["state"] not in ("running", "ready"):
@@ -1139,6 +1141,7 @@ def cmd_status(args):
     """A task agent says what it's doing, how far along it is and the time left, at the start, at
     each natural step and at least every 5 minutes (as Shepherdr's `shepherdr status`). Herdr guesses nothing: it shows
     what the agent said and counts the minutes down while it works."""
+    own_core_check()
     text = " ".join(str(args.text or "").split())
     if not text:
         raise Fail("Say what you're doing: herdr-task status <id> \"Fixing the two failing tests\" --done 40 --left 5m")

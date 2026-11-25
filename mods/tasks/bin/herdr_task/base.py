@@ -163,8 +163,43 @@ FOREIGN_SESSION = CALLER_SESSION not in (None, "", "default", SESSION)
 FOREIGN_TERMINAL = False
 
 
+def hc_config():
+    """herdr-core's own settings file (hc --help: ~/.config/herdr-core/config.toml, $XDG_CONFIG_HOME's when set)."""
+    x = os.environ.get("XDG_CONFIG_HOME") or ""
+    return os.path.join(x if x.startswith("/") else os.path.join(os.path.expanduser("~"), ".config"), "herdr-core", "config.toml")
+
+
+_PIN = re.compile(r"""^socket\s*=\s*["']([^"']+)["']""")
+
+
+def pinned_socket(path=None):
+    """The one socket herdr-core's config names for every session (a top-level `socket = "…"`), or None. With it, each
+    session's core listens there: Shepherdr's own core then sits on a socket named after another session (#1507, a
+    synced machine whose config said `…/default/default.sock`), and the Herdr app's default session reaches that same core."""
+    try:
+        with open(path or hc_config()) as f:
+            lines = f.read().splitlines()
+    except (OSError, UnicodeDecodeError):
+        return None
+    for ln in lines:
+        ln = ln.strip()
+        if ln.startswith("["):
+            return None
+        m = _PIN.match(ln)
+        if m:
+            return os.path.expanduser(m.group(1))
+    return None
+
+
 def session_socket(name):
-    return os.path.basename(name or "") == f"{SESSION}.sock"
+    """Whether this socket is Shepherdr's own core's: named after its session, or the one socket the config pins (where
+    hc with HC_SESSION=<SESSION> lands anyway)."""
+    if not name:
+        return False
+    if os.path.basename(name) == f"{SESSION}.sock":
+        return True
+    pin = pinned_socket()
+    return bool(pin) and os.path.realpath(pin) == os.path.realpath(name)
 
 
 if not FOREIGN_SESSION:
@@ -189,21 +224,49 @@ def real_home():
         return os.path.expanduser("~")
 
 
-def not_real():
-    """Why this environment isn't the account's own, or None when it is."""
-    env, home = os.environ, real_home()
-    same = lambda a, b: os.path.realpath(a) == os.path.realpath(b)
-    if env.get("HOME") and not same(env["HOME"], home):
-        return f"HOME is {env['HOME']}, not {home}"
-    app = env.get("HERDR_APP_HOME")
-    if app and not same(app, os.path.join(home, ".config", "herdr-app")):
-        return f"HERDR_APP_HOME is {app}"
+def _same(a, b):
+    return os.path.realpath(a) == os.path.realpath(b)
+
+
+def core_problem():
+    """Why the herdr-core this process would reach isn't Shepherdr's own session's, or None: its session and socket."""
+    env = os.environ
     if env.get("HC_SESSION") != SESSION:
         return f"HC_SESSION is {env.get('HC_SESSION') or 'not set'}, not Shepherdr's own ({SESSION})"
     sock = env.get("HC_SOCKET")
-    if sock and not session_socket(sock) and not (env.get("HC_TERMINAL_SOCKET") and same(sock, env["HC_TERMINAL_SOCKET"])):
-        return f"HC_SOCKET is {sock}"
+    if sock and not session_socket(sock) and not (env.get("HC_TERMINAL_SOCKET") and _same(sock, env["HC_TERMINAL_SOCKET"])):
+        m = re.fullmatch(r"(.+)\.sock", os.path.basename(sock))
+        whose = f', herdr-core session "{m.group(1)}"\'s socket,' if m else ""
+        return f"HC_SOCKET is {sock}{whose} not Shepherdr's own ({SESSION}.sock)"
     return None
+
+
+def not_real():
+    """Why this environment isn't the account's own, or None when it is."""
+    env, home = os.environ, real_home()
+    if env.get("HOME") and not _same(env["HOME"], home):
+        return f"HOME is {env['HOME']}, not {home}"
+    app = env.get("HERDR_APP_HOME")
+    if app and not _same(app, os.path.join(home, ".config", "herdr-app")):
+        return f"HERDR_APP_HOME is {app}"
+    return core_problem()
+
+
+def refusal(name, why):
+    """The guard's words: what is wrong, which side (a task's terminal: its machine's core; else this shell), the fix."""
+    if why.startswith("HC_SOCKET") and os.environ.get("HERDR_GUARD_SESSION"):
+        # #1507: a task's own terminal, given its socket by the core that started it: the machine is wrong, not the agent
+        return (f"refusing to run {name}: {why}. This task's terminal was started by a herdr-core that isn't Shepherdr's "
+                f"own session on this machine, so the machine needs a fix, not you: on the main machine run "
+                f"`herdr-task machines sync` (it says what is wrong here and how to fix it), or `shepherdr doctor` here. "
+                "Say so in your chat and stop.")
+    if why.startswith(("HC_SOCKET", "HC_SESSION")):
+        return (f"refusing to run {name}: {why}. This shell's environment is wrong: unset HC_SOCKET, and leave HC_SESSION unset "
+                f"or {SESSION} (a test names its throwaway session with SHEPHERDR_SESSION too): another session's core "
+                "isn't Shepherdr's, and a changed one can reach the real core and wipe its spaces.")
+    return (f"refusing to run {name}: {why}. Run herdr-task with the real HOME, HERDR_APP_HOME, "
+            f"and HC_SESSION unset or {SESSION} (SHEPHERDR_SESSION names another): changed ones can reach "
+            "the real core and wipe its spaces.")
 
 
 def guard(args):
@@ -211,9 +274,15 @@ def guard(args):
     name = os.path.basename(args[0])
     why = not_real() if name in GUARDED else None
     if why:
-        raise Fail(f"refusing to run {name}: {why}. Run herdr-task with the real HOME, HERDR_APP_HOME, "
-                   f"and HC_SESSION unset or {SESSION} (SHEPHERDR_SESSION names another): changed ones can reach "
-                   "the real core and wipe its spaces.")
+        raise Fail(refusal(name, why))
+
+
+def own_core_check():
+    """The one check a task agent's own commands (status, ready, feedback, reviewed) make first (#1507): each refuses alike
+    when this process would reach another session's herdr-core, even one that never runs hc itself."""
+    why = core_problem()
+    if why:
+        raise Fail(refusal("herdr-task", why))
 
 
 def run(args, cwd=None, check=False, env=None, stdin=None):

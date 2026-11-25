@@ -1122,3 +1122,77 @@ class ReplyBack(unittest.TestCase):
     def test_nothing_asked_means_no_call(self):
         with self.mock.patch.object(machines.subprocess, "run", lambda *a, **k: self.fail("called")):
             self.run_on(self.mac, lambda: machines.replies_pass({}))
+
+
+class SyncedMachineCore(unittest.TestCase):
+    """#1507: a synced machine whose task agents were refused while sync said "current". Sync now also looks at what file
+    shas can't see there (the core's session, a socket pinned for every session, the herdr-task its shell really runs)."""
+
+    def test_install_reports_a_pinned_socket_and_an_older_copy_on_the_path(self):
+        home = scratch(self)
+        os.makedirs(os.path.join(home, ".config", "herdr-core"))
+        with open(os.path.join(home, ".config", "herdr-core", "config.toml"), "w") as f:
+            f.write('# mine\nsocket = "~/.local/state/herdr-core/default/default.sock"\n[other]\nsocket = "no"\n')
+        for d, said in (("old", "3.2.0"), (".local/bin", "3.2.18")):
+            os.makedirs(os.path.join(home, d), exist_ok=True)
+            p = os.path.join(home, d, "herdr-task")
+            with open(p, "w") as f:
+                f.write(f"#!/bin/sh\necho {said}\n")
+            os.chmod(p, 0o755)
+        env = {"HOME": home, "SHELL": "/bin/sh", "HC_SESSION": "shepherdr",
+               "PATH": os.pathsep.join([os.path.join(home, "old"), os.path.join(home, ".local/bin"), "/usr/bin", "/bin"])}
+        r = subprocess.run([sys.executable, "-c", machines.INSTALL], input=json.dumps(install_payload(".x", op="check")), env=env,
+                           capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        h = json.loads(r.stdout.splitlines()[-1])["health"]
+        self.assertEqual(h["pin"], os.path.join(home, ".local/state/herdr-core/default/default.sock"))
+        self.assertEqual((h["session"], h["herdr_task"], h["other_copy"]), ("shepherdr", os.path.join(home, "old", "herdr-task"), True))
+        self.assertRegex(h["herdr_task_date"], r"^\d{4}-\d\d-\d\d$")
+        os.remove(os.path.join(home, "old", "herdr-task"))
+        r = subprocess.run([sys.executable, "-c", machines.INSTALL], input=json.dumps(install_payload(".x", op="check")), env=env,
+                           capture_output=True, text=True, timeout=60)
+        h = json.loads(r.stdout.splitlines()[-1])["health"]
+        self.assertEqual((h["herdr_task"], h["other_copy"]), (os.path.join(home, ".local/bin", "herdr-task"), False))
+
+    def test_a_plain_machine_has_nothing_to_fix(self):
+        home = scratch(self)
+        env = {"HOME": home, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin"}
+        r = subprocess.run([sys.executable, "-c", machines.INSTALL], input=json.dumps(install_payload(".x", op="check")), env=env,
+                           capture_output=True, text=True, timeout=60)
+        h = json.loads(r.stdout.splitlines()[-1])["health"]
+        self.assertEqual((h["pin"], h["session"], h["other_copy"]), (None, "default", False))
+        self.assertEqual(machines.problems("vm", {"session": "shepherdr"}, {**h, "session": "shepherdr"}), [])
+
+    def test_each_problem_says_its_fix(self):
+        link = {"name": "vm-demo", "target": "me@vm", "session": "shepherdr"}
+        got = machines.problems("vm-demo", link, {"session": "shepherdr", "pin": "/h/.local/state/herdr-core/default/default.sock",
+                                                   "config": "/h/.config/herdr-core/config.toml"})
+        self.assertEqual(len(got), 1)
+        self.assertIn("sed -i.bak '/^socket *=/d' /h/.config/herdr-core/config.toml", got[0])
+        self.assertIn("hc exec --on vm-demo -- env HC_SOCKET=/h/.local/state/herdr-core/default/default.sock hc server stop", got[0])
+        got = machines.problems("vm-demo", {**link, "session": None}, {"session": "default"})
+        self.assertIn("leads to herdr-core's 'default' session there", got[0])
+        self.assertIn("hc machine add me@vm --name vm-demo --session shepherdr", got[0])
+        got = machines.problems("vm-demo", link, {"session": "default"})
+        self.assertIn("runs as herdr-core session 'default'", got[0])
+        got = machines.problems("vm-demo", link, {"session": "shepherdr", "other_copy": True, "herdr_task": "/o/herdr-task",
+                                                  "herdr_task_date": "2026-10-01"})
+        self.assertIn("runs is /o/herdr-task from 2026-10-01, an older or other copy than the synced ~/.local/bin/herdr-task", got[0])
+
+    def test_sync_says_needs_fix_not_current(self):
+        from unittest import mock
+        m = {"version": "v1", "files": [], "links": [], "touch": []}
+        res = {"files": {}, "links": {}, "stamp": {"version": "v1"}, "health": {"session": "shepherdr", "pin": "/p/default.sock", "config": "/c"}}
+        with mock.patch.object(machines, "_remote_python", lambda *a, **k: res), mock.patch.object(machines, "core_name", lambda: "mac"), \
+                mock.patch.object(machines, "_reach_cache", lambda: {"graph": {}}), \
+                mock.patch.object(machines, "nodes", lambda g: [{"route": [{"name": "vm-demo", "how": "herdr-core"}], "node": {"assistants": []}}]), \
+                mock.patch.object(machines, "route_text", lambda r: "vm-demo"):
+            got = machines.sync_machine("vm-demo", m, "check", link={"name": "vm-demo", "session": "shepherdr"})
+        self.assertEqual(got["state"], "needs-fix")
+        self.assertTrue(any("pins every session's socket" in d for d in got["details"]), got["details"])
+        self.assertTrue(any(d.startswith("no Assistant runs there") for d in got["details"]), got["details"])
+        res["health"] = {"session": "shepherdr"}
+        with mock.patch.object(machines, "_remote_python", lambda *a, **k: res), mock.patch.object(machines, "core_name", lambda: "mac"), \
+                mock.patch.object(machines, "_reach_cache", lambda: None):
+            got = machines.sync_machine("vm-demo", m, "check", link={"name": "vm-demo", "session": "shepherdr"})
+        self.assertEqual((got["state"], got["details"]), ("current", []))

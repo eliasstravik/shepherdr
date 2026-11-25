@@ -29,7 +29,7 @@ import sys
 import tempfile
 from contextlib import contextmanager
 
-from .base import APP_HOME, ENTRY, Fail, GH, HOME, hc_json, now, run, SHARE, STORE
+from .base import APP_HOME, ENTRY, Fail, GH, HOME, hc_json, now, own_core_check, run, SHARE, STORE
 from .settings import DEFAULTS, bare, read_settings
 
 STATE = os.path.join(STORE, ".feedback.json")
@@ -360,6 +360,7 @@ def offer_words(line, key):
 
 
 def cmd_feedback(args):
+    own_core_check()
     from .launch import caller_space, is_coordinator
     from .output import say
     from . import reactions
