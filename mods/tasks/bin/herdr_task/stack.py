@@ -47,8 +47,9 @@ def merged_base(s, t, ask_github=True):
     repo = github(s) if ask_github else None
     if not repo:
         return None
-    ok, out, _ = gh("pr", "list", "--repo", repo, "--head", base, "--state", "all", "--limit", "10",
-                    "--json", "number,state,isCrossRepository,baseRefName,headRefOid")
+    with released(s):  # #1490: never the task list held while GitHub answers
+        ok, out, _ = gh("pr", "list", "--repo", repo, "--head", base, "--state", "all", "--limit", "10",
+                        "--json", "number,state,isCrossRepository,baseRefName,headRefOid")
     try:
         mine = [x for x in json.loads(out) if not x.get("isCrossRepository")] if ok and out else []
     except (ValueError, TypeError, AttributeError):
