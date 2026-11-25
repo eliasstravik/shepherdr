@@ -107,6 +107,10 @@ test("#1050: forking a task's chat while its agent runs asks first; a plain chat
   expect(liveTaskAgent(worker, [{ ...worker, status: { app: null }, foreground: { name: "bash" } }])).toBe(null);
   // only the reviewer left
   expect(liveTaskAgent(worker, [all[1]])).toBe(null);
+  // #1410: a Nix-wrapped agent, its status not told
+  const nix = { ...worker, status: {}, foreground: { name: ".claude-wrapped" } };
+  expect(liveTaskAgent(worker, [nix])?.address).toBe("t1");
+  expect(liveTaskAgent(worker, [{ ...nix, foreground: { name: ".bash-wrapped" } }])).toBe(null);
   expect(FORK_LIVE.verb).toBe("Fork anyway");
 });
 
