@@ -13,12 +13,12 @@ import * as CL from "../core/chat-log.js";
 import * as CV from "../core/chat-view.js";
 import { taskArtifacts, titleInTask } from "../core/task-artifacts.js";
 const { summary, names } = CL as any;
-const { senderName, briefLabel, firstUser, firstKeys, newsTimeline, resolveArtifacts, unsigned, fromName, sentTo, selfName, subagentsOf, isHelper } = CV as any;
+const { senderName, briefLabel, firstUser, firstKeys, newsTimeline, resolveArtifacts, unsigned, fromName, sentTo, selfName, subagentsOf, isHelper, parentAddr } = CV as any;
 import { mentionedIn } from "../core/send.js";
 import * as MEc from "../core/mentions.js";
 import * as SCc from "../core/screens.js";
 import { codexChoice } from "../core/asks.js";
-const { SCREEN } = SCc as any;
+const { SCREEN, TRUST, trustOf } = SCc as any;
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 const CLI_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex" };
@@ -508,6 +508,15 @@ export class Compat {
       needs.push({ id: `secret:${a.address}:${a.name}`, chat: key, place, ...(task ? { task } : {}), at: Date.now(), secret: this.secretAsk(a) });
     }
 
+    // #1441: an agent at its CLI's folder-trust screen (a task's, its reviewer or helper, an Assistant): Needs you with
+    // its own card, wherever its chat is (service/watch.ts watches every agent before its session)
+    for (const { card } of (this as any).watch?.trustCards?.() ?? []) {
+      const w = this.trustWho(card.addr, chats);
+      if (!w) continue;
+      const place = w.task ? tasks.find((x) => x.id === w.task)?.place ?? "" : places.find((p) => p.chat === w.chat)?.id ?? "";
+      needs.push({ id: card.id, chat: w.chat, place, ...(w.task ? { task: w.task } : {}), at: card.opened, question: this.screenQuestion(card, w.chat) });
+    }
+
     // 'attention' is an agent waiting with no card: one whose chat has a card (its question, a secret) needs you once,
     // not twice (one toast, one alert, one in the counts)
     const carded = new Set(needs.filter((x) => x.id !== "attention").map((x) => x.chat));
@@ -554,8 +563,29 @@ export class Compat {
     return null;
   }
 
-  /** A CLI's start screen (core/screens.js card) as a card that presses a choice on a tap. */
+  /** Whose an agent at a start screen is (#1441): its chat, and its task when it is a task's worker (worker: true) or
+   *  that worker's helper (a reviewer); null when it is no chat's. */
+  trustWho(addr: string, chats = this.chats): { chat: string; task?: string; worker?: boolean } | null {
+    const row = this.rows.find((r) => r.worker === addr);
+    if (row) return { chat: `${taskId(row)}/worker`, task: taskId(row), worker: true };
+    const k = (this as any).terminalsOf?.(addr);
+    const parent = k && isHelper(k) ? parentAddr(k) : null;
+    const of = parent ? this.rows.find((r) => r.worker === parent) : null;
+    if (of) return { chat: `${taskId(of)}/worker`, task: taskId(of) };
+    const key = [...chats].find(([, a]) => a === addr)?.[0];
+    return key ? { chat: key } : null;
+  }
+
+  /** A CLI's start screen (core/screens.js card) as a card that presses a choice on a tap. A folder-trust screen
+   *  (#1441) is its own card in plain words: Trust this folder and start, or No (a task's worker: the task stops). */
   screenQuestion(c: any, key: string, by?: { ref: string; title: string; chat: string }): Question {
+    const trust = trustOf(c);
+    if (trust) {
+      const w = this.trustWho(c.addr);
+      return { id: c.id, title: TRUST.title, kind: "Question", to: key, press: true, noNote: true,
+        trust: { cli: c.cli, ...(trust.folder ? { folder: trust.folder } : {}), waits: TRUST.waits(c.cli, trust.folder), allows: TRUST.allows },
+        choices: [{ label: TRUST.yes, short: TRUST.yesShort }, { label: TRUST.no(w?.worker), short: TRUST.noShort(w?.worker) }], ...(by ? { by } : {}) } as Question;
+    }
     return { id: c.id, title: SCREEN.title(c.cli), kind: "Question", to: key, ...(c.words ? { screen: c.words } : {}), press: true,
       choices: (c.choices ?? []).map((x: any) => ({ label: x.label, ...(x.description ? { description: x.description } : {}) })), ...(by ? { by } : {}) } as Question;
   }
@@ -772,6 +802,11 @@ export class Compat {
       }
     };
     if (addr) screens(addr, null);
+    // its helpers' folder-trust screens (#1441: a reviewer that never started), on its own chat too
+    if (addr) for (const kid of subagentsOf((this as any).terminalsAll?.() ?? [], addr)) {
+      const c = watch?.openCard?.(kid.address);
+      if (c && trustOf(c)) messages.push({ id: `card:${c.id}`, who: "agent", at: c.opened, question: this.screenQuestion(c, key) });
+    }
     // an Assistant's chat: its tasks' workers' asks on their own cards, headed by their task (one per task, its oldest),
     // their secrets, their start screens, and how each closed
     if (space) for (const r of spaceRows.filter((r) => r.worker)) {

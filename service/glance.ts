@@ -122,6 +122,8 @@ const needText = (n: any) => {
   const q = n?.question;
   if (!q) return needReason(n);
   if (q.kind === "Plan") return [REASONS.plan, q.plan].filter(Boolean).join("\n\n");
+  // #1441: a folder-trust card says what waits and what trusting allows
+  if (q.trust) return [q.trust.waits, q.trust.allows].filter(Boolean).join("\n\n");
   const parts = q.parts?.length > 1 ? q.parts.map((p: any) => p.title) : [];
   return [q.title, q.command, ...parts].filter(Boolean).join("\n\n") || needReason(n);
 };
@@ -132,7 +134,7 @@ const urlOf = (place: string, task?: string, focus?: string) => { const q = new 
 export function buttonChoices(q: any): Choice[] {
   if (!q?.choices?.length || q.kind === "Plan" || (q.parts && q.parts.length > 1) || /^merge\b/i.test(q.title ?? "") || q.evidence || q.multi || String(q.id ?? "").startsWith("menu:")) return [];
   return q.choices
-    .map((c: any, i: number) => ({ i, label: clip(c.label, LABEL) }))
+    .map((c: any, i: number) => ({ i, label: clip(c.short ?? c.label, LABEL) }))
     .filter((c: Choice) => c.i !== q.noteRequiredFor && c.i !== q.always)
     .slice(0, 3);
 }

@@ -353,8 +353,10 @@ def main():
     c.add_argument("--dry-run", action="store_true", help="--file: show the redacted draft and duplicates, file nothing")
     cmd("done", lambda a: cmd_state(a, "done"), "mark done without merging (the person's call: only when they ask; agents finish "
                                                 "with ready): a task on its own branch is closed unmerged, its branch and pull request left as they are")
-    cmd("stop", cmd_stop, "the person's Stop: pause its agent like pressing Esc (it drops what it was doing and waits); the next "
-                          "message to it carries on")
+    c = cmd("stop", cmd_stop, "the person's Stop: pause its agent like pressing Esc (it drops what it was doing and waits); the next "
+                              "message to it carries on")
+    c.add_argument("--untrusted", action="store_true", help="the person said No to its CLI's folder-trust screen (its agent "
+                                                            "exited): stopped, saying so; the next message starts it again")
     c = cmd("reply", cmd_reply, "the person's message to a task: to its agent, or (none left, or the task is Done) its agent starts "
                                 "again on its own session with it")
     c.add_argument("text", nargs="?", help="the message (default: what is piped in)")

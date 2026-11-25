@@ -10,6 +10,8 @@ import { sendBody, steerNow, messageBody, refusal, reactionLine, mentionedIn, ta
 import { kindOf } from "../core/chat-reader.js";
 import { WORDS } from "../core/chat-view.js";
 import { settle } from "../core/pending.js";
+import * as SCREENS_ from "../core/screens.js";
+const SCREENS = SCREENS_ as any;
 import * as AGa from "../core/agents.js";
 import { answerCodex } from "./codex-ask.ts";
 import { steps as answerSteps } from "../core/asks.js";
@@ -327,8 +329,16 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     // a CLI's start screen (service/watch.ts): a tap presses that choice, only on the screen the card was drawn from;
     // "Answer in terminal" just shows the terminal
     if (b.terminal === true) return { ok: true };
-    const why = await (compat as any).watch?.press(str(b.question, 300), typeof b.choice === "number" ? b.choice : -1);
-    return why ? { ok: false, error: why } : { ok: true };
+    const id = str(b.question, 300), watch = (compat as any).watch;
+    const card = watch?.card?.(id), choice = typeof b.choice === "number" ? b.choice : -1;
+    const why = await watch?.press(id, choice);
+    if (why) return { ok: false, error: why };
+    // #1441: No on a task's worker's folder-trust screen (its CLI exits): the task stops, saying why, instead of
+    // hanging as an agent that vanished. Its next message or Resume starts it again (and asks again).
+    const w = card && SCREENS.trustOf(card) && choice === 1 ? compat.trustWho?.(card.addr) : null;
+    const t = w?.worker && w.task ? compat.taskOf(w.task) : null;
+    if (t) await task(["stop", t.ref, "--untrusted"], t.folder, t.machine).catch(() => null);
+    return { ok: true };
   }
   if (b?.type === "answer" && typeof b.question === "string" && b.question.startsWith("cq:")) {
     // Codex's own questions (compat.ts codexQuestion): answered on its screen, as a person would

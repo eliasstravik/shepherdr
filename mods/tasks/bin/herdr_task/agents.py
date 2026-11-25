@@ -231,6 +231,7 @@ def task_status(task, live):
 STOPPED = "Agent stopped"
 GONE = "Its agent is no longer running."
 BY_YOU = "Stopped by you."
+NOT_TRUSTED = "You didn't trust its folder, so it didn't start."
 
 
 def carried_on(task, live, states=None):

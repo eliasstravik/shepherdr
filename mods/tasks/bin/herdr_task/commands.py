@@ -17,7 +17,7 @@ from .settings import (
     task_settings, worker_argv, worktrees_on, setting_sources, SET_BY,
 )
 from .agents import (
-    agent_log, agent_running, background_jobs, busy_again, BY_YOU, clear_stopped, job_names, own_jobs, detail, fit, LINE_MAX, live_agents, ready_turns,
+    agent_log, agent_running, background_jobs, busy_again, BY_YOU, NOT_TRUSTED, clear_stopped, job_names, own_jobs, detail, fit, LINE_MAX, live_agents, ready_turns,
     status_word, STATUSES, SUMMARY_MAX, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
@@ -1581,6 +1581,16 @@ def cmd_stop(args):
         t = s.find(args.id)
         if t["state"] not in ("running", "ready"):
             raise Fail(f"{s.name(t)} isn't being worked on ({STATUSES.get(t['state'], t['state'])}); there is nothing to stop.")
+        if getattr(args, "untrusted", False):
+            # #1441: No on its CLI's folder-trust screen, which exits its agent: nothing to interrupt
+            if t["state"] == "running":
+                t["stopped_by"], t["stopped_why"], t["stopped_at"], t["stopped_turns"] = "you", NOT_TRUSTED, now(), {}
+                t.pop("trust_ask", None)
+                t.pop("retry", None)
+                s.dirty = True
+            v = view(s, t, [detail(k) for k in live_agents(s.key(t))])
+            say(args, v, f"{s.name(t)} stopped: {NOT_TRUSTED} The next message to it starts it again.")
+            return
         live = workers(s, t)
         if not live:
             raise Fail(f"{s.name(t)} has no agent at work; there is nothing to stop. `herdr-task resume {s.ref(t)}` starts it again.")

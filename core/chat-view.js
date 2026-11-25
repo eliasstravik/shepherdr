@@ -452,7 +452,7 @@ export const isHelper = (k) => HELPER_ROLES.includes(roleOf(k)) && !!k?.parent;
 
 // k's parent, as an address comparable with `addr`: another machine's terminal names its parent on that machine ("t5"
 // for "vm/t5").
-function parentAddr(k) {
+export function parentAddr(k) {
   const p = String(k?.parent ?? "");
   if (!p) return null;
   const m = String(k.address ?? "").includes("/") ? String(k.address).split("/")[0] : null;

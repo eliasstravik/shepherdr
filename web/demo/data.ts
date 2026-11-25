@@ -39,6 +39,8 @@ export const tasks: Task[] = [
   task('vm:GARDEN-3', 'Watering reminders', P.garden, 'work', { started: NOW - 30 * min, repo: 'branch', worktree: true, branch: 'task/watering-reminders', base: 'main', pr: { number: 31, url: 'https://github.com/example/garden-app/pull/31', checks: 'running' }, report: { msg: 'Writing tests', progress: 25, eta: 110 } }),
   // SHEP-321: a task just started (no % yet: the turning ring) and one stopped by an error part way
   task('SHOP-18', 'Product page copy', P.shop, 'work', { started: NOW - 2 * min, report: { msg: 'Reading the product pages' } }),
+  // #1441: its agent stopped at Claude Code's folder-trust screen
+  task('BLOG-12', 'Add an RSS feed', P.blog, 'need', { needsAt: NOW - 3 * min, report: { msg: 'Asks to trust this folder', paused: true } }),
   task('BLOG-11', 'Newsletter signup form', P.blog, 'need', { needsAt: NOW - 12 * min, stopped: { by: 'error', why: 'its session ended' }, report: { msg: 'Adding the form', progress: 45, paused: true } }),
   task('SHOP-19', 'Product page reviews', P.shop, 'work', { started: NOW - min, repo: 'branch', worktree: true, branch: 'task/product-page-reviews', base: 'main' }),
   task('BLOG-9', 'Dark mode for code blocks', P.blog, 'queued', { afterTitle: 'Fix typo on the About page', desc: 'Adds a dark theme to the code blocks on the blog', agent: undefined }),
@@ -268,6 +270,8 @@ export const chats: Record<string, Chat> = Object.fromEntries(
     chat(P.garden, [a('GARDEN-3 is in progress, about 20 minutes left.'), { id: `m${++n}`, who: 'agent', news: { task: 'vm:GARDEN-4', ref: 'GARDEN-4', mark: 'needs', what: '', text: 'I need an image library to resize the photos.' } }, ask('q-pil', 'Run a command', byPhoto, ['Allow once', 'Decline'], { command: 'pip install pillow' })], gpt),
     chat('SHOP-14/worker', [a('I compared both for the shop. Stripe is already used for your invoices. Adyen gets cheaper above 50k a month but needs two weeks of paperwork.'), ...payQ().map((x, i) => (i ? x : { ...x, suggests: ['Go with Stripe', 'Compare the fees again'] }))], opus),
     chat('SHOP-12/worker', [a('Search is done. I added an index and cached the top queries.', { suggests: ['Looks good, merge it', 'Show me the diff', 'status?'] })], opus),
+    chat('BLOG-12/worker', [ask('scr-t42-1', 'Trust this folder?', undefined, ['Trust this folder and start', 'No, stop the task'], { press: true, noNote: true,
+      trust: { cli: 'Claude Code', folder: '/Users/sam/dev/blog', waits: "Claude Code won't start in /Users/sam/dev/blog until you trust this folder.", allows: "Trusting it lets the folder's project settings and hooks run." } })], opus),
     chat('BLOG-10/worker', [a('Fixed it straight in the blog folder, as this space is set up.')], opus),
     chat('NOTES-4/worker', [a('I read the three quotes in your notes folder and wrote up a comparison.')], opus),
     chat('vm:GARDEN-4/worker', permQ().map((x, i) => (i ? x : { ...x, suggests: ['Allow it once'] })), opus),
