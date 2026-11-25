@@ -2383,6 +2383,9 @@ def cmd_uninstall(a):
     if not rec and not old:
         raise Stop(f"Shepherdr isn't installed under {root}")
     r = Run(root, a.dry_run)
+    # #1430: layout.py lives in the herdr_task this removes, and the hold's, the share's and the data folders' paths
+    # come from it after: imported now, while it's still here
+    layout_mod()
     rec = rec or {}
     links = dict(rec.get("links") or {})
     if old:

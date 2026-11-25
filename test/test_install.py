@@ -442,6 +442,21 @@ class Install(unittest.TestCase):
         finally:
             shutil.rmtree(src, ignore_errors=True)
 
+    def test_the_installed_copy_uninstalls_to_its_end(self):
+        """#1430: the installed shepherdr removes its own herdr_task, then still needs layout.py (the sync hold's and
+        the data folders' paths): uninstall finishes and takes away everything it lists."""
+        run("install", "--root", self.root, "--yes")
+        with open(self.p(".herdr/sync-hold"), "w") as f:
+            f.write("held\n")
+        own = self.p(SHARE, "bin", "shepherdr")
+        p = subprocess.run([sys.executable, own, "uninstall", "--root", self.root], capture_output=True, text=True,
+                           stdin=subprocess.DEVNULL)
+        self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
+        self.assertIn("Shepherdr uninstalled", p.stdout)
+        self.assertFalse(os.path.exists(self.p(".herdr/sync-hold")))
+        self.assertFalse(os.path.exists(self.p(RECORD)))
+        self.assertFalse(os.path.exists(self.p(SHARE, "mods")), "its emptied folders go too")
+
     def test_update_says_loudly_when_the_install_is_not_whole(self):
         """An update that goes in but leaves doctor failing says so at its end, with the ✗ lines and no 'done' (#905):
         here a helper whose SHEP block isn't layout.py's."""
