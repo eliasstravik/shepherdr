@@ -28,7 +28,7 @@ from .launch import (
     base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
     own_path, parent_for, resume_argv, set_branch, setup_for, space_for_folder, tab_title, task_tabs,
 )
-from .store import bare_by_mistake, is_task_list, locate, open_store, quoted, read_list, Store, store_files
+from .store import bare_by_mistake, Busy, is_task_list, locate, open_store, queue_progress, quoted, read_list, Store, store_files
 from .queues import after_refs, parse_after, queue_reason, set_after
 from .archive import unarchive
 from .output import line, minutes, say, view
@@ -981,7 +981,7 @@ def parse_left(text):
     return int(sum(float(n) * {"h": 3600000, "m": 60000, "s": 1000}[u[0]] for n, u in parts))
 
 
-STATUS_WAIT = 15
+STATUS_WAIT = 5
 
 
 def cmd_status(args):
@@ -994,22 +994,39 @@ def cmd_status(args):
     if args.done is not None and not 0 <= args.done <= 100:
         raise Fail("--done is a percentage, 0 to 100.")
     left = parse_left(args.left) if args.left else None
-    # #1130: a status line never waits minutes behind a busy list: it gives up after STATUS_WAIT, saying so
-    with open_store(args, wait=STATUS_WAIT) as s:
+    shown = fit(text)
+    # set: when it was said ("at" moves on while it waits, for the minutes left).
+    said = now()
+    progress = {"text": shown, "at": said, "set": said, **({"done": args.done} if args.done is not None else {}),
+                **({"left": left} if left is not None else {})}
+
+    def put(s):
         t = s.find(args.id)
         if t["state"] not in ("running", "ready"):
             raise Fail(f"{s.name(t)} isn't being worked on ({STATUSES.get(t['state'], t['state'])}); nothing to report.")
-        shown = fit(text)
-        # set: when it was said ("at" moves on while it waits, for the minutes left).
-        t["progress"] = {"text": shown, "at": now(), "set": now(), **({"done": args.done} if args.done is not None else {}),
-                         **({"left": left} if left is not None else {})}
+        t["progress"] = dict(progress)
         s.dirty = True
-        v = view(s, t, [detail(k) for k in live_agents(s.key(t))])
+        return t, view(s, t, [detail(k) for k in live_agents(s.key(t))])
+
+    queued = False
+    try:
+        # #1130: a status line never waits minutes behind a busy list
+        with open_store(args, wait=STATUS_WAIT) as s:
+            t, v = put(s)
+    except Busy:
+        # #1490: nor is it dropped: kept aside, the list's next holder puts it on its task (Store.take_progress())
+        with open_store(args, write=False) as s:
+            t, v = put(s)
+            queue_progress(s.path, t["id"], progress)
+        queued = True
     note = f" Cut to {LINE_MAX} characters: \"{shown}\". Keep it shorter next time." if shown != text else ""
+    if queued:
+        note += " The task list is busy right now: it shows once it's free, within a minute."
     # Every status gives the time left, a rough guess beats none (SHEP-13): one without it asks for it.
     if left is None:
         note += " Add --left with your best guess of the time left (like 20m) to every status."
-    say(args, {**v, "cut": shown != text}, f"{s.name(t)}: {shown}" + (f" · {args.done}%" if args.done is not None else "")
+    say(args, {**v, "cut": shown != text, **({"queued": True} if queued else {})}, f"{s.name(t)}: {shown}"
+        + (f" · {args.done}%" if args.done is not None else "")
         + (f" · ~{minutes(round(left / 60000))} left" if left is not None else "") + "." + note)
 
 

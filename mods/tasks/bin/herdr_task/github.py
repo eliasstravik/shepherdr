@@ -22,6 +22,27 @@ def gh(*args, cwd=None):
     return r.returncode == 0, r.stdout.strip(), (r.stderr or r.stdout).strip()
 
 
+# #1490: what the scheduler asked GitHub with the task list's lock let go (tick.prefetch()), each answer used once by
+# the call below that would ask it again under the lock; cleared after its list's turn.
+_ANSWERS = {}
+_ASK = object()
+
+
+@contextlib.contextmanager
+def answered(found):
+    _ANSWERS.clear()
+    _ANSWERS.update(found or {})
+    try:
+        yield
+    finally:
+        _ANSWERS.clear()
+
+
+def answer(*key):
+    """An answer asked ahead (answered()), else _ASK."""
+    return _ANSWERS.pop(key, _ASK)
+
+
 def github(s):
     """The repo on GitHub ("owner/name") when it has a GitHub remote and gh works there; asked
     again after an hour. None: tasks merge locally. gh failing on a repo whose remote is on GitHub
@@ -511,6 +532,9 @@ def required_checks(task):
     owner, _, name = (pr.get("repo") or "").partition("/")
     if not (owner and name and pr.get("number")):
         return None
+    found = answer("required", pr["repo"], pr["number"])
+    if found is not _ASK:
+        return found
     ok, out, _ = gh("api", "graphql", "-f", f"query={REQUIRED_QUERY}", "-f", f"owner={owner}", "-f", f"name={name}",
                     "-F", f"n={pr['number']}")
     try:
