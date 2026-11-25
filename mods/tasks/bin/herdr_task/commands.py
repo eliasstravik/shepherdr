@@ -21,7 +21,7 @@ from .agents import (
     status_word, STATUSES, SUMMARY_MAX, WORKING_AGAIN,
 )
 from .sessions import refresh_sessions
-from .github import (already_merged, checks_missing, collision, collision_reason, collision_words, github_unreachable, pr_for_branch, checks_since, drop_branch, expected_checks, finish, gh, github, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
+from .github import (already_merged, checks_missing, collision, collision_reason, collision_words, github_unreachable, pr_for_branch, checks_since, drop_branch, expected_checks, finish, gh, github, landed, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
                      merge_checks, pr_pending, pr_problem, pr_view, queue_refusal, remote_of, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
@@ -725,6 +725,15 @@ def cmd_ready(args):
             how = f"pull request #{gone['number']} is merged" if gone else f"its work is already in {t.get('base') or 'main'}"
             say(args, v, f"{s.name(t)}: {how}; done.")
             return
+        if wt and not os.path.isdir(wt) and not t.get("nothing_to_merge"):
+            # #1426: its worktree removed (after a merge, say) and its work not in its base: said, never a pull request
+            # or a merge from a folder that isn't there.
+            main, br, base = s.loc["folder"], t.get("branch"), t.get("base") or "main"
+            q = shlex.quote
+            has = br and git(main, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")[0]
+            raise Fail(f"{s.name(t)}'s worktree {wt} is gone, and its work isn't in {base}. "
+                       + (f"Bring it back (git -C {q(main)} worktree add {q(wt)} {br}), then run ready again." if has else
+                          f"Its branch {br} is gone too: nothing is left here to merge. Tell the person."))
         msg = finalize(s, t)
         # Its own background work still running (SHEP-148): the task shows Working until it ends.
         # #1093: named, and Codex's only while something of its own really runs (ended ones never listed)
@@ -1201,7 +1210,7 @@ def cmd_state(args, state):
             for k in ("reviews", "review", "auto_merge", "merged", "nothing_to_merge", "accepted_at", "merge_asked", "merge_queued", "closed_unmerged",
                       "quiet", "told", "told_sent"):
                 t.pop(k, None)
-        if state == "done" and (t.get("was_merged") or (t.get("worktree") and merged_here(s, t))):
+        if state == "done" and (t.get("was_merged") or (t.get("worktree") and (merged_here(s, t) or landed(s, t)))):
             # SHEP-423: reopened after it merged (to tag a release, say), then done again: still merged. Squash-merged on
             # GitHub, merged_here can't tell, and it was filed "Done · not merged": a schedule listening for "merged" missed it.
             t["merged"] = True

@@ -2724,6 +2724,68 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         self.assertNotIn("pr", self.task)
         self.assertNotIn(("pr", "create"), calls)
 
+    # #1486: its agent merged it by hand (the merge steps: rebase, fast-forward, worktree and branch removed), then done:
+    # merged, also after a rebase, a squash, or a plain fast-forward; never when its work isn't in main.
+    def merged_by_hand(self, how):
+        import argparse
+        wt = self.task["worktree"]
+        self.task["head"] = self.change(wt, "reactions on the left")
+        self.commands.own_work(self.store, self.task)  # what ready keeps
+        self.task["state"] = "ready"
+        if how == "rebase":
+            self.commit(self.main, "another task merged meanwhile")
+            self.git(wt, "rebase", "-q", "main")
+        if how == "squash":
+            self.squash_into_main()
+        elif how != "none":
+            self.git(self.main, "merge", "-q", "--ff-only", "task/1")
+        self.git(self.main, "worktree", "remove", wt)
+        self.git(self.main, "branch", "-D", "task/1")
+        self.commands.cmd_state(argparse.Namespace(id="SHEP-1", json=True, folder=None), "done")
+        return self.task["state"], bool(self.task.get("merged")), bool(self.task.get("closed_unmerged"))
+
+    def test_done_after_a_fast_forward_by_hand_is_merged(self):
+        self.assertEqual(self.merged_by_hand("ff"), ("done", True, False))
+
+    def test_done_after_a_rebase_and_fast_forward_by_hand_is_merged(self):
+        self.assertEqual(self.merged_by_hand("rebase"), ("done", True, False))
+
+    def test_done_after_a_squash_by_hand_is_merged(self):
+        self.assertEqual(self.merged_by_hand("squash"), ("done", True, False))
+
+    def test_done_with_its_work_not_in_main_is_not_merged(self):
+        self.assertEqual(self.merged_by_hand("none"), ("done", False, True))
+
+    # #1426: a release task reopened after its pull request squash-merged, its worktree and branch removed: ready again is
+    # done (never a crash on its missing head); its work not merged and its worktree gone: said plainly.
+    def test_ready_after_its_worktree_and_branch_went_is_done(self):
+        from unittest import mock
+        import herdr_task.github as github
+        own = self.change(self.task["worktree"], "release notes")
+        self.commands.own_work(self.store, self.task)
+        self.squash_into_main()
+        self.git(self.main, "worktree", "remove", self.task["worktree"])
+        self.git(self.main, "branch", "-D", "task/1")
+        self.task.update(state="running", head=None, kept_open=True, was_merged=True,
+                         pr={"number": 704, "url": "https://github.com/o/r/pull/704", "repo": "o/r"})
+        self.github([])
+        with mock.patch.object(github, "pr_view", lambda t: {"state": "MERGED", "headRefOid": own, "mergeCommit": {"oid": "f00"}}):
+            self.assertEqual(self.ready_now(), ("done", True))
+
+    def test_ready_after_its_worktree_went_says_so(self):
+        from herdr_task.base import Fail
+        self.change(self.task["worktree"], "not merged anywhere")
+        self.git(self.main, "worktree", "remove", self.task["worktree"])
+        self.github([])
+        with self.assertRaises(Fail) as e:
+            self.ready_now()
+        self.assertIn("worktree", str(e.exception))
+        self.assertIn("worktree add", str(e.exception))
+        self.git(self.main, "branch", "-D", "task/1")
+        with self.assertRaises(Fail) as e:
+            self.ready_now()
+        self.assertIn("Its branch task/1 is gone too", str(e.exception))
+
     # SHEP-96: a task with no commits beyond its base (research, an artifact only) still waits in
     # Ready for the person's Accept, its words kept; Accept just marks it done and cleans up.
     def ready_said(self, summary="Found three options.", details="- Read five sources"):
@@ -6316,6 +6378,29 @@ class TaskFlow(unittest.TestCase):
             github.pr_push(self.store, self.task, "o/r")
         self.assertIn("out of GitHub's merge queue", str(e.exception))
         self.assertIn("Resource not accessible", str(e.exception))
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "branch", "--list", "task/1"), "")
+
+    def test_ready_pushes_when_its_branch_was_deleted_on_the_remote(self):
+        """#1497: its branch deleted on the remote, the tracking ref still there: the push leases on "not there" (never
+        git's "stale info"). After a merged pull request: said, nothing pushed, never a second one."""
+        import herdr_task.github as github
+        wt, remote = self.task["worktree"], os.path.join(self.root, "remote.git")
+        self.git(self.root, "init", "-q", "--bare", remote)
+        self.git(self.main, "remote", "add", "origin", remote)
+        self.commit(wt, "work", "a.txt")
+        self.git(wt, "push", "-q", "-u", "origin", "task/1")
+        self.git(self.root, "--git-dir", remote, "branch", "-D", "task/1")  # GitHub deleted it; origin/task/1 stays here
+        merged = []
+        self.patch(github, "gh", lambda *a, **k: (True, json.dumps(merged), ""))
+        tip = self.commit(wt, "a follow-up", "a.txt")
+        github.pr_push(self.store, self.task, "o/r")
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "task/1"), tip)
+        self.git(self.root, "--git-dir", remote, "branch", "-D", "task/1")
+        merged.append({"number": 7, "url": "u7", "isCrossRepository": False, "baseRefName": "main", "headRefOid": "abc"})
+        self.commit(wt, "another follow-up", "a.txt")
+        with self.assertRaises(Exception) as e:
+            github.pr_push(self.store, self.task, "o/r")
+        self.assertIn("Pull request #7 for task/1 is already merged", str(e.exception))
         self.assertEqual(self.git(self.root, "--git-dir", remote, "branch", "--list", "task/1"), "")
 
     def taking(self, prs):
