@@ -95,7 +95,7 @@ const useCoarse = () => useSyncExternalStore(onCoarse, () => typeof matchMedia =
  *  least the pane's): herdr sends only the screen, never older lines, so its tall screen is the history you scroll
  *  up through. It opens at the last line shown and follows new output, unless you scroll up; back down, it follows
  *  again. */
-function Term({ stream, fill }: { stream: string; fill?: boolean }) {
+function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; onEnd?: () => void }) {
   const phone = useUI((u) => u.phone)
   const coarse = useCoarse()
   const own = stream.startsWith('sh:')
@@ -112,6 +112,8 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
   const [ctrl, setCtrl] = useState(false)
   const ctrlRef = useRef(false)
   ctrlRef.current = ctrl
+  const endRef = useRef(onEnd)
+  endRef.current = onEnd
   /** what pressed the key row last: 'touch', 'pen', 'mouse', or '' for a key press on its button */
   const pointer = useRef('')
 
@@ -217,6 +219,8 @@ function Term({ stream, fill }: { stream: string; fill?: boolean }) {
           fit()
         },
         setStatus,
+        // your own shell ended (Ctrl+D, exit): its drawer or screen closes
+        () => endRef.current?.(),
       )
       fit()
     })
@@ -391,13 +395,14 @@ function whereOf(thread: Thread) {
 
 /** your own terminal, in the drawer under a chat or a task */
 function Drawer({ thread }: { thread: Thread }) {
+  const close = () => setUI(thread.task ? { tterm: false } : { term: false })
   return (
     <>
       <div className="tbar">
         <span>{whereOf(thread)}</span>
-        <IB icon="x" label="Close the terminal" onClick={() => setUI(thread.task ? { tterm: false } : { term: false })} />
+        <IB icon="x" label="Close the terminal" onClick={close} />
       </div>
-      <Term stream={shellKey(thread)} />
+      <Term stream={shellKey(thread)} onEnd={close} />
     </>
   )
 }
@@ -411,14 +416,15 @@ function TerminalPane() {
   const p = placeOf(snap, ui.at)
   if (!p) return null
   const thread: Thread = t ? { chat: taskChat(t), place: t.place, task: t, where: 'pane' } : { chat: p.chat, place: p.id, where: 'pane' }
+  const close = () => setUI(t ? { pane: 'tasks' } : { pane: null })
   return (
     <PaneFrame flush head={() => (t ? <Hd back={{ label: 'Back to the task', run: () => setUI({ pane: 'tasks' }) }} title="Terminal" sub={t.name} /> : <Hd title="Terminal" pad={12} />)}>
       <div className="tdr" style={{ border: 0 }}>
         <div className="tbar">
           <span>{whereOf(thread)}</span>
-          <IB icon="x" label="Close the terminal" onClick={() => setUI(t ? { pane: 'tasks' } : { pane: null })} />
+          <IB icon="x" label="Close the terminal" onClick={close} />
         </div>
-        <Term stream={shellKey(thread)} fill />
+        <Term stream={shellKey(thread)} fill onEnd={close} />
       </div>
     </PaneFrame>
   )

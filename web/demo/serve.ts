@@ -305,6 +305,8 @@ Bun.serve<Sock['data'], never>({
         if (m.type === 'open') { ws.send(JSON.stringify({ type: 'size', cols: 100, rows: 12 })); say(TERM_LINKS + 'sam@mac-mini shop % ') }
         else if (m.type === 'text') say(m.text ?? '')
         else if (m.type === 'keys' && m.keys?.includes('enter')) say("\r\n(this demo doesn't run commands)\r\nsam@mac-mini shop % ")
+        // Ctrl+D ends the shell: the page closes the terminal, as the service tells it for a real one
+        else if (m.type === 'keys' && m.keys?.includes('ctrl+d')) { ws.send(JSON.stringify({ type: 'ended' })); return }
         ws.send(JSON.stringify({ type: 'ack', id: m.id }))
         return
       }
