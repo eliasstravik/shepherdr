@@ -9522,6 +9522,25 @@ class Next32(unittest.TestCase):
         self.assertIn("no agent at work", str(e.exception))
         self.assertEqual(self.hc, [])
 
+    def test_no_on_the_folder_trust_screen_stops_it_saying_why(self):
+        """#1441: the person's No on its CLI's folder-trust screen (its agent exited): stopped by them, saying why,
+        nothing interrupted, never left looking like an agent that vanished; still stopped once the tick looks."""
+        self.begun()
+        self.live[:] = []
+        self.change(trust_ask="t9")
+        v = self.run_cmd(self.commands.cmd_stop, id="1", untrusted=True)
+        self.assertEqual(self.hc, [])
+        t = self.task(1)
+        self.assertEqual((t["stopped_by"], t["stopped_why"]), ("you", "You didn't trust its folder, so it didn't start."))
+        self.assertNotIn("trust_ask", t)
+        self.assertEqual((v["status"], v["needs"], v["stopped_why"]), ("needs", "stopped", "You didn't trust its folder, so it didn't start."))
+        import herdr_task.tick as tick
+        with self.mock.patch.object(tick, "live_agents", lambda key: []), self.mock.patch.object(tick, "detail", lambda k: k), \
+                self.mock.patch.object(tick, "store_files", lambda *a: self.store_mod.store_files()), \
+                self.mock.patch.object(tick, "now", lambda: self.task(1)["stopped_at"] + 60000):
+            tick.stopped_pass({})
+        self.assertEqual(self.task(1)["stopped_why"], "You didn't trust its folder, so it didn't start.")
+
     # ---- Stopped, never restarted (step 38) ----
 
     def stopped_pass(self, log_rows=None):

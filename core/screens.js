@@ -147,6 +147,30 @@ export const SCREEN = {
   ended: (cli, how) => `${cli}'s start screen · ${how}`,
 };
 
+// A CLI's folder-trust screen (#1441): Claude Code's "Quick safety check" / "Do you trust the files in this folder?" (its
+// Enter on the wrong choice exits), Codex's "Do you trust the contents of this directory?". The person's choice every
+// time: { yes, no } (the screen's own choice for each, wherever its cursor is) and the folder it names, else null.
+const TRUST_WORDS = /Quick safety check|Do you trust the files in this folder|trust this folder|Do you trust the contents of this directory|allow Codex to work in this folder/i;
+export function trustOf(card) {
+  if (!card || !TRUST_WORDS.test(`${card.all ?? ""}\n${card.words ?? ""}`)) return null;
+  const labels = (card.choices ?? []).map((c) => String(c.label ?? ""));
+  const yes = labels.findIndex((l) => /^yes\b/i.test(l)), no = labels.findIndex((l) => /^no\b/i.test(l));
+  if (yes < 0 || no < 0) return null;
+  const folder = cleaned(card.all).map((l) => l.trim()).find((l) => /^(\/|~\/|~$|[A-Z]:\\)\S*$/.test(l)) ?? null;
+  return { yes, no, folder };
+}
+// The trust card's words: plain, the same on the web card, the phone and the watch.
+export const TRUST = {
+  title: "Trust this folder?",
+  waits: (cli, folder) => `${cli} won't start${folder ? ` in ${folder}` : " here"} until you trust this folder.`,
+  allows: "Trusting it lets the folder's project settings and hooks run.",
+  yes: "Trust this folder and start",
+  no: (task) => (task ? "No, stop the task" : "No, close it"),
+  // on a notification's or a watch's button (24 characters at most)
+  yesShort: "Trust and start",
+  noShort: (task) => (task ? "No, stop it" : "No, close it"),
+};
+
 // Watches agents' screens: one per chat copy (the window's) or one for the web app (the service's). io: { hc(args)
 // -> { code, stdout }, cards(addr) -> [card], save(addr, list) }. tick(addr, k) every couple of seconds while the agent
 // is starting; it says (through onPost) when it put a new card up, for the alert.

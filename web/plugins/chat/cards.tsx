@@ -73,6 +73,21 @@ export function QuestionCard({ q, chat, place }: { q: Question; chat: string; pl
       </div>
     )
   }
+  // #1441: a CLI's folder-trust screen: what waits and what trusting allows, No, Trust this folder and start
+  if (q.trust) {
+    return (
+      <div className="card" data-card={q.id}>
+        <span className="t">{q.title}</span>
+        <span>{q.trust.waits}</span>
+        <span className="s">{q.trust.allows}</span>
+        <div className="acts">
+          {say('no', { choice: 1 }, q.choices[1]?.label ?? 'No', { busy: 'Stopping…' })}
+          {say('yes', { choice: 0 }, q.choices[0]?.label ?? 'Trust this folder and start', { kind: 'pri', busy: 'Starting…' })}
+        </div>
+        <ActError acts={acts} />
+      </div>
+    )
+  }
   // a plan: what it will do, Keep planning, Approve
   if (q.kind === 'Plan' || q.plan) {
     return (

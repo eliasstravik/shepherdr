@@ -695,7 +695,7 @@ function Messages({ thread }: { thread: Thread }) {
       if (from && from !== lastRef) out.push(<TaskRef key={`r:${k}`} id={from} title={m.question.by!.title ?? m.question.by!.ref} t={taskOf(snap, from)} />)
       if (from) lastRef = from
       const place = (from && taskOf(snap, from)?.place) || thread.place
-      if (m.question.title && !m.question.command && !m.question.plan && !m.question.parts?.length && m.question.sent === undefined && !m.question.closed) out.push(<div key={`q:${k}`} className={cx('b', gap && 'gap')}>{m.question.title}</div>)
+      if (m.question.title && !m.question.trust && !m.question.command && !m.question.plan && !m.question.parts?.length && m.question.sent === undefined && !m.question.closed) out.push(<div key={`q:${k}`} className={cx('b', gap && 'gap')}>{m.question.title}</div>)
       out.push(<QuestionCard key={k} q={m.question} chat={m.question.by?.chat ?? thread.chat} place={place} />)
     } else if (m.secret) out.push(<SecretCard key={k} ask={m.secret} chat={thread.chat} />)
     else if (m.news) {

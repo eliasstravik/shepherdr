@@ -53,7 +53,7 @@ export function keptTags(snap: NeedsSnap & Pick<Snapshot, 'asks'>, onScreen: str
 }
 
 /** a choice as an alert shows it: a choice that needs a note says so in the app, not in the alert */
-const short = (q: Question, i: number) => (q.noteRequiredFor === i ? q.choices[i].label.replace(/ with a note$/i, '') : q.choices[i].label)
+const short = (q: Question, i: number) => q.choices[i].short ?? (q.noteRequiredFor === i ? q.choices[i].label.replace(/ with a note$/i, '') : q.choices[i].label)
 
 /** the card's choices in short: "Approve the plan · Send it back" */
 export const choicesLine = (q: Question) => q.choices.map((_, i) => short(q, i)).join(' · ')

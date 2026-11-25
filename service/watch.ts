@@ -2,13 +2,15 @@
 // task workers):
 // - a CLI stopped on its own start screen (trust, theme, sign in): a card with its choices (core/screens.js), pressed
 //   only on the screen it was drawn from.
+// - any agent still before its session (a task's, an Assistant, a reviewer) whose chat nobody has open too, so a
+//   folder-trust screen reaches Needs you, the phone and the watch (#1441: an agent sat 80 minutes at one).
 // - a session that is gone ("No conversation found"): show a note and wait for the person to restart it.
 import type { Hub } from "./hub.ts";
 import * as SC from "../core/screens.js";
 import * as CV from "../core/chat-view.js";
 import * as AG from "../core/agents.js";
 
-const { ScreenWatch, starting, cliOf, readScreen, screenText, pressKeys, SCREEN } = SC as any;
+const { ScreenWatch, starting, cliOf, readScreen, screenText, pressKeys, SCREEN, trustOf } = SC as any;
 const { LOST } = CV as any;
 const { freshArgv } = AG as any;
 type Run = (args: string[]) => Promise<{ code: number; stdout: string; stderr?: string }>;
@@ -40,11 +42,17 @@ export class AgentWatch {
     if (this.busy) return;
     this.busy = true;
     try {
-      for (const w of this.o.watched()) {
+      const watched = this.o.watched(), seen = new Set(watched.map((w) => w.addr));
+      for (const w of watched) {
         const k: any = this.hub.terminals.get(w.addr);
         if (!k) continue;
         if (starting(k) || this.screens.open(w.addr)) await this.screens.tick(w.addr, k).catch(() => undefined);
         if (this.lostCandidate(k)) await this.checkLost(w).catch(() => undefined);
+      }
+      // the rest: only their start screens, while they are starting (or a card of theirs is still open)
+      for (const [addr, k] of this.hub.terminals as Map<string, any>) {
+        if (seen.has(addr) || !(starting(k) || this.screens.open(addr))) continue;
+        await this.screens.tick(addr, k).catch(() => undefined);
       }
     } finally { this.busy = false; }
   }
@@ -54,8 +62,26 @@ export class AgentWatch {
     const addr = [...this.own.keys()].find((a) => this.cardsOf(a).some((c) => c.id === id));
     const card = addr ? this.cardsOf(addr).find((c) => c.id === id) : null;
     if (!card || card.state !== "open") return SCREEN.gone;
+    // a folder-trust card shows two buttons of its own (0: trust, 1: no): each presses the screen's own choice
+    const t = trustOf(card);
+    if (t) {
+      if (choice !== 0 && choice !== 1) return SCREEN.gone;
+      return this.screens.press(card, choice === 0 ? t.yes : t.no);
+    }
     return this.screens.press(card, choice);
   }
+
+  /** The open folder-trust card of each agent waiting on one: [{ card, trust }]. */
+  trustCards(): { card: any; trust: { yes: number; no: number; folder: string | null } }[] {
+    const out: any[] = [];
+    for (const addr of this.own.keys()) {
+      const card = this.openCard(addr), trust = card ? trustOf(card) : null;
+      if (card && trust) out.push({ card, trust });
+    }
+    return out;
+  }
+  /** The card with this id, open or not. */
+  card(id: string) { for (const addr of this.own.keys()) { const c = this.cardsOf(addr).find((x) => x.id === id); if (c) return c; } return null; }
 
   // At its shell after a resume (its CLI no longer runs there), or ended with an error: looked at once.
   private lostCandidate(k: any) {
