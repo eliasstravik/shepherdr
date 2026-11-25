@@ -2,7 +2,7 @@
 // says (tap, drag, long press, two fingers), nothing reaches the remote before Take over, the key row's keys and chords
 // reach the remote as it wants them, and the view enters and leaves the device's own full screen.
 import { expect, test } from 'bun:test'
-import { browserPress, chords, clamp, deskPress, enterDevice, gestures, HOLD_MS, keysymOf, leaveDevice, panBy, refit, shown, SENTINEL, toRemote, typed, wheelSteps, WHOLE, zoomAt, type Act, type View } from './full.ts'
+import { browserPress, chords, clamp, deskPress, enterDevice, gestures, HOLD_MS, keysymOf, leaveDevice, panBy, refit, shown, SENTINEL, spotIn, stillTap, TAP_MS, tapDone, toRemote, typed, wheelSteps, WHOLE, zoomAt, type Act, type View } from './full.ts'
 
 // a phone held upright (390 x 700) showing a 1280 x 800 page: fitted to 390 x 243.75, centred
 const box = { w: 390, h: 700 }
@@ -192,4 +192,33 @@ test("entering and leaving the device's own full screen, and the app's alone whe
   expect(await enterDevice({ fullscreenElement: null, documentElement: {} })).toBe(false)
   // refused (no tap behind it): the same
   expect(await enterDevice({ fullscreenElement: null, documentElement: { requestFullscreen: () => Promise.reject(new Error('no')) } })).toBe(false)
+})
+
+// The Screen pane: a tap on the picture brings up a touch screen's keyboard (SHEP-498); a drag, a pinch or a long
+// hold does not, and the typing box goes under the finger so the spot stays in view above the keyboard.
+test('pane: a tap raises the keyboard, a drag, a second finger or a long hold does not', () => {
+  const s0 = { x: 100, y: 200, t: 1000 }
+  expect(stillTap(s0, { x: 104, y: 206 }, 1)).toBe(s0)
+  expect(stillTap(s0, { x: 100, y: 230 }, 1)).toBeNull()
+  expect(stillTap(s0, { x: 100, y: 200 }, 2)).toBeNull()
+  expect(stillTap(null, { x: 100, y: 200 }, 1)).toBeNull()
+  expect(tapDone(s0, 1000 + TAP_MS)).toBe(true)
+  expect(tapDone(s0, 1001 + TAP_MS)).toBe(false)
+  expect(tapDone(null, 1000)).toBe(false)
+})
+
+test('pane: the typing box sits under the finger, never outside the picture', () => {
+  const r = { left: 580, top: 220, width: 370, height: 231 }
+  expect(spotIn(r, { x: 600, y: 300 })).toEqual({ x: 20, y: 80 })
+  expect(spotIn(r, { x: 0, y: 0 })).toEqual({ x: 0, y: 0 })
+  expect(spotIn(r, { x: 2000, y: 2000 })).toEqual({ x: 369, y: 230 })
+})
+
+test('pane: what is typed (a password) is never logged, and the keyboard is not phone-only', async () => {
+  const dir = new URL('.', import.meta.url).pathname
+  for (const f of ['client.tsx', 'fullview.tsx', 'full.ts']) expect(await Bun.file(dir + f).text()).not.toMatch(/console\.(log|info|debug|warn)/)
+  const client = await Bun.file(dir + 'client.tsx').text()
+  // one typing box for the pane and full screen alike, there whenever you drive, on any screen size
+  expect(client).toContain('{drive ? <TypeBox')
+  expect(client).not.toMatch(/drive && phone && !full/)
 })

@@ -91,6 +91,8 @@ div.b[data-menu]{cursor:pointer}
    video, the picture zoomed by hand (its transform), a slim bar on top that hides, the key row under it */
 .scrfull{position:fixed;left:0;right:0;top:0;height:var(--app-h,100dvh);z-index:30;display:flex;flex-direction:column;background:#000;color:var(--fg);--fg:#fafafa;--canvas:#0a0a0a;--sub:#d4d4d4;--muted:#a3a3a3;--control:rgb(255 255 255/.12);--control2:rgb(255 255 255/.2);--well:rgb(255 255 255/.08);--line2:rgb(255 255 255/.16);--term:#0a0a0a}
 .fbox{position:relative;flex:1;min-height:0;overflow:hidden}
+.sbox{position:relative}
+.pane>.foot>.fkeys{margin:0 calc(-1 * var(--gut)) 8px;padding-bottom:8px}
 .scr.full{position:absolute;inset:0;border-radius:0;background:none;box-shadow:none;transform-origin:0 0;overflow:visible}
 .scr.full canvas{width:auto;height:auto}
 .scr.full.drive{box-shadow:none}

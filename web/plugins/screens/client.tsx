@@ -10,7 +10,7 @@ import { PaneFrame } from '@client/App.tsx'
 import { act as call, definePlugin, getState, notice, openSettings, openTask, setUI, togglePane, tryAct, useSnap, useUI, type ScreenAt, type Thread } from '@client/kernel.ts'
 import { secretDialog } from '@client/settings.tsx'
 import { openMenu } from '@client/overlay.tsx'
-import { Btn, cx, Hd, I, IB } from '@client/ui.tsx'
+import { Btn, cx, Hd, IB } from '@client/ui.tsx'
 import { DoneRow } from '@plugins/chat/cards.tsx'
 import { StatusIcon } from '@plugins/tasks/icon.tsx'
 import { shortUrl, toUrl, type BrowserDown, type BrowserUp } from '@shared/browser.ts'
@@ -18,7 +18,7 @@ import type { Chat, ScreenInfo, Snapshot, Task } from '@shared/types.ts'
 import { isEverything, machineLabel, placeOf, spaceName, taskOf, tasksIn, tstate } from '@shared/view.ts'
 import { screenKey, screenRow } from './menu.ts'
 import { fit, keyEvent, modifiers, toPage, type Size } from '@plugins/browser/input.ts'
-import { browserPress, deskPress, enterDevice, keysymOf, leaveDevice, refit, wheelSteps, WHOLE, type Mods, type Pt, type View } from './full.ts'
+import { browserPress, deskPress, enterDevice, keysymOf, leaveDevice, refit, spotIn, stillTap, tapDone, wheelSteps, WHOLE, type Mods, type Pt, type Tap, type View } from './full.ts'
 import { coarse, FullBar, KeyRow, pasteFrom, Surface, TypeBox, type Remote } from './fullview.tsx'
 
 /** the picture in full screen: how it is zoomed and moved, in a box this size */
@@ -92,12 +92,10 @@ function useLink(key: string, onFrame: (data: string, width: number) => void) {
   return { state, send }
 }
 
-/** The page as the agent's browser draws it: the latest frame wins. Driving, your clicks, keys and touches go to it;
- *  on a phone, tapping it brings up the phone's own keyboard. */
+/** The page as the agent's browser draws it: the latest frame wins. Driving, your clicks, keys and touches go to it
+ *  (a tap also brings up a touch screen's keyboard: the Screen view's typing box). */
 function BrowserView({ k, drive, ring, send, state, onFrameRef, full, remoteRef }: { k: string; drive: boolean; ring: boolean; send: (m: BrowserUp) => void; state: State | null; onFrameRef: React.MutableRefObject<(data: string, width: number) => void>; full: Full; remoteRef: React.MutableRefObject<Remote | null> }) {
   const canvas = useRef<HTMLCanvasElement>(null)
-  const typed = useRef<HTMLInputElement>(null)
-  const phone = useUI((u) => u.phone)
   const [page, setPage] = useState<Size>({ w: 1280, h: 800 })
   const bitmap = useRef<ImageBitmap | null>(null)
   const busy = useRef(false)
@@ -197,7 +195,8 @@ function BrowserView({ k, drive, ring, send, state, onFrameRef, full, remoteRef 
     if (!drive) return
     const pts = Array.from(e.touches).map((t) => at(t)).filter((p): p is { x: number; y: number } => !!p)
     send({ type: 'input_touch', eventType, touchPoints: pts })
-    if (eventType === 'touchEnd' && phone) typed.current?.focus({ preventScroll: true })
+    // no mouse events after a touch: their mousedown would take the focus from the typing box, closing the keyboard
+    if (eventType === 'touchEnd') e.preventDefault()
   }
   const blank = !has && !state?.url
   const r = full ? fit(full.box, page) : null
@@ -218,8 +217,6 @@ function BrowserView({ k, drive, ring, send, state, onFrameRef, full, remoteRef 
       />
       {/* why there is no page to show (its machine can't be reached, its tool isn't there), in its own line */}
       {blank && state?.error && <div className="empty desk-why" role="status"><b>{state.error}</b><span>Shepherdr looks again by itself.</span></div>}
-      {/* a phone's own keyboard types into the page through this box */}
-      {drive && phone && !full && <input ref={typed} aria-label="Type into the page" autoCapitalize="off" autoCorrect="off" style={{ position: 'absolute', opacity: 0, width: 1, height: 1, bottom: 0 }} onChange={(e) => { const t = e.target.value; e.target.value = ''; if (t) send({ type: 'text', text: t }) }} onKeyDown={(e) => { const k1 = e.key.length > 1 ? keyEvent(e.nativeEvent, 'keyDown') : null; if (k1) send(k1) }} />}
       {!drive && !full && <button type="button" className="veil" aria-label="Live view. Take over to click and type" onClick={() => notice('Take over to click and type')} />}
     </div>
   )
@@ -313,7 +310,6 @@ function deskRemote(r: Rfb): Remote {
 function DesktopView({ k, drive, ring, apiRef, busy, onMac, full, remoteRef }: { k: string; drive: boolean; ring: boolean; apiRef: React.MutableRefObject<{ paste(t: string): void; shot(): string | null } | null>; busy?: string; onMac: string; full: Full; remoteRef: React.MutableRefObject<Remote | null> }) {
   const snap = useSnap()
   const host = useRef<HTMLDivElement>(null)
-  const typed = useRef<HTMLInputElement>(null)
   const rfb = useRef<import('@novnc/novnc').default | null>(null)
   const phone = useUI((u) => u.phone)
   const [status, setStatus] = useState<Check | 'opening' | 'live'>('opening')
@@ -342,6 +338,8 @@ function DesktopView({ k, drive, ring, apiRef, busy, onMac, full, remoteRef }: {
       r.scaleViewport = true
       r.background = 'transparent'
       r.viewOnly = true
+      // on a touch screen a tap must not take the focus from the typing box (the phone's keyboard would close)
+      r.focusOnClick = !coarse()
       r.addEventListener('connect', () => setStatus('live'))
       // the display went (or never came): ask why, and connect again once it is back
       r.addEventListener('disconnect', () => {
@@ -371,8 +369,6 @@ function DesktopView({ k, drive, ring, apiRef, busy, onMac, full, remoteRef }: {
   const failed = typeof status === 'object' && !status.ok ? status : null
   const fx = failed ? fixOf(failed.code, onMac) : null
   const setPassword = () => { if (snap) secretDialog(snap, 'all', PASSWORD, 'all', { fresh: !snap.config?.secrets.some((x) => x.name === PASSWORD), done: () => setTries((n) => n + 1) }) }
-  // X keysyms of the extra keys a phone's keyboard lacks
-  const KEYS: [string, number, string][] = [['esc', 0xff1b, 'Escape'], ['tab', 0xff09, 'Tab'], ['←', 0xff51, 'ArrowLeft'], ['↑', 0xff52, 'ArrowUp'], ['↓', 0xff54, 'ArrowDown'], ['→', 0xff53, 'ArrowRight']]
   return (
     <>
       <div className={cx('scr', ring && 'drive', full && 'full')} style={full ? zoomed(full) : { aspectRatio: held || (failed && failed.code !== 'starting') ? undefined : phone ? '4/3' : '16/10' }}>
@@ -401,13 +397,6 @@ function DesktopView({ k, drive, ring, apiRef, busy, onMac, full, remoteRef }: {
         ) : null}
         {!drive && !full && status === 'live' && <button type="button" className="veil" aria-label="Live view. Take over to click and type" onClick={() => notice('Take over to click and type')} />}
       </div>
-      {drive && phone && !full && status === 'live' && (
-        <div className="keys" style={{ background: 'none', padding: '8px 0 0' }}>
-          <button type="button" aria-label="Keyboard" style={{ background: 'var(--control)', color: 'var(--fg)' }} onClick={() => typed.current?.focus()}><I n="term" c="s16" /></button>
-          {KEYS.map(([l, sym, code]) => <button type="button" key={code} aria-label={`${code} key`} style={{ background: 'var(--control)', color: 'var(--fg)' }} onClick={() => rfb.current?.sendKey(sym, code)}>{l}</button>)}
-          <input ref={typed} aria-label="Type into the desktop" autoCapitalize="off" autoCorrect="off" style={{ position: 'absolute', opacity: 0, width: 1, height: 1 }} onChange={(e) => { const t = e.target.value; e.target.value = ''; for (const ch of t) rfb.current?.sendKey(ch.codePointAt(0)!, null) }} onKeyDown={(e) => { if (e.key === 'Enter') rfb.current?.sendKey(0xff0d, 'Enter'); else if (e.key === 'Backspace') rfb.current?.sendKey(0xff08, 'Backspace') }} />
-        </div>
-      )}
     </>
   )
 }
@@ -449,6 +438,28 @@ function ScreenPane() {
   const [rowOn, setRowOn] = useState(false)
   const [armed, setArmed] = useState<Mods>({})
   useEffect(() => setView(WHOLE), [scr?.key, scr?.src])
+  // In the pane, a tap on the picture (not a drag or a pinch) brings up a touch screen's keyboard: the typing box moves
+  // under the finger first, so when the keyboard takes its room the page keeps the spot being typed into in view.
+  const tap = useRef<Tap | null>(null)
+  const typeAt = (at: { x: number; y: number } | null) => {
+    const t = typing.current
+    const b = boxEl.current
+    if (!t) return
+    if (!at || !b) { t.style.top = ''; t.style.left = ''; t.style.bottom = ''; return }
+    const p = spotIn(b.getBoundingClientRect(), at)
+    t.style.top = `${p.y}px`
+    t.style.left = `${p.x}px`
+    t.style.bottom = 'auto'
+  }
+  // the keyboard came up (the page got shorter): the spot being typed into scrolls back into view above it
+  useEffect(() => {
+    if (full || !kb) return
+    const vv = window.visualViewport
+    const keep = () => typing.current?.scrollIntoView({ block: 'center', inline: 'nearest' })
+    vv?.addEventListener('resize', keep)
+    window.addEventListener('resize', keep)
+    return () => { vv?.removeEventListener('resize', keep); window.removeEventListener('resize', keep) }
+  }, [full, kb])
   // turned: the whole picture again; the keyboard came or went: the same size, the spot last touched in view
   useLayoutEffect(() => {
     const el = boxEl.current
@@ -480,6 +491,7 @@ function ScreenPane() {
     })
   }
   useEffect(() => {
+    typeAt(null)
     if (full) {
       // a computer's keyboard types into the screen at once; a phone's comes up with the keyboard button
       if (!coarse()) setTimeout(() => typing.current?.focus({ preventScroll: true }), 0)
@@ -493,6 +505,7 @@ function ScreenPane() {
       return () => document.removeEventListener('fullscreenchange', off)
     }
     device.current = false
+    if (document.activeElement === typing.current) typing.current?.blur()
     ;(navigator as Navigator & { keyboard?: { unlock?: () => void } }).keyboard?.unlock?.()
     void leaveDevice()
     setKb(false)
@@ -559,6 +572,15 @@ function ScreenPane() {
       ...(src === 'b' ? [{ icon: 'screen' as const, label: 'Open on the desktop instead', run: () => void act(k, 'desktop', { url: state?.url ?? sc.b?.url ?? '' }).then((ok) => ok && setScr({ src: 'd' })) }] : []),
       { icon: 'doc', label: kind === 'task' ? 'Save a screenshot to the task' : 'Save a screenshot', run: () => void shot() },
     ])
+  // the keyboard: a touch screen's own comes up (the typing box takes the focus); a computer's shows the key row
+  const kbOn = coarse() ? kb : rowOn
+  const keyboard = () => {
+    if (!coarse()) { setRowOn(!rowOn); typing.current?.focus({ preventScroll: true }); return }
+    if (kb) return typing.current?.blur()
+    if (!full) typeAt(null)
+    typing.current?.focus({ preventScroll: true })
+  }
+  const keyBtn = <IB icon="keyboard" label={kbOn ? 'Hide the keyboard' : 'Keyboard'} pressed={kbOn} onPointerDown={(e) => e.preventDefault()} onClick={keyboard} />
   const url = addr ?? shortUrl(state?.url ?? sc.b?.url ?? '')
   const fullAt: Full = full && box.w ? { view, box } : null
   return (
@@ -571,14 +593,19 @@ function ScreenPane() {
         </Hd>
       )}
       foot={
-        isIdle ? undefined : (
-          <div className="sbar">
-            <span className="who">
-              <i className={cx('dot', driving ? 'you' : hands ? 'ask' : '')} />
-              {driving ? "You're driving" : hands ? 'Waiting for you' : busy ? `“${sc.d!.busy}” is using it` : 'The agent is driving'}
-            </span>
-            {driving ? <Btn kind="pri" onClick={() => handBack()}>{hands ? "I'm done" : 'Hand back'}</Btn> : <Btn kind={hands ? 'pri' : undefined} onClick={take}>Take over</Btn>}
-          </div>
+        // a screen nobody else uses has no bar, except on a touch screen: its keyboard comes up from here
+        isIdle && !coarse() ? undefined : (
+          <>
+            {!full && drive && kbOn ? <KeyRow remote={gate} armed={armed} setArmed={setArmed} desk={src === 'd'} mac={sc.d?.own === false} paste={() => pasteFrom(gate)} /> : null}
+            <div className="sbar">
+              <span className="who">
+                <i className={cx('dot', driving || isIdle ? 'you' : hands ? 'ask' : '')} />
+                {isIdle ? "It's yours to use" : driving ? "You're driving" : hands ? 'Waiting for you' : busy ? `“${sc.d!.busy}” is using it` : 'The agent is driving'}
+              </span>
+              {drive && keyBtn}
+              {isIdle ? null : driving ? <Btn kind="pri" onClick={() => handBack()}>{hands ? "I'm done" : 'Hand back'}</Btn> : <Btn kind={hands ? 'pri' : undefined} onClick={take}>Take over</Btn>}
+            </div>
+          </>
         )
       }
     >
@@ -597,7 +624,20 @@ function ScreenPane() {
       )}
       {/* the same picture in the pane and in full screen (never connected again): full screen only wraps it */}
       <div className={full ? 'scrfull' : undefined} onPointerDown={bump} onKeyDown={bump}>
-        <div ref={boxEl} className={full ? 'fbox' : undefined}>
+        <div
+          ref={boxEl}
+          className={full ? 'fbox' : 'sbox'}
+          onTouchStartCapture={(e) => { const t = e.touches[0]; tap.current = !full && drive && e.touches.length === 1 ? { x: t.clientX, y: t.clientY, t: e.timeStamp } : null }}
+          onTouchMoveCapture={(e) => { const t = e.touches[0]; tap.current = stillTap(tap.current, { x: t.clientX, y: t.clientY }, e.touches.length) }}
+          onTouchEndCapture={(e) => {
+            const s0 = tap.current
+            tap.current = null
+            if (!s0 || full || !drive || !tapDone(s0, e.timeStamp) || (e.target as Element).closest('button, input, textarea, select, a')) return
+            // inside the tap itself, or the phone won't bring its keyboard up
+            typeAt(s0)
+            typing.current?.focus({ preventScroll: true })
+          }}
+        >
           {snap.demo ? <DemoPicture key={`${k}:${src}`} k={k} drive={drive} desktop={src === 'd'} idle={isIdle && src === 'b'} onContinued={() => setAddr('billing.example.com/invoices')} /> : src === 'b' ? <BrowserView k={k} drive={drive} ring={driving} send={send} state={state} onFrameRef={frame} full={fullAt} remoteRef={remote} /> : <DesktopView k={k} drive={drive} ring={driving} apiRef={desk} busy={sc.d?.busy} onMac={sc.d?.own === false && machine !== snap.host ? mach : 'the Mac'} full={fullAt} remoteRef={remote} />}
           {full && !snap.demo ? <Surface remote={gate} drive={drive} view={view} setView={setView} box={box} spot={spot} typing={typing} onBlocked={() => { setBarOn(true); notice('Take over to click and type') }} /> : null}
           {full ? (
@@ -613,12 +653,8 @@ function ScreenPane() {
                 </div>
               ) : undefined}
               canType={drive}
-              kb={coarse() ? kb : rowOn}
-              keyboard={() => {
-                if (!coarse()) { setRowOn(!rowOn); typing.current?.focus({ preventScroll: true }); return }
-                if (kb) typing.current?.blur()
-                else typing.current?.focus({ preventScroll: true })
-              }}
+              kb={kbOn}
+              keyboard={keyboard}
               driving={driving}
               hands={hands}
               idle={isIdle}
@@ -626,9 +662,10 @@ function ScreenPane() {
               handBack={() => handBack()}
             />
           ) : null}
+          {/* the box every keyboard types into, in the pane and in full screen alike */}
+          {drive ? <TypeBox remote={gate} armed={armed} setArmed={setArmed} onFocus={setKb} inputRef={typing} /> : null}
         </div>
-        {full && drive && (coarse() ? kb : rowOn) ? <KeyRow remote={gate} armed={armed} setArmed={setArmed} desk={src === 'd'} mac={sc.d?.own === false} paste={() => pasteFrom(gate)} /> : null}
-        {full && drive ? <TypeBox remote={gate} armed={armed} setArmed={setArmed} onFocus={setKb} inputRef={typing} /> : null}
+        {full && drive && kbOn ? <KeyRow remote={gate} armed={armed} setArmed={setArmed} desk={src === 'd'} mac={sc.d?.own === false} paste={() => pasteFrom(gate)} /> : null}
       </div>
     </PaneFrame>
   )

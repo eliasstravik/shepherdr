@@ -313,3 +313,15 @@ export async function enterDevice(doc: Doc = document): Promise<boolean> {
 export async function leaveDevice(doc: Doc = document) {
   if (doc.fullscreenElement && doc.exitFullscreen) await doc.exitFullscreen().catch(() => undefined)
 }
+
+/** A tap in the Screen pane (one finger, held briefly, barely moved) brings up a touch screen's keyboard; a drag or
+ *  a pinch does not. */
+export const TAP_MOVE = 10
+export const TAP_MS = 600
+export type Tap = { x: number; y: number; t: number }
+export const stillTap = (s: Tap | null, at: Pt, fingers: number): Tap | null => (s && fingers === 1 && Math.hypot(at.x - s.x, at.y - s.y) <= TAP_MOVE ? s : null)
+export const tapDone = (s: Tap | null, t: number) => !!s && t - s.t <= TAP_MS
+/** where the hidden typing box goes for a tap at a page point: under the finger, inside the picture's box */
+export function spotIn(r: { left: number; top: number; width: number; height: number }, at: Pt): Pt {
+  return { x: Math.round(Math.max(0, Math.min(r.width - 1, at.x - r.left))), y: Math.round(Math.max(0, Math.min(r.height - 1, at.y - r.top))) }
+}
