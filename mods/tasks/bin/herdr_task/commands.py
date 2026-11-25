@@ -25,7 +25,8 @@ from .github import (already_merged, checks_missing, collision, collision_reason
                      merge_checks, pr_pending, pr_problem, pr_view, queue_refusal, remote_of, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
-    base_ref, brief, caller_labels, caller_space, current_base, default_space, folder_for, handoff, launch, name_tabs,
+    base_ref, brief, caller_labels, caller_space, current_base, default_branch, default_space, folder_for, handoff, launch,
+    name_tabs, worktree_list,
     own_path, parent_for, resume_argv, set_branch, setup_for, space_for_folder, tab_title, task_tabs,
 )
 from .store import bare_by_mistake, is_task_list, locate, open_store, quoted, read_list, Store, store_files
@@ -123,13 +124,32 @@ def cmd_add(args):
             # Started later by the scheduler, with no caller to ask: its space is kept now.
             schedule(s, t, at, {"space": space or default_space()})
         v = view(s, t)
+        warn = shared_branch_warning(s, t)
+        if warn:
+            v["warning"] = warn
         # SHEP-335: what it got from its repo's settings (or Everywhere's), so the Assistant knows the repo's, not its own
         got = [x for x in task_settings(s, t) if x["by"] and x["by"] != "task" and x["label"] in ("Review", "Merge", "Proof", "Agent")]
     if at:
         ensure_scheduler_quietly()
     said = "; ".join(f"{x['label']} {x['text'].split(':')[0]} ({SET_BY[x['by']]})" for x in got)
     say(args, v, f"{s.name(t)} added (its key, for commands only: {s.ref(t)})" + (f": {v['why']}" if at else "")
-        + (f"\nIts settings: {said}." if said else ""))
+        + (f"\nIts settings: {said}." if said else "") + (f"\nHeads-up: {v['warning']}" if v.get("warning") else ""))
+
+
+def shared_branch_warning(s, t):
+    """#1443: a task added to work in the folder itself while the folder is on another branch than the repo's main line:
+    its reviews and ready check the folder's branch, so work it does on a branch of its own goes unseen. Said at add."""
+    if t.get("mode") == "worktree" or s.loc["kind"] != "repo":
+        return None
+    main = s.loc["folder"]
+    ok, here, _ = git(main, "symbolic-ref", "--quiet", "--short", "HEAD")
+    line_ = default_branch(main)
+    if not line_ or (ok and here == line_):
+        return None
+    on = here if ok else "a detached commit"
+    return (f"{main} is on {on}, not {line_}, and this task works in the folder itself, so its reviews and ready check "
+            f"{on}. For a branch of its own, add it with --worktree; if its agent makes its own branch, point the task at it "
+            f"once started: herdr-task edit {s.ref(t)} --branch <that branch>.")
 
 
 # ---- scheduled (SHEP-38) -----------------------------------------------------------------------
@@ -793,9 +813,52 @@ def review_refusal(s, t, wt):
             f"ready at), then run ready again.{delta} {rounds - rounds_used(t)} of {rounds} rounds left.")
 
 
+def work_tree(s, t, folder=None):
+    """#1443: where a task's work is, and the ref of its newest commit there: (path, ref). A worktree task's own
+    worktree; else the worktree its branch is checked out in (or the branch itself, checked out nowhere); else, for a
+    task in the folder itself, the worktree of this repo the caller works in (its --folder or current folder: a worker
+    that made its own worktree and branch), else the folder. (None, None) outside a git repo."""
+    wt = t.get("worktree") if t.get("mode") == "worktree" else None
+    if wt and os.path.isdir(wt):
+        return wt, "HEAD"
+    if s.loc["kind"] != "repo":
+        return None, None
+    main = s.loc["folder"]
+    trees = worktree_list(main)
+    br = t.get("branch")
+    if br:
+        tree = next((w for w in trees if w["branch"] == br), None)
+        if tree:
+            return tree["path"], "HEAD"
+        if git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{br}")[0]:
+            return main, f"refs/heads/{br}"
+    if t.get("mode") != "worktree":
+        others = [os.path.realpath(w["path"]) for w in trees if os.path.realpath(w["path"]) != os.path.realpath(main)]
+        for p in (folder, os.getcwd()):
+            if not p:
+                continue
+            p = os.path.realpath(os.path.expanduser(p))
+            inside = [w for w in others if p == w or p.startswith(w.rstrip(os.sep) + os.sep)]
+            if inside:
+                return max(inside, key=len), "HEAD"
+    return main, "HEAD"
+
+
+def work_words(s, where, ref):
+    """The branch (or commit) a work_tree is on, and where, for what reviewed says."""
+    if ref != "HEAD":
+        return f"{ref[len('refs/heads/'):] if ref.startswith('refs/heads/') else ref}, not checked out"
+    ok, br, _ = git(where, "symbolic-ref", "--quiet", "--short", "HEAD")
+    on = br if ok else f"a detached commit ({git(where, 'rev-parse', '--short', 'HEAD')[1]})"
+    return on if where == s.loc["folder"] else f"{on} in {where}"
+
+
 def unchanged_folder(s, t):
-    """A task in the folder itself left it as it started: on the same commit, nothing tracked changed."""
+    """A task in the folder itself left it as it started: on the same commit, nothing tracked changed. #1443: never
+    when its work is in another worktree (a worker that made its own): the folder is unchanged, its work isn't."""
     folder = s.loc["folder"]
+    if work_tree(s, t)[0] != folder:
+        return False
     ok, head, _ = git(folder, "rev-parse", "HEAD")
     clean, changed, _ = git(folder, "status", "--porcelain", "--untracked-files=no")
     return ok and head == t["folder_start"] and clean and not changed
@@ -881,22 +944,25 @@ def cmd_reviewed(args):
         used = rounds_used(t)
         wt = t.get("worktree") if t.get("mode") == "worktree" else None
         head = None
-        where = wt if wt and os.path.isdir(wt) else (s.loc["folder"] if s.loc["kind"] == "repo" else None)
+        # #1443: the task's own branch wherever it is checked out, never just the folder's HEAD
+        where, ref = work_tree(s, t, getattr(args, "folder", None))
         named = getattr(args, "commit", None)
         if named:
             # The commit the round reviewed (#797), fixes perhaps committed since: one on this branch.
             ok, head, _ = git(where, "rev-parse", "--verify", "--quiet", f"{named}^{{commit}}") if where else (False, "", "")
             if not ok or not head:
                 raise Fail(f"--commit {named} isn't a commit here.")
-            if not git(where, "merge-base", "--is-ancestor", head, "HEAD")[0]:
-                raise Fail(f"--commit {named} isn't on this task's branch (HEAD or before it).")
-        elif wt and os.path.isdir(wt):
-            if git(wt, "status", "--porcelain", "--untracked-files=no")[1]:
-                raise Fail(f"{wt} has uncommitted changes: a review is of a commit. Commit first, then review it "
+            if not git(where, "merge-base", "--is-ancestor", head, ref)[0]:
+                raise Fail(f"--commit {named} isn't on this task's branch ({work_words(s, where, ref)}: its newest commit "
+                           f"or before it). If its work is on another branch, point the task at it first: herdr-task edit "
+                           f"{s.ref(t)} --branch <that branch>.")
+        elif where and ref == "HEAD" and where != s.loc["folder"]:
+            if git(where, "status", "--porcelain", "--untracked-files=no")[1]:
+                raise Fail(f"{where} has uncommitted changes: a review is of a commit. Commit first, then review it "
                            "(or name the commit it reviewed with --commit).")
-            head = git(wt, "rev-parse", "HEAD")[1]
-        elif s.loc["kind"] == "repo":
-            head = git(s.loc["folder"], "rev-parse", "HEAD")[1] or None
+            head = git(where, "rev-parse", "HEAD")[1]
+        elif where:
+            head = git(where, "rev-parse", ref)[1] or None
         heads = {r.get("head") for r in rounds_this_run(t) if r.get("head")}
         if wt and head and head not in heads and os.path.isdir(wt) and carried_over(s, t, wt, heads, head):
             # #1178: a clean merge of the base (or the same changes on a newer base) after a reviewed commit: the review
@@ -914,7 +980,7 @@ def cmd_reviewed(args):
         t.pop("review_out", None)
         s.dirty = True
         v = view(s, t)
-    on_what = f" for commit {head[:7]}" if head else ""
+    on_what = f" for commit {head[:7]} ({work_words(s, where, ref)})" if head else ""
     say(args, {**v, "round": used + 1, "rounds": rounds}, f"{s.name(t)}: review round {used + 1} of {rounds} recorded{on_what}.")
 
 
@@ -1336,7 +1402,8 @@ def cmd_edit(args):
             schedule(s, t, at)
         elif args.at is not None:
             unschedule(t)  # --at "": back to To do
-        if args.here or args.worktree:
+        adopt = args.worktree and (getattr(args, "branch", None) or "").strip() and t["state"] not in NOT_STARTED
+        if (args.here or args.worktree) and not adopt:  # #1443: --worktree --branch <its branch> adopts it (set_branch)
             if t["state"] not in ("todo", "scheduled", "queued"):
                 raise Fail("Where a task works can only change before it starts.")
             if args.worktree and s.loc["kind"] != "repo":
