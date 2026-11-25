@@ -37,6 +37,7 @@ import { newsRow, type NewsRow } from './news.ts'
 import { cardsNow, stillLoading, TRIES, wantsEarlier } from './hold.ts'
 import { outOfView, setAway, useAway, type Waiting } from './away.ts'
 import { keepAtEnd, rowEdges } from './stick.ts'
+import { OFF_PX, isOffEnd, newSince, onEnd, setOffEnd, toEnd, useOffEnd } from './newest.ts'
 import { commandMode, commandOf, commandWord, type CommandState } from './command.ts'
 import { toggleSpaceTerm, toggleTaskTerm } from '@plugins/terminal/menu.ts'
 
@@ -557,6 +558,10 @@ function Messages({ thread }: { thread: Thread }) {
   const end = useRef<HTMLDivElement>(null)
   const stuck = useRef(true)
   const jump = useUI((u) => u.jump)
+  // #1504: the rows as the jump button counts them, and the row that was last when you scrolled away from the end
+  const seen = useRef<{ id: string; mine: boolean }[]>([])
+  seen.current = rows.map((r) => ({ id: keyOf(r.msg), mine: r.msg.who === 'you' }))
+  const left = useRef<string | null>(null)
   // the newest page held only task rows (SHEP-445): earlier pages, by themselves, until a few real messages are in
   const [, bump] = useState(0)
   const tried = opened.get(thread.chat) ?? 0
@@ -587,7 +592,16 @@ function Messages({ thread }: { thread: Thread }) {
         height = sc.scrollHeight
         if (stuck.current) return void (sc.scrollTop = sc.scrollHeight)
       }
-      stuck.current = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 80
+      const off = sc.scrollHeight - sc.scrollTop - sc.clientHeight
+      stuck.current = off < 80
+      // well away from the end: the jump button shows, counting what comes from now; back at the end it goes
+      if (off > OFF_PX) {
+        if (left.current == null) left.current = seen.current.at(-1)?.id ?? ''
+        setOffEnd(thread.chat, { count: newSince(seen.current, left.current) })
+      } else if (stuck.current) {
+        left.current = null
+        setOffEnd(thread.chat, null)
+      }
       const c = getState().chats[thread.chat]
       if (sc.scrollTop < 40 && c?.earlier && !loading.has(thread.chat)) {
         loading.add(thread.chat)
@@ -601,12 +615,27 @@ function Messages({ thread }: { thread: Thread }) {
       }
     }
     sc.addEventListener('scroll', on, { passive: true })
-    return () => sc.removeEventListener('scroll', on)
+    // the jump button and End: glide back to the newest message (at once with reduced motion); it follows again there
+    const off = onEnd(thread.chat, () => {
+      const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+      sc.scrollTo({ top: sc.scrollHeight, behavior: still ? 'auto' : 'smooth' })
+    })
+    left.current = null
+    setOffEnd(thread.chat, null)
+    return () => {
+      sc.removeEventListener('scroll', on)
+      off()
+      setOffEnd(thread.chat, null)
+    }
   }, [thread.chat])
   useLayoutEffect(() => {
     const sc = end.current?.closest<HTMLElement>('.scroll')
     if (sc && stuck.current) sc.scrollTop = sc.scrollHeight
   })
+  // new messages while you're away from the end: the button's count goes up
+  useEffect(() => {
+    if (left.current != null) setOffEnd(thread.chat, { count: newSince(seen.current, left.current) })
+  }, [rows, thread.chat])
   // a picture that loads later (a card's, a tile's) grows the chat: it stays at the newest message
   useEffect(() => {
     const sc = end.current?.closest<HTMLElement>('.scroll')
@@ -781,6 +810,20 @@ function AwayCard({ thread }: { thread: Thread }) {
       <I n="ask" c="c-ask" />
       <button type="button" className="n" onClick={() => setUI({ jump: w.id })}>{w.words}</button>
     </div>
+  )
+}
+
+/** a round ↓ above the box while the chat is scrolled away from its end, with how many messages came since; a tap
+ *  goes back to the newest (#1504) */
+function ToEnd({ thread }: { thread: Thread }) {
+  const off = useOffEnd(thread.chat)
+  if (!off) return null
+  const n = off.count
+  return (
+    <button type="button" className="toend" aria-label={n ? `${n} new ${n === 1 ? 'message' : 'messages'}, go to the newest` : 'Go to the newest message'} onClick={() => toEnd(thread.chat)}>
+      <I n="toend" />
+      {n > 0 && <span className="cnt">{n > 99 ? '99+' : n}</span>}
+    </button>
   )
 }
 
@@ -1177,6 +1220,7 @@ export default definePlugin({
     // effort picker (T3 Code's, Claude's)
     reg.commands.push(
       { id: 'chat.reply', title: 'Write in the chat', area: 'Chat', icon: 'reply', keys: ['R'], words: 'reply message box type focus compose', when: () => !!focusChat(), run: () => void focusBox() },
+      { id: 'chat.end', title: 'Go to the newest message', area: 'Chat', icon: 'toend', keys: ['End'], words: 'jump bottom latest scroll down end', when: () => isOffEnd(focusChat()), run: () => void toEnd(focusChat()) },
       { id: 'chat.model', title: 'Change model or effort', area: 'Chat', icon: 'agent', keys: ['Mod+Shift+M'], words: 'agent picker claude codex fast', when: () => !!boxPart('button.agent'), run: () => boxPart('button.agent')?.click() },
     )
     // Share into Shepherdr (SHEP-345): a share lands in the chat open last
@@ -1185,7 +1229,7 @@ export default definePlugin({
     reg.views.messages = Messages
     reg.views.box = Box
     reg.chatTail.push({ order: 15, View: StoppedChat }, { order: 95, View: WorkingSign }, { order: 96, View: BackgroundNote })
-    reg.aboveBox.push({ order: 20, View: AwayCard })
+    reg.aboveBox.push({ order: 20, View: AwayCard }, { order: 5, View: ToEnd })
   },
 })
 
