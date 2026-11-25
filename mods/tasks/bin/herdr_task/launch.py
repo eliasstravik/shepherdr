@@ -36,7 +36,7 @@ OWN = ["ready", "reviewed", "status", "alert", "feedback", "show", "list", "wher
 # herdr-secret's agent commands (~/.config/herdr-app/bin/herdr-secret): asking for a secret and
 # using one by name never ask either, as Shepherdr's secret commands. Written by its full path or
 # its bare name. Reviewers get none (launch() skips own_argv for them; herdr-secret refuses them).
-SECRET = ["ask", "run", "env", "list"]
+SECRET = ["ask", "cancel", "run", "env", "list"]
 # herdr-artifact's verbs a worker uses for its proof (#866): Codex's sandbox can't write its store,
 # so they run escalated and never ask either. Never --custom (a panel installs code in the window).
 ARTIFACT = ["guide", "new", "publish", "update", "show", "list", "link", "preview", "where"]
@@ -689,7 +689,8 @@ def closing_line(s, task, parent=None, argv=None):
     text += browser_line()
     if secret_path():
         text += (" Secrets (keys, tokens, passwords) are used by name, never seen: `herdr-secret ask NAME --why \"…\"` "
-                 "(then end your turn), `herdr-secret run NAME -- <command>`, `herdr-secret list`; these run without asking too.")
+                 "(then end your turn), `herdr-secret cancel NAME` once you no longer need it, `herdr-secret run NAME -- <command>`, "
+                 "`herdr-secret list`; these run without asking too.")
     if argv and agent_key(argv) == "codex":
         # #1136 #1142: run in the sandbox, hc can't open Herdr's core and the browser's socket folder is read-only
         text += (" Codex's sandbox can't reach Herdr nor write git's data, so give those commands, herdr-browser's (your task's "

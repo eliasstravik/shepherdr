@@ -372,5 +372,34 @@ class Forward(Machine):
             secret.serve("vm/t1")
 
 
+class Cancel(unittest.TestCase):
+    """An agent withdraws an ask it no longer needs (the plan changed): herdr-secret cancel clears its label, and its
+    box closes (the service shows it as No longer needed). hc is a recorder."""
+
+    def run_cancel(self, labels):
+        calls = []
+        me = {"address": "t1", "labels": labels}
+        run = lambda argv, **kw: calls.append(argv) or types.SimpleNamespace(returncode=0, stderr="")
+        out = []
+        with mock.patch.object(secret, "me", return_value=me), mock.patch.object(secret.subprocess, "run", run), \
+                mock.patch.object(secret, "say", out.append):
+            self.assertEqual(secret.main(["cancel", "SLACK_CLIENT_SECRET"]), 0)
+        return calls, out
+
+    def test_withdraws_its_own_ask(self):
+        calls, out = self.run_cancel({"herdr.secret.ask.SLACK_CLIENT_SECRET": "for the Slack app"})
+        self.assertEqual(calls, [["hc", "label", "t1", "herdr.secret.ask.SLACK_CLIENT_SECRET="]])
+        self.assertIn("Withdrawn", out[0])
+
+    def test_nothing_asked_nothing_done(self):
+        calls, out = self.run_cancel({})
+        self.assertEqual(calls, [])
+        self.assertIn("aren't asking", out[0])
+
+    def test_a_bad_name_is_refused(self):
+        with self.assertRaises(secret.Fail):
+            secret.main(["cancel", "not a name"])
+
+
 if __name__ == "__main__":
     unittest.main()

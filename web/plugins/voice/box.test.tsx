@@ -134,7 +134,7 @@ test('the bubbles stay while typing; they hide in a call, while dictating, while
   expect(hidden).not.toMatch(/\btext\b|files/)
   // above the box, not in it; the chat keeps its bottom in view when they come
   expect(chat).toMatch(/\{sug && <Replies texts=\{sug\.texts\} onSend=\{sendSug\} onEdit=\{editSug\} \/>\}\s*<div\s+className="cbox"/)
-  expect(chat).toContain('ro.observe(sc)')
+  expect(chat).toContain('return keepAtEnd(sc, box, () => stuck.current)')
 })
 
 test('the voice call button is gone from the header and the phone bottom bar; it is the box\'s round button', () => {

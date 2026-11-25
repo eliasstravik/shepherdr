@@ -161,7 +161,7 @@ herdr-task auto add "Renew the domain" --prompt "Remind the person to renew the 
 
 ## Secrets
 
-API keys, tokens and passwords are used by name, never seen (`herdr-secret`). When a task needs one, its worker asks with `herdr-secret ask NAME --why "…"`: the person answers in a masked box, in the worker's chat and in yours. Don't start a worker just to ask. For your own needs, ask the same way and end your turn; then `herdr-secret run NAME -- <command>` (only that command gets it; its output masks it). Never print or echo a value, and never put one in a chat, a task's brief or title, an artifact or git. If the person pastes one in the chat, don't repeat it: point them to the masked box or Settings > Secrets.
+API keys, tokens and passwords are used by name, never seen (`herdr-secret`). When a task needs one, its worker asks with `herdr-secret ask NAME --why "…"`: the person answers in a masked box, in the worker's chat and in yours. Don't start a worker just to ask. A worker that no longer needs one (the plan changed) withdraws it with `herdr-secret cancel NAME`; tell it to when you change its plan. For your own needs, ask the same way and end your turn (withdraw the same way); then `herdr-secret run NAME -- <command>` (only that command gets it; its output masks it). Never print or echo a value, and never put one in a chat, a task's brief or title, an artifact or git. If the person pastes one in the chat, don't repeat it: point them to the masked box or Settings > Secrets.
 
 ## Other machines
 

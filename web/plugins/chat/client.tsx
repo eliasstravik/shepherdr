@@ -35,7 +35,6 @@ import { BoxThumb, openPreview, SentThumb, sourcesOf } from './thumbs.tsx'
 import { heldStep, signOf } from './typing.ts'
 import { newsRow, type NewsRow } from './news.ts'
 import { cardsAfter, cardsNow, stillLoading, TRIES, wantsEarlier } from './hold.ts'
-import { outOfView, setAway, useAway, type Waiting } from './away.ts'
 import { keepAtEnd, rowEdges } from './stick.ts'
 import { OFF_PX, isOffEnd, newSince, onEnd, setOffEnd, toEnd, useOffEnd } from './newest.ts'
 import { commandMode, commandOf, commandWord, type CommandState } from './command.ts'
@@ -644,32 +643,6 @@ function Messages({ thread }: { thread: Thread }) {
     // the box or the suggested replies above it grew: the chat's window got shorter, its bottom stays in view
     return keepAtEnd(sc, box, () => stuck.current)
   }, [thread.chat])
-  // the cards that wait for an answer: while one is out of view, a reminder above the box leads to it (away.ts)
-  const waiting = useRef<Waiting[]>([])
-  waiting.current = waitingIn(rows, thread)
-  useEffect(() => {
-    const sc = end.current?.closest<HTMLElement>('.scroll')
-    if (!sc) return
-    const check = () => {
-      const v = sc.getBoundingClientRect()
-      const cards = waiting.current.flatMap((w) => {
-        const el = sc.querySelector(`[data-card="${attr(w.id)}"]`)
-        if (!el) return []
-        const r = el.getBoundingClientRect()
-        return [{ ...w, top: r.top, bottom: r.bottom }]
-      })
-      setAway(thread.chat, outOfView(cards, { top: v.top, bottom: v.bottom }))
-    }
-    check()
-    sc.addEventListener('scroll', check, { passive: true })
-    const ro = new ResizeObserver(check)
-    ro.observe(sc)
-    return () => {
-      sc.removeEventListener('scroll', check)
-      ro.disconnect()
-    }
-  }, [thread.chat, rows])
-  useEffect(() => () => setAway(thread.chat, null), [thread.chat])
   useEffect(() => {
     if (!jump) return
     const el = document.querySelector(`[data-msg="${attr(jump)}"], [data-card="${attr(jump)}"]`)
@@ -788,30 +761,6 @@ function Messages({ thread }: { thread: Thread }) {
 const loading = new Set<string>()
 /** how many earlier pages a chat read by itself when it opened (SHEP-445), so opening it again doesn't read more */
 const opened = new Map<string, number>()
-
-/** the cards in these rows still waiting for an answer, oldest first, with the reminder's words */
-export function waitingIn(rows: Shown[], thread: Thread): Waiting[] {
-  return rows.flatMap(({ msg: m }): Waiting[] => {
-    if (m.question && m.question.sent === undefined && !m.question.closed) {
-      const by = !thread.task ? m.question.by?.title ?? m.question.by?.ref : undefined
-      return [{ id: m.question.id, words: by ? `${by} asks you` : 'A question waits for you' }]
-    }
-    if (m.secret && !m.secret.saved) return [{ id: m.secret.id, words: `A secret is asked for: ${m.secret.name}` }]
-    return []
-  })
-}
-
-/** one quiet line above the box while a waiting card is out of view; a tap scrolls to it */
-function AwayCard({ thread }: { thread: Thread }) {
-  const w = useAway(thread.chat)
-  if (!w) return null
-  return (
-    <div className="banner">
-      <I n="ask" c="c-ask" />
-      <button type="button" className="n" onClick={() => setUI({ jump: w.id })}>{w.words}</button>
-    </div>
-  )
-}
 
 /** a round ↓ above the box while the chat is scrolled away from its end, with how many messages came since; a tap
  *  goes back to the newest (#1504) */
@@ -1229,7 +1178,7 @@ export default definePlugin({
     reg.views.messages = Messages
     reg.views.box = Box
     reg.chatTail.push({ order: 15, View: StoppedChat }, { order: 95, View: WorkingSign }, { order: 96, View: BackgroundNote })
-    reg.aboveBox.push({ order: 20, View: AwayCard }, { order: 5, View: ToEnd })
+    reg.aboveBox.push({ order: 5, View: ToEnd })
   },
 })
 
