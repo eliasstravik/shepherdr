@@ -86,6 +86,7 @@ edits the file, or edit it yourself.
 | `automations.enabled` | Off: schedules don't run |
 | `machine.start_memory`, `machine.start_load`, `machine.start_disk` | A machine's limits before new tasks start there |
 | `machine.low_priority`, `machine.worker_memory` | How task agents run on a machine |
+| `machine.home` | A machine's own Assistant, in its home folder: on for the serving machine, off for others unless set |
 
 Ignored from 3.2 on, wherever a file still has them: `autopilot`, `tasks.max_running` (Tasks at once), the add-ons'
 `off` list and Notify.
