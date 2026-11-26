@@ -7,7 +7,9 @@ import { join } from "node:path";
 const file = join(mkdtempSync(join(tmpdir(), "shep-plugins-")), "shepherdr.json");
 writeFileSync(file, JSON.stringify({ everywhere: { plugins_off: ["voice"] } }));
 process.env.HERDR_TASK_SETTINGS = file;
-const { offPlugins, setConfig } = await import("./next.ts");
+const { offPlugins: all, setConfig } = await import("./next.ts");
+// only the two this test switches (other plugins off by default, like the Diff viewer, stay out of it)
+const offPlugins = () => all().filter((id) => id === "files" || id === "voice");
 
 test("a plugin that is off by default stays off until switched on, and off again when switched off", () => {
   expect(offPlugins().sort()).toEqual(["files", "voice"]);
