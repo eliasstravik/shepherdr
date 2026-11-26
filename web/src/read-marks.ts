@@ -20,7 +20,7 @@ export function toMark(snap: Snapshot, keys: string[], asked: Map<string, number
 }
 
 /** something new in a space's Assistant's chat, unless the space is muted */
-export const spaceUnread = (snap: Snapshot, p: Pick<Space, 'id' | 'chat'>) => notifyOf(snap, p.id) !== 'Off' && unread(snap, p.chat)
+export const spaceUnread = (snap: Snapshot, p: Pick<Space, 'id' | 'chat'>) => unread(snap, p.chat) && notifyOf(snap, p.id) !== 'Off'
 
 /** what a mark sent already covers, until the snapshot has it */
 const asked = new Map<string, number>()
