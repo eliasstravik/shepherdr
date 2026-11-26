@@ -1937,6 +1937,17 @@ class NoFalseNeedsYou(unittest.TestCase):
         self.held({"tool_name": "Bash", "tool_input": {"command": "x"}, "turn_id": "u1", "transcript_path": log})
         self.assertIsNone(self.agents.held_ask("t1"))
 
+    def test_an_ask_from_before_ready_never_holds_a_ready_task(self):
+        """#1539: a Codex approval cancelled, its hook still waiting and its log never saying so; then its agent said
+        ready: the task stayed Needs you (asks). An ask from before ready is stale (its agent went on to say ready);
+        a new one after it still asks the person."""
+        ask = {"tool_name": "Bash", "tool_input": {"command": "python3 scripts/check.py"}, "turn_id": "u1"}
+        self.held(ask, ago_s=120)
+        self.task.update(state="ready", ready_at=self.clock - 60_000)
+        self.assertEqual(self.status()[0], "ready")
+        self.held(ask, ago_s=30)  # asked after ready
+        self.assertEqual(self.status()[:2], ("needs", "asks"))
+
     def test_a_claude_permission_its_agent_went_past_is_not_held(self):
         log = os.path.join(tempfile.mkdtemp(), "s.jsonl")
         use = {"type": "tool_use", "id": "u1", "name": "Bash", "input": {"command": "ls"}}
