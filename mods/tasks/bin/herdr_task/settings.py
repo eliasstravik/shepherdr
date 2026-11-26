@@ -349,8 +349,9 @@ SET_KEYS = {"review": "review", "brief.review": "review", "merge": "merge", "bri
             "task.permission": "perm",
             "flags": "flags", "task.flags": "flags", "extra-flags": "flags", "extra_flags": "flags"}
 # The Proof line (as Shepherdr's skill asks of its task agents), on and off.
-PROOF_WORDS = {"on": "show verifiable proof in one artifact: each proof with a one-line caption, real and from this work now, "
-                     "plus a \"Not proven\" list; then say ready with --proof <its id>",
+PROOF_WORDS = {"on": "show verifiable proof in one artifact: it opens with a short \"For you\" part (what to check or decide, "
+                     "what is not proven, what you decided on your own), then each proof with a one-line caption, real and "
+                     "from this work now, plus a \"Not proven\" list; then say ready with --proof <its id>",
                "off": "not needed for this task: no proof artifact; say in your summary how you checked it"}
 MERGE_VALUES = {"ask": "ask", "ask me first": "ask", "ask first": "ask", "ask the person first": "ask", "wait": "ask",
                 "checks": "checks", "after checks": "checks", "after github checks": "checks", "after checks pass": "checks", "after all checks": "checks", "after all checks pass": "checks", "right away": "auto",

@@ -417,6 +417,13 @@ class NoTaskNumbers(unittest.TestCase):
         self.assertIn("is for commands only: never write it anywhere the person reads", w)
         self.assertIn("[@Fix login](task:", w)
 
+    def test_the_worker_proof_starts_with_for_you(self):
+        w = self.read("worker.md")
+        proof = next(l for l in w.splitlines() if l.startswith("- Proof,"))
+        self.assertLess(proof.index('"For you"'), proof.index("what changed"))
+        for words in ("check or decide", "could not prove", "decisions you took on your own"):
+            self.assertIn(words, proof)
+
 
 class ShellScripts(unittest.TestCase):
     """#731: macOS /bin/sh is bash 3.2, which scans a here-doc inside $( ) for quotes, so one apostrophe in its
