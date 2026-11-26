@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test'
-import { marked } from 'marked'
-import './markdown.tsx'
+import { Marked } from 'marked'
+// its own copy of the rule: other tests replace markdown.tsx's module, but keep its real exports
+const { rawHtmlAsText } = (await import('./markdown.tsx' + '?own')) as typeof import('./markdown.tsx')
+const marked = new Marked({ gfm: true, breaks: false }).use(rawHtmlAsText)
 
 // #1549: raw HTML in an agent's reply shows as typed and never styles the rest of the message
 test('a placeholder in angle brackets stays text', () => {

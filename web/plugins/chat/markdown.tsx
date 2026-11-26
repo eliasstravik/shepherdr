@@ -3,7 +3,7 @@
 // button (the design system's code block), a tap on a bit of `code` copies it, and task names and #spaces are links
 // that open them.
 import DOMPurify from 'dompurify'
-import { marked } from 'marked'
+import { marked, type MarkedExtension } from 'marked'
 import { useMemo, type MouseEvent, type ReactNode } from 'react'
 import { copyText } from '@client/copy.ts'
 import { IC } from '@client/icons.ts'
@@ -16,7 +16,8 @@ marked.setOptions({ gfm: true, breaks: false })
 // #1549: an agent's raw HTML shows as typed: a placeholder like <code> or <id> stays words and styles nothing after it.
 // Only a line break (<br>, common in a table's cell) still breaks the line.
 const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-marked.use({ renderer: { html: ({ text }) => (/^<br\s*\/?>$/i.test(text.trim()) ? '<br>' : esc(text)) } })
+export const rawHtmlAsText: MarkedExtension = { renderer: { html: ({ text }) => (/^<br\s*\/?>$/i.test(text.trim()) ? '<br>' : esc(text)) } }
+marked.use(rawHtmlAsText)
 
 // a link goes to a new tab, never in place of the app; one to this app is caught by kernel.ts and opens in it.
 // Without a browser (bun test) DOMPurify has no hooks: the module still loads, so a test's mock can keep its real exports.
