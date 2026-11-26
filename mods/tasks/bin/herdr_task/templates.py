@@ -186,7 +186,23 @@ WORKER_MD_BEFORE_TURN0 = WORKER_MD_BEFORE_NOROUND.replace(NOROUND_OLD, NOROUND_R
 TURN0_OLD = '(again on a timeout; still at turn 0 after one, `hc read <its name>` to see why:'
 TURN0_RULE = ('(again on a timeout, or when it returns at once at turn 0 while `hc read <its name>` shows it still working: i'
               "t hadn't begun its first turn; still at turn 0 after a timeout, `hc read <its name>` to see why:")
-WORKER_MD = WORKER_MD_BEFORE_TURN0.replace(TURN0_OLD, TURN0_RULE)
+WORKER_MD_BEFORE_LIMIT_ROUNDS = WORKER_MD_BEFORE_TURN0.replace(TURN0_OLD, TURN0_RULE)
+# Since Review rounds is the number the person asked for (#1557: "at most 1 round" ran 13): later rounds check the fixes,
+# and once all are used the agent fixes the last findings and says ready, the last fix unreviewed, said on its card.
+ROUNDS_DELTA_OLD = "and that round's findings: code a round passed isn't reviewed again."
+ROUNDS_DELTA_RULE = ("and that round's findings, to check each is fixed: code a round passed isn't reviewed again.")
+ROUNDS_MUST_OLD = MUST_OLD + " Only those cost a round: leave a finding below Must fix as a follow-up in your summary, unfixed (a fix is a change that needs a round of its own)."
+ROUNDS_MUST_RULE = ("Review rounds is the number of rounds the person asked for: never run more. Fix every finding at or above "
+                    "Must fix and commit; while rounds are left, review again, and stop once a round finds none at or above it. "
+                    "When the rounds are used, fix the last round's must-fix findings, commit and say ready without another "
+                    "round, writing plainly in your ready details that the last fix wasn't reviewed again and what it fixed. "
+                    "Only findings at or above Must fix get fixed: leave the rest as follow-ups in your summary, unfixed.")
+ROUNDS_GATE_OLD = ("Rounds used and your final commit unreviewed: say why in your chat, set your status line to it and end your "
+                   "turn; only your Assistant can add a round.")
+ROUNDS_GATE_RULE = ("Once all rounds are used, `ready` takes your final commit unreviewed. Never ask for or wait on another round: "
+                    "only the person adds one.")
+WORKER_MD = WORKER_MD_BEFORE_LIMIT_ROUNDS.replace(ROUNDS_DELTA_OLD, ROUNDS_DELTA_RULE).replace(
+    ROUNDS_MUST_OLD, ROUNDS_MUST_RULE).replace(ROUNDS_GATE_OLD, ROUNDS_GATE_RULE)
 
 REVIEWER_MD_BEFORE_SUBAGENT = """You review one Herdr task's work before it can merge. Read only: never edit files, commit or push.
 - Read the task, then the diff of its branch against its base, and run the project's checks.
@@ -219,7 +235,19 @@ REVIEWER_DELTA_RULE = ("- Read the task, then the diff your worker gives you, an
 REVIEWER_MUST_OLD = "minor (a nit or a later improvement).\n"
 REVIEWER_MUST_RULE = ("minor (a nit or a later improvement). Give them in two lists: \"Must fix:\" those at or above the Must fix "
                       "level your worker names, then \"Follow-up:\" the rest.\n")
-REVIEWER_MD = REVIEWER_MD_BEFORE_DELTA.replace(REVIEWER_DELTA_OLD, REVIEWER_DELTA_RULE).replace(REVIEWER_MUST_OLD, REVIEWER_MUST_RULE)
+REVIEWER_MD_BEFORE_FIXCHECK = REVIEWER_MD_BEFORE_DELTA.replace(REVIEWER_DELTA_OLD, REVIEWER_DELTA_RULE).replace(REVIEWER_MUST_OLD, REVIEWER_MUST_RULE)
+# Since a later round checks the fixes rather than hunting anew, and findings must be plausible here (#1557).
+REVIEWER_FIXCHECK_OLD = ("A later round's diff is only what changed since the last reviewed commit: review that and what it "
+                         "touches, never again code an earlier round passed.\n")
+REVIEWER_FIXCHECK_RULE = ("A later round checks the fixes: its diff is only what changed since the last reviewed commit, with "
+                          "that round's findings. Say for each finding whether it is fixed, not fixed, or the fix broke "
+                          "something it touches; don't start a fresh hunt: anything else you notice is Follow-up, and code an "
+                          "earlier round passed isn't reviewed again.\n")
+REVIEWER_REAL_OLD = "- Report each finding with a level:"
+REVIEWER_REAL_RULE = ("- Report only what could plausibly go wrong in this repo, as its own people, tools and machines use it, "
+                      "most important first. Something that needs tampering, a hostile setup or contrived timing is minor at "
+                      "most.\n- Report each finding with a level:")
+REVIEWER_MD = REVIEWER_MD_BEFORE_FIXCHECK.replace(REVIEWER_FIXCHECK_OLD, REVIEWER_FIXCHECK_RULE).replace(REVIEWER_REAL_OLD, REVIEWER_REAL_RULE)
 
 
 # Earlier worker defaults: a file still saying one, unedited, gets today's.
@@ -232,7 +260,7 @@ OLD_WORKER_READY = """You work on one Herdr task. Stay within the task's scope a
 - When the work is finished, run the `herdr-task ready` command given at the end of your brief, with a short summary. That puts the task in Ready for the person, who accepts it. Never mark a task done yourself.
 """
 OLD_WORKER_MD = OLD_WORKER_READY.split("- When the work is finished")[0]
-OLD_WORKERS = (WORKER_MD_BEFORE_TURN0, WORKER_MD_BEFORE_NOROUND, WORKER_MD_BEFORE_LIMIT, WORKER_MD_BEFORE_OPTIONS, WORKER_MD_BEFORE_REPLIES, WORKER_MD_BEFORE_DELTA, WORKER_MD_BEFORE_TESTS, WORKER_MD_BEFORE_ROW, WORKER_MD_BEFORE_CLOCK, WORKER_MD_BEFORE_LIVE, WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
+OLD_WORKERS = (WORKER_MD_BEFORE_LIMIT_ROUNDS, WORKER_MD_BEFORE_TURN0, WORKER_MD_BEFORE_NOROUND, WORKER_MD_BEFORE_LIMIT, WORKER_MD_BEFORE_OPTIONS, WORKER_MD_BEFORE_REPLIES, WORKER_MD_BEFORE_DELTA, WORKER_MD_BEFORE_TESTS, WORKER_MD_BEFORE_ROW, WORKER_MD_BEFORE_CLOCK, WORKER_MD_BEFORE_LIVE, WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
 
 
 TEMPLATE_HEADS = {
@@ -267,7 +295,8 @@ def instructions(role):
     if body is None or (role == "worker" and body.strip() in [x.strip() for x in OLD_WORKERS]) \
             or (role == "reviewer" and body.strip() in (REVIEWER_MD_BEFORE_SUBAGENT.strip(), REVIEWER_MD_BEFORE_FEEDBACK.strip(),
                                                     REVIEWER_MD_BEFORE_SANDBOX.strip(), REVIEWER_MD_BEFORE_CLAUDE.strip(),
-                                                    REVIEWER_MD_BEFORE_PAGES.strip(), REVIEWER_MD_BEFORE_DELTA.strip())):
+                                                    REVIEWER_MD_BEFORE_PAGES.strip(), REVIEWER_MD_BEFORE_DELTA.strip(),
+                                                    REVIEWER_MD_BEFORE_FIXCHECK.strip())):
         body = WORKER_MD if role == "worker" else REVIEWER_MD
     new = head + body.strip() + "\n"
     if text is None or new.strip() != text.strip():

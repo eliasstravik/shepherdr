@@ -866,8 +866,9 @@ def review_refusal(s, t, wt):
     """Why ready is refused for review (as Shepherdr's: `ready` waits for a review of the final
     commit), or None. Only tasks whose brief taught `reviewed` (review_gate) and whose Settings
     block says Review: on. A worktree task's final commit must be one a round was recorded on; a
-    task in the folder itself needs a round recorded since it started. Out of rounds, only the
-    Assistant adds one (review-more): the task then waits, saying so (review_out)."""
+    task in the folder itself needs a round recorded since it started. #1557: once all its rounds are used, ready takes
+    the final commit unreviewed (the fix of the last findings): the number of rounds is what the person asked for, and
+    its agent says on the card that the last fix wasn't reviewed again. Only the person adds a round (review-more)."""
     on, rounds = review_limits(s, t)
     if not on or not t.get("review_gate"):
         return None
@@ -875,6 +876,8 @@ def review_refusal(s, t, wt):
         return None  # no commits of its own: nothing to review (nothing to merge)
     if not wt and t.get("folder_start") and unchanged_folder(s, t):
         return None  # in the folder itself, and it changed nothing (#744: a run that only reads)
+    if rounds_used(t) >= rounds:
+        return None  # #1557: all rounds used: ready takes it, the last fix unreviewed (its agent says so on the card)
     revs = rounds_this_run(t)
     head = t.get("head") if wt else None
     if (any(r.get("head") == head for r in revs) if wt else bool(revs)):
@@ -892,11 +895,6 @@ def review_refusal(s, t, wt):
                  and git(wt, "merge-base", "--is-ancestor", r["head"], head or "HEAD")[0]), None)
     delta = (f" Since round on {last[:7]}, have only what changed reviewed (git diff {last[:7]}..HEAD, and any merge's "
              "conflict resolutions), with that round's findings.") if last else ""
-    if rounds_used(t) >= rounds:
-        t["review_out"] = now()
-        return (f"All {rounds} review rounds are used and {what} isn't reviewed. A fix made after the last round needs a round "
-                f"of its own: say why in your chat (what the fix changed), set your status line to it, and end your turn: only "
-                f"your Assistant can add a round (herdr-task review-more {ref}).")
     return (f"Review is on and {what} isn't reviewed. Have it reviewed as your brief says, fix what must be fixed, record the "
             f"round with `{ht} reviewed {ref} --folder {folder} --report \"<findings, a line>\"` (on the commit you'd say "
             f"ready at), then run ready again.{delta} {rounds - rounds_used(t)} of {rounds} rounds left.")
@@ -1022,7 +1020,7 @@ def base_merges_only(s, t, wt, reviewed, head):
 def cmd_reviewed(args):
     """A task's agent records one review round of its current commit (its own review: a helper agent
     it started as its hc child, as its brief says). Uses one of its Review rounds; `ready` then accepts that
-    commit. Out of rounds it is refused: only the Assistant adds one (review-more)."""
+    commit. Out of rounds it is refused: ready then takes the fix unreviewed (#1557); only the person adds a round."""
     own_core_check()
     with open_store(args) as s:
         t = s.find(args.id)
@@ -1062,8 +1060,9 @@ def cmd_reviewed(args):
                 "used. Say ready.")
             return
         if used >= rounds:
-            raise Fail(f"All {rounds} review rounds of {s.name(t)} are used. Say why in your chat and end your turn: only your "
-                       f"Assistant can add a round (herdr-task review-more {s.ref(t)}).")
+            raise Fail(f"All {rounds} review rounds of {s.name(t)} are used: that is the number the person asked for, so no "
+                       "more review. Fix what the last round found at or above Must fix, commit, and say ready, writing on "
+                       "the card (its details) that the last fix wasn't reviewed again.")
         text = " ".join(str(args.report or "").split())[:2000]
         t.setdefault("reviews", []).append({"round": used + 1, "result": "report", "text": text, "at": now(), "head": head,
                                             "by": os.environ.get("HC_TERMINAL_ID")})
@@ -1075,9 +1074,9 @@ def cmd_reviewed(args):
 
 
 def cmd_review_more(args):
-    """The Assistant gives a task exactly one more review round (as Shepherdr's `task review-more`):
-    only once all its rounds are used. The limit stops an agent reviewing for ever, so the task's
-    own agent can never raise it. Its agent is told."""
+    """The Assistant gives a task exactly one more review round (as Shepherdr's `task review-more`), when the person
+    asks for it (#1557: never on its own): only once all its rounds are used. The limit stops an agent reviewing for
+    ever, so the task's own agent can never raise it. Its agent is told."""
     labels = caller_labels()
     with open_store(args) as s:
         t = s.find(args.id)
@@ -1099,7 +1098,8 @@ def cmd_review_more(args):
         if live:
             ht, folder = own_path(), shlex.quote(s.loc["folder"])
             from .news import hold, NO_AGENT, send_or_hold
-            note = (f"Your Assistant added one review round to {s.name(t)}: {rounds + 1} in all. Have your final commit reviewed, "
+            note = (f"Your Assistant added one review round to {s.name(t)}: {rounds + 1} in all. Have your final commit reviewed "
+                    "(what changed since the last reviewed commit: does it fix that round's findings?), "
                     f"record it with `{ht} reviewed {s.ref(t)} --folder {folder} --report \"<findings, a line>\"`, then run ready again.")
             r = send_or_hold(live[-1]["address"], note)
             if r == NO_AGENT:
