@@ -37,6 +37,8 @@ export const NOT_DATA: Record<string, string> = {
   "api:commands": "the agent's own commands, for the / list in the message box: voice says a command by itself",
   "api:reach": "the spaces a chat's agent can reach, for the # and @ list in the message box: voice names a space or task by itself",
   "api:spaces": "makes a new space (a change: asked for in Everything, or done on the page with screen)",
+  "api:newspace": "New space's recent folders on a machine, to pick from in its dialog: not read out",
+  "api:folders": "whether New space's folder is in a git repo, for its Make it a git repo switch: not read out",
   "api:file": "a picture or file sent in a chat, as bytes",
   "api:files": "Files (a plugin, off by default): a space's folder on disk, browsed and read on the page; not read out",
   "api:artifacts": "an artifact's own page (HTML made by an agent): opened, not read out; its title, versions and space are in the snapshot's artifacts",

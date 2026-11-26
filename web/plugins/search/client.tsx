@@ -31,6 +31,10 @@ interface Item {
   chord?: string
   /** more words it is found by */
   words?: string
+  /** a task's key (SHOP-12): found by its start, typed with or without the dash */
+  ref?: string
+  /** only once something is typed (an archived task, as 3.1's Jump) */
+  typed?: boolean
   run: () => void
 }
 
@@ -64,10 +68,16 @@ function itemsOf(snap: Snapshot): { things: Item[]; commands: Item[]; actions: I
   const sRows = ui.at ? spaceRows(ui.at, true) : null
   const actions = [...(t && tRows ? fromRows(tRows, t.name, `task-act:${t.id}`, ids) : []), ...(sRows && !t ? fromRows(sRows, spaceLabel(snap, ui.at), `space-act:${ui.at}`, ids) : [])]
   const ev = everything(snap)
-  const spaces: Item[] = [...(ev ? [ev] : []), ...spacesOf(snap)].map((p) => ({
+  // spaces whose Assistant changed last first (3.1's Jump): the ones in use now on top
+  const byUse = spacesOf(snap).map((p, i) => ({ p, i })).sort((a, b) => (b.p.changedAt ?? 0) - (a.p.changedAt ?? 0) || a.i - b.i).map((x) => x.p)
+  const spaces: Item[] = [...(ev ? [ev] : []), ...byUse].map((p) => ({
     key: `space:${p.id}`, kind: 'Space', label: p.id === ev?.id ? 'Everything' : spaceName(snap, p), sub: p.id === ev?.id ? undefined : machineLabel(snap, p.machine) + (p.archived ? ' · archived' : ''), lead: <SpaceIcon snap={snap} id={p.id} />, run: () => go(p.id),
   }))
-  const tasks: Item[] = snap.tasks.filter((x) => !x.archived).map((x) => ({ key: `task:${x.id}`, kind: 'Task', label: x.name, sub: workWords(snap, x), words: workName(x), lead: <StatusIcon t={x} time="side" />, run: () => openTask(x) }))
+  // archived ones too, once something is typed; each with its key (SHOP-12), as the task's chat names it
+  const tasks: Item[] = snap.tasks.map((x) => {
+    const ref = x.id.slice(x.id.lastIndexOf(':') + 1)
+    return { key: `task:${x.id}`, kind: 'Task', label: x.name, sub: [ref, x.archived ? 'Archived' : '', workWords(snap, x)].filter(Boolean).join(' · '), words: workName(x), ref, typed: !!x.archived, lead: <StatusIcon t={x} time="side" />, run: () => openTask(x) }
+  })
   const repos: Item[] = reposOf(snap).filter((r) => r.tasks.length).map((r) => ({ key: `repo:${r.key}`, kind: 'Repo', label: r.name, sub: [r.short, snap.machines.length > 1 ? machineLabel(snap, r.machine) : ''].filter(Boolean).join(' · '), icon: 'folder', run: () => showRepo(r.key) }))
   const arts: Item[] = ev ? artifactsIn(snap, ev.id).map((a) => ({ key: `art:${a.id}`, kind: 'Artifact', label: a.title, sub: `${spaceLabel(snap, a.place)} · ${agoShort(a.at)}`, icon: 'doc', run: () => openArtifact(a.id) })) : []
   const scheds: Item[] = registry.views.scheduled
@@ -92,12 +102,19 @@ export function byWords(q: string, text: string): number {
   return typed.length && typed.every((w) => words.some((x) => x.startsWith(w))) ? 300 : -1
 }
 
+/** a task's key by its start, case and dash aside: "shop-1" and "SHOP12" find SHOP-12 (its words alone, "shop" or "12", match by its row's line) */
+export function refMatch(q: string, ref?: string): number {
+  const flat = (x: string) => x.toLowerCase().replace(/[\s-]/g, '')
+  const t = flat(q)
+  return ref && t && /\d/.test(q) && flat(ref).startsWith(t) ? 400 - (flat(ref).length - t.length) : -1
+}
+
 /** the rows for a query: empty, recent picks, then actions on what is in focus, then the commands; typed, every item
  *  ranked by its match, a recent pick a little higher */
 export function rank(q: string, all: { things: Item[]; commands: Item[]; actions: Item[] }, recent: string[]): { label?: string; items: Item[] }[] {
   const mode = MODES[q.trim()[0]] ? q.trim()[0] : ''
   const text = mode ? q.trim().slice(1) : q
-  const pool = [...all.actions, ...all.commands, ...all.things].filter(MODES[mode] ?? (() => true))
+  const pool = [...all.actions, ...all.commands, ...all.things].filter((i) => (MODES[mode] ?? (() => true))(i) && (!i.typed || !!text.trim()))
   if (!text.trim()) {
     const byKey = new Map(pool.map((i) => [i.key, i]))
     const rec = recent.map((k) => byKey.get(k)).filter((i): i is Item => !!i).slice(0, 5)
@@ -114,7 +131,7 @@ export function rank(q: string, all: { things: Item[]; commands: Item[]; actions
   const scored = pool
     .map((i) => {
       // the label by a loose match; its other words (where it is, what else it's called) only by the starts of words
-      const s = Math.max(fuzzy(text, i.label), byWords(text, `${i.sub ?? ''} ${i.words ?? ''}`))
+      const s = Math.max(fuzzy(text, i.label), byWords(text, `${i.sub ?? ''} ${i.words ?? ''}`), refMatch(text, i.ref))
       const r = recent.indexOf(i.key)
       return { i, s: s < 0 ? s : s + (r >= 0 ? 120 - r * 4 : 0) + (i.kind === 'Action' ? 20 : 0) }
     })

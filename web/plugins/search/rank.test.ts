@@ -39,3 +39,12 @@ test('other words count only by their starts: "pref" finds Open Settings, scatte
   const withWords = { ...all, commands: [{ key: 'cmd:s', kind: 'Command', label: 'Open Settings', words: 'preferences', run: () => undefined }] as never[] }
   expect(rank('pref', withWords, [])[0].items.map((i) => i.label)).toEqual(['Open Settings'])
 })
+
+test('an archived task shows only once something is typed; a task is found by its key', () => {
+  const t = (key: string, label: string, ref: string, typed = false) => ({ key, kind: 'Task', label, sub: ref, ref, typed, run: () => undefined }) as never
+  const withOld = { ...all, things: [...all.things, t('task:9', 'Old login fix', 'SHOP-9', true), t('task:12', 'Cart badge', 'SHOP-12')] }
+  expect(rank('@', withOld, [])[0].items.map((i) => i.label)).not.toContain('Old login fix')
+  expect(rank('login', withOld, [])[0].items.map((i) => i.label)).toContain('Old login fix')
+  expect(rank('shop-12', withOld, [])[0].items[0].label).toBe('Cart badge')
+  expect(rank('SHOP12', withOld, [])[0].items[0].label).toBe('Cart badge')
+})

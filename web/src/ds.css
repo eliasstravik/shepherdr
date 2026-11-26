@@ -291,6 +291,7 @@ button.b{cursor:pointer}
 .dlg.wide{width:min(560px,calc(100% - 32px))}
 .dlg h2,.sheet h2{font-size:16px;line-height:24px;font-weight:600}.dlg p{color:var(--muted);font-size:14px;line-height:20px}
 .fld{display:grid;gap:4px;justify-items:start}.fld>span{color:var(--muted);font-size:var(--sec);line-height:var(--secl)}.fld>.inp{justify-self:stretch}
+.nsr{display:grid;margin:-4px -8px 0}
 .fake{display:flex;align-items:center;min-height:var(--field);padding:6px 12px;border-radius:8px;background:var(--well);box-shadow:inset 0 0 0 1px var(--line2);justify-self:stretch}
 .pk{display:grid;gap:4px}.pk .hd{height:var(--btn);padding:0;margin-bottom:4px}.pk .inp{margin-bottom:4px}
 .pk .list{display:grid;gap:1px;align-content:start;min-height:240px}
