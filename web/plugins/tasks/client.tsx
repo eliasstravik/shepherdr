@@ -18,6 +18,8 @@ import { SpaceIcon } from '@client/space-icon.tsx'
 import type { MergeEvidence, Message, Snapshot, Task } from '@shared/types.ts'
 import { askedWords, isEverything, machineLabel, nowGroups, onBranch, placeDown, reposOf, spaceLabel, spaceOnFolder, spacesOf, etaOf, headLine, leftWords, statusWord, taskChat, taskLine, taskWhen, tasksIn, tstate, workKey, workName, workWords, type Repo } from '@shared/view.ts'
 import { DoneRow } from '@plugins/chat/cards.tsx'
+import { Markdown } from '@plugins/chat/markdown.tsx'
+import { readable, words as saidWords } from '@core/accept.js'
 import { replyToTask, SlideHint, useSlide } from '@plugins/chat/slide.tsx'
 import { StatusIcon } from './icon.tsx'
 import { chipsOf, choices, clean, filterCount, filterOn, filterTasks, hereOn, NO_FILTER, toggle, type GroupKey, type TaskFilter } from '@shared/task-filter.ts'
@@ -277,6 +279,7 @@ export function ReviewCard({ t, ctx }: { t: Task; ctx: 'chat' | 'thread' }) {
   const snap = useSnap()
   const ev = useEvidence(t)
   const [fold, setFold] = useState(false)
+  const [more, setMore] = useState(false)
   const [, bump] = useState(0)
   const Tile = registry.views.tile
   // its buttons answer at once and wait together (pending.ts): Mark as done holds until the server's state moves on
@@ -293,11 +296,21 @@ export function ReviewCard({ t, ctx }: { t: Task; ctx: 'chat' | 'thread' }) {
   const checks = ev?.checks && ev.checks.state !== 'none' && ev.checks.state !== 'unknown' ? (ev.checks.state === 'passed' ? ev.checks.text || 'checks passed' : ev.checks.state === 'failed' ? 'checks failed' : 'checks running') : ''
   const foldWords = files.length ? [`${files.length} ${files.length === 1 ? 'file' : 'files'} changed${branch ? '' : ' in the folder'}`, checks].filter(Boolean).join(' · ') : ''
   const proof = t.proof ?? (typeof ev?.proof === 'string' ? ev.proof : ev?.proof?.id)
+  // what its agent said with ready: the short summary up top, its details folded under it (an older, too long summary
+  // keeps its first sentence and folds the rest)
+  const said = saidWords({ summary: t.summary ?? ev?.summary, details: t.details ?? ev?.details }) as { summary: string; details: string }
   return (
     <div className="card" data-card={`review:${t.id}`}>
       {ctx === 'chat' && <span className="t tw"><StatusIcon t={t} time="none" />{t.name}</span>}
       <span className="s">{ctx === 'chat' && t.work && <><WorkTag snap={snap} t={t} /> · </>}{where}</span>
-      <span>{t.summary ?? ev?.summary ?? 'Ready for you to look at.'}</span>
+      <span>{said.summary || 'Ready for you to look at.'}</span>
+      {said.details && (
+        <button type="button" className="fold" aria-expanded={more} onClick={() => setMore(!more)}>
+          <I n={more ? 'down' : 'right'} c="s16" />
+          Details
+        </button>
+      )}
+      {more && said.details && <Markdown text={readable(said.details)} />}
       {proof && Tile && <div className="atile"><Tile id={proof} /></div>}
       {foldWords && (
         <button type="button" className="fold" aria-expanded={fold} onClick={() => setFold(!fold)}>

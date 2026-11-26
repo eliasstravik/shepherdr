@@ -43,7 +43,7 @@ export interface CardActs {
   now: CardPress | undefined
 }
 export function useCardActs(card: string, at: string): CardActs {
-  useSyncExternalStore(onPresses, pressVersion)
+  useSyncExternalStore(onPresses, pressVersion, pressVersion)
   return { card, at, now: pressOf(card, at) }
 }
 

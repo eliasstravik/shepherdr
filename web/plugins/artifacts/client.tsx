@@ -68,25 +68,32 @@ export function Preview({ a, dark }: { a: Artifact; dark: boolean }) {
   )
 }
 
-/** a page as a picture tile: a small picture of the page, its title, when it was updated; tap to open */
-function Tile({ id }: { id: string }) {
+/** the older version a chat's card was posted with, still kept; null: the newest (or one no longer kept) */
+export const postedVersion = (a: Artifact, v?: number) => (v && v < a.v ? a.versions.find((x) => x.n === v) ?? null : null)
+
+/** a page as a picture tile: a small picture of the page, its title, when it was updated; tap to open. In a chat, the
+ *  version it was posted with (v): an older one shows and opens that version, not the newest. */
+export function Tile({ id, v }: { id: string; v?: number }) {
   const snap = useSnap()
   const dark = useDark()
   const a = snap?.artifacts.find((x) => x.id === id)
   if (!snap || !a) return null
+  const old = postedVersion(a, v)
+  // an older version's own picture (a missing one falls back to its first lines)
+  const shown = old ? { ...a, v: old.n, thumb: true } : a
   return (
-    <button type="button" className="tile" onClick={() => openArtifact(a.id)}>
-      <Preview a={a} dark={dark} />
+    <button type="button" className="tile" onClick={() => openArtifact(a.id, old ? old.n : null)}>
+      <Preview a={shown} dark={dark} />
       <span className="l1" style={{ fontWeight: 500 }}>{a.title}</span>
-      <span className="l2">{spaceLabel(snap, a.place)} · {agoShort(a.at)}</span>
+      <span className="l2">{old ? `Version ${old.n} · ` : ''}{spaceLabel(snap, a.place)} · {agoShort(old?.at ?? a.at)}</span>
     </button>
   )
 }
 
-/** a page an agent made shows in the chat as its tile */
+/** a page an agent made shows in the chat as its tile, at the version it came with */
 function InChat({ msg }: { msg: Message; chat: Chat }) {
   if (!msg.artifact) return null
-  return <div className="atile"><Tile id={msg.artifact.id} /></div>
+  return <div className="atile"><Tile id={msg.artifact.id} v={msg.artifact.v} /></div>
 }
 
 /* ---------- an open artifact ---------- */
