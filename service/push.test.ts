@@ -49,7 +49,7 @@ test("an agent's own alert, from its label", () => {
   const snap = { places: [{ id: "sp1", name: "tt-repo", chat: "sp1" }], tasks: [], settings: [] };
   const terms = [{ address: "t1", state: "live", labels: { "herdr.role": "coordinator", "herdr.alert": JSON.stringify({ id: "x", at: 5, title: "Can't wait", body: "Look now" }) } }];
   const out = agentAlerts(terms, snap, (a) => (a === "t1" ? "sp1" : null), "/nonexistent");
-  expect(out).toEqual([{ id: "x", at: 5, title: "#tt-repo · Can't wait", body: "Look now", chat: "sp1", place: "sp1", notify: true }]);
+  expect(out).toEqual([{ id: "x", at: 5, title: "#tt-repo · Can't wait", what: "Can't wait", body: "Look now", chat: "sp1", place: "sp1", notify: true }]);
 });
 
 test("SHEP-255: an alert carries the task it is about: its chat's, or a task's helper's by its herdr.task label; a helper of no task's none", () => {

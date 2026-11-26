@@ -76,7 +76,7 @@ export function alertsOf(snap: any, said: (chat: string) => string | undefined =
  * task's agent or an alert about a task always; an Assistant's by its space's Notify). chatOf: a terminal's chat key.
  */
 export function agentAlerts(terminals: Iterable<any>, snap: any, chatOf: (address: string) => string | null, home: string) {
-  const out: { id: string; at: number; title: string; body: string; chat?: string; task?: string; place?: string; notify: boolean; ended?: true; machine?: string | null; memory?: true }[] = [];
+  const out: { id: string; at: number; title: string; what?: string; body: string; chat?: string; task?: string; place?: string; notify: boolean; ended?: true; machine?: string | null; memory?: true }[] = [];
   const all = [...terminals];
   for (const k of all) {
     let a: any = null;
@@ -101,7 +101,7 @@ export function agentAlerts(terminals: Iterable<any>, snap: any, chatOf: (addres
     const ended = k.state !== undefined && k.state !== "live";
     const machine = String(k.address ?? "").includes("/") ? String(k.address).slice(0, String(k.address).indexOf("/")) : null;
     const memory = a.about && /^Memory at \d+%/.test(String(a.title ?? ""));
-    out.push({ id: String(a.id), at: Number(a.at) || 0, title: T.clip(T.toastTitle(who, String(a.title ?? "")), 60), body: T.clip(String(a.body ?? ""), 300), ...(chat ? { chat } : {}), ...(of ? { task: of.id } : {}), ...(place ? { place } : {}), notify,
+    out.push({ id: String(a.id), at: Number(a.at) || 0, title: T.clip(T.toastTitle(who, String(a.title ?? "")), 60), what: T.clip(String(a.title ?? ""), 120), body: T.clip(String(a.body ?? ""), 300), ...(chat ? { chat } : {}), ...(of ? { task: of.id } : {}), ...(place ? { place } : {}), notify,
       ...(ended ? { ended: true as const } : {}), ...(machine ? { machine } : {}), ...(memory ? { memory: true as const } : {}) });
   }
   // Assistants here that their model's provider kept cutting off (herdr-task tick's .retries.json), once per cut, as

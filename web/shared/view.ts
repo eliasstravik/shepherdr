@@ -2,6 +2,7 @@
 // machines as headings, groups, spaces), a task's status from its agent's report and the facts Shepherdr knows, its
 // row's words and time, a space's "needs you" count. The app, the alerts and the voice all read it from here.
 import type { Artifact, Automation, Machine, Place, Section, Snapshot, Task } from './types.ts'
+import { taskAlerts } from './needs-you.ts'
 
 export type Space = Place
 
@@ -352,9 +353,11 @@ export const spaceOnFolder = (snap: Snapshot, r: Pick<Repo, 'folder' | 'machine'
 /** "Asked in #root": the space that asked for a task, in words */
 export const askedWords = (snap: Snapshot, t: Task) => (t.asked && snap.places.some((p) => p.id === t.asked) ? `Asked in ${spaceLabel(snap, t.asked)}` : '')
 
-/** Tasks › Now, grouped by what each task needs. Done newest first. */
-export function nowGroups(tasks: Task[]): { name: 'Needs you' | 'Working' | 'Up next' | 'Done' | 'Archived'; tasks: Task[] }[] {
-  const by = (s: TaskState[]) => tasks.filter((t) => s.includes(tstate(t)))
+/** Tasks › Now, grouped by what each task needs. Done newest first. alerting: the tasks whose agent's alert stands
+ *  (taskAlerts), under Needs you while it does, as in the glance feed (needs-you.ts) */
+export function nowGroups(tasks: Task[], alerting?: { has(id: string): boolean }): { name: 'Needs you' | 'Working' | 'Up next' | 'Done' | 'Archived'; tasks: Task[] }[] {
+  const st = (t: Task): TaskState => { const s = tstate(t); return alerting?.has(t.id) && (s === 'working' || s === 'next') ? 'ask' : s }
+  const by = (s: TaskState[]) => tasks.filter((t) => s.includes(st(t)))
   const newest = (a: Task, b: Task) => (b.doneAt ?? b.at ?? 0) - (a.doneAt ?? a.at ?? 0)
   return [
     { name: 'Needs you' as const, tasks: by(['ask', 'ready']) },
@@ -369,7 +372,8 @@ export function nowGroups(tasks: Task[]): { name: 'Needs you' | 'Working' | 'Up 
  *  chat's agent when it asks. No space: everywhere. The same count decides the Tasks button's number. */
 export function needsCount(snap: Snapshot, placeId?: string): number {
   const all = !placeId || isEverything(snap, placeId)
-  const tasks = snap.tasks.filter((t) => (all || taskInSpace(t, placeId)) && ['ask', 'ready'].includes(tstate(t))).length
+  const alerting = taskAlerts(snap)
+  const tasks = snap.tasks.filter((t) => (all || taskInSpace(t, placeId)) && (['ask', 'ready'].includes(tstate(t)) || (alerting.has(t.id) && tstate(t) !== 'done' && tstate(t) !== 'archived'))).length
   const chats = snap.places.filter((p) => p.needs && (all || p.id === placeId)).length
   return tasks + chats
 }
