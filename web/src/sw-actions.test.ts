@@ -157,3 +157,12 @@ test("another app's window on the same host doesn't quiet it; a test alert shows
   await t.push({ title: 'Shepherdr · Test', body: 'Alerts reach this device.', tag: 'test', test: true })
   expect(t.shown.length).toBe(1)
 })
+
+test('Restart all on a restart alert starts the stopped Assistants again (#1545)', async () => {
+  const w = worker(() => ({ status: 200, body: { ok: true, started: 2 } }))
+  await w.push({ title: 'vm-a · Not back after the restart', body: 'The machine\'s restart stopped shop, docs.', tag: 'alert:a1', actions: [{ action: 'restart-all', title: 'Restart all' }], restart: { alert: 'a1' } })
+  expect(w.shown[0].options.actions).toEqual([{ action: 'restart-all', title: 'Restart all' }])
+  await w.click('restart-all')
+  expect(w.posted.map((p) => p.body)).toEqual([{ type: 'restart-all', alert: 'a1' }])
+  expect(w.shown.at(-1)!.title).toBe('Restarting ✓')
+})

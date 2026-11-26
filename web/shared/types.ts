@@ -1328,7 +1328,7 @@ export interface Snapshot {
   read?: Record<string, number>
   /** the agents' own alerts (herdr-task alert), one per agent, as the window's toasts say them (service/push.ts
    *  agentAlerts): "HERD-4 · <title>" over its body, its chat, and whether it reaches the person (its space's Notify) */
-  alerts?: { id: string; at: number; title: string; /** its own words, without who sent it (#1561) */ what?: string; body: string; chat?: string; /** the task it is about (SHEP-255): its row shows it; none: no task's, not in Tasks */ task?: string; place?: string; notify: boolean; ended?: true; machine?: string | null; memory?: true }[]
+  alerts?: { id: string; at: number; title: string; /** its own words, without who sent it (#1561) */ what?: string; body: string; chat?: string; /** the task it is about (SHEP-255): its row shows it; none: no task's, not in Tasks */ task?: string; place?: string; notify: boolean; ended?: true; machine?: string | null; memory?: true; /** #1545: Restart all (the restart-all action) */ restart?: true }[]
   /** the sidebar's sections, as Slack's, each with its spaces in the human's order: the top ones first (Pinned, id
    *  'pinned', among them), then each machine's, its machine in order (shared/order.ts) */
   sections?: Section[]

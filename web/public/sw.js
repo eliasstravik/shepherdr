@@ -90,7 +90,7 @@ self.addEventListener('push', (e) => {
           renotify: !!tag,
           icon: 'icon-192.png?v=2',
           badge: 'badge-96.png?v=2',
-          data: { url: a.url || './', waits: !!a.waits, answer: a.answer, accept: a.accept, reply: a.reply },
+          data: { url: a.url || './', waits: !!a.waits, answer: a.answer, accept: a.accept, reply: a.reply, restart: a.restart },
         }
         const actions = fit(a.actions)
         if (actions.length) options.actions = actions
@@ -161,6 +161,7 @@ self.addEventListener('notificationclick', (e) => {
   const then = (p) => e.waitUntil(p.then(refresh))
   if (e.action === 'later') return
   if (e.action === 'accept' && d.accept) return then(act({ type: 'accept', task: d.accept.task }).then((r) => said(n, r, 'Done ✓', n.body)))
+  if (e.action === 'restart-all' && d.restart) return then(act({ type: 'restart-all', alert: d.restart.alert }).then((r) => said(n, r, 'Restarting ✓', n.body)))
   if (/^\d+$/.test(e.action) && d.answer)
     return then(act({ type: 'answer', chat: d.answer.chat, question: d.answer.question, choice: Number(e.action), fromAlert: true }).then((r) => said(n, r, 'Answered ✓', label)))
   if (e.action === 'reply' && d.reply && typeof e.reply === 'string' && e.reply.trim()) {
