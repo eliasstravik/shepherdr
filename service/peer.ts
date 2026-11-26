@@ -103,8 +103,11 @@ export const trustedPeer = (port: number | undefined, service: number) => {
   return process.platform === "darwin" && peerProblem !== null && lsofPeer(port, service, run) !== null;
 };
 
+/** A finished command's output, or "" when it was stopped by the timeout or failed: a ps cut short could miss a person. */
+export const outputOf = (r: { stdout?: { toString(): string } | null; exitCode?: number | null; exitedDueToTimeout?: boolean }) =>
+  r.exitedDueToTimeout || r.exitCode !== 0 ? "" : r.stdout?.toString() ?? "";
 const run = (argv: string[]) => {
-  try { return spawnSync(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore", timeout: 5000 }).stdout.toString(); } catch { return ""; }
+  try { return outputOf(spawnSync(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore", timeout: 5000 })); } catch { return ""; }
 };
 
 /** lsof -F's sockets: [pid, uid, "local->remote"] for each socket line. */
@@ -154,7 +157,7 @@ export const otherPeople = (ps: string, me = ME, ignored: (uid: number) => boole
  *    other person has a process on this Mac (ps lists everyone's) and the connection is still up after ps looked,
  *    so the holder was alive while ps listed it ("system").
  *  lsof not seeing the service's own side means it can't look here: null, as for anything else. */
-export function lsofPeer(port: number, service: number, exec: (argv: string[]) => string, me = ME, self = process.pid, ignore: string[] = ignoredAccounts()): "owner" | "system" | null {
+export function lsofPeer(port: number, service: number, exec: (argv: string[]) => string, me = ME, self = process.pid, ignore?: string[]): "owner" | "system" | null {
   const look = () => {
     const socks = lsofSockets(exec([LSOF, "-nP", `-iTCP@127.0.0.1:${port}`, "-sTCP:ESTABLISHED", "-Fpun"]));
     const ours = socks.some(([pid, , n]) => pid === self && n === `127.0.0.1:${service}->127.0.0.1:${port}`);
@@ -167,7 +170,8 @@ export function lsofPeer(port: number, service: number, exec: (argv: string[]) =
   if (first.callers.length) return first.callers.every((u) => u === me) ? ((lsofProblem = null), "owner") : say("another user opened it");
   const ps = exec([PS, "-axo", "uid="]);
   if (!ps.split("\n").some((x) => x.trim() === String(me))) return say("ps gave no process list"); // ps must list us too
-  const ignored = (u: number) => ignore.length > 0 && ignore.includes(accountOf(exec([ID, "-P", String(u)]), u) ?? "");
+  const listed = ignore ?? ignoredAccounts(); // read only here: a hidden caller with others on this Mac
+  const ignored = (u: number) => listed.length > 0 && listed.includes(accountOf(exec([ID, "-P", String(u)]), u) ?? "");
   if (otherPeople(ps, me, ignored).length) return say("another person has processes on this Mac, so a hidden caller could be theirs (a service account can be named in settings: web.ignore_accounts)");
   const again = look();
   if (!again.ours || again.callers.length) return say("the connection changed while looking");

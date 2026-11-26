@@ -214,6 +214,12 @@ describe("macOS 27, no netstat table: lsof and ps (GitHub #777)", () => {
     const { otherPeople } = await import("./peer.ts");
     expect(otherPeople(ps(0, 88, 501, 502, 4294967294), 501)).toEqual([502]);
   });
+  test("a command stopped by the timeout or failing gives no output: a ps cut short can't hide a person", async () => {
+    const { outputOf } = await import("./peer.ts");
+    expect(outputOf({ stdout: "0\n501\n", exitCode: 0 })).toBe("0\n501\n");
+    expect(outputOf({ stdout: "0\n501\n", exitCode: null, exitedDueToTimeout: true })).toBe("");
+    expect(outputOf({ stdout: "0\n501\n", exitCode: 1 })).toBe("");
+  });
   test("an account's name from id -P: one line, 10 fields, the uid asked", async () => {
     const { accountOf } = await import("./peer.ts");
     expect(accountOf(passwd["503"], 503)).toBe("mfe");
