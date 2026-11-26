@@ -155,6 +155,8 @@ button:disabled{opacity:.5;cursor:default}
 [data-drop-over="heading"]{background:var(--control);border-radius:8px}
 [data-drop-over="before"]{box-shadow:inset 0 2px 0 var(--fg)}
 .side .rowx,.drawer .rowx,.side .mh,.drawer .mh{touch-action:pan-y}
+/* a space with something new from its Assistant (read-marks.ts) */
+.row.unread{color:var(--fg);font-weight:600}
 /* a machine dragged with its rows: they lift together, over what they pass */
 [data-dragging="machine"]{position:relative;z-index:5;border-radius:0;background:var(--control);box-shadow:0 1px 0 var(--control)}.mh[data-dragging="machine"]{border-radius:8px 8px 0 0;cursor:grabbing}
 .tbar span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

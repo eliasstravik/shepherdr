@@ -16,6 +16,7 @@ import { columnsOf, swapSides, useSides } from './sides.ts'
 import { SettingsWindow } from './settings.tsx'
 import { cx, Empty, I, IB, useScrolled } from './ui.tsx'
 import { SpaceIcon } from './space-icon.tsx'
+import { MarkRead } from './read-marks.ts'
 
 /** the thread the middle column shows: the open task when it has the middle, else the space's chat */
 export function middleThread(snap: Snapshot, ui: { at: string; max: string | null }): Thread | null {
@@ -289,6 +290,7 @@ export function App() {
           {registry.overlays.map((V, i) => <V key={i} />)}
         </div>
         <Toasts />
+        <MarkRead />
       </div>
     </div>
   )

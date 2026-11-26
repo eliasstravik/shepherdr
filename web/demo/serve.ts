@@ -17,6 +17,8 @@ const socks = new Set<Sock>()
 const state = { normal: structuredClone(snapshot('normal')), empty: structuredClone(snapshot('empty')), down: structuredClone(snapshot('down')), more: structuredClone(snapshot('more')), long: structuredClone(snapshot('long')), one: structuredClone(snapshot('one')), five: structuredClone(snapshot('five')) }
 const chats: Record<string, Chat> = structuredClone(seed)
 let n = 1000
+/** the group a Remove group took, for its Undo */
+let gone: NonNullable<Snapshot['sections']>[number] | null = null
 function resetDemo() {
   for (const mode of ['normal', 'empty', 'down', 'more', 'long', 'one', 'five'] as const) state[mode] = structuredClone(snapshot(mode))
   for (const key of Object.keys(chats)) delete chats[key]
@@ -177,7 +179,10 @@ function action(a: Record<string, any>): unknown {
   if (a.type === 'space-remove') return each((snap) => { snap.places = snap.places.filter((p) => p.id !== a.place) }), { ok: true }
   if (a.type === 'move') return each((snap) => { snap.sections = snap.sections?.map((s) => ({ ...s, spaces: [...s.spaces.filter((x) => x !== a.id), ...(s.id === a.to ? [a.id] : [])] })) }), { ok: true }
   if (a.type === 'section' && a.op === 'new') { const id = `s:g${++n}`; each((snap) => { snap.sections = [...(snap.sections ?? []), { id, name: a.name, machine: a.machine, spaces: [] }] }); return { ok: true, id } }
-  if (a.type === 'section' && a.op === 'delete') return each((snap) => { snap.sections = snap.sections?.filter((s) => s.id !== a.id) }), { ok: true }
+  if (a.type === 'section' && a.op === 'delete') return each((snap) => { gone = snap.sections?.find((s) => s.id === a.id) ?? null; snap.sections = snap.sections?.filter((s) => s.id !== a.id) }), { ok: true }
+  if (a.type === 'section' && a.op === 'restore') return gone ? (each((snap) => { snap.sections = [...(snap.sections ?? []), gone!] }), (gone = null), { ok: true }) : { ok: false, error: 'There is nothing to undo.' }
+  // #1560: a chat on screen is read
+  if (a.type === 'read') return each((snap) => { snap.read = { ...snap.read, ...a.chats } }), { ok: true }
   // #1547: a machine's start limit (null: back to all machines')
   if (a.type === 'setting' && /^machine\.start_/.test(a.key)) return each((snap) => { snap.settings = snap.settings.map((sec) => ({ ...sec, rows: sec.rows.map((r) => (r.key !== a.key ? r : a.value === null ? { ...r, value: r.stepFrom ?? r.value, inherits: undefined, from: 'all machines' } : { ...r, value: a.value, inherits: { value: r.stepFrom ?? '', from: 'all machines' }, from: undefined })) })) }), { ok: true }
   if (a.type === 'config') {

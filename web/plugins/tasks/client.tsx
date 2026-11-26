@@ -143,6 +143,17 @@ export function open(t: Task) {
   openTask(t.id)
 }
 
+/** Mark as done from the menu asks first: a slip of the thumb has no one-tap undo (reopening a task loses its Ready
+ *  or its place in the queue), and it merges nothing */
+function markDone(t: Task) {
+  confirm({
+    title: `Mark “${t.name}” as done?`,
+    body: onBranch(t) ? 'Nothing is merged: its branch stays as it is.' : 'It moves to Done.',
+    ok: 'Mark as done',
+    run: () => tryAct({ type: 'close', chat: taskChat(t), force: true }, undefined, 'Marking as done…'),
+  })
+}
+
 function del(t: Task) {
   confirm({
     title: 'Delete this task?',
@@ -189,7 +200,7 @@ export function taskRows(t: Task, where: 'row' | 'thread'): MenuRow[] | null {
     ...extra.filter((r) => r.label === 'Show screen'),
     ...(s === 'next' ? [{ icon: 'folder' as const, label: 'Move to', sub: spacesOf(snap).filter((p) => p.id !== t.place && !p.archived).map((p) => ({ label: spaceLabel(snap, p.id), run: () => void tryAct({ type: 'task-move', chat, place: p.id }, undefined, 'Moving…') })) }] : []),
     // from the menu it closes without merging: "Done · not merged" for a task on its own branch
-    ...(s !== 'done' && s !== 'archived' ? [{ icon: 'check' as const, label: 'Mark as done', run: () => void tryAct({ type: 'close', chat, force: true }, undefined, 'Marking as done…') }] : []),
+    ...(s !== 'done' && s !== 'archived' ? [{ icon: 'check' as const, label: 'Mark as done', run: () => markDone(t) }] : []),
     { icon: 'pen', label: 'Rename', cmd: 'tasks.rename', run: () => renameDialog(t.name, (name) => tryAct({ type: 'task-rename', chat, name })) },
     // Stop pauses the agent, like pressing Esc: it drops what it was doing and waits
     ...(s === 'working' ? [{ icon: 'stop' as const, label: 'Stop', cmd: 'tasks.stop', run: () => void tryAct({ type: 'stop', chat }, undefined, 'Stopping…') }] : []),
