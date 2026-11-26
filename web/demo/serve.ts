@@ -279,6 +279,13 @@ Bun.serve<Sock['data'], never>({
       if (what === 'patch') return Response.json({ path: file, text: `diff --git a/${file} b/${file}\nindex 1a2b3c4..5d6e7f8 100644\n--- a/${file}\n+++ b/${file}\n@@ -12,9 +12,14 @@ export function search(query: string) {\n   const words = query.trim().toLowerCase().split(/\\s+/)\n-  const all = products.filter((p) => words.every((w) => p.name.toLowerCase().includes(w)))\n-  return all.slice(0, 20)\n+  const hit = cache.get(query)\n+  if (hit) return hit\n+  // one pass over the index instead of every product's name\n+  const ids = words.map((w) => index.get(w) ?? new Set<number>())\n+  const found = [...ids[0]].filter((id) => ids.every((s) => s.has(id))).slice(0, 20)\n+  cache.set(query, found)\n+  return found\n }\n \n export function clear() {\n@@ -40,3 +45,4 @@ export function clear() {\n   products.length = 0\n+  cache.clear()\n }\n` })
       return Response.json({ error: 'Ask for diff or patch.' })
     }
+    // New space's recent folders and whether a folder is in a git repo (service/spaces.ts newSpaceInfo, folders)
+    if (path === '/api/newspace') return Response.json({ home: '/Users/sam', recent: ['/Users/sam/dev/shop', '/Users/sam/dev/recipes', '/Users/sam/dev/blog', '/Users/sam/dev/portfolio', '/Users/sam/notes'], start: '/Users/sam' })
+    if (path === '/api/folders') {
+      const p = url.searchParams.get('path') ?? '~'
+      const repo = /^~\/dev\/(shop|blog|garden|portfolio)(\/|$)/.exec(p)
+      return Response.json({ path: p, exists: !!repo || p === '~/notes', dir: true, repo: repo ? `~/dev/${repo[1]}` : null, entries: [] })
+    }
     if (path === '/api/action') return Response.json(action((await req.json()) as Record<string, any>) ?? { ok: true })
     if (path === '/api/upload') {
       const f = (await req.formData()).get('file') as File | null

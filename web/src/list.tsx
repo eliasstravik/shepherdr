@@ -9,7 +9,8 @@ import { everything, folderOf, groupOf, isEverything, isHomeSpace, isTilde, list
 import { act, getState, go, notice, openSettings, registry, setUI, shownOn, tryAct, useUI, type Filter, type MenuRow } from './kernel.ts'
 import { confirm, openDialog, openForm, openMenu } from './overlay.tsx'
 import { AgentField, MachineField, pickFor, type Pick } from './picker.tsx'
-import { Btn, Cnt, I, IB, MenuGroup, Row } from './ui.tsx'
+import { Btn, Cnt, I, IB, MenuGroup, Row, Tgl } from './ui.tsx'
+import { offersRepo, suggestions, tilde, untilde } from '@core/newspace.js'
 import { attr } from './attr.ts'
 import { copyText } from './copy.ts'
 import { DictateButton } from './dictate.tsx'
@@ -183,6 +184,32 @@ export function newGroupDialog(machine?: string, then?: (id: string) => void) {
   )
 }
 
+const ask = (u: string) => fetch(u, { headers: { 'x-shepherdr': '1' } }).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+
+/** New space's folder help (3.1's): the machine's recent folders to pick instead of typing a path, and whether the folder
+ *  is in a git repo yet (the service answers both; null while it hasn't) */
+function useFolderHelp(machine: string | null, path: string) {
+  const [info, setInfo] = useState<{ home: string; recent: string[] } | null>(null)
+  const [inRepo, setInRepo] = useState<boolean | null>(null)
+  useEffect(() => {
+    let on = true
+    setInfo(null)
+    void ask(`api/newspace${machine ? `?machine=${encodeURIComponent(machine)}` : ''}`).then((j) => on && j?.home && setInfo({ home: j.home, recent: Array.isArray(j.recent) ? j.recent : [] }))
+    return () => void (on = false)
+  }, [machine])
+  useEffect(() => {
+    let on = true
+    setInRepo(null)
+    if (!path) return
+    const t = setTimeout(() => void ask(`api/folders?${new URLSearchParams({ ...(machine ? { machine } : {}), path })}`).then((j) => on && j && !j.error && setInRepo(!!j.repo)), 300)
+    return () => {
+      on = false
+      clearTimeout(t)
+    }
+  }, [machine, path])
+  return { info, inRepo }
+}
+
 /** New space; from a repo's tasks (SHEP-325, "Make it a space") with its name and folder filled in */
 export function newSpaceDialog(machine?: string, pre?: { name: string; folder: string }) {
   openForm(
@@ -195,12 +222,19 @@ export function newSpaceDialog(machine?: string, pre?: { name: string; folder: s
       // it starts on Everything's choice for chats
       const [pick, setPick] = useState<Pick | null>(null)
       const [busy, setBusy] = useState(false)
+      const path = folder.trim() || (name.trim() ? `~/dev/${name.trim().replace(/^#\s*/, '')}` : '')
+      const { info, inRepo } = useFolderHelp(m === snap?.host ? null : m, path)
+      // a folder outside git (not home or /) is made a repo, so each task gets its own worktree; on unless turned off
+      const [repoOff, setRepoOff] = useState(false)
+      const offerRepo = !!info && offersRepo(untilde(path.replace(/\/+$/, ''), info.home), inRepo, info.home)
+      // a folder that has its space already only opens that one: not offered
+      const has = new Set((snap?.places ?? []).filter((p) => (p.machine ?? snap.host) === m).map((p) => p.folder))
+      const picks: string[] = info ? suggestions(info.recent.filter((f) => !has.has(f)), folder, info.home) : []
       const ok = async () => {
-        const path = folder.trim() || (name.trim() ? `~/dev/${name.trim().replace(/^#\s*/, '')}` : '')
         if (!path || busy) return
         setBusy(true)
         try {
-          const r = await fetch('api/spaces', { method: 'POST', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify({ machine: m === snap.host ? undefined : m, path, name: name.trim().replace(/^#\s*/, '') || undefined, ...(icon ? { icon } : {}), agent: pick ?? undefined, create: true }) })
+          const r = await fetch('api/spaces', { method: 'POST', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify({ machine: m === snap.host ? undefined : m, path, name: name.trim().replace(/^#\s*/, '') || undefined, ...(icon ? { icon } : {}), agent: pick ?? undefined, create: true, ...(offerRepo && !repoOff ? { makeRepo: true } : {}) }) })
           const j = (await r.json().catch(() => ({}))) as { place?: string; error?: string; warning?: string; existed?: boolean }
           if (!r.ok || !j.place) throw new Error(j.error || 'The space could not be made.')
           close()
@@ -227,6 +261,19 @@ export function newSpaceDialog(machine?: string, pre?: { name: string; folder: s
             <span>Folder</span>
             <input className="inp" name="folder" value={folder} placeholder={name.trim() ? `~/dev/${name.trim().replace(/^#\s*/, '')}` : '~/dev/docs'} autoComplete="off" autoCapitalize="off" spellCheck={false} onChange={(e) => setFolder(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void ok()} />
           </label>
+          {info && picks.length > 0 && (
+            <div className="nsr" role="group" aria-label="Recent folders">
+              {picks.map((f) => (
+                <Row key={f} icon="folder" label={tilde(f, info.home)} onClick={() => setFolder(tilde(f, info.home))} />
+              ))}
+            </div>
+          )}
+          {offerRepo && (
+            <div className="srow">
+              <span className="n">Make it a git repo</span>
+              <Tgl label="Make it a git repo" on={!repoOff} onChange={(v) => setRepoOff(!v)} />
+            </div>
+          )}
           <AgentField title="The new space runs on" machine={m} pick={pick ?? pickFor(snap, 'all', 'Chats')} onChange={setPick} />
           <div className="acts">
             <Btn onClick={close}>Cancel</Btn>
