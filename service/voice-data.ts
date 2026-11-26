@@ -15,7 +15,7 @@ export type SourceArgs = { task?: string; place?: string; chat?: string; artifac
 export const SOURCES: Record<string, { about: string; arg?: "task" | "task-or-space" | "space" | "chat" | "machine"; rest?: boolean; serves: string[] }> = {
   insights: { about: "Personal analytics: how the person has used Shepherdr over the last month (messages and how they were written, tasks, how long tasks waited on them, questions, errors), kept only on their machines; path day, week or month for that period", serves: ["action:analytics"] },
   evidence: { about: "a task's review card: what it says changed, files changed, checks, proof", arg: "task", serves: ["action:evidence"] },
-  changes: { about: "a task's or space's changed files: lines added and removed", arg: "task-or-space", serves: [] },
+  changes: { about: "a task's or space's changed files: lines added and removed", arg: "task-or-space", serves: ["api:worktree"] },
   patch: { about: "one changed file's diff (path: the file)", arg: "task-or-space", rest: true, serves: [] },
   pr: { about: "a task's pull request: state, checks, files", arg: "task", serves: [] },
   files: { about: "a task's or space's folder: its entries (path: the folder)", arg: "task-or-space", rest: true, serves: [] },
