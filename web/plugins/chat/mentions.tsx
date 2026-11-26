@@ -187,7 +187,10 @@ export function useMentions(chatKey: string, here: string, text: string, setText
     list,
     onKey,
     box: {
+      // where the cursor is: typing doesn't always fire select, so input and key-up say it too
       onSelect: sync,
+      onInput: sync,
+      onKeyUp: sync,
       onFocus: sync,
       onBlur: () => setCaret(null),
       'aria-controls': open ? id : undefined,
