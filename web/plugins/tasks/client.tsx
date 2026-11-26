@@ -320,9 +320,11 @@ export function ReviewCard({ t, ctx }: { t: Task; ctx: 'chat' | 'thread' }) {
       )}
       {fold && (
         <div className="files">
-          {files.map((f) => (
-            <span key={f.path}>{f.path}<em>{[f.added ? `+${f.added}` : '', f.removed ? `−${f.removed}` : ''].filter(Boolean).join(' ')}</em></span>
-          ))}
+          {files.map((f) => {
+            const n = <>{f.path}<em>{[f.added ? `+${f.added}` : '', f.removed ? `−${f.removed}` : ''].filter(Boolean).join(' ')}</em></>
+            // with the Diff viewer on, a file opens its changes in the Changes pane
+            return has('diff') ? <button type="button" key={f.path} onClick={() => setUI({ pane: 'diff', task: null, art: null, artWide: false, diff: { src: `task:${t.id}`, file: f.path } })}>{n}</button> : <span key={f.path}>{n}</span>
+          })}
         </div>
       )}
       {t.mergeFailed && <span className="s c-red">{t.mergeFailed}</span>}

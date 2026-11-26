@@ -260,6 +260,15 @@ Bun.serve<Sock['data'], never>({
     if (path === '/api/me') return Response.json({ login: 'sam', off: [] })
     // the # list's spaces (service/main.ts reachOf): every space but Everything, this machine's and the others'
     if (path === '/api/reach') return Response.json({ from: state.normal.host, checked: Date.now(), spaces: state.normal.places.filter((p) => p.id !== EV).map((p) => { const id = p.id.split('/').pop()!, far = p.machine && p.machine !== state.normal.host; return { id, name: p.name, route: far ? p.machine : '', machine: p.machine ?? state.normal.host, target: far ? `${p.machine}/${id}` : id } }) })
+    // the Diff viewer's Changes pane: a task's changes against main, or a space's folder's not committed yet
+    if (path === '/api/worktree') {
+      const task = url.searchParams.get('task'), what = url.searchParams.get('what'), file = url.searchParams.get('path') ?? ''
+      const files: [string, number, number, string?][] = task === 'SHOP-12' ? [['src/search/index.ts', 42, 17], ['src/search/cache.ts', 58, 0, 'added'], ['test/search.test.ts', 31, 2], ['docs/old-search.md', 0, 24, 'deleted']]
+        : task ? [['src/checkout/Button.tsx', 6, 2]] : [['notes/todo.md', 2, 1]]
+      if (what === 'diff') return Response.json({ base: task ? 'main' : 'its last commit', against: task ? 'main' : null, files: files.map(([p, add, del, st]) => ({ path: p, status: st ?? 'modified', add, del })), add: 0, del: 0 })
+      if (what === 'patch') return Response.json({ path: file, text: `diff --git a/${file} b/${file}\nindex 1a2b3c4..5d6e7f8 100644\n--- a/${file}\n+++ b/${file}\n@@ -12,9 +12,14 @@ export function search(query: string) {\n   const words = query.trim().toLowerCase().split(/\\s+/)\n-  const all = products.filter((p) => words.every((w) => p.name.toLowerCase().includes(w)))\n-  return all.slice(0, 20)\n+  const hit = cache.get(query)\n+  if (hit) return hit\n+  // one pass over the index instead of every product's name\n+  const ids = words.map((w) => index.get(w) ?? new Set<number>())\n+  const found = [...ids[0]].filter((id) => ids.every((s) => s.has(id))).slice(0, 20)\n+  cache.set(query, found)\n+  return found\n }\n \n export function clear() {\n@@ -40,3 +45,4 @@ export function clear() {\n   products.length = 0\n+  cache.clear()\n }\n` })
+      return Response.json({ error: 'Ask for diff or patch.' })
+    }
     if (path === '/api/action') return Response.json(action((await req.json()) as Record<string, any>) ?? { ok: true })
     if (path === '/api/upload') {
       const f = (await req.formData()).get('file') as File | null

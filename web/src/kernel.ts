@@ -274,6 +274,8 @@ export interface UI {
   artq: string | null
   /** the warnings line was closed: the ids of the warnings it held ("a|b"), until one that isn't among them shows */
   banner: { what: string } | null
+  /** the Changes pane (diff plugin): whose changes (task:<id>, space:<id>) and the file open in it */
+  diff?: { src: string; file: string | null } | null
 }
 
 interface State {
