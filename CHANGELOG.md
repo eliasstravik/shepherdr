@@ -1,5 +1,80 @@
 # Changelog
 
+## 3.2.20
+
+Recaps in the chat, an Update button for any agent, alerts that show their words, two new plug-ins you can switch on
+(Files and Changes), and many things from 3.1 brought back.
+
+### What you will notice first
+
+- Coming back to a chat after 15 minutes away shows a short recap of what happened, in an outlined block with a
+  clock. Claude Code's own recaps and heads-ups show the same way, and Recap in a chat's menu asks any agent for one.
+  Switch recaps off in Settings › Plugins.
+- A chat on an older Claude Code or Codex offers Update: it runs the agent's own update and reopens the same
+  conversation.
+- An agent's alert now shows its words: on the task's row under Needs you, as a card inside the task with Copy, and as
+  a toast that stays until you close it.
+- Nothing is pinned above the message box any more for a waiting question or secret: the card stays where it was
+  asked, and Needs you, the badge and notifications still carry it. A secret ask that is no longer needed closes by
+  itself.
+
+### Off until you switch it on
+
+Two new plug-ins, both off by default. Switch them on in Settings › Plugins.
+
+- Files: the shown space's folder as a tree, on its own machine. Drop files from your computer onto a folder, or drag
+  files between folders.
+- Diff viewer: a Changes pane beside Tasks and Artifacts. What a task changed against its base, or what isn't
+  committed in a space's folder, file by file and read only. A Ready card's files open there too.
+
+### Chat
+
+- # and @ open the space and task picker again, following the cursor as you type.
+- / lists the agent's own commands again, and /model opens the agent picker.
+- A message held for the agent's turn is a row over the box with Send now, Edit and Remove.
+- Question cards get Other… (your own answer) and Chat about this. The scroll button says "1 question below" and
+  goes to it; a reply quote jumps to its message.
+- Background jobs and helpers show over the box again, with their output and a Stop button.
+- Restart in a chat's menu reopens any running Claude Code or Codex on the same conversation, even mid-turn or stuck.
+  End stops a space's Assistant (it asks first); its tasks keep running.
+- Text in angle brackets shows as typed, Send finishes the keyboard's half-typed word first, and a desktop's message
+  box takes the keyboard when you switch chats.
+
+### Around the app
+
+- Search finds archived tasks and task keys, with recent spaces first. New space lists recent folders to tap, and
+  offers to make a folder a git repo.
+- Unread spaces are bold again and count down once read; groups and machines have Mark as read. Remove group has
+  Undo, and Mark as done asks first.
+- The review card shows the details an agent wrote, under its summary.
+- Settings › Secrets lists every kept secret, a machine's own too, with Replace and Remove.
+- An older artifact card in a chat opens the version it was posted with.
+- Settings › Machines counts each machine's live agents and shows its start limits, which you can change there.
+- Settings has Keep the screen on, for this device.
+- Driving a screen in the side pane brings up the keyboard, with a key row (Esc, Tab, arrows, Enter, Paste).
+- Voice can read the artifact open on screen.
+
+### Tasks and Assistants
+
+- An Assistant that was running when its machine restarted (a reboot or power cut) starts again by itself on its own
+  conversation. One that can't is listed in one alert with Restart all.
+- The review rounds you set are the limit: once used, the agent fixes the last findings and says ready, saying the
+  last fix wasn't reviewed again. Later rounds check the earlier fixes instead of starting over.
+- Proofs start with a short For you part: what to check or decide, and what isn't proven.
+- Assistants start small related tasks side by side instead of one after another.
+- A merge waits only for GitHub workflows that are switched on; a task merged while it waited on you is done; a ready
+  task is no longer held at Needs you by an older question; Codex's ready no longer counts as a job still running.
+
+### Left out on purpose
+
+Some things from 3.1 stay out of 3.2. [Upgrading](docs/upgrading.md) lists each with what to do instead, for example:
+Find in chat (ask the Assistant, or use the browser's find), Rewind and Fork (ask the agent to undo, or use its own
+/rewind in the terminal view), Start later (ask the Assistant: "start X at 9") and Pin a task.
+
+### Nothing to do
+
+Updating is enough: `shepherdr update`. Nothing needs doing once.
+
 ## 3.2.19
 
 A Night theme in true black, a card to trust a folder and start, Codex's Approve for me, quieter tabs, and many small
