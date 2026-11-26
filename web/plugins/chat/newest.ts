@@ -8,6 +8,17 @@ export const OFF_PX = 240
 export interface OffEnd {
   /** messages from the agent (and the app's own rows) that came after you left the end */
   count: number
+  /** questions waiting on you below what is in view (#1560: "1 question below") */
+  asks?: number
+}
+
+/** the button's words when questions wait below */
+export const questionsBelow = (n: number) => (n === 1 ? '1 question below' : `${n} questions below`)
+
+/** the open question cards (data-ask) under the bottom of the chat's view, top first */
+export function asksBelow(sc: HTMLElement): HTMLElement[] {
+  const bottom = sc.getBoundingClientRect().bottom
+  return [...sc.querySelectorAll<HTMLElement>('[data-ask]')].filter((el) => el.getBoundingClientRect().top > bottom - 8)
 }
 
 /** how many of these rows are new: those after the row that was last when you left, never what you sent yourself.
@@ -26,7 +37,7 @@ const fns = new Set<() => void>()
 /** what the chat's button shows now (null: at its end); the same answer keeps the same object */
 export function setOffEnd(chat: string, a: OffEnd | null) {
   const was = now.get(chat) ?? null
-  if (was?.count === a?.count && !was === !a) return
+  if (was?.count === a?.count && (was?.asks ?? 0) === (a?.asks ?? 0) && !was === !a) return
   now.set(chat, a)
   for (const fn of fns) fn()
 }
@@ -54,3 +65,17 @@ export function toEnd(chat: string | undefined): boolean {
 
 /** is the chat away from its end now (End's command shows only then) */
 export const isOffEnd = (chat: string | undefined) => !!chat && !!now.get(chat)
+
+const asks = new Map<string, () => void>()
+/** the open chat says how it goes to its first question below; the "1 question below" pill calls it */
+export function onAsk(chat: string, go: () => void) {
+  asks.set(chat, go)
+  return () => {
+    if (asks.get(chat) === go) asks.delete(chat)
+  }
+}
+export function toAsk(chat: string) {
+  const go = asks.get(chat)
+  go?.()
+  return !!go
+}

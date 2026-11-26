@@ -261,17 +261,20 @@ export const chats: Record<string, Chat> = Object.fromEntries(
       relay('to', '#garden-app on vm', 'The photo task waits on a library. Pillow is fine to install.', today(9, 22), { how: 'assistant', state: 'waiting', why: 'the person is writing to it' }),
       relay('to', 'Assistant on studio', 'Is the site build green again?', today(9, 23), { how: 'assistant', state: 'failed', why: "studio can't be reached" }),
       { id: `m${++n}`, who: 'agent', news: { task: 'SHOP-14', ref: 'SHOP-14', mark: 'needs', what: '', text: "Which provider should I switch to, Stripe or Adyen? I'd go with Stripe." } },
-      ask('q-pay', '', byPay, ['Stripe', 'Adyen']),
+      ask('q-pay', '', byPay, ['Stripe', 'Adyen'], { other: true }),
       { id: `m${++n}`, who: 'agent', news: { task: 'vm:GARDEN-4', ref: 'GARDEN-4', mark: 'needs', what: '', text: 'I need an image library to resize the photos.' } },
       ask('q-pil', 'Run a command', byPhoto, ['Allow once', 'Decline'], { command: 'pip install pillow' }),
       // a working task's row with its time left, then how its asks closed: the same line twice shows once
       { id: `m${++n}`, who: 'agent', news: { task: 'SHOP-15', ref: 'SHOP-15', mark: 'other', what: 'blocked', text: 'Waiting at a prompt' } },
       { id: `m${++n}`, who: 'agent', ended: 'Bigger checkout button on phones · Run: npm test · Allowed in the chat' },
       { id: `m${++n}`, who: 'agent', ended: 'Bigger checkout button on phones · Run: npm test · Allowed in the chat' },
-      a('Dependency check started on its schedule in #shop. It found 3 packages behind and is updating them.'),
+      a('Dependency check started on its schedule in #shop. It found 3 packages behind and is updating them.', { id: 'm-dep' }),
       me('And the sale plan, APP/?artifact=a-plan, still good?'),
+      // #1560: pictures the chat can't show here, and an artifact on its way
+      a('', { images: 3 }),
+      a('', { publishing: true }),
       // a reply that quotes a long message, with a short answer: the quote truncates inside the bubble (SHEP-353)
-      me('Use /ui to fix', { reply: { text: 'Dependency check started on its schedule in #shop. It found 3 packages behind and is updating them. Supercalifragilisticexpialidociouslylongwordwithoutanybreaks', who: 'agent' }, reactions: [{ emoji: '👍', by: 'them' }] }),
+      me('Use /ui to fix', { reply: { id: 'm-dep', text: 'Dependency check started on its schedule in #shop. It found 3 packages behind and is updating them. Supercalifragilisticexpialidociouslylongwordwithoutanybreaks', who: 'agent' }, reactions: [{ emoji: '👍', by: 'them' }] }),
       me('Pinned to https://example.com/releases/2026/november/checkout-redesign-final-final-v2-with-the-bigger-button and Pneumonoultramicroscopicsilicovolcanoconiosis too', { reactions: [{ emoji: '🎉', by: 'both' }] }),
       a('Noted: https://example.com/releases/2026/november/checkout-redesign-final-final-v2-with-the-bigger-button is the one, and Pneumonoultramicroscopicsilicovolcanoconiosis stays.', { reactions: [{ emoji: '👍', by: 'me' }] }),
       // a wide table (#1442): readable columns that scroll sideways in their box on a phone, never one letter wide

@@ -108,7 +108,7 @@ test('the round button and Enter send only what is in the box; a suggested reply
   expect(go).not.toMatch(/sug\.texts/)
   expect(chat).toContain('const filled = !!text.trim() || !!files?.length || !!pastes.length')
   // no greyed suggestion in the box, no Tab chip
-  expect(chat).toContain('placeholder={placeholder}')
+  expect(chat).toContain('placeholder={hint}')
   expect(chat).not.toContain('Use suggestion')
   expect(chat).not.toContain("e.key === 'Tab'")
   // a tap sends exactly its text at once as its own message, alone (the box's draft and files stay; no focus taken:
