@@ -27,6 +27,7 @@ import { replyToTask, SlideHint, useSlide } from './slide.tsx'
 import { dayLabel } from './days.ts'
 import { Markdown, withLinks } from './markdown.tsx'
 import { expandPicked, useMentions } from './mentions.tsx'
+import { modelTyped, useSlash } from './slash.tsx'
 import { dropped, pasted } from './paste.ts'
 import { addPaste, dropPaste, isLongMessage, isLongPaste, joined, peekOf, setPastes, sizeOf, usePastes, type Paste } from './fold.ts'
 import { fineOnly, touch } from './clip.ts'
@@ -978,6 +979,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
     box.setSelectionRange(box.value.length, box.value.length)
   }, [key])
   const ment = useMentions(key, thread.task?.place ?? thread.place, text, setText, ref)
+  const slash = useSlash(key, text, setText, ref)
   const sg = suggestionOf(chat, suggestionsOn(snap.settings))
   const busy = !!chat?.working && !chat.finished
   const call = useUI((u) => u.call)
@@ -992,6 +994,8 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   // a line starting with `!` runs as a command in the agent's own shell (Claude Code, Codex); another agent has none,
   // so its words don't go and the box offers your own terminal
   const mode = commandMode(text, pick.agent)
+  const openAgent = (typed?: string) =>
+    openPicker({ title: thread.task ? 'This task runs on' : 'This chat runs on', machine, pick, typed, onChange: () => undefined, onClose: (now) => applyPick(key, pick, now, { agent: pickWords(now).agent }) })
   const go = (wait = false) => {
     if (getState().ui.call && !TEXT_IN_CALL) return
     // a long paste folded into a chip goes as text, exactly as pasted, after what was typed
@@ -1004,6 +1008,13 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
       // a message. Those stay in the box for the next message
       send(key, key, text.trim(), false, true, dictatedInto.delete(key) ? 'dictated' : 'typed')
       setText('')
+      return
+    }
+    // /model never reaches the agent: it opens the agent picker, the model it names picked (3.1's, GitHub #1560)
+    const model = files?.length || pastes.length ? undefined : modelTyped(t)
+    if (model !== undefined) {
+      setText('')
+      openAgent(model)
       return
     }
     if (composing.current) endComposition(ref.current)
@@ -1094,9 +1105,11 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
         </div>
       )}
       {ment.list}
+      {slash.list}
       <div className="crow">
         <textarea
           {...ment.box}
+          {...(slash.list ? slash.box : {})}
           ref={ref}
           className={cx('cin', mode && 'mono')}
           rows={1}
@@ -1130,6 +1143,8 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
           onKeyDown={(e) => {
             // the # or @ list takes its keys first: Up, Down, Enter or Tab to pick, Escape
             if (ment.onKey(e)) return
+            // the / list the same way
+            if (slash.onKey(e)) return
             // Enter sends and Shift+Enter makes a new line, the same on phone and desktop
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
               e.preventDefault()
@@ -1143,7 +1158,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
         <AgentLine
           pick={pick}
           machine={machine}
-          onClick={() => openPicker({ title: thread.task ? 'This task runs on' : 'This chat runs on', machine, pick, onChange: () => undefined, onClose: (now) => applyPick(key, pick, now, { agent: pickWords(now).agent }) })}
+          onClick={() => openAgent()}
         />
         <UpdateHint chat={chat} />
         <span className="sp" />
