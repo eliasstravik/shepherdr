@@ -10,7 +10,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 J = lambda *p: os.path.join(ROOT, *p)
 
 # Accepted with no caller in this repo, on purpose. "back:" ones are being brought back by tasks running now; take
-# them off once their button lands (this test then says so). The rest: dropped on purpose (docs/upgrading.md, "What
+# them off once their button lands. The rest: dropped on purpose (docs/upgrading.md, "What
 # does not"), or called from outside this repo.
 NO_WEB_CALLER = {
     # being brought back by tasks running now (Ask cards, Restart, undo group, remove secret and task search ride
@@ -120,7 +120,8 @@ class WebCallers(unittest.TestCase):
         missing = [n for n in quiet if n not in NO_WEB_CALLER]
         self.assertEqual(missing, [], "Nothing calls these any more. Bring the button back, or add each to "
                          "NO_WEB_CALLER with why (and a line in docs/upgrading.md if people lose it), or delete it from the service.")
-        stale = sorted(n for n in NO_WEB_CALLER if n not in quiet)
+        # "back:" ones may get their caller from a task merged without knowing this list: never red for that
+        stale = sorted(n for n, why in NO_WEB_CALLER.items() if n not in quiet and not why.startswith("back"))
         self.assertEqual(stale, [], "Called again, or gone from the service: take these off NO_WEB_CALLER.")
 
 
