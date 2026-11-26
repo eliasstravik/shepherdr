@@ -46,8 +46,8 @@ What does not:
 - Tasks at once. A task starts the moment it is asked to.
 - Automatic retry. An agent that stopped stays stopped until you press Restart. Only a restart of the machine
   itself is different: the Assistants running when it went down start again on their own conversations once it's back.
-- Pinned spaces, per-space Notify, tabs, the Files and Changes panels, usage insights. (Files is back as a plugin you
-  switch on in Settings › Plugins: [plugins.md](plugins.md#files).)
+- Pinned spaces, per-space Notify, tabs, the Files and Changes panels, usage insights. (Both are back as plugins you
+  switch on in Settings › Plugins: Files and Diff viewer, [plugins.md](plugins.md#files).)
 - Your own changes to Shepherdr's window mods and layout. They are in the backup folder.
 
 Also left out on purpose, each with what to do instead:

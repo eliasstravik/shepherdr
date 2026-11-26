@@ -1,0 +1,15 @@
+/* Diff viewer: the Changes pane */
+.dsrc{margin:4px 0 4px}
+.dfile .n{min-width:0}.dfile .l1{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
+.dfile .l2{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dnums{display:flex;gap:6px;flex:none;font:12px/16px ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.dnums .a{color:var(--green)}.dnums .d{color:var(--red)}
+.dlines{padding:4px 0 16px;font:12px/18px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--sub)}
+.dl{padding:0 12px 0 22px;white-space:pre-wrap;overflow-wrap:anywhere;position:relative;tab-size:4}
+.dl.add,.dl.del{color:var(--fg)}
+.dl.add{background:color-mix(in srgb,var(--green) 14%,transparent)}
+.dl.del{background:color-mix(in srgb,var(--red) 14%,transparent)}
+.dl.add::before,.dl.del::before{position:absolute;left:8px;opacity:.7}
+.dl.add::before{content:"+"}.dl.del::before{content:"−"}
+.dl.hunk{margin-top:8px;padding:2px 12px;color:var(--muted);background:var(--well);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dl.hunk:first-child{margin-top:0}
