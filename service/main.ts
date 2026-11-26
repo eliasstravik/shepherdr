@@ -52,6 +52,7 @@ import { TaskLogs } from "./task-logs.ts";
 import { Settings, onWritten, PUSH, pushBody, readSettings } from "./settings.ts";
 import { Secrets, SecretsHome, secretValue } from "./secrets.ts";
 import { Agents } from "./agents.ts";
+import { Updates } from "./agent-update.ts";
 import { Machines } from "./machines.ts";
 import { Push, alertsOf, agentAlerts } from "./push.ts";
 import { waiting } from "../web/shared/alerts.ts";
@@ -226,6 +227,8 @@ function alertNew(snap: any) {
 }
 compat.agents = new Agents(hub);
 (compat.agents as Agents).onOffer = () => live.refresh();
+compat.updates = new Updates(hub, (addr, reader) => (compat.agents as Agents).revive(addr, reader));
+(compat.updates as Updates).onChange = () => live.refresh();
 const machines = new Machines(hub, () => model.machineNames());
 machines.onChange = () => model.rebuild();
 compat.machineStats = (m) => machines.of(m);

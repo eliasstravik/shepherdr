@@ -168,6 +168,7 @@ function action(a: Record<string, any>): unknown {
   if (a.type === 'archive' && t) return patchTask(t.id, { archived: a.on ? Date.now() : undefined }), { ok: true }
   if (a.type === 'task-rename' && t) return patchTask(t.id, { name: a.name }), { ok: true }
   if (a.type === 'task-move' && t) return patchTask(t.id, { place: a.place }), { ok: true }
+  if (a.type === 'agent-update') return { ok: true, words: 'Codex is now 0.172.0. 1 other chat on this machine gets it when it restarts.' }
   if (a.type === 'task-start' && t) { patchTask(t.id, { status: 'work', started: Date.now() - 15 * 60_000, report: { msg: 'Just started', progress: 50 }, agent: { chat: `${t.id}/worker`, role: 'worker', cli: 'claude', status: 'work', running: true, age: '', note: '' } }); say(`${t.id}/worker`, { text: "Started. I'll tell you when it's ready for review." }); return { ok: true } }
   if (a.type === 'stop' && t) return patchTask(t.id, { status: 'need', stopped: { by: 'you' } }), { ok: true }
   if (a.type === 'rename') return each((snap) => { snap.places = snap.places.map((p) => (p.id === a.id ? { ...p, name: a.name } : p)); snap.sections = snap.sections?.map((s) => (s.id === a.id ? { ...s, name: a.name } : s)); snap.machines = snap.machines.map((m) => (m.id === a.id ? { ...m, name: a.name || (m.ownName ?? m.machine) } : m)) }), { ok: true }

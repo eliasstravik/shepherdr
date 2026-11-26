@@ -499,6 +499,11 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const next = await compat.agents.restart(a, reader, pick);
     return { ok: true, terminal: next };
   }
+  if (b?.type === "agent-update" && typeof b.chat === "string" && compat.updates) {
+    // Update <agent>: its CLI's own update on its machine, then the chat reopens on the same conversation
+    const a = chat(b.chat);
+    return { ok: true, ...(await compat.updates.update(a, compat.reader?.(a))) };
+  }
   if (b?.type === "machine-hosts") {
     // Add machine, as the window's (mods/machine-add-chat, core/machine-add.js): the hosts in ~/.ssh/config, and the
     // machines added already (hc machine ls)

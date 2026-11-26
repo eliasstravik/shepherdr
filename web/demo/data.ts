@@ -225,7 +225,8 @@ const LONG_NOTE = 'The supplier quotes are in. Short version: the second supplie
 const chat = (key: string, messages: Message[], agent: Chat['agent'], x: Partial<Chat> = {}): Chat => ({ key, messages, cli: agent?.kind ?? 'claude', top: true, agent, ...x })
 const sonnet = { kind: 'claude', model: 'sonnet', modelLabel: 'Sonnet 5.5', effort: 'medium' }
 const opus = { kind: 'claude', model: 'opus', modelLabel: 'Opus 5.5', effort: 'high' }
-const gpt = { kind: 'codex', model: 'gpt-5.5-codex', modelLabel: 'GPT-5.5 Codex', effort: 'high' }
+// a newer Codex is out: the chat shows Update Codex (plugins/chat/update.tsx)
+const gpt = { kind: 'codex', model: 'gpt-5.5-codex', modelLabel: 'GPT-5.5 Codex', effort: 'high', update: '0.172.0' }
 const payQ = () => [a("Which provider should I switch to, Stripe or Adyen? I'd go with Stripe."), ask('q-pay', '', undefined, ['Stripe', 'Adyen'])]
 const permQ = (by?: typeof byPhoto) => [a('I need an image library to resize the photos.'), ask('q-pil', 'Run a command', by, ['Allow once', 'Decline'], { command: 'pip install pillow' })]
 

@@ -964,7 +964,8 @@ export interface Chat {
 /** What a chat's agent runs on (SHEP-298: its terminal's arguments and log, never Settings), or, with planned, what its
  *  first message starts it on */
 export interface ChatAgent { kind: string; model?: string; modelLabel?: string; effort?: string; speed?: string; perm?: string; runtime?: AgentRuntime; planned?: PlannedAgent; /** the window's model button: "Opus 5.5 · High" */ words?: string
-    /** #1222: the extra flags it was started with, one word each ("--advisor=opus") */ flags?: string[] }
+    /** #1222: the extra flags it was started with, one word each ("--advisor=opus") */ flags?: string[]
+    /** a newer version of its CLI it can update to (Update <agent>: service/agent-update.ts) */ update?: string }
 
 /** no agent yet: what Settings will start it on, said as that and never as what runs (docs/runtime-state.md) */
 export interface PlannedAgent {
@@ -1387,6 +1388,8 @@ export type Action =
   | { type: 'stop-job'; chat: string; job: string }
   /** what the restart sheet shows for a coordinator (chat: its place id) or a task's agent (ID/Agent): RestartInfo */
   | { type: 'restart-info'; chat: string }
+  /** Update <agent>: its CLI's own update, then the chat reopens on the same conversation */
+  | { type: 'agent-update'; chat: string }
   /** start a coordinator or a task's agent again on this CLI, model and effort (none: the CLI's own; no kind: all as
       Settings say for its role); save: as its space's Settings for its role too */
   /** speed: normal, fast or ultrafast, '' for the CLI's own; left out keeps what it was started on. It lasts as long as this chat, and save leaves it out of Settings. */

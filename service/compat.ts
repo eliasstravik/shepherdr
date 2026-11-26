@@ -262,6 +262,8 @@ export class Compat {
   /** A machine's health and plan limits (service/machines.ts), set by main. */
   machineStats: ((m: string | null) => any) | null = null;
 
+  /** Update <agent> (service/agent-update.ts), set by main. */
+  updates: { available(kind: string, t: any, meta: any, machine: string | null): string | null; update(addr: string, reader: any): Promise<{ terminal: string; version: string; words: string }> } | null = null;
   /** The model menu and restarts (service/agents.ts), set by main. */
   /** The agent Shepherdr settings choose for a space's Assistant (main.ts: Settings.role), for a start from the web. */
   assistantPick: ((space: string) => any) | null = null;
@@ -842,6 +844,9 @@ export class Compat {
       const kind = reader.kind ?? "claude";
       agent = this.agentNow(kind, t, reader.conv?.meta, machine);
       if (agent.model) agent = { ...agent, runtime: { model: agent.model, modelLabel: agent.modelLabel, ...(agent.effort ? { effort: agent.effort } : {}), speed: agent.speed, source: "session", at: Date.now() } };
+      // a newer version of its CLI (Update <agent>: service/agent-update.ts)
+      const up = this.updates?.available(kind, t, reader.conv?.meta, machine);
+      if (up) agent = { ...agent, update: up };
     } catch {}
     // the first row: the log's very start, or earlier pages to load as it scrolls up
     const head = reader.start === 0 ? { top: true } : reader.start ? { earlier: true } : {};
