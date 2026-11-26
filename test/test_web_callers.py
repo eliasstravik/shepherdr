@@ -23,8 +23,6 @@ NO_WEB_CALLER = {
     "/api/commands": "back: the / command list",
     "assistant-close": "back if End comes with Restart a running Assistant",
     # later (#1560's accepted plan)
-    "/api/newspace": "later: New space's recent folders and Make it a git repo (the folder browser: dropped)",
-    "/api/folders": "dropped: New space's folder browser",
     # dropped on purpose: a line each in docs/upgrading.md, What does not
     "rewind": "dropped: Rewind a message",
     "schedule": "dropped: Start later and Reschedule",
