@@ -172,6 +172,9 @@ def pr_open(s, task, repo, summary=None):
     if done:
         raise Fail(f"Pull request #{done['number']} for {br} is already merged, and {br} has commits since. "
                    f"Put them on a new branch (a new task) rather than a second pull request.")
+    if commit_base(task):
+        raise Fail(f"This task's base is a commit ({task['base'][:9]}), not a branch: its folder was on a detached commit "
+                   f"when it started. Give it a branch to merge into (herdr-task edit <task> --base <branch>), then ready again.")
     ok, out, err = gh("pr", "create", "--repo", repo, "--head", br, "--base", task.get("base") or "main",
                       "--title", pr_title(s, task), "--body", pr_body(s, task, summary),
                       *(["--draft"] if task.get("pr_draft") else []))
@@ -288,6 +291,11 @@ def pr_body(s, task, summary=None):
     return "\n".join(lines + [MARK_END])
 
 
+def commit_base(task):
+    """#1533: its base is a commit, not a branch (started while its folder was on a detached commit)."""
+    return bool(re.fullmatch(r"[0-9a-f]{7,40}", task.get("base") or ""))
+
+
 def pr_adopt(task, repo):
     """The open pull request for the task's branch, opened by hand or by its agent, recorded on the
     task; None when there is none (SHEP-13: ready failed with "already exists"). Only one from this
@@ -295,14 +303,17 @@ def pr_adopt(task, repo):
     ok, out, _ = gh("pr", "list", "--repo", repo, "--head", task["branch"], "--state", "open",
                     "--json", "number,url,isCrossRepository,baseRefName,headRefOid")
     tip_ok, tip, _ = git(task["worktree"], "rev-parse", task["branch"])
+    loose = commit_base(task)
     try:
         found = next((p for p in json.loads(out) if not p.get("isCrossRepository")
-                      and p.get("baseRefName") == (task.get("base") or "main")
+                      and (loose or p.get("baseRefName") == (task.get("base") or "main"))
                       and tip_ok and tip and p.get("headRefOid") == tip), None) if ok and out else None
     except (ValueError, TypeError, AttributeError):
         found = None
     if found:
         task["pr"] = {"number": found["number"], "url": found["url"], "repo": repo}
+        if loose and found.get("baseRefName"):
+            task["base"] = found["baseRefName"]  # #1533: its pull request's base, a real branch
     return task.get("pr") if found else None
 
 
@@ -760,6 +771,26 @@ def workflow_checks(text, base="main"):
     return None
 
 
+# #1558: workflows switched off on GitHub (disabled_manually, disabled_inactivity) never run: their files don't
+# count. One lookup per repo, kept this long; None (couldn't ask) keeps every file, as before.
+WORKFLOW_STATES_MS = 5 * 60000
+_WORKFLOW_STATES = {}
+
+
+def workflow_states(repo):
+    """{".github/workflows/<file>": its state on GitHub ("active", "disabled_manually", ...)} for repo, or None."""
+    if not repo:
+        return None
+    at, found = _WORKFLOW_STATES.get(repo, (0, None))
+    if now() - at < WORKFLOW_STATES_MS:
+        return found
+    ok, out, _ = gh("api", "--paginate", f"repos/{repo}/actions/workflows?per_page=100", "--jq",
+                    ".workflows[] | [.path, .state] | @tsv")
+    found = dict(ln.split("\t", 1) for ln in out.splitlines() if "\t" in ln) if ok else None
+    _WORKFLOW_STATES[repo] = (now(), found)
+    return found
+
+
 def expected_checks(s, task, sha):
     """Whether checks will come for its pull request at commit sha, from its repo's workflows there:
     "yes", "maybe" or None (workflow_checks()). Kept on the pull request per commit."""
@@ -771,7 +802,10 @@ def expected_checks(s, task, sha):
     ref = sha if sha and git(main, "cat-file", "-e", f"{sha}^{{commit}}")[0] else (task.get("branch") or task.get("head"))
     ok, out, _ = git(main, "ls-tree", "--name-only", f"{ref}:{WORKFLOWS}") if ref else (False, "", "")
     found = None
+    states = workflow_states(pr.get("repo")) if ok else None
     for name in out.split() if ok else []:
+        if states and states.get(f"{WORKFLOWS}/{name}", "active") != "active":
+            continue
         if name.endswith((".yml", ".yaml")):
             said = workflow_checks(git(main, "show", f"{ref}:{WORKFLOWS}/{name}")[1], task.get("base") or "main")
             found = "yes" if "yes" in (found, said) else said or found

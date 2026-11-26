@@ -25,7 +25,7 @@ from .github import (already_merged, checks_missing, collision, collision_reason
                      merge_checks, mid_turn, pr_pending, pr_problem, pr_view, queue_refusal, remote_of, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
-    base_ref, brief, caller_labels, caller_space, current_base, default_branch, default_space, folder_for, handoff, launch,
+    base_ref, brief, caller_labels, DETACHED, caller_space, current_base, default_branch, default_space, folder_for, handoff, launch,
     name_tabs, worktree_list,
     own_path, parent_for, resume_argv, set_branch, setup_for, space_for_folder, tab_title, task_tabs,
 )
@@ -117,6 +117,7 @@ def cmd_add(args):
         set_base(s, t, args.base, space, new=True)
         set_branch(s, t, getattr(args, "branch", None))
         take_pr(s, t, getattr(args, "pr", None))
+        detached_refusal(s, t)
         set_notes(t, args)
         if args.after:
             set_after(s, t, *parse_after(s, args.after))
@@ -134,6 +135,15 @@ def cmd_add(args):
     said = "; ".join(f"{x['label']} {x['text'].split(':')[0]} ({SET_BY[x['by']]})" for x in got)
     say(args, v, f"{s.name(t)} added (its key, for commands only: {s.ref(t)})" + (f": {v['why']}" if at else "")
         + (f"\nIts settings: {said}." if said else "") + (f"\nHeads-up: {v['warning']}" if v.get("warning") else ""))
+
+
+def detached_refusal(s, t):
+    """#1533: a worktree task with no base of its own takes the folder's checked-out branch; on a detached commit
+    there is none to merge into (its pull request can't open), so it's refused at add."""
+    if t.get("mode") != "worktree" or t.get("base") or t.get("pr") or s.loc["kind"] != "repo":
+        return
+    if not git(s.loc["folder"], "symbolic-ref", "--quiet", "HEAD")[0]:
+        raise Fail(DETACHED.format(folder=s.loc["folder"]))
 
 
 def shared_branch_warning(s, t):

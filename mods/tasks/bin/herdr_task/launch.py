@@ -743,6 +743,10 @@ def handoff(s, task, prev, parent=None, argv=None):
     return "\n\n".join(x for x in lines if x)
 
 
+DETACHED = ("{folder} is on a detached commit, so this task has no branch to start from and merge into. Check out a "
+            "branch there, or give the task one with --base <branch>.")
+
+
 def current_base(main):
     """The folder's base: the branch checked out in it (else its commit)."""
     ok, base, _ = git(main, "symbolic-ref", "--short", "HEAD")
@@ -908,6 +912,9 @@ def folder_for(s, task):
         start = task.get("start") or git(main, "merge-base", base, have.get("head") or br)[1] or have.get("head")
         task.update(worktree=path, branch=br, base=base, start=start)
         return path
+    if not own and not task.get("base") and not (task.get("pr") or {}).get("taken") \
+            and not git(main, "symbolic-ref", "--quiet", "HEAD")[0]:
+        raise Fail(DETACHED.format(folder=main))  # #1533: no branch to merge into
     exists = git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}")[0]
     os.makedirs(os.path.dirname(path), exist_ok=True)
     taken = (task.get("pr") or {}).get("branch") if (task.get("pr") or {}).get("taken") else None
