@@ -13,7 +13,7 @@ const vault = [
   { name: 'DEPLOY_KEY', at: 1, scope: 'machine' as const, machine: null, space: null, where: 'This computer' },
   { name: 'SHOP_KEY', at: 1, scope: 'space' as const, machine: null, space: space.id, where: `Space ${space.name}` },
 ]
-const snap: Snapshot = { ...base, settings: [...(base.settings ?? []), { name: 'Secrets', level: 'all', rows: [], vault } as any] }
+const snap: Snapshot = { ...base, settings: [...(base.settings ?? []).filter((x) => x.name !== 'Secrets'), { name: 'Secrets', level: 'all', rows: [], vault } as any] }
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
 
 test("Everywhere's page lists every secret, a machine's own too, each with Replace and Remove", () => {
