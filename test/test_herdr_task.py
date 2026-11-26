@@ -949,12 +949,12 @@ class BackToWork(unittest.TestCase):
             worker = f.read()
         with open(os.path.join(ROOT, "templates", "reviewer.md")) as f:
             reviewer = f.read()
-        for words in (templates.WORKER_MD, worker):
-            self.assertIn(templates.DELTA_RULE, words)
-            self.assertIn(templates.MUST_RULE, words)
+        for words in (templates.WORKER_MD, worker):  # #1557 reworded the round limit after these
+            self.assertIn(templates.DELTA_RULE.replace(templates.ROUNDS_DELTA_OLD, templates.ROUNDS_DELTA_RULE), words)
+            self.assertIn(templates.MUST_RULE.replace(templates.ROUNDS_MUST_OLD, templates.ROUNDS_MUST_RULE), words)
             self.assertNotIn("the diff against the base branch and", words)
         for words in (templates.REVIEWER_MD, reviewer):
-            self.assertIn(templates.REVIEWER_DELTA_RULE, words)
+            self.assertIn(templates.REVIEWER_DELTA_RULE.replace(templates.REVIEWER_FIXCHECK_OLD, templates.REVIEWER_FIXCHECK_RULE), words)
             self.assertIn(templates.REVIEWER_MUST_RULE, words)
             self.assertNotIn(templates.REVIEWER_DELTA_OLD, words)
         self.assertIn(templates.WORKER_MD_BEFORE_DELTA, templates.OLD_WORKERS)
@@ -6336,22 +6336,53 @@ class TaskFlow(unittest.TestCase):
         with self.assertRaises(self.commands.Fail):
             self.commands.cmd_reviewed(argparse.Namespace(id="SHEP-1", json=True, folder=None, report="", commit=None))
 
-    def test_a_fix_after_the_last_round_asks_for_one_more(self):
-        """#951: the fix of the last round's findings was refused, and the Assistant had told the worker to just
-        say ready. The refusal and the Assistant's guide both say that fix needs a round of its own (review-more)."""
+    def test_a_fix_after_the_last_round_goes_ready_unreviewed(self):
+        """#1557: "at most 1 round" ran 13: ready refused the fix of the last findings and the Assistant was told to add
+        a round each time. Now the number of rounds is what the person asked for: ready takes the last fix unreviewed,
+        `reviewed` past the limit says to say ready, and every agent's words say so (nobody adds a round on their own)."""
+        import argparse
+        from herdr_task import templates
         wt = self.reviewed_task()
         head = self.task["reviews"][0]["head"]
+        self.commit(wt, "fix round 1's majors", "a.txt")
+        self.assertIn("2 of 3 rounds left", self.refusal())  # rounds left: still reviewed first
         self.task["reviews"] += [{"round": 2, "result": "report", "at": 3, "head": head},
                                  {"round": 3, "result": "report", "at": 4, "head": head}]
-        self.commit(wt, "fix round 3's majors", "a.txt")
-        out = self.refusal()
-        self.assertIn("A fix made after the last round needs a round of its own", out)
-        self.assertIn("review-more", out)
-        with open(os.path.join(ROOT, "templates", "assistant.md")) as f:
-            guide = f.read()
-        [line] = [x for x in guide.splitlines() if x.startswith("- A task out of review rounds")]
-        self.assertIn("that fix needs a round of its own", line)
-        self.assertIn("Never tell it to say ready without one", line)
+        self.commit(wt, "fix round 3's majors", "b.txt")
+        self.assertIsNone(self.refusal())
+        self.assertNotIn("review_out", self.task)
+        with self.assertRaises(self.commands.Fail) as e:
+            self.commands.cmd_reviewed(argparse.Namespace(id="SHEP-1", json=True, folder=None, report="", commit=None))
+        self.assertIn("say ready", str(e.exception))
+        self.assertIn("wasn't reviewed again", str(e.exception))
+        self.assertNotIn("review-more", str(e.exception))
+        texts = {}
+        for name in ("worker.md", "reviewer.md", "assistant.md"):
+            with open(os.path.join(ROOT, "templates", name)) as f:
+                texts[name] = f.read()
+        for words in (templates.WORKER_MD, texts["worker.md"]):
+            self.assertIn(templates.ROUNDS_MUST_RULE, words)
+            self.assertIn(templates.ROUNDS_GATE_RULE, words)
+            self.assertIn(templates.ROUNDS_DELTA_RULE, words)
+            self.assertNotIn("only your Assistant can add a round", words)
+            self.assertNotIn("needs a round of its own", words)
+        for words in (templates.REVIEWER_MD, texts["reviewer.md"]):
+            self.assertIn(templates.REVIEWER_FIXCHECK_RULE, words)
+            self.assertIn("could plausibly go wrong in this repo", words)
+            self.assertNotIn(templates.REVIEWER_FIXCHECK_OLD, words)
+        [line] = [x for x in texts["assistant.md"].splitlines() if x.startswith("- A task's Review rounds")]
+        self.assertIn("Never add a round on your own", line)
+        self.assertIn("wasn't reviewed again", line)
+        self.assertNotIn("needs a round of its own", texts["assistant.md"])
+        with open(os.path.join(BIN, "herdr_task", "launch.py")) as f:
+            self.assertIn("wasn't reviewed again", f.read())
+        # unedited old templates get today's words
+        self.assertIn(templates.WORKER_MD_BEFORE_LIMIT_ROUNDS, templates.OLD_WORKERS)
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(templates, "TEMPLATES", d):
+            with open(os.path.join(d, "reviewer.md"), "w") as f:
+                f.write(templates.TEMPLATE_HEADS["reviewer"] + templates.REVIEWER_MD_BEFORE_FIXCHECK)
+            self.assertEqual(templates.instructions("reviewer"), templates.REVIEWER_MD.strip())
 
     def test_out_of_rounds_needs_you_whatever_its_line_says(self):
         """#784: ready refused for rounds, the worker's status line "waiting for a review round" is no work of its own."""
@@ -7210,7 +7241,7 @@ class ReadyMergeGit(unittest.TestCase):
         two rounds recorded on HEAD were refused ("isn't reviewed"), and a task taken back to work by a chat message
         never came back to Ready (settle_back() needs that head)."""
         import herdr_task.store as store
-        loc, ref = self.ready_on_disk(rounds=1)
+        loc, ref = self.ready_on_disk(rounds=2)
         wt = self.task["worktree"]
         a = self.commit(wt, "work", "a.txt")
         self.commands.cmd_reviewed(self.reviewed_args(ref, a))
@@ -7222,11 +7253,10 @@ class ReadyMergeGit(unittest.TestCase):
                 github.own_work(s, s.find(ref))
         tick()
         with self.assertRaises(self.commands.Fail):
-            self.commands.cmd_ready(self.ready_args(ref))   # its fix isn't reviewed, rounds used
-        self.commands.cmd_review_more(self.args(id=ref, folder=self.main))
-        self.assertIn("may now use 2 review rounds (was 1, 1 used)", self.said[-1])
+            self.commands.cmd_ready(self.ready_args(ref))   # its fix isn't reviewed, a round left
         self.commands.cmd_reviewed(self.reviewed_args(ref, b))
-        self.commands.cmd_review_more(self.args(id=ref, folder=self.main))
+        self.commands.cmd_review_more(self.args(id=ref, folder=self.main))  # the person asked for one more
+        self.assertIn("may now use 3 review rounds (was 2, 2 used)", self.said[-1])
         self.commands.cmd_reviewed(self.reviewed_args(ref, b))  # a third round, on the same commit
         tick()
         self.commands.cmd_ready(self.ready_args(ref))
@@ -7234,7 +7264,7 @@ class ReadyMergeGit(unittest.TestCase):
             t = s.find(ref)
             self.assertEqual((t["state"], t["head"]), ("ready", b))
             self.assertEqual([r["head"] for r in t["reviews"]], [a, b, b])
-            self.assertEqual(t["review_rounds_added"], 2)
+            self.assertEqual(t["review_rounds_added"], 1)
 
     def test_review_more_says_when_the_round_did_not_stick(self):
         """#1494: review-more said nothing while the round wasn't there after; now it reads the list back."""
