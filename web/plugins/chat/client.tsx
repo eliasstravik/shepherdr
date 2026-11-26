@@ -7,6 +7,7 @@ import { dictatedInto, TEXT_IN_CALL, useDictating } from '@client/dictate.tsx'
 import { attr } from '@client/attr.ts'
 import { boxPart, focusBox, focusChat } from '@client/commands.ts'
 import { act, attempt, definePlugin, getState, has, notice, openTask, registry, setUI, tryAct, useChat, useDraft, useSnap, useStore, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
+import { endComposition, isEcho, type Sent } from './echo.ts'
 import { partsOf, placeOutgoing, placesOf, keyOf, readNow, showsAs, type Outgoing } from '@client/outbox.ts'
 import { confirm, openMenu } from '@client/overlay.tsx'
 import { AgentLine, openPicker, pickFor, pickWords, type Pick } from '@client/picker.tsx'
@@ -27,7 +28,7 @@ import { dayLabel } from './days.ts'
 import { Markdown, withLinks } from './markdown.tsx'
 import { dropped, pasted } from './paste.ts'
 import { addPaste, dropPaste, isLongMessage, isLongPaste, joined, peekOf, setPastes, sizeOf, usePastes, type Paste } from './fold.ts'
-import { touch } from './clip.ts'
+import { fineOnly, touch } from './clip.ts'
 import { landLaunchShare, putAway, useLanded, watchLastChat } from './share.ts'
 import { openSendTo } from './sendto.tsx'
 import { ReplyPress, repliesHidden, suggestionOf, suggestionsOn } from './suggest.ts'
@@ -939,10 +940,24 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   const reply = useUI((u) => u.reply[key])
   const phone = useUI((u) => u.phone)
   const ref = useRef<HTMLTextAreaElement>(null)
+  // #1538: what Send just sent, so the keyboard writing it back into the empty box is dropped
+  const sentRef = useRef<Sent | null>(null)
+  const composing = useRef(false)
   // a finger (a phone, a tablet): + opens a menu with Photos and Files
   const finger = useMemo(touch, [])
   const shared = useLanded() === key
   useGrow(ref, text)
+  // #1550: on a desktop, a chat switched to takes the keyboard, its draft kept, unless you're typing somewhere else (a
+  // dialog, another box); never on a phone or tablet, where it would bring up the keyboard
+  useEffect(() => {
+    if (!fineOnly()) return
+    const a = document.activeElement
+    if (a && a !== document.body && (a.matches('input, textarea, select, [contenteditable]') || a.closest('[role="dialog"], dialog'))) return
+    const box = ref.current
+    if (!box) return
+    box.focus({ preventScroll: true })
+    box.setSelectionRange(box.value.length, box.value.length)
+  }, [key])
   const sg = suggestionOf(chat, suggestionsOn(snap.settings))
   const busy = !!chat?.working && !chat.finished
   const call = useUI((u) => u.call)
@@ -971,6 +986,8 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
       setText('')
       return
     }
+    if (composing.current) endComposition(ref.current)
+    sentRef.current = { text, at: Date.now() }
     send(key, key, t, wait && busy, false, dictatedInto.delete(key) ? 'dictated' : 'typed')
     setText('')
     setPastes(key, () => [])
@@ -1068,7 +1085,13 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
           enterKeyHint="send"
           autoComplete="off"
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            const echo = isEcho(sentRef.current, text, e.target.value, Date.now())
+            sentRef.current = null
+            if (!echo) setText(e.target.value)
+          }}
+          onCompositionStart={() => (composing.current = true)}
+          onCompositionEnd={() => (composing.current = false)}
           onPaste={(e) => {
             const f = pasted(e.clipboardData)
             if (f.length) {
