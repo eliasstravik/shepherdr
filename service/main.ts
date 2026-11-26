@@ -42,6 +42,7 @@ import { Asks } from "./asks.ts";
 import { Jobs } from "./jobs.ts";
 import { terminalBridge } from "./terminal.ts";
 import { worktree } from "./worktree.ts";
+import * as files from "./files.ts";
 import * as SPm from "../core/spaces.js";
 import { createScreens, SCREEN_PASSWORD } from "./screens.ts";
 import { voiceCall, callToResume, callsOn, handOff, type ChatView } from "./voice.ts";
@@ -1103,10 +1104,37 @@ const server = Bun.serve<{ who: string }>({
       if (path === "/api/push/test") return json(await push.test(endpoint));
     }
     if (path === "/api/worktree") {
+      // a task's worktree, or a space's own folder (space=<id>: only what isn't committed there)
       const t = compat.taskOf(url.searchParams.get("task") ?? "");
-      if (!t) return json({ error: "No such task." }, 404);
-      try { return json(await worktree(hub, t.where, url.searchParams.get("what") ?? "", url.searchParams.get("path") ?? undefined)); }
+      const sp = t ? null : compat.spaceOf(url.searchParams.get("space") ?? "");
+      const where = t?.where ?? (sp?.folder ? { folder: sp.folder, machine: sp.machine } : null);
+      if (!where) return json({ error: t || url.searchParams.get("task") ? "No such task." : "No such space." }, 404);
+      try { return json(await worktree(hub, where, url.searchParams.get("what") ?? "", url.searchParams.get("path") ?? undefined)); }
       catch (err) { return json({ error: (err as Error).message }, 400); }
+    }
+    if (path === "/api/files") {
+      // Files (the files plugin, off by default): a space's folder, on the machine it lives on (service/files.ts)
+      if (!pluginOn("files")) return json({ error: "Files is off in Settings › Plugins." }, 404);
+      const sp = compat.spaceOf(url.searchParams.get("space") ?? "");
+      if (!sp?.folder) return json({ error: "No such space." }, 404);
+      const at = { folder: sp.folder, machine: !sp.machine || sp.machine === me?.host ? null : sp.machine };
+      const what = url.searchParams.get("what") ?? "", rel = url.searchParams.get("path") ?? "";
+      try {
+        if (req.method === "GET" && what === "ls") return json(await files.list(hub, at, rel));
+        if (req.method === "GET" && what === "read") return json(await files.read(hub, at, rel));
+        if (req.method === "GET" && what === "file") return await files.file(hub, at, rel, url.searchParams.get("download") === "1");
+        if (req.method === "GET" && what === "zip") return await files.zip(hub, at, rel);
+        if (req.method === "POST" && what === "put") {
+          const form = await req.formData().catch(() => null), f = form?.get("file");
+          if (!(f instanceof File)) return json({ error: "No file came." }, 400);
+          return json(await files.put(hub, at, rel, f, form?.get("replace") === "1"));
+        }
+        if (req.method === "POST" && what === "mv") {
+          const b = await req.json().catch(() => null);
+          return json(await files.move(hub, at, b?.from ?? "", b?.to ?? ""));
+        }
+      } catch (err) { return json({ error: (err as Error).message }, 400); }
+      return json({ error: "Ask for ls, read, file, zip, put or mv." }, 400);
     }
     if (path === "/api/activity") {
       const addr = compat.addrOf(url.searchParams.get("chat") ?? "");

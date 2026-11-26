@@ -140,7 +140,7 @@ function Bar({ snap }: { snap: Snapshot }) {
   const at = useUI((u) => u.at)
   // the Tasks count follows the Tasks filter (SHEP-331): redraw when it changes
   useUI((u) => u.tf)
-  const on = pane === 'tasks' || pane === 'artifacts' ? pane : pane ? '' : 'chat'
+  const on = pane && registry.bar.some((b) => b.pane === pane) ? pane : pane ? '' : 'chat'
   return (
     <>
       <nav className="bar" aria-label="Views">

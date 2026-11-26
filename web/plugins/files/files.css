@@ -1,0 +1,13 @@
+/* Files: the tree, a file's text and picture */
+.ftree{min-height:100%;border-radius:8px;padding-bottom:24px}
+.ftree.drop,.row.ft.drop{background:var(--control);box-shadow:inset 0 0 0 1px var(--line2)}
+.row.ft{gap:6px;min-height:32px;text-align:left;font-size:14px;line-height:20px;-webkit-touch-callout:none;user-select:none}
+.row.ft.on{background:var(--control);color:var(--fg)}
+.row.ft .i{flex:none;color:var(--muted)}
+.row.ft .chev{display:inline-grid;place-items:center;width:16px;flex:none}
+.row.ft .chev.none{visibility:hidden}
+.ftnote{padding:6px 8px;color:var(--muted);font-size:var(--sec);line-height:var(--secl)}
+.ftext{margin:0;padding:4px 4px 24px;font:13px/20px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--fg);white-space:pre;overflow-x:auto;tab-size:4}
+.ftimg{display:grid;place-items:center;padding:8px}
+.ftimg img{max-width:100%;height:auto;border-radius:8px;background:repeating-conic-gradient(var(--control) 0 25%,transparent 0 50%) 0 0/16px 16px}
+@media(pointer:coarse){.row.ft{min-height:40px;font-size:15px}}
