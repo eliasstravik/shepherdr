@@ -1672,6 +1672,7 @@ class CodexCodeMode(unittest.TestCase):
             after, args = (int(m.group(1)), m.group(2)) if m else (0 if ppid == "1" else 60, rest)
             rows.append(f"{pid} {ppid} Sun Nov 15 10:{after // 60:02d}:{after % 60:02d} 2026 {args}")
         self.ps = "\n".join(rows) + "\n"
+        self.ps_rows = ps
 
     def replay(self, n=None):
         with open(os.path.join(ROOT, "test", "fixtures", "codex-code-mode", "rollout-items.jsonl")) as f:
@@ -1797,6 +1798,19 @@ class CodexCodeMode(unittest.TestCase):
         self.setUp_ps("100 1 codex\n101 100 codex-code-mode-host\n102 101 sleep 9\n")
         self.assertTrue(self.agents.codex_working(codex))
         self.assertTrue(self.agents.codex_working({}))  # no pid: its log decides
+
+    def test_the_ready_command_itself_is_no_job(self):
+        """#1540: Codex runs herdr-task ready as a command of its own: that command (and the shell running it) was
+        read as a job still running, so every session its log left open counted, "11 background jobs of yours still
+        run" while nothing else ran. Only another process counts."""
+        codex = {"foreground": {"pid": 100}}
+        self.setUp_ps("100 1 codex --no-daemon\n102 100 +4 codex-code-mode-host\n"
+                      "105 102 +90 /bin/zsh -lc herdr-task ready APP-1\n106 105 +90 python3 herdr-task ready APP-1\n"
+                      "108 106 +91 ps -axo pid=,ppid=,lstart=,args=\n")
+        with self.mock.patch.object(self.agents.os, "getpid", lambda: 106):
+            self.assertFalse(self.agents.codex_working(codex))
+            self.setUp_ps(self.ps_rows + "107 102 +95 /bin/bash -lc npm run dev\n")
+            self.assertTrue(self.agents.codex_working(codex))
 
     def test_its_tool_servers_are_no_job(self):
         """#946/#1022: a Codex worker's MCP servers (its children since it started, as real Codex 0.163 starts

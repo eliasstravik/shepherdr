@@ -1231,22 +1231,30 @@ def codex_working(k):
         fg = detail(k).get("foreground") or {}
     if not fg.get("pid"):
         return True
-    children, started = {}, {}
+    children, started, parent = {}, {}, {}
     out = run(["ps", "-axo", "pid=,ppid=,lstart=,args="], env=dict(os.environ, LC_ALL="C", LANG="C")).stdout
     for line in out.splitlines():
         parts = line.split(None, 7)  # pid, ppid, the five words of lstart, args
         if len(parts) >= 7 and parts[1].isdigit():
             started[parts[0]] = _ps_started(" ".join(parts[2:7]))
+            parent[parts[0]] = parts[1]
             children.setdefault(parts[1], []).append((parts[0], parts[7] if len(parts) > 7 else ""))
     root = str(fg["pid"])
     born = started.get(root)
+    # #1540: this herdr-task run (ready, status), a command the agent runs, and the shells running it: no job
+    me, mine = str(os.getpid()), set()
+    while me in parent and me not in mine and me != root:
+        mine.add(me)
+        me = parent[me]
     todo, seen_pids = [root], set()
     while todo:
         for pid, args in children.get(todo.pop(), []):
             if pid in seen_pids:
                 continue
             seen_pids.add(pid)
-            if CODEX_HOST in args:
+            if pid == str(os.getpid()):
+                continue  # this run's own children (this very ps)
+            if CODEX_HOST in args or pid in mine:
                 todo.append(pid)  # its code mode's commands run under it
                 continue
             at = started.get(pid)
