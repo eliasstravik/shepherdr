@@ -1581,6 +1581,35 @@ NO_LINK = ("No web link is known here yet: Shepherdr's web app isn't served, or 
            "linked this one (`shepherdr web status` there says).")
 
 
+def no_link():
+    """Why there is no link, in plain words (GitHub #1543): the web app runs on this computer but isn't shared on the
+    tailnet (what the service last said, web.json: no host elsewhere, no link), or the general NO_LINK."""
+    try:
+        w = json.load(open(WEB_JSON))
+    except (OSError, ValueError):
+        w = None
+    if not isinstance(w, dict) or not w.get("on") or (w.get("serve") or {}).get("host"):
+        return NO_LINK
+    why = (w.get("share_error") or w.get("why") or "").rstrip(".")
+    return ("Shepherdr's web app runs on this computer only: it isn't shared on your tailnet"
+            + (f" ({why})" if why else "") + ", so there is no share link yet. A share link needs the web app "
+            "shared with Tailscale; `shepherdr web status` shows the link once it is.")
+
+
+def local_link(aid):
+    """This machine's own page of the artifact on 127.0.0.1 (preview's server), for this computer only; None if
+    it can't be served here."""
+    try:
+        with Store(find_anywhere(aid), write=False) as s:
+            v, d = kept_version(s.find(aid), None)
+        if not os.path.isfile(os.path.join(d, PAGE)):
+            return None
+        port, token = preview_start()
+    except (Fail, OSError):
+        return None
+    return f"http://127.0.0.1:{port}/{urllib.parse.quote(token, safe='')}/{urllib.parse.quote(aid, safe='')}/v{v}/"
+
+
 def known(aid, machine):
     """Fails unless the artifact is here (or, with --from, leaves that to the machine it's on)."""
     if not machine:
@@ -1591,7 +1620,13 @@ def cmd_link(o):
     known(o.id, o.machine)
     link = web_link(o.id)
     if not link:
-        raise Fail(NO_LINK)
+        why = no_link()
+        local = None if o.machine else local_link(o.id)
+        if o.json:
+            print(json.dumps({"id": o.id, "link": None, "local": local, "why": why}))
+        else:
+            print((f"On this computer only: {local}\n" if local else "") + why, file=sys.stderr)
+        return 1
     print(json.dumps({"id": o.id, "link": link}) if o.json else link)
     return 0
 
@@ -1616,7 +1651,7 @@ def cmd_open(o):
     else:
         if screen:
             print("Asked the person's screen to show it: the app opens it on the page they use, if one is open.")
-        print(f"Link: {link}" if link else NO_LINK)
+        print(f"Link: {link}" if link else no_link())
     return 0 if (screen or link) else 1
 
 
