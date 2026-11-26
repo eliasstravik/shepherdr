@@ -136,6 +136,10 @@ const longDay = (s: Snapshot): Snapshot => ({
 })
 
 // ?case=one and ?case=five (SHEP-438): the sidebar with one machine only, and with a fifth one to fold and drag
+const pcts = (lo: number, hi: number, by: number) => Array.from({ length: (hi - lo) / by + 1 }, (_, i) => `${lo + i * by}%`)
+const LIMIT_DEMO: [string, string, string[]][] = [['start_memory', '80%', pcts(10, 100, 5)], ['start_load', '100%', pcts(25, 400, 25)], ['start_disk', '90%', pcts(10, 100, 5)]]
+/** a machine's start-limit rows as the service gives them (machine.<field>@<machine>); own: the ones it set itself */
+const limitRows = (at: string, own: Record<string, string>) => LIMIT_DEMO.map(([f, d, steps]) => ({ label: f, key: `machine.${f}@${at}`, value: own[f] ?? d, steps, stepFrom: d, group: at, ...(f in own ? { inherits: { value: d, from: 'all machines' } } : { from: 'all machines' }) }))
 const oneMachine = (s: Snapshot): Snapshot => ({ ...s, machines: s.machines.slice(0, 1), places: s.places.filter((p) => p.machine === s.host), warnings: [] })
 const fiveMachines = (s: Snapshot): Snapshot => ({
   ...s,
@@ -176,7 +180,8 @@ export function snapshot(mode: 'normal' | 'empty' | 'down' | 'more' | 'long' | '
     artifacts: empty ? [] : artifacts,
     asks: {},
     needs: [],
-    settings: [],
+    // #1547: each machine's start limits, as the service's Machines section keeps them
+    settings: [{ name: 'Machines', rows: limitRows('local', {}).concat(limitRows('vm', { start_memory: '70%', start_disk: 'Off' })) }],
     config,
     warnings: empty ? [] : down ? [{ id: 'm:vm', kind: 'machine', text: "Can't reach vm · last seen 14:02" }] : [{ id: 'u:claude', kind: 'usage', text: "You've used 76% of this week's Claude plan" }, { id: 'm:vm', kind: 'machine', text: 'vm: disk nearly full' }, ...(mode === 'more' ? [{ id: 'u:codex', kind: 'usage' as const, text: "You've used 81% of your Codex plan" }] : [])],
     screens: empty ? {} : {

@@ -320,6 +320,71 @@ function addMachineDialog(snap: Snapshot) {
 
 const meterOf = (m: Snapshot['machines'][number], re: RegExp) => m.health?.meters.find((x) => re.test(x.name))?.pct
 
+type Mach = Snapshot['machines'][number]
+/** #1548: the agents live on a machine now, as the Tasks list and the spaces show them: its tasks' agents and its
+ *  spaces' Assistants that are working or waiting on you */
+const agentsOn = (snap: Snapshot, m: Mach) =>
+  snap.tasks.filter((t) => (t.on || snap.host) === m.machine && (t.status === 'work' || t.status === 'need')).length +
+  snap.places.filter((p) => p.machine === m.machine && (p.status === 'work' || p.status === 'need')).length
+
+/* ---------- #1547: a machine's start limits (herdr-task holds new tasks while it is busier) ---------- */
+
+const LIMITS: [string, string][] = [['start_load', 'Processor'], ['start_memory', 'Memory'], ['start_disk', 'Disk']]
+/** its three limit rows as the service keeps them (machine.<field>@<machine>, "local" for the one serving the app) */
+function limitsOf(snap: Snapshot, m: Mach) {
+  const at = m.machine === snap.host ? 'local' : m.machine
+  const rows = snap.settings?.find((x) => x.name === 'Machines')?.rows ?? []
+  return LIMITS.flatMap(([f, name]) => {
+    const row = rows.find((r) => r.key === `machine.${f}@${at}`)
+    return row ? [{ name, row, off: /^off$/i.test(row.value), own: !!row.inherits }] : []
+  })
+}
+const setLimit = (key: string, value: string | null) => tryAct({ type: 'setting', key, value, place: 'all' })
+/** the next word up or down its stepper's list (a value off the list starts from the nearest) */
+function stepTo(steps: string[], value: string, by: number) {
+  const n = parseFloat(value)
+  let i = steps.indexOf(value)
+  if (i < 0) i = steps.reduce((b, s, j) => (Math.abs(parseFloat(s) - n) < Math.abs(parseFloat(steps[b]!) - n) ? j : b), 0)
+  return steps[Math.max(0, Math.min(steps.length - 1, i + by))]!
+}
+
+function limitsDialog(id: string) {
+  openForm(
+    function Form({ close }) {
+      const snap = useStore((s) => s.snap)
+      const m = snap?.machines.find((x) => x.id === id)
+      const lims = snap && m ? limitsOf(snap, m) : []
+      return (
+        <>
+          <h2>Start limits{m ? ` · ${m.name}` : ''}</h2>
+          <p>New tasks wait while {m?.name ?? 'this machine'} is busier than this.</p>
+          {lims.map(({ name, row, off, own }) => {
+            const steps = row.steps ?? []
+            const at = steps.indexOf(row.value)
+            return (
+              <SRow key={row.key} label={<>{name}<small>{own ? <>Set here · <span className="lk" role="button" tabIndex={0} onClick={() => void setLimit(row.key, null)} onKeyDown={(e) => e.key === 'Enter' && void setLimit(row.key, null)}>Reset</span></> : 'Default'}</small></>}>
+                <span className="stp">
+                  {!off && (
+                    <>
+                      <IB icon="minus" label={`Lower ${name}`} disabled={at === 0} onClick={() => void setLimit(row.key, stepTo(steps, row.value, -1))} />
+                      <span className="num">{row.value}</span>
+                      <IB icon="plus" label={`Raise ${name}`} disabled={at === steps.length - 1} onClick={() => void setLimit(row.key, stepTo(steps, row.value, 1))} />
+                    </>
+                  )}
+                  <Tgl label={`${name} limit`} on={!off} onChange={(on) => void setLimit(row.key, on ? row.stepFrom ?? steps[steps.length - 1] ?? null : 'Off')} />
+                </span>
+              </SRow>
+            )
+          })}
+          {!lims.length && <p className="hint">Its limits can't be read now.</p>}
+          <div className="acts"><Btn onClick={close}>Done</Btn></div>
+        </>
+      )
+    },
+    { label: 'Start limits' },
+  )
+}
+
 function Machines({ snap }: { snap: Snapshot }) {
   const warns = snap.machines.filter((m) => machineWarn(m))
   return (
@@ -332,8 +397,11 @@ function Machines({ snap }: { snap: Snapshot }) {
       ))}
       {snap.machines.map((m) => {
         const off = unreachable(m)
-        const agents = m.health?.working ?? 0
+        const agents = agentsOn(snap, m)
         const tri: [string, number | undefined][] = [['Processor', meterOf(m, /cpu|processor|load/i)], ['Memory', meterOf(m, /mem/i)], ['Disk', meterOf(m, /disk/i)]]
+        // #1547: each meter's start limit under it (new tasks wait above it), and Start limits to change them
+        const lims = limitsOf(snap, m)
+        const desk = !off && snap.config?.desktops?.includes(m.machine)
         return (
           <div className="mcard" key={m.id}>
             <div>
@@ -348,13 +416,15 @@ function Machines({ snap }: { snap: Snapshot }) {
                     <span className="hint">{name}</span>
                     <span className="num">{pct === undefined ? '–' : `${Math.round(pct)}%`}</span>
                     <Meter pct={pct ?? 0} />
+                    {((l) => l && <span className="hint">{l.off ? 'No limit' : `Limit ${l.row.value}`}</span>)(lims.find((x) => x.name === name))}
                   </div>
                 ))}
               </div>
             )}
-            {!off && snap.config?.desktops?.includes(m.machine) && (
+            {(desk || lims.length > 0) && (
               <div className="acts" style={{ justifyContent: 'flex-start' }}>
-                <Btn small onClick={() => setUI({ settings: null, pane: 'screen', scr: { key: `machine:${m.machine}`, src: 'd', drive: false }, task: null, art: null })}>Open desktop</Btn>
+                {lims.length > 0 && <Btn small onClick={() => limitsDialog(m.id)}>Start limits</Btn>}
+                {desk && <Btn small onClick={() => setUI({ settings: null, pane: 'screen', scr: { key: `machine:${m.machine}`, src: 'd', drive: false }, task: null, art: null })}>Open desktop</Btn>}
               </div>
             )}
           </div>
