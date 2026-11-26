@@ -1,0 +1,7 @@
+/* the # and @ list over the message box (mentions.tsx) */
+.cbox{position:relative}
+.mlist{left:0;right:0;bottom:calc(100% + 6px);max-width:none;max-height:min(22rem,40dvh);overflow-y:auto;overscroll-behavior:contain;z-index:20;display:grid;gap:1px;align-content:start}
+.mlist .lab{padding-top:4px}
+.mlist .hint{padding:4px 8px 8px}
+.mlist .row[aria-selected="true"]{background:var(--control);color:var(--fg)}
+.mlist .mhash{display:grid;place-items:center;width:var(--ic);flex:none;color:var(--muted)}
