@@ -35,6 +35,7 @@ import { landLaunchShare, putAway, useLanded, watchLastChat } from './share.ts'
 import { openSendTo } from './sendto.tsx'
 import { ReplyPress, repliesHidden, suggestionOf, suggestionsOn } from './suggest.ts'
 import { UpdateHint, updateRows } from './update.tsx'
+import { endRows, restartRows } from './restart.tsx'
 import { BoxThumb, openPreview, SentThumb, sourcesOf } from './thumbs.tsx'
 import { heldStep, signOf } from './typing.ts'
 import { newsRow, type NewsRow } from './news.ts'
@@ -1245,6 +1246,9 @@ export default definePlugin({
     // Update <agent> (update.tsx): a row in the space's header menu and in a task's ⋯, while a newer version is out
     reg.spaceMenu.push({ order: 7, rows: (p, head) => (head ? updateRows(p.chat) : []) })
     reg.taskMenu.push({ order: 7, rows: (t, where) => (where === 'thread' ? updateRows(taskChat(t)) : []) })
+    // Restart and End (restart.tsx): a way out for a running, even stuck, agent, beside Update in the chat's menu
+    reg.spaceMenu.push({ order: 8, rows: (p, head) => (head ? [...restartRows(p.chat), ...endRows(p)] : []) })
+    reg.taskMenu.push({ order: 8, rows: (t, where) => (where === 'thread' ? restartRows(taskChat(t)) : []) })
   },
 })
 

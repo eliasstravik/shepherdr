@@ -525,6 +525,13 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const a = chat(b.chat);
     return { ok: true, ...(await compat.updates.update(a, compat.reader?.(a))) };
   }
+  if (b?.type === "agent-restart" && typeof b.chat === "string" && compat.agents?.revive) {
+    // Restart in a chat's menu: a running agent, even a stuck or busy one, closes and opens again on the same CLI,
+    // model and conversation (Agents.revive, as Update <agent> and the Stopped card do)
+    const a = chat(b.chat), t: any = hub.terminals.get(a);
+    if (!t || t.state !== "live") throw new Error("That agent isn't running.");
+    return { ok: true, terminal: await compat.agents.revive(a, compat.reader?.(a) ?? null) };
+  }
   if (b?.type === "machine-hosts") {
     // Add machine, as the window's (mods/machine-add-chat, core/machine-add.js): the hosts in ~/.ssh/config, and the
     // machines added already (hc machine ls)
