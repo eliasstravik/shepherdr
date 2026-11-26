@@ -723,6 +723,8 @@ export class Compat {
         messages.push({ id: x.id, who: "you", at: x.at, text, ...(sentCid ? { cid: sentCid } : {}), command: { state: x.state, ...(x.out ? { out: x.out } : {}) } } as Message);
       }
       else if (x.kind === "error" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, error: true });
+      // a recap of what happened (the CLI's own, or the answer to the Recap ask), and a CLI's heads-up: quiet rows
+      else if ((x.kind === "recap" || x.kind === "heads") && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, recap: x.kind === "heads" ? "heads" : "recap" } as Message);
       // its own question asked now shows as its card (at the end), in place of its "Asked you" box, as the window's
       else if (x.kind === "ask" && !x.closed && (asking || x === codexCard)) continue;
       else if (x.kind === "ask" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, asked: x.closed === "answered" ? "answered" : x.closed ? "dismissed" : "open" });

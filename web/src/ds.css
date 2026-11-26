@@ -686,3 +686,5 @@ textarea.cin{overflow-y:auto}
 .kwarn>.i{color:var(--amber)}.kwarn .n{flex:1;min-width:min(12rem,100%)}
 .pal button.row:hover:not([aria-selected="true"]){background:none}
 .dlg.wide:has(>.ksheet){width:min(760px,calc(100% - 32px))}
+/* Recaps: what happened while you were away, a quiet block of its own (never a bubble) */
+.msgs>.recap{justify-self:start;max-width:min(92%,640px);margin-block:8px;padding:10px 14px 12px;border-radius:14px;background:var(--raised);box-shadow:inset 0 0 0 1px var(--line);color:var(--sub)}.recap .rh{display:flex;align-items:center;gap:6px;margin-bottom:4px;color:var(--muted);font-size:12px;line-height:16px;font-weight:500}.recap .rh .qm{font-variant-numeric:tabular-nums}.recap .rh .qm::before{content:"·";margin-inline-end:6px}

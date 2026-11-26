@@ -110,6 +110,8 @@ BEGIN { pos = base; first = base; msgs = 0 }
     if (index(line, "\"type\":\"user\",\"message\"") || index(line, "\"type\":\"assistant\",\"uuid\"") || (index(line, "\"type\":\"attachment\",\"uuid\"") && index(line, "\"queued_command\""))) keep = 1
     # what a /fast run in place said (SHEP-181: the chat shows it runs on Fast at once)
     if (index(head, "\"subtype\":\"local_command\"") && index(line, "local-command-stdout")) keep = 1
+    # the recap Claude Code writes after you were away, and its heads-up notes: quiet rows in the chat
+    if (index(head, "\"type\":\"system\"") && (index(head, "\"subtype\":\"away_summary\"") || index(head, "\"subtype\":\"informational\""))) keep = 1
   } else if (index(head, "\"type\":\"response_item\"")) {
     if (index(head, "\"type\":\"message\"") || index(head, "_call\"")) keep = 1
   } else if (index(head, "\"type\":\"event_msg\"")) {
@@ -289,8 +291,13 @@ function pilotOf(t) {
   return m ? { reason: unattr(/\breason="([^"]*)"/.exec(m[1])?.[1] ?? "") } : null;
 }
 
+// Shepherdr's Recap ask (service/recap.ts): a message that is only a <herdr-recap> tag. It never shows; the reply it
+// gets is a recap item, not a message.
+const recapAsk = (t) => /^\s*<herdr-recap\b[^>]*>[\s\S]*<\/herdr-recap\s*>\s*$/.test(String(t).replace(/<\/?pasted_content\b[^>]*>/g, ""));
+
 // A message's words, with the task news it carries (news: shown as their own lines) and the Autopilot wake it is.
 function cleanUser(t) {
+  if (recapAsk(t)) return { text: "", recap: true };
   const news = newsOf(t), pilot = pilotOf(t);
   const u = cleanWords(t);
   const out = news.length ? { ...(u ?? { text: "" }), news } : u;
@@ -630,6 +637,8 @@ function codexStep(name, args) {
 //   replyTo: the start of the message it answers; replyTask: the task it answers, when it replies to a task)
 //   { kind: "mark", id }  (a message of only reactions: ends the turn, shows nothing)
 //   { kind: "news", id, at, ref, event, text }  (one line of task news Herdr told an Assistant)
+//   { kind: "recap", id, at, text, own? }  (a short recap of what happened: Claude Code's own (own), or the reply to
+//   Shepherdr's Recap ask)   { kind: "heads", id, at, text }  (a heads-up note Claude Code wrote, not a message)
 //   { kind: "sent", id, at, to, text, how, call?, state?, why? }  (a message the agent sent another agent: sendsOf();
 //   call: the call that sent it; state: delivered | waiting | failed once its result says, why: in words)
 //   a user item's from: who sent it (another agent's address); assistant: { machine, space, reply } when it is
@@ -847,6 +856,9 @@ export class Conversation {
 
   user(id, u) {
     this.waiting = false;
+    // the Recap ask: its turn's words are the recap (recapping); anything else said to it ends that
+    this.recapping = Boolean(u?.recap);
+    if (u?.recap) return;
     // taken from the queue: it shows as said now
     const q = u?.text ? this.queue.findIndex((x) => x.text === u.text) : -1;
     if (q >= 0) this.queue.splice(q, 1);
@@ -934,6 +946,8 @@ export class Conversation {
   // Claude Code's note to the agent that a job ended (<task-notification>). A watcher's note of
   // one line it printed (no status) isn't an end.
   notified(text) {
+    // a job's end wakes it: a turn of its own, not the recap's
+    this.recapping = false;
     const id = /<tool-use-id>([^<]+)<\/tool-use-id>/.exec(text)?.[1];
     const task = /<task-id>([^<]+)<\/task-id>/.exec(text)?.[1];
     if (id || (task && /<status>/.test(text))) this.ended(id ?? null, /<status>/.test(text) ? task ?? null : null);
@@ -1078,6 +1092,13 @@ export class Conversation {
       if (meta) this.meta = { ...this.meta, ...meta, at: time(l.timestamp) };
     }
     if (l.type === "queue-operation") { this.queueOp(l, off); return; }
+    if (l.type === "system") {
+      // its own recap (written when you come back after a while) and its heads-up notes, without their settings hint
+      const text = typeof l.content === "string" ? l.content.replace(/\s*\(disable recaps in \/config\)\s*$/i, "").replace(/\s*·\s*turn off with .*$/i, "").trim() : "";
+      if (text && l.subtype === "away_summary") this.push({ kind: "recap", id: `r${off}`, text, at: time(l.timestamp), own: true });
+      else if (text && l.subtype === "informational") this.push({ kind: "heads", id: `h${off}`, text, at: time(l.timestamp) });
+      return;
+    }
     if (l.type === "user" && l.origin?.kind === "task-notification") {
       // A helper or a background job finished (Claude Code tells the agent so): it's done.
       const c = l.message?.content;
@@ -1136,9 +1157,11 @@ export class Conversation {
             prev.text += "\n\n" + said;
             // the newest words' suggestion, if they end with one
             delete prev.suggests;
-            Object.assign(prev, this.takeSuggest());
+            const sg = this.takeSuggest();
+            if (prev.kind !== "recap") Object.assign(prev, sg);
           } else {
-            const item = { kind: "agent", id: `a${off}`, text: said, at: time(l.timestamp), ...this.takeSuggest() };
+            const sg = this.takeSuggest();
+            const item = { kind: this.recapping ? "recap" : "agent", id: `a${off}`, text: said, at: time(l.timestamp), ...(this.recapping ? {} : sg) };
             this.replies.set(id, item);
             if (this.replies.size > 20) this.replies.delete(this.replies.keys().next().value);
             this.push(item);
@@ -1187,7 +1210,8 @@ export class Conversation {
         if (u) this.user(`u${off}`, { ...u, at: time(l.timestamp) });
       } else if (p.type === "message" && p.role === "assistant") {
         const words = this.agentText((Array.isArray(p.content) ? p.content : []).filter((it) => it?.type === "output_text" && it.text?.trim()).map((it) => it.text.trim()).join("\n\n"));
-        if (words) this.push({ kind: "agent", id: `a${off}`, text: words, at: time(l.timestamp), ...this.takeSuggest() });
+        const sg = this.takeSuggest();
+        if (words) this.push({ kind: this.recapping ? "recap" : "agent", id: `a${off}`, text: words, at: time(l.timestamp), ...(this.recapping ? {} : sg) });
       } else if ((p.type === "function_call" || p.type === "custom_tool_call" || p.type === "local_shell_call") && p.name !== "wait" && p.name !== "sleep") {
         const cid = String(p.call_id ?? p.id ?? `c${off}`);
         // Codex's own questions (Plan mode): answered in its terminal, shown here as asked.
@@ -1231,6 +1255,7 @@ export class Conversation {
       const used = i.last_token_usage?.total_tokens;
       this.meta = { ...this.meta, used: used ?? this.meta.used, window: i.model_context_window ?? this.meta.window };
     } else if (p.type === "task_complete" || p.type === "turn_aborted") {
+      this.recapping = false;
       for (const h of this.helpers.values()) if (h.untilTurn) h.done = true;
       this.open.clear();
       this.waits.clear();
