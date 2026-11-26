@@ -51,10 +51,10 @@ test("versions: read, compared, the running one", () => {
 test("the chat log says which version wrote it (Claude Code and Codex)", () => {
   const c = new Conversation("claude");
   c.claude({ type: "user", version: "2.1.300", timestamp: "2026-11-26T10:00:00Z", message: { content: "hi" } }, 0);
-  expect(c.meta.version).toBe("2.1.300");
+  expect((c.meta as any).version).toBe("2.1.300");
   const x = new Conversation("codex");
   x.codex({ type: "session_meta", timestamp: "2026-11-26T10:00:00Z", payload: { cli_version: "0.160.0" } }, 0);
-  expect(x.meta.version).toBe("0.160.0");
+  expect((x.meta as any).version).toBe("0.160.0");
 });
 
 test("a chat on an older version is offered the newest, read in the background", async () => {
