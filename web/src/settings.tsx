@@ -9,7 +9,7 @@ import { everything, isEverything, machineLabel, machineWarn, placeOf, spaceLabe
 import { copyText } from './copy.ts'
 import type { IconName } from './icons.ts'
 import { newerServed, notice, openSettings, registry, setUI, tryAct, updateNow, useStore, useUI } from './kernel.ts'
-import { openDialog, openForm } from './overlay.tsx'
+import { confirm, openDialog, openForm } from './overlay.tsx'
 import { openPicker, PickerHead, pickFor, sayPick, useCatalog, type Role } from './picker.tsx'
 import { MOTIONS, setPref, THEMES, usePrefs, WIDTHS } from './prefs.ts'
 import { canKeepAwake, setAwake, useAwake } from './awake.ts'
@@ -262,7 +262,7 @@ export function secretDialog(snap: Snapshot, place: string, name?: string, scope
       return (
         <>
           <h2>{name ? `${opts.fresh ? 'Set' : 'Replace'} ${name}` : 'Add a secret'}</h2>
-          <p>{level === 'all' ? 'Every space can use it.' : `Only ${spaceLabel(snap, level)} can use it.`}</p>
+          <p>{level === 'all' ? 'Every space can use it.' : `Only ${secretWhere(snap, level)} can use it.`}</p>
           {!name && (
             <label className="fld">
               <span>Name</span>
@@ -284,15 +284,39 @@ export function secretDialog(snap: Snapshot, place: string, name?: string, scope
   )
 }
 
-function Secrets({ snap, place }: { snap: Snapshot; place: string }) {
+/** who may use a secret kept at a level, in words: "#shop", "agents on mini" */
+const secretWhere = (snap: Snapshot, level: string) => {
+  const m = /^m:(.*)$/.exec(level)
+  return m ? `agents on ${m[1] ? machineLabel(snap, m[1]) : snap.host}` : spaceLabel(snap, level)
+}
+
+/** Every kept secret, by name only, never its value: Everywhere's, each machine's and each space's (a space's own
+ *  page: its own), each with Replace and Remove, so a leaked key goes from a phone in two taps. */
+export function Secrets({ snap, place }: { snap: Snapshot; place: string }) {
   const all = place === 'all'
-  const list = snap.config!.secrets.filter((s) => all || s.scope === place)
+  const vault = snap.settings?.find((x) => x.name === 'Secrets')?.vault
+  // each with the level the service keeps it at: all, m:<machine> ('' this computer) or the space's id
+  const kept = vault
+    ? vault.map((e) => ({ name: e.name, level: e.scope === 'everywhere' ? 'all' : e.scope === 'machine' ? `m:${e.machine ?? ''}` : e.space ?? '' }))
+    : snap.config!.secrets.map((s) => ({ name: s.name, level: s.scope }))
+  const list = kept.filter((s) => s.level && (all || s.level === place))
+  const remove = (s: { name: string; level: string }) =>
+    confirm({
+      title: `Remove ${s.name}?`,
+      body: 'Agents can no longer use it. To use it again, add it again.',
+      ok: 'Remove',
+      danger: true,
+      run: () => tryAct({ type: 'secret', level: s.level, name: s.name, value: null }, `Removed ${s.name}`),
+    })
   return (
     <>
       <p className="hint">Agents use these by name and never see them.</p>
       {list.map((s) => (
-        <SRow key={`${s.scope}:${s.name}`} label={<>{s.name}<small>{s.scope === 'all' ? 'Every space' : `Only ${spaceLabel(snap, s.scope)}`}</small></>}>
-          <Btn small onClick={() => secretDialog(snap, place, s.name, s.scope)}>Replace</Btn>
+        <SRow key={`${s.level}:${s.name}`} label={<>{s.name}<small>{s.level === 'all' ? 'Every space' : `Only ${secretWhere(snap, s.level)}`}</small></>}>
+          <span className="acts">
+            <Btn small onClick={() => secretDialog(snap, place, s.name, s.level)}>Replace</Btn>
+            <Btn small onClick={() => remove(s)}>Remove</Btn>
+          </span>
         </SRow>
       ))}
       <div className="acts" style={{ justifyContent: 'flex-start', marginTop: 8 }}>

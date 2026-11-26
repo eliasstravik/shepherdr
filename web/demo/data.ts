@@ -24,7 +24,7 @@ export const tasks: Task[] = [
   // SHEP-348's six states on the repo line: own branch, no PR (SHOP-19); PR checks passed (SHOP-12), failed (SHOP-15),
   // running (GARDEN-3); merged (SHOP-11); in the folder itself (BLOG-10); research, no repo (NOTES-4)
   task('SHOP-12', 'Faster product search', P.shop, 'ready', { needsAt: NOW - 8 * hour, repo: 'branch', worktree: true, branch: 'task/faster-product-search', base: 'main', pr: { number: 212, url: 'https://github.com/example/shop/pull/212', checks: 'passed' }, summary: 'Results show in about 80 ms, down from 400.', proof: 'a-shop12' }),
-  task('BLOG-10', 'Fix typo on the About page', P.blog, 'ready', { needsAt: NOW - hour, repo: 'folder', summary: 'Fixed the typo and two more I found on the same page.' }),
+  task('BLOG-10', 'Fix typo on the About page', P.blog, 'ready', { needsAt: NOW - hour, repo: 'folder', summary: 'Fixed the typo and two more I found on the same page.', details: '- "Recieve" is now "Receive" in the About page heading\n- Also fixed "seperate" and "occured" further down\n- Checked: the site builds and the page reads right' }),
   task('NOTES-4', 'Compare supplier quotes', P.notes, 'ready', { needsAt: NOW - 3 * hour, summary: 'Brightpack is cheapest at your volume. Norbox ships fastest.', proof: 'a-quotes' }),
   task('SHOP-14', 'Switch payment provider', P.shop, 'need', { needsAt: NOW - 2 * hour, blocked: 'question', repo: 'branch', report: { msg: 'Which provider, Stripe or Adyen?', progress: 35, paused: true } }),
   task('vm:GARDEN-4', 'Photo upload', P.garden, 'need', { agent: { chat: 'vm:GARDEN-4/worker', role: 'worker', cli: 'claude', status: 'need', running: true, age: '', note: '' }, needsAt: NOW - 5 * min, blocked: 'permission', repo: 'branch', report: { msg: 'Wants to run a command', progress: 80, paused: true } }),
@@ -181,7 +181,13 @@ export function snapshot(mode: 'normal' | 'empty' | 'down' | 'more' | 'long' | '
     asks: {},
     needs: [],
     // #1547: each machine's start limits, as the service's Machines section keeps them
-    settings: [{ name: 'Machines', rows: limitRows('local', {}).concat(limitRows('vm', { start_memory: '70%', start_disk: 'Off' })) }],
+    settings: [{ name: 'Machines', rows: limitRows('local', {}).concat(limitRows('vm', { start_memory: '70%', start_disk: 'Off' })) },
+      // Settings › Secrets: every kept secret by name and where, a machine's own too (#1560)
+      { name: 'Secrets', level: 'all', rows: [], vault: [
+        { name: 'GITHUB_TOKEN', at: NOW - 9 * day, scope: 'everywhere', machine: null, space: null, where: 'Everywhere' },
+        { name: 'DEPLOY_KEY', at: NOW - 3 * day, scope: 'machine', machine: 'vm', space: null, where: 'vm' },
+        { name: 'STRIPE_KEY', at: NOW - 2 * day, scope: 'space', machine: null, space: P.shop, where: 'Space shop' },
+      ] }],
     config,
     warnings: empty ? [] : down ? [{ id: 'm:vm', kind: 'machine', text: "Can't reach vm · last seen 14:02" }] : [{ id: 'u:claude', kind: 'usage', text: "You've used 76% of this week's Claude plan" }, { id: 'm:vm', kind: 'machine', text: 'vm: disk nearly full' }, ...(mode === 'more' ? [{ id: 'u:codex', kind: 'usage' as const, text: "You've used 81% of your Codex plan" }] : [])],
     screens: empty ? {} : {
@@ -274,7 +280,7 @@ export const chats: Record<string, Chat> = Object.fromEntries(
       relay('to', 'Bigger checkout button on phones', 'Keep the total above the fold on a 360 px screen too.', today(9, 25), { how: 'reply', state: 'delivered' }),
       relay('from', 'Bigger checkout button on phones', 'Done: the total stays above the fold at 360 px. Screenshot in my chat.', today(9, 40)),
       relay('to', 'Faster product search', 'Fix what keeps its pull request from merging.', today(9, 41), { how: 'fix', state: 'waiting', why: 'its agent stopped; it goes to its next one' }),
-      a('I made a mock-up of the new checkout. Have a look.'), { id: `m${++n}`, who: 'agent', artifact: { id: 'a-mock', v: 3 } }, a('Started SHOP-15, added from Everything.'), { id: `m${++n}`, who: 'agent', news: { task: 'SHOP-14', ref: 'SHOP-14', mark: 'needs', what: '', text: "Which provider should I switch to, Stripe or Adyen? I'd go with Stripe." } }, ask('q-pay', '', byPay, ['Stripe', 'Adyen']), a('SHOP-16 started on its schedule in #shop. It found 3 packages behind and is updating them.', { suggest: 'How is the checkout button going?' })], sonnet),
+      a('I made a mock-up of the new checkout. Have a look.'), { id: `m${++n}`, who: 'agent', artifact: { id: 'a-mock', v: 2 } }, a('Started SHOP-15, added from Everything.'), { id: `m${++n}`, who: 'agent', news: { task: 'SHOP-14', ref: 'SHOP-14', mark: 'needs', what: '', text: "Which provider should I switch to, Stripe or Adyen? I'd go with Stripe." } }, ask('q-pay', '', byPay, ['Stripe', 'Adyen']), a('SHOP-16 started on its schedule in #shop. It found 3 packages behind and is updating them.', { suggest: 'How is the checkout button going?' })], sonnet),
     // working, nothing written yet: the working sign alone (SHEP-313)
     chat(P.blog, [a('To see it yourself, run this in the blog folder:\n\n```\nbun run dev\n```'), me('!git status --short', { command: { state: 'done', out: ' M web/src/archive.ts\n?? drafts/november.md' } }), me('!bun test archive', { command: { state: 'failed', out: 'archive.test.ts:\n✗ links to every month [4.21ms]\n  Expected: "/archive/2026/11"\n  Received: "/archive/undefined"\n\n 0 pass\n 1 fail' } }), me('The link to the archive is broken too. Can you fix it?', { reactions: [{ emoji: '👍', by: 'both' }] })], sonnet, { working: true, doing: "Running python3 - <<'EOF' p='web/src/archive.ts'" }),
     chat(P.notes, [], sonnet),
