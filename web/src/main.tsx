@@ -1,6 +1,7 @@
 // The page starts here: the styles, this device's look, the plugins that are on, the link to the server.
 import './styles.css'
 import './prefs.ts'
+import './awake.ts'
 import './warnings.tsx'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
