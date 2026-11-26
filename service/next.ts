@@ -13,6 +13,7 @@ import { repoKey, repoOf } from "../core/host.js";
 export const PLUGINS: { id: string; name: string; always?: boolean }[] = [
   { id: "tasks", name: "Tasks", always: true }, { id: "artifacts", name: "Artifacts", always: true }, { id: "terminal", name: "Terminal" },
   { id: "screens", name: "Screens" }, { id: "voice", name: "Voice" }, { id: "schedules", name: "Schedules" }, { id: "reactions", name: "Reactions" },
+  { id: "recaps", name: "Recaps" },
   { id: "search", name: "Search", always: true }, { id: "alerts", name: "Alerts", always: true },
 ];
 
@@ -24,6 +25,8 @@ export function offPlugins(): string[] {
   return Array.isArray(off) ? off.filter((id) => PLUGINS.some((p) => p.id === id && !p.always)) : [];
 }
 export const pluginOn = (id: string) => !offPlugins().includes(id);
+/** Settings › Plugins › Recaps: a recap on its own when you come back to a chat (everywhere.recaps_auto_off) */
+export const recapsAuto = (f: any = file()) => pluginOn("recaps") && f?.everywhere?.recaps_auto_off !== true;
 
 /* ---------- Settings › Shortcuts: the person's own keys, kept for every device ---------- */
 
@@ -147,6 +150,7 @@ export function configOf(input: { defaults: Defaults; spaces: string[]; secrets:
     plugins: PLUGINS.map((p) => ({ id: p.id, name: p.name, on: !off.includes(p.id), ...(p.always ? { always: true } : {}) })),
     plans: input.plans,
     shortcuts: shortcutsOf(f),
+    recaps: { auto: f?.everywhere?.recaps_auto_off !== true },
     ...(input.addMachine ? { addMachine: input.addMachine } : {}),
     ...(input.desktops?.length ? { desktops: input.desktops } : {}),
   };
@@ -168,6 +172,11 @@ export function setConfig(place: string, key: string, value: unknown, scope?: { 
   }
   if (key.startsWith("shortcut.") || key === "shortcuts.reset" || key === "shortcuts.letters") {
     setShortcut(next, key, value);
+    return writeSettings(next);
+  }
+  if (key === "recaps.auto") {
+    const e = (next.everywhere ??= {});
+    if (value === false) e.recaps_auto_off = true; else delete e.recaps_auto_off;
     return writeSettings(next);
   }
   if (key === "analytics.on" || key === "analytics.noted") {

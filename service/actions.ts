@@ -26,6 +26,8 @@ import * as MA from "../core/machine-add.js";
 import { exec } from "./model.ts";
 import { FIND } from "../core/chat-log.js";
 import { spawn } from "./spawn.ts";
+import { askRecap } from "./recap.ts";
+import { recapsAuto } from "./next.ts";
 
 const attachDir = () => join(appHome(), "data", "chat-attach");
 /** files in one message at most (the page says so before it sends: web/plugins/chat/client.tsx) */
@@ -590,6 +592,13 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (current && reader?.start) await (compat as any).earlier?.(current);
     else if (history && prior?.start) await (compat as any).earlier?.(history);
     return { ok: true };
+  }
+  if (b?.type === "recap" && typeof b.chat === "string") {
+    // the Recap action, or the page's own when you come back to a chat (auto: never an error, off in Settings)
+    const auto = b.auto === true;
+    if (auto && !recapsAuto()) return { ok: true, asked: false };
+    const a = chat(b.chat);
+    return askRecap(hub, a, compat.reader?.(a)?.conv?.items ?? [], { auto });
   }
   if (b?.type === "keys" && typeof b.chat === "string" && Array.isArray(b.keys) && b.keys.length <= 32 && b.keys.every((k: unknown) => typeof k === "string" && k.length <= 40)) {
     const res = await hc(["keys", chat(b.chat), ...b.keys]);

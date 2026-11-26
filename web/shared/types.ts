@@ -659,6 +659,9 @@ export interface Message {
   news?: { task: string; ref: string; event?: string; mark: 'started' | 'needs' | 'ready' | 'done' | 'other'; what: string; text: string; live?: boolean; accept?: boolean }
   /** the agent's own question as the log has it (3.0's "Asked you" box): open, answered, or closed without one */
   asked?: 'open' | 'answered' | 'dismissed'
+  /** a short recap of what happened while you were away (the CLI's own, or its answer to the Recap ask), or a
+   *  heads-up note its CLI wrote: a quiet block of its own, never a bubble */
+  recap?: 'recap' | 'heads'
   /** an error the CLI wrote: red words, no bubble */
   error?: boolean
   /** images sent with it that the chat can't show, as 3.0's paperclip line ("1 image") */
@@ -1364,6 +1367,8 @@ export type Action =
   | { type: 'model'; chat: string; model: string }
   | { type: 'effort'; chat: string; effort: string }
   | { type: 'keys'; chat: string; keys: string[] }
+  /** ask the chat's agent for a recap (auto: the page's own, when you come back to it; never an error) */
+  | { type: 'recap'; chat: string; auto?: boolean }
   | { type: 'text'; chat: string; text: string }
   | { type: 'call'; chat: string; on: boolean }
   /** place: the level it is set at, as a place id (all when none); a machine's or project's goes to that machine */
@@ -1548,6 +1553,8 @@ export interface Config {
   /** Settings › Shortcuts: the shortcuts the person changed (a command's id to its keys; empty: none), and whether
    *  single-letter keys work; the same on every device */
   shortcuts?: { keys: Record<string, string[]>; letters: boolean }
+  /** Settings › Recaps: whether a chat recaps by itself when you come back to it after a while */
+  recaps?: { auto: boolean }
 }
 
 /* ---------- 3.2: screens, an agent's browser and desktop ---------- */

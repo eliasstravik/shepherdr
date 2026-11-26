@@ -17,6 +17,7 @@ the rest. [`web/plugins.json`](../web/plugins.json) is the list, in order.
 | voice | yes | Voice over the whole app, dictation in the message box, and Settings › Voice (the ElevenLabs key) | No voice or mic button, no Voice page |
 | schedules | yes | Tasks › Scheduled | No Scheduled tab |
 | reactions | yes | Emoji reactions on messages | No emoji row in a message's menu |
+| recaps | yes | A short recap when you come back to a chat after 15 minutes away, Recap in a chat's menu, and Settings › Recaps | No recap asks (an agent's own recaps still show) |
 
 Settings › Plugins has the switches. They are kept as `everywhere.plugins_off` in `~/.config/shepherdr/settings.json`
 (`service/next.ts` `PLUGINS`). An open page starts again when a switch flips.
