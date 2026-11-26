@@ -161,7 +161,10 @@ export class Live {
   private combined(ws: WS, key: string, chat: Chat): Chat {
     const old = ws.data.history?.get(key)?.chat;
     if (!old?.messages.length) return chat;
-    return { ...chat, messages: [...old.messages, { id: "history-boundary", who: "agent", newSession: true }, ...chat.messages],
+    // #1537: ids are byte offsets in each session's own log, so two sessions can share one: the older session's get
+    // their own (a reply quote's too), or the page's rows mix them up
+    const prior = old.messages.map((m) => ({ ...m, id: `h:${m.id}`, ...(m.reply?.id ? { reply: { ...m.reply, id: `h:${m.reply.id}` } } : {}) }));
+    return { ...chat, messages: [...prior, { id: "history-boundary", who: "agent", newSession: true }, ...chat.messages],
       top: !!old.top && !!chat.top, earlier: !!old.earlier || !!chat.earlier };
   }
 
