@@ -445,3 +445,36 @@ class CommandLine(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LinkWhenOnlyLocal(Base):
+    """GitHub #1543: the web app ran on this computer only (not shared on the tailnet), and `link` said only that no
+    link is known, as if it weren't served. Now it says so plainly, what a share link needs, and gives this
+    computer's own page."""
+
+    def link(self, aid, web):
+        path = os.path.join(self.dir, "web.json")
+        with open(path, "w") as f:
+            json.dump(web, f)
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(A, "WEB_JSON", path), mock.patch.object(A, "core_doc", lambda name: None), \
+                mock.patch.object(A, "preview_start", lambda: (4321, "tok")), redirect_stdout(out), \
+                mock.patch.object(sys, "stderr", err):
+            code = A.cmd_link(types.SimpleNamespace(id=aid, machine=None, json=False))
+        return code, out.getvalue(), err.getvalue()
+
+    def test_only_this_computer(self):
+        aid = self.publish(title="A page")["id"]
+        code, out, err = self.link(aid, {"on": True, "link": None, "why": "Tailscale isn't running here", "serve": {"host": None}})
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn(f"On this computer only: http://127.0.0.1:4321/tok/{aid}/v1/", err)
+        self.assertIn("runs on this computer only: it isn't shared on your tailnet (Tailscale isn't running here)", err)
+        self.assertIn("A share link needs the web app shared with Tailscale", err)
+
+    def test_served_elsewhere_or_shared(self):
+        aid = self.publish(title="A page")["id"]
+        code, _, err = self.link(aid, {"on": True, "link": None, "why": "x", "serve": {"host": "vm-b"}})
+        self.assertEqual(code, 1)
+        self.assertIn(A.NO_LINK, err)
+        code, out, _ = self.link(aid, {"on": True, "link": "https://box.example.ts.net/shepherdr", "serve": {"host": None}})
+        self.assertEqual((code, out.strip()), (0, f"https://box.example.ts.net/shepherdr/?artifact={aid}"))

@@ -3037,7 +3037,8 @@ class ReviewAsAHelperAgent(unittest.TestCase):
             self.assertIn("codex --no-daemon --sandbox read-only", words)
             self.assertIn("claude --permission-mode dontAsk", words)
             self.assertNotIn("permission-mode plan", words)  # #1181
-            self.assertIn("still at turn 0 after one, `hc read <its name>` to see why", words)  # #1191
+            self.assertIn("still at turn 0 after a timeout, `hc read <its name>` to see why", words)  # #1191
+            self.assertIn("or when it returns at once at turn 0 while `hc read <its name>` shows it still working", words)  # #1510
             self.assertIn("`hc keys <its name> enter`", words)
             self.assertIn("exactly as the Reviewer line gives it", words)
             self.assertIn("hc wait <its name>", words)
@@ -3045,6 +3046,7 @@ class ReviewAsAHelperAgent(unittest.TestCase):
         self.assertIn(templates.WORKER_MD_BEFORE_SUBAGENTS, templates.OLD_WORKERS)
         self.assertIn(templates.WORKER_MD_BEFORE_COMMAND, templates.OLD_WORKERS)
         self.assertIn(templates.WORKER_MD_BEFORE_WAIT, templates.OLD_WORKERS)
+        self.assertIn(templates.WORKER_MD_BEFORE_TURN0, templates.OLD_WORKERS)
         with open(os.path.join(ROOT, "templates", "reviewer.md")) as f:
             self.assertIn(templates.REVIEWER_MD.strip(), f.read())
 
@@ -10443,6 +10445,10 @@ class ParallelCollisions(unittest.TestCase):
             words = f.read()
         self.assertIn("With worktrees, tasks run in parallel by default, also when they touch the same files or screens", words)
         self.assertIn("`--after` is only for a task that needs another's result first", words)
+        self.assertIn("it can't begin without that finished code (it extends it), or it is a release", words)  # #1551
+        self.assertIn("Needing a small piece from another task (a function's name and exit codes, a file format, a route's shape) is no reason to wait", words)
+        self.assertIn("with `--after` only for a real dependency or a release", words)
+        self.assertNotIn('--prompt "<the full prompt>" --after "$A" --folder', words)  # the example no longer chains a small need
         self.assertIn("that fix round is the accepted price", words)
         self.assertNotIn("as parallel edits there conflict at merge", words)
         self.assertIn("tasks touching different files run in parallel", words)
