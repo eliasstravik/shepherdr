@@ -5,10 +5,10 @@ const events = new Map<string, () => void>()
 const asked: { released: boolean; release(): Promise<void> }[] = []
 const g = globalThis as any
 const doc = { visibilityState: 'visible', addEventListener: (t: string, f: () => void) => events.set(t, f) }
-const had = { document: 'document' in g, localStorage: 'localStorage' in g, isSecureContext: 'isSecureContext' in g }
-g.document ??= doc
+const had = { document: g.document, localStorage: g.localStorage, isSecureContext: g.isSecureContext }
+g.document = doc
 const store = new Map<string, string>()
-g.localStorage ??= { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v), removeItem: (k: string) => store.delete(k) }
+g.localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v), removeItem: (k: string) => store.delete(k) }
 g.isSecureContext = true
 Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { request: async () => {
   const l = { released: false, release: async () => void (l.released = true) }
@@ -18,11 +18,11 @@ Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { requ
 
 // the fakes go after this file: other tests see no page
 afterAll(() => {
-  for (const k of Object.keys(had) as (keyof typeof had)[]) if (!had[k]) delete g[k]
+  for (const k of Object.keys(had) as (keyof typeof had)[]) if (had[k] === undefined) delete g[k]; else g[k] = had[k]
   delete (navigator as any).wakeLock
 })
 
-const { canKeepAwake, setAwake } = await import('./awake.ts')
+const { canKeepAwake, setAwake } = (await import('./awake.ts' + '?fresh')) as typeof import('./awake.ts') // its own copy: another test may have loaded it on another page
 const tick = () => new Promise((r) => setTimeout(r, 0))
 
 test('off by default; on holds a lock, off lets it go', async () => {
