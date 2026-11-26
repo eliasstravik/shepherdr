@@ -434,6 +434,11 @@ class CommandLine(unittest.TestCase):
         self.assertIn("parent.postMessage({ shepherdr: 'answer', text:", guide)
         self.assertIn("--proof", guide)
         self.assertIn("Not proven", guide)
+        # a proof opens with "For you" before any detail (what to check or decide, not proven, own decisions)
+        part = guide[guide.index("## A task's proof"):]
+        self.assertLess(part.index("For you"), part.index("What changed"))
+        for words in ("Check or decide", "Decided on my own"):
+            self.assertIn(words, part)
         for gone in ("recipe", "herdr-app", "main.js", "--custom"):
             self.assertNotIn(gone, guide)
 

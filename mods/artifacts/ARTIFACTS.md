@@ -94,10 +94,25 @@ herdr-artifact publish ./proof --task SHOP-4 --proof --title "<the task's full t
 It stays on its task (its card and thread), not in Artifacts, until the person keeps it. On the
 page, in this order:
 
-1. What changed, in one to three plain lines.
-2. Each proof (a picture, a before and after, a short clip, a command's output), each with a
+1. A heading "For you" first, before any detail: a few short lines, not a second report.
+   - Check or decide: what the person should look at or choose, or "Nothing".
+   - Not proven: what you could not show, in a few words, or "Nothing".
+   - Decided on my own: choices you made that the brief did not settle, or "None".
+2. What changed, in one to three plain lines.
+3. Each proof (a picture, a before and after, a short clip, a command's output), each with a
    one-line caption saying what it shows.
-3. A heading "Not proven" and a list of what you could not show, or "Nothing".
+4. A heading "Not proven" and a list of what you could not show and why, or "Nothing".
+
+For example:
+
+```html
+<h2>For you</h2>
+<ul>
+  <li><b>Check or decide:</b> the new button colour on a phone.</li>
+  <li><b>Not proven:</b> the Mac app, which this machine can't run.</li>
+  <li><b>Decided on my own:</b> kept the old link working so saved bookmarks still open.</li>
+</ul>
+```
 
 ## Other commands
 
