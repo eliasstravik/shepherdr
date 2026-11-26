@@ -623,6 +623,11 @@ const voiceIO: VoiceIO = {
     return result;
   },
   addrOf: (key) => compat.addrOf(key),
+  // #1509: the open artifact's page, as the app serves it (its own folder only; another machine's from there)
+  async page(id, v, machine) {
+    const r = await artifacts.file(id, v, ["index.html"], machine, null, {});
+    return r.ok ? await r.text() : null;
+  },
   taskWhere: (id) => { const t = compat.taskOf(id); return t ? { ref: t.ref, folder: t.folder, machine: t.machine } : null; },
   // SHEP-110: the web app's other reads (voice-data.ts SOURCES), each as the panel that shows it reads it
   async read(source, a) {

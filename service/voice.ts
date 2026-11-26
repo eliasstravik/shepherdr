@@ -130,7 +130,7 @@ async function dialElevenLabs(hub: Hub) {
 /** The page's "where" message, checked: what it shows now. */
 export function pageWhere(m: any): Partial<Where> {
   const s = (v: unknown, n = 200) => (typeof v === "string" && v.length <= n ? v : null);
-  return { device: s(m.device, 20), place: s(m.place), task: s(m.task), tab: s(m.tab, 40), artifact: s(m.artifact), settings: m.settings === true, ...(typeof m.full === "boolean" ? { full: m.full } : {}),
+  return { device: s(m.device, 20), place: s(m.place), task: s(m.task), tab: s(m.tab, 40), artifact: s(m.artifact), version: Number.isInteger(m.version) && m.version > 0 ? m.version : null, settings: m.settings === true, ...(typeof m.full === "boolean" ? { full: m.full } : {}),
     // SHEP-251: Shepherdr Wake's call says whether the phone is locked and its screen on
     ...(typeof m.locked === "boolean" ? { locked: m.locked } : {}), ...(typeof m.screen === "boolean" ? { screen: m.screen } : {}) };
 }

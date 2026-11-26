@@ -26,6 +26,7 @@ How Shepherdr works:
 
 Your tools:
 - look: read anything: here (where the call is, what is on screen), a chat (latest messages or a search), spaces, machines (health, plan usage, warnings), tasks, one task, needs (all that waits on the person), news, schedules, settings, secret names, artifacts.
+- look page reads the words of the artifact open on screen (only that one): a long page comes in parts, and query finds the parts about something. Open an artifact first to read another.
 - look data sees everything the app shows: its live data and what opens on demand (a task's changed files and checks, usage insights, the agents' models...). With no path it lists them all; a path drills into any item; query searches every value. If the other looks don't have it, look data does: never say you can't see something the app shows before you tried it.
 - open: show something in the person's app (the one the call runs in): Everything or a space, a task, an agent's Screen (its browser or desktop), its terminal, Tasks, Needs you, Artifacts, an artifact, a Settings page.
 - send: write in a chat as the person: Everything, a space, a task (by its title), or "here": the chat on screen.
@@ -79,7 +80,7 @@ const tool = (name, description, props, required = [], speech = "force") =>
     tool_call_sound: "typing", tool_call_sound_behavior: "auto", parameters: { type: "object", properties: props, required } });
 
 /** What a look can read, an open can show and an act can do (service/voice-tools.ts answers each). */
-export const LOOKS = ["here", "chat", "spaces", "machines", "tasks", "task", "needs", "news", "schedules", "settings", "secrets", "artifacts", "data"];
+export const LOOKS = ["here", "chat", "spaces", "machines", "tasks", "task", "needs", "news", "schedules", "settings", "secrets", "artifacts", "page", "data"];
 export const OPENS = ["space", "chat", "task", "screen", "terminal", "tasks", "needs", "artifacts", "artifact", "settings"];
 /** an agent's Screen: its browser or its desktop */
 export const SCREENS = ["browser", "desktop"];
@@ -93,11 +94,12 @@ export const ASK_FIRST = ["done", "done_without_merging", "stop", "delete", "arc
 
 export const TOOLS = [
   tool("look", "Read Shepherdr: where the call is, a chat, spaces, machines (health, plan usage, warnings), tasks, a task's details, what needs the person, news, schedules, settings, secret names, artifacts, and data: everything else the app shows anywhere. Answers in short sentences.", {
-    what: { type: "string", enum: LOOKS, description: "What to read. here: the call's context and what is on screen. chat: a chat's latest messages (or a search with query). tasks: a list (filter with id and query). task: one task's status, summary, checks and proof. needs: every question, command to allow, step for the person's hands, task Ready for review or Stopped. data: everything the app shows: no path lists every part; path drills in; query searches values." },
+    what: { type: "string", enum: LOOKS, description: "What to read. here: the call's context and what is on screen. chat: a chat's latest messages (or a search with query). tasks: a list (filter with id and query). task: one task's status, summary, checks and proof. needs: every question, command to allow, step for the person's hands, task Ready for review or Stopped. page: the words of the artifact open on screen (query: only the parts about it; part: the next part of a long one). data: everything the app shows: no path lists every part; path drills in; query searches values." },
     id: PLACE,
     path: { type: "string", description: "data: where to read, a part then keys or names, like \"machines/mini/stats/limits/codex\", \"config/all\", \"insights\", \"changes\" (id: the task)." },
     query: { type: "string", description: "Words to search for (a chat, tasks, artifacts), or a status to filter tasks (needs you, ready for review, working, stopped, up next, done, archived)." },
     count: { type: "integer", description: "How many chat messages or items (default 6, at most 30)." },
+    part: { type: "integer", description: "page: which part of a long page (1 first)." },
   }, ["what"]),
   tool("open", "Show something in the person's app, the one the call runs in: Everything or a space, a chat, a task, an agent's Screen, its terminal, Tasks, Needs you, Artifacts, an artifact, or a Settings page.", {
     what: { type: "string", enum: OPENS, description: "What to show. space, chat: Everything or a space (chat also a task's). task: by its title. screen: the Screen of a task's or chat's agent (view: browser or desktop). terminal: a chat's agent's terminal (chat: back to its chat). tasks, needs: Tasks, Now. artifacts: the list. settings: id is the page (General, Agents, Tasks, Secrets, Machines, Usage, Plugins)." },
@@ -282,7 +284,7 @@ export function batchLines(lines) {
 
 const LOOK_WORDS = { here: "looking at the screen", chat: "reading the chat", spaces: "checking spaces", machines: "checking machines",
   tasks: "checking tasks", task: "reading the task", needs: "checking what needs you", news: "reading the news",
-  schedules: "checking schedules", settings: "reading settings", secrets: "checking secret names", artifacts: "checking artifacts", data: "looking it up" };
+  schedules: "checking schedules", settings: "reading settings", secrets: "checking secret names", artifacts: "checking artifacts", page: "reading the page", data: "looking it up" };
 const ACT_WORDS = { done: "marking it as done", done_without_merging: "marking it as done", start: "starting the task", stop: "stopping the task",
   restart: "restarting the task", rename_task: "renaming the task", move_task: "moving the task", archive: "archiving the task",
   unarchive: "bringing the task back", delete: "deleting the task", answer: "answering", run_schedule: "running the schedule",

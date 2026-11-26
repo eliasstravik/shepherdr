@@ -21,7 +21,7 @@ import { NAME as VOICE_PAGE, needsKey, openVoiceSettings, VoiceSettings } from '
 /** what this page shows, told to the call as it changes: its "here" and "this task" */
 function whereNow() {
   const { ui } = getState()
-  return { device: ui.phone ? 'phone' : 'desktop', place: ui.at, task: ui.task, tab: ui.pane, artifact: ui.art, settings: !!ui.settings, full: false }
+  return { device: ui.phone ? 'phone' : 'desktop', place: ui.at, task: ui.task, tab: ui.pane, artifact: ui.art, version: ui.art ? ui.artV : null, settings: !!ui.settings, full: false }
 }
 
 function screenHead(): Head {
