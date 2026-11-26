@@ -7,6 +7,7 @@
 // serve's own 127.0.0.1 port ("peer not found", checked on 1.104).
 import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "./spawn.ts";
+import { readSettings } from "./settings.ts";
 
 const ME = process.getuid?.() ?? -1;
 const NETSTAT = ["/usr/sbin/netstat", "/usr/bin/netstat"].find((p) => existsSync(p)) ?? "netstat";
@@ -103,7 +104,7 @@ export const trustedPeer = (port: number | undefined, service: number) => {
 };
 
 const run = (argv: string[]) => {
-  try { return spawnSync(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore" }).stdout.toString(); } catch { return ""; }
+  try { return spawnSync(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore", timeout: 5000 }).stdout.toString(); } catch { return ""; }
 };
 
 /** lsof -F's sockets: [pid, uid, "local->remote"] for each socket line. */
@@ -118,20 +119,33 @@ export function lsofSockets(text: string): [number, number, string][] {
   return out;
 }
 
-/** A service account no one can log in to: its passwd line (`id -P <uid>`) ends in a no-login shell. Endpoint agents
- *  such as McAfee's run as one (mfe, uid 503, /usr/bin/false). An account id can't read counts as a person. */
-const NO_LOGIN = new Set(["/usr/bin/false", "/bin/false", "/sbin/nologin", "/usr/sbin/nologin", "/usr/bin/nologin"]);
-export const serviceAccount = (passwd: string) => {
-  const f = passwd.trim().split("\n")[0]?.split(":") ?? [];
-  return f.length >= 7 && NO_LOGIN.has(f[f.length - 1]);
-};
+/** The account name a uid's passwd line (`id -P <uid>`, macOS: 10 fields) gives, or null. Only an exact single line
+ *  whose uid field is the uid asked counts, so a name that looks like a number can't answer for another uid. */
+export function accountOf(passwd: string, uid: number): string | null {
+  const lines = passwd.split("\n").filter((l) => l.trim());
+  if (lines.length !== 1) return null;
+  const f = lines[0].trim().split(":");
+  return f.length === 10 && f[2] === String(uid) && ACCOUNT.test(f[0]) ? f[0] : null;
+}
+const ACCOUNT = /^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/;
 
-/** The uids of processes run by another person: a login account (macOS: 501 and up) other than the owner. With
- *  passwd (uid -> its `id -P` line), a service account no one can log in to doesn't count. */
-export const otherPeople = (ps: string, me = ME, passwd?: (uid: number) => string) =>
+/** Accounts the owner says are services, not people (settings: everywhere.web.ignore_accounts), e.g. McAfee Agent's
+ *  "mfe". Their processes don't stop Tailscale being believed on macOS 27 (lsofPeer). The owner names them: nothing
+ *  is guessed from a shell or a flag, which another account could set or which wouldn't stop it logging in over SSH.
+ *  A listed account's own code is trusted as Tailscale is: list only services you trust. Empty: as before. */
+export function ignoredAccounts(): string[] {
+  try {
+    const v = readSettings()?.everywhere?.web?.ignore_accounts;
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string" && ACCOUNT.test(x)) : [];
+  } catch { return []; }
+}
+
+/** The uids of processes run by another person: a login account (macOS: 501 and up) other than the owner. ignored(uid):
+ *  true for an account the owner listed as a service. */
+export const otherPeople = (ps: string, me = ME, ignored: (uid: number) => boolean = () => false) =>
   [...new Set(ps.split("\n").map((x) => x.trim()).filter((x) => /^\d+$/.test(x)).map(Number))]
     .filter((u) => u >= 501 && u < 2 ** 31 && u !== me)
-    .filter((u) => !passwd || !serviceAccount(passwd(u)));
+    .filter((u) => !ignored(u));
 
 /** macOS without a netstat table (GitHub #777): who holds the caller's side, by lsof. lsof sees every socket of this
  *  user and none of another's (root's, another person's), and always this service's own side of the connection:
@@ -140,7 +154,7 @@ export const otherPeople = (ps: string, me = ME, passwd?: (uid: number) => strin
  *    other person has a process on this Mac (ps lists everyone's) and the connection is still up after ps looked,
  *    so the holder was alive while ps listed it ("system").
  *  lsof not seeing the service's own side means it can't look here: null, as for anything else. */
-export function lsofPeer(port: number, service: number, exec: (argv: string[]) => string, me = ME, self = process.pid): "owner" | "system" | null {
+export function lsofPeer(port: number, service: number, exec: (argv: string[]) => string, me = ME, self = process.pid, ignore: string[] = ignoredAccounts()): "owner" | "system" | null {
   const look = () => {
     const socks = lsofSockets(exec([LSOF, "-nP", `-iTCP@127.0.0.1:${port}`, "-sTCP:ESTABLISHED", "-Fpun"]));
     const ours = socks.some(([pid, , n]) => pid === self && n === `127.0.0.1:${service}->127.0.0.1:${port}`);
@@ -153,7 +167,8 @@ export function lsofPeer(port: number, service: number, exec: (argv: string[]) =
   if (first.callers.length) return first.callers.every((u) => u === me) ? ((lsofProblem = null), "owner") : say("another user opened it");
   const ps = exec([PS, "-axo", "uid="]);
   if (!ps.split("\n").some((x) => x.trim() === String(me))) return say("ps gave no process list"); // ps must list us too
-  if (otherPeople(ps, me, (u) => exec([ID, "-P", String(u)])).length) return say("another person has processes on this Mac, so a hidden caller could be theirs");
+  const ignored = (u: number) => ignore.length > 0 && ignore.includes(accountOf(exec([ID, "-P", String(u)]), u) ?? "");
+  if (otherPeople(ps, me, ignored).length) return say("another person has processes on this Mac, so a hidden caller could be theirs (a service account can be named in settings: web.ignore_accounts)");
   const again = look();
   if (!again.ours || again.callers.length) return say("the connection changed while looking");
   lsofProblem = null;

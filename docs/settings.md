@@ -87,6 +87,7 @@ edits the file, or edit it yourself.
 | `machine.start_memory`, `machine.start_load`, `machine.start_disk` | A machine's limits before new tasks start there |
 | `machine.low_priority`, `machine.worker_memory` | How task agents run on a machine |
 | `machine.home` | A machine's own Assistant, in its home folder: on for the serving machine, off for others unless set |
+| `web.ignore_accounts` | macOS 27 only: account names (e.g. McAfee Agent's `mfe`) whose processes don't count as another person when the web app checks a tailnet visitor. List only service accounts you trust: a listed account could reach the app as you. Empty: every other account counts |
 
 Ignored from 3.2 on, wherever a file still has them: `autopilot`, `tasks.max_running` (Tasks at once), the add-ons'
 `off` list and Notify.
