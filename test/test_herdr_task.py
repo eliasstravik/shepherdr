@@ -4482,7 +4482,8 @@ class CleanEnv(unittest.TestCase):
 
 class NeverRevived(unittest.TestCase):
     """3.2 (step 38): an Assistant or a task's agent the core gave a plain shell (a crash, a power loss, a reboot) is
-    never typed back into that shell. Each tick still records a running agent's session on its terminal (the chat
+    never typed back into that shell; only an Assistant a restart of the machine cut off starts again, beside it (#1545,
+    BackAfterReboot). Each tick still records a running agent's session on its terminal (the chat
     reads its log from there). A fake core in memory: hc and the agents' session files are never touched."""
 
     def setUp(self):
@@ -4506,12 +4507,16 @@ class NeverRevived(unittest.TestCase):
             if args == ("ls",):
                 return {"terminals": [{"address": a, "state": t["state"]} for a, t in self.terms.items()]}
             if args[0] == "get":
-                return json.loads(json.dumps(self.terms[args[1]]))
+                return json.loads(json.dumps(self.terms[args[1]])) if args[1] in self.terms else None
             raise AssertionError(f"hc {args}")
-        for name, value in (("run", hc), ("hc_json", hc_json), ("session_of", lambda pid: self.sessions.get(pid, (None, None)))):
+        for name, value in (("run", hc), ("hc_json", hc_json), ("session_of", lambda pid: self.sessions.get(pid, (None, None))),
+                            ("CUT", os.path.join(self.dir, ".cut-off.json"))):
             p = mock.patch.object(revive, name, value)
             p.start()
             self.addCleanup(p.stop)
+        p = mock.patch.dict(os.environ, {"HERDR_TASK_BOOT_ID": "boot-1"})
+        p.start()
+        self.addCleanup(p.stop)
 
     def assistant(self, addr="t1", pid=100, agent_pid=101, status="done"):
         self.terms[addr] = {"address": addr, "state": "live", "pid": pid, "cwd": "/home/me", "template": "assistant",
@@ -4562,6 +4567,157 @@ class NeverRevived(unittest.TestCase):
             for name in names:
                 self.assertFalse(hasattr(mod, name), f"{mod.__name__}.{name}")
         self.assertFalse(os.path.exists(os.path.join(BIN, "herdr_task", "autopilot.py")))
+
+
+class BackAfterReboot(unittest.TestCase):
+    """#1545: herdr-core brings an Assistant's terminal back after a reboot as a plain shell, labels kept. One that was
+    running when the machine went down starts again on its own conversation (revive.restart_assistant, no message);
+    one the person had stopped stays stopped; one that can't start is listed in one alert with Restart all. The
+    machine's boot is HERDR_TASK_BOOT_ID; the restart itself is faked (NeverRevived's core allows only labels)."""
+
+    # NeverRevived's fake core, reused (a subclass would run its tests again)
+    assistant, crash, tick = NeverRevived.assistant, NeverRevived.crash, NeverRevived.tick
+
+    def setUp(self):
+        NeverRevived.setUp(self)
+        import herdr_task.settings as settings
+        import herdr_task.launch as launch
+        self.restarted, self.next = [], "t9"
+
+        self.ends = False  # the new agent ends at once (its conversation gone)
+
+        def restart(k, message):
+            self.restarted.append((k["address"], message))
+            if self.next:
+                del self.terms[k["address"]]  # the old terminal ends (hc kill, hc rm)
+                self.terms[self.next] = {"address": self.next, "state": "finished" if self.ends else "live", "labels": {}}
+            return self.next
+        self.terms["herdr-automations"] = {"address": "herdr-automations", "state": "live", "labels": {},
+                                           "foreground": {"pid": 9, "name": "python3", "argv": ["python3"]}}
+        for obj, name, value in ((self.r, "restart_assistant", restart), (settings, "machine_name", lambda: "vm-a"),
+                                 (launch, "core_spaces", lambda: [{"id": "sp1", "name": "shop", "folder": "/w/shop"}])):
+            p = self.mock.patch.object(obj, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def boot(self, n):
+        p = self.mock.patch.dict(os.environ, {"HERDR_TASK_BOOT_ID": n, "HERDR_TASK_BOOT_SETTLE": "0"})
+        p.start()
+        self.addCleanup(p.stop)
+
+    def record(self, addr="t1"):
+        return json.loads(self.terms[addr]["labels"]["herdr.resume"])
+
+    def alert(self):
+        v = self.terms["herdr-automations"]["labels"].get("herdr.alert")
+        return json.loads(v) if v else None
+
+    def test_an_assistant_running_at_shutdown_starts_again_on_its_conversation(self):
+        self.assistant()
+        self.tick()
+        self.assertEqual(self.record()["boot"], "boot-1")
+        self.crash("t1")
+        self.boot("boot-2")
+        self.assertEqual(self.tick()["back"], [{"was": "t1", "now": "t9"}])
+        self.assertEqual(self.restarted, [("t1", None)], "resumed, no message typed")
+        self.assertIsNone(self.alert())
+
+    def test_one_the_person_stopped_stays_stopped(self):
+        self.assistant()
+        self.tick()
+        self.crash("t1")  # their /exit or Ctrl+C: a shell in front, in this same boot
+        self.assertEqual(self.tick(), {})
+        self.assertTrue(self.record()["stopped"])
+        self.boot("boot-2")
+        self.assertEqual(self.tick(), {})
+        self.assertEqual(self.restarted, [])
+
+    def test_a_crash_in_this_boot_is_not_restarted(self):
+        self.assistant()
+        self.tick()
+        self.crash("t1")
+        self.tick()
+        self.tick()
+        self.assertEqual(self.restarted, [])
+
+    def test_a_tasks_agent_is_left_to_its_task(self):
+        self.assistant()
+        self.terms["t1"]["labels"]["herdr.task"] = "SHOP-2"
+        self.tick()
+        self.crash("t1")
+        self.boot("boot-2")
+        self.assertEqual(self.tick(), {})
+        self.assertEqual(self.restarted, [])
+
+    def test_a_record_from_before_this_change_is_never_restarted(self):
+        self.assistant()
+        self.tick()
+        rec = self.record()
+        rec.pop("boot")
+        self.terms["t1"]["labels"]["herdr.resume"] = json.dumps(rec)
+        self.crash("t1")
+        self.boot("boot-2")
+        self.tick()
+        self.assertEqual(self.restarted, [])
+
+    def test_one_that_cannot_start_is_in_one_alert_until_it_runs_again(self):
+        self.assistant("t1")
+        self.assistant("t2", pid=110, agent_pid=111)
+        self.terms["t1"]["labels"]["herdr.space"] = "sp1"
+        self.tick()
+        self.crash("t1")
+        self.crash("t2", pid=210)
+        self.boot("boot-2")
+        self.next = None
+        report = self.tick()
+        self.assertEqual(report["not_back"], ["t1", "t2"])
+        a = self.alert()
+        self.assertEqual((a["title"], a["restart"], a["task"]), ("Not back after the restart", ["t1", "t2"], "vm-a"))
+        self.assertIn("shop, me", a["body"])  # its space's name, else its folder's
+        self.assertIn("Restart all", a["body"])
+        # marked stopped: never tried again by itself, and the alert stays as it is
+        self.assertTrue(self.record("t1")["stopped"])
+        self.assertEqual(self.tick(), {})
+        self.assertEqual(len(self.restarted), 2)
+        # one started again (its Restart, Restart all, a message): the alert lists the other; then none: it goes
+        del self.terms["t1"]
+        self.tick()
+        self.assertEqual(self.alert()["restart"], ["t2"])
+        self.assertEqual(self.alert()["id"], a["id"], "the same alert, not a new one")
+        del self.terms["t2"]
+        self.tick()
+        self.assertIsNone(self.alert())
+        self.assertFalse(os.path.exists(self.r.CUT))
+
+    def test_one_that_ends_at_once_is_in_the_alert(self):
+        self.assistant()
+        self.tick()
+        self.crash("t1")
+        self.boot("boot-2")
+        self.ends = True
+        report = self.tick()
+        self.assertNotIn("back", report)
+        self.assertEqual(report["not_back"], ["t9"])
+        self.assertEqual(self.alert()["restart"], ["t9"])
+        del self.terms["t9"]  # its chat's Restart: restart.sh ends and removes it
+        self.tick()
+        self.assertIsNone(self.alert())
+
+    def test_the_alert_comes_back_on_a_new_scheduler_terminal(self):
+        self.assistant()
+        self.tick()
+        self.crash("t1")
+        self.boot("boot-2")
+        self.next = None
+        self.tick()
+        self.terms["herdr-automations"]["labels"] = {}  # scheduler --ensure replaced its terminal
+        self.tick()
+        self.assertEqual(self.alert()["restart"], ["t1"])
+
+    def test_this_machines_boot_is_known(self):
+        os.environ.pop("HERDR_TASK_BOOT_ID")
+        self.r._boot = None
+        self.assertTrue(self.r.boot_id())
 
 
 class AutomationFromAnotherMachine(unittest.TestCase):

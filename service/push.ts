@@ -6,7 +6,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA, where } from "./paths.ts";
 import * as T from "../core/toasts.js";
-import { alertUrl, ACCEPT, ACCEPT_MERGE, choiceButtons, DEFAULT_TOPICS, notifies, notifyOf, pushTopics, REPLY, taskWho, WATCH_BODY, WATCH_TITLE, watchTitle, type PushAction, type PushTopic } from "../web/shared/alerts.ts";
+import { alertUrl, ACCEPT, ACCEPT_MERGE, RESTART_ALL, choiceButtons, DEFAULT_TOPICS, notifies, notifyOf, pushTopics, REPLY, taskWho, WATCH_BODY, WATCH_TITLE, watchTitle, type PushAction, type PushTopic } from "../web/shared/alerts.ts";
 import { excerpt } from "../web/shared/excerpt.ts";
 import { unread } from "../web/shared/needs-you.ts";
 
@@ -14,6 +14,8 @@ import { unread } from "../web/shared/needs-you.ts";
 type Out = {
   title: string; body: string; tag: string; topic: PushTopic; place?: string; waits?: true; url?: string;
   actions?: PushAction[]; answer?: { chat: string; question: string }; accept?: { task: string }; reply?: { chat: string; to?: string };
+  /** #1545: Restart all, for the Assistants a restart of their machine left stopped (that alert's id) */
+  restart?: { alert: string };
 };
 
 /**
@@ -63,7 +65,8 @@ export function alertsOf(snap: any, said: (chat: string) => string | undefined =
     now.set(`msg:${p.chat}:${last}`, { title: T.toastTitle(T.assistantWho(p.name), "New message"), body: said(p.chat) || "Tap to read it.", tag: `msg:${p.chat}`, topic: "assistant", place: p.id, url: alertUrl({ place: p.id }), actions: [REPLY], reply: { chat: p.chat } });
   }
   // an agent's own alert (herdr-task alert), as its toast: a task's always, an Assistant's by its space's Notify
-  for (const a of snap.alerts ?? []) if (a.notify) now.set(`alert:${a.id}`, { title: a.title, body: a.body, tag: `alert:${a.id}`, topic: "needs", ...(a.place ? { place: a.place, url: alertUrl({ place: a.place }) } : {}) });
+  for (const a of snap.alerts ?? []) if (a.notify) now.set(`alert:${a.id}`, { title: a.title, body: a.body, tag: `alert:${a.id}`, topic: "needs", ...(a.place ? { place: a.place, url: alertUrl({ place: a.place }) } : {}),
+    ...(a.restart ? { actions: [RESTART_ALL], restart: { alert: a.id } } : {}) });
   // short enough for a watch: its title on one line, its body in two
   for (const a of now.values()) { a.title = watchTitle(a.title); a.body = excerpt(a.body, WATCH_BODY); }
   return now;
@@ -76,7 +79,7 @@ export function alertsOf(snap: any, said: (chat: string) => string | undefined =
  * task's agent or an alert about a task always; an Assistant's by its space's Notify). chatOf: a terminal's chat key.
  */
 export function agentAlerts(terminals: Iterable<any>, snap: any, chatOf: (address: string) => string | null, home: string) {
-  const out: { id: string; at: number; title: string; what?: string; body: string; chat?: string; task?: string; place?: string; notify: boolean; ended?: true; machine?: string | null; memory?: true }[] = [];
+  const out: { id: string; at: number; title: string; what?: string; body: string; chat?: string; task?: string; place?: string; notify: boolean; ended?: true; machine?: string | null; memory?: true; restart?: true }[] = [];
   const all = [...terminals];
   for (const k of all) {
     let a: any = null;
@@ -93,7 +96,9 @@ export function agentAlerts(terminals: Iterable<any>, snap: any, chatOf: (addres
     const labelled = key ? snap.tasks?.find((t: any) => t.id === (machineOf ? `${machineOf}:${key}` : key)) : null;
     const of = labelled ?? task;
     // SHEP-322: a task's agent by its task's title, never its key
-    const who = (of ? taskWho(snap, of.id) : "") || (k.labels?.["herdr.role"] === "coordinator" || coord ? T.assistantWho(coord?.name) : k.program?.name ?? "Agent");
+    // #1545: the Assistants a restart of a machine left stopped (herdr-task revive.py cut_alert_pass), from that machine
+    const restart = Array.isArray(a.restart) && a.restart.length > 0;
+    const who = (of ? taskWho(snap, of.id) : "") || (restart ? String(a.task || "This computer") : k.labels?.["herdr.role"] === "coordinator" || coord ? T.assistantWho(coord?.name) : k.program?.name ?? "Agent");
     const place = of?.place ?? coord?.id;
     const notify = Boolean(a.about || task || k.labels?.["herdr.task"] || !place || notifies(snap, { go: { place } }));
     // SHEP-246: what the glance feed needs to keep only what is still true: its terminal finished, its machine, and a
@@ -102,7 +107,7 @@ export function agentAlerts(terminals: Iterable<any>, snap: any, chatOf: (addres
     const machine = String(k.address ?? "").includes("/") ? String(k.address).slice(0, String(k.address).indexOf("/")) : null;
     const memory = a.about && /^Memory at \d+%/.test(String(a.title ?? ""));
     out.push({ id: String(a.id), at: Number(a.at) || 0, title: T.clip(T.toastTitle(who, String(a.title ?? "")), 60), what: T.clip(String(a.title ?? ""), 120), body: T.clip(String(a.body ?? ""), 300), ...(chat ? { chat } : {}), ...(of ? { task: of.id } : {}), ...(place ? { place } : {}), notify,
-      ...(ended ? { ended: true as const } : {}), ...(machine ? { machine } : {}), ...(memory ? { memory: true as const } : {}) });
+      ...(ended ? { ended: true as const } : {}), ...(machine ? { machine } : {}), ...(memory ? { memory: true as const } : {}), ...(restart ? { restart: true as const } : {}) });
   }
   // Assistants here that their model's provider kept cutting off (herdr-task tick's .retries.json), once per cut, as
   // the window's (lib/inbox.js readRetries): "<who> · <why>", "Write to it to carry on, or restart it."

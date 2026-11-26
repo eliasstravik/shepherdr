@@ -163,6 +163,8 @@ export const REPLY: PushAction = { action: 'reply', title: 'Reply', type: 'text'
 /** the button on a Ready for review alert: on a branch it merges too, and says so */
 export const ACCEPT: PushAction = { action: 'accept', title: 'Mark as done' }
 export const ACCEPT_MERGE: PushAction = { action: 'accept', title: 'Mark as done and merge' }
+/** #1545: on the alert listing the Assistants a restart of their machine left stopped */
+export const RESTART_ALL: PushAction = { action: 'restart-all', title: 'Restart all' }
 
 /** a card answered from a button, as on its card: never a plan, a merge or a form, which stay a deliberate pick in the
  *  app (sendsOnTap's rule) */

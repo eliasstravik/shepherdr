@@ -279,6 +279,27 @@ const reviving = new Map<string, Promise<{ addr: string; mine?: symbol; result?:
 /** how long a restarted Assistant may take to come up before its message is given up on (the page's Retry) */
 export const REVIVE_WAIT = { ms: 120_000, every: 500 };
 
+/** #1545: an alert's Restart all: each Assistant a restart of its machine left stopped (herdr-task revive.py
+ *  cut_alert_pass lists them on the alert), started again on its own conversation as the Stopped card's Restart. One
+ *  started meanwhile (a message to it, its own Restart) is skipped; the alert goes at that machine's next tick. */
+export async function restartAll(hub: Hub, id: string, compat: Compat) {
+  const alertOf = (t: any) => { try { return JSON.parse(t?.labels?.["herdr.alert"] ?? "null"); } catch { return null; } };
+  const k: any = [...hub.terminals.values()].find((t: any) => alertOf(t)?.id === id);
+  const list = alertOf(k)?.restart;
+  if (!k || !Array.isArray(list)) throw new Error("That alert isn't here any more.");
+  if (!compat.agents?.revive) throw new Error("Restart isn't available here.");
+  const at = String(k.address).includes("/") ? String(k.address).slice(0, String(k.address).indexOf("/") + 1) : "";
+  let started = 0, failed = 0;
+  for (const x of list) {
+    const addr = at + String(x), t: any = hub.terminals.get(addr);
+    // still stopped: a plain shell, or ended at once (cut_alert_pass); restarted meanwhile, it is gone or runs
+    if (!t || (t.state === "live" && inFront(t) !== "shell")) continue;
+    try { await compat.agents.revive(addr, compat.reader?.(addr) ?? null); started++; } catch { failed++; }
+  }
+  if (failed) throw new Error(`${failed} didn't start again: open its chat and press Restart.`);
+  return { ok: true, started };
+}
+
 /** A message to a space whose Assistant ended: it starts again on its own conversation (Agents.revive, the Stopped
  *  card's Restart), and the message goes to the new one once it is up, held for its turn if it is busy. One that can't
  *  start again (its record gone, no log to resume) gives way to a fresh Assistant with the message as its task. */
@@ -546,6 +567,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim().split("\n").pop() || "It didn't stop.");
     return { ok: true };
   }
+  if (b?.type === "restart-all" && typeof b.alert === "string") return restartAll(hub, b.alert, compat);
   if ((b?.type === "held-now" || b?.type === "held-drop") && typeof b.cid === "string") {
     // a queued message (Send now and ×): sent at once, or taken back unsent
     const m = held.find((x) => x.cid === b.cid);
