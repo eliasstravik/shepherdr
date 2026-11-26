@@ -51,7 +51,7 @@ export const NOT_DATA: Record<string, string> = {
  *  sends (web/src, web/plugins) or the Action type lists, and the service answers. */
 export const WRITES = [
   // chats: a message, a reaction, an answer to a question or permission card, a secret given, Stop, Restart, Recap
-  "send", "react", "answer", "secret", "secret-saved", "stop", "steer", "stop-job", "restart", "read", "keys", "text", "model", "effort", "call", "recap",
+  "send", "react", "answer", "secret", "secret-saved", "stop", "steer", "stop-job", "restart", "agent-update", "read", "keys", "text", "model", "effort", "call", "recap",
   // tasks: the review card (Mark as done [and merge]), Start task, the row's menu
   "accept", "close", "delete", "archive", "reopen", "task-start", "task-resume", "task-rename", "task-move", "schedule", "pause", "pin",
   // schedules: Run now, Pause, Resume, Edit
