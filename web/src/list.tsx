@@ -17,6 +17,7 @@ import { press, pressing } from './drag.ts'
 import { buzz, IOS, still } from './motion.ts'
 import { swapRow } from './sides.ts'
 import { NameWithIcon, SpaceIcon } from './space-icon.tsx'
+import { markSpacesRead, spaceUnread } from './read-marks.ts'
 
 const FILTERS: Filter[] = ['Active', 'Archived', 'All']
 
@@ -367,16 +368,30 @@ function WholeName({ name, id }: { name: string; id: string }) {
   )
 }
 
-function groupMenu(anchor: Element, id: string, name: string) {
+/** Mark as read on a group's or a machine's menu, while one of its spaces has something new */
+function readRow(spaces: Space[]): MenuRow[] {
+  const snap = getState().snap
+  const fresh = snap ? spaces.filter((p) => spaceUnread(snap, p)) : []
+  return snap && fresh.length ? [{ icon: 'check', label: 'Mark as read', run: () => markSpacesRead(snap, fresh) }] : []
+}
+
+function groupMenu(anchor: Element, id: string, name: string, spaces: Space[]) {
   openMenu(
     anchor,
     [
+      ...readRow(spaces),
       { icon: 'pen', label: 'Rename', run: () => renameDialog(name, (n) => tryAct({ type: 'rename', id, name: n })) },
       // removing a group keeps its spaces, ungrouped
-      { icon: 'bin', label: 'Remove group', danger: true, line: true, run: () => void tryAct({ type: 'section', op: 'delete', id }) },
+      { icon: 'bin', label: 'Remove group', danger: true, line: true, run: () => void removeGroup(id, name) },
     ],
     { label: name },
   )
+}
+
+/** a group goes at once; the service keeps it for the toast's Undo (section restore) */
+async function removeGroup(id: string, name: string) {
+  if (!(await tryAct({ type: 'section', op: 'delete', id }))) return
+  notice(`Removed the group “${name}”`, { ms: 8000, sub: 'Its spaces stay, ungrouped.', act: { label: 'Undo', run: () => void tryAct({ type: 'section', op: 'restore' }) } })
 }
 
 /** Spaces are dragged into the order you want: among those beside them, or onto another group of the same machine
@@ -403,9 +418,10 @@ function SpaceRow({ snap, p, sub, under, siblings, section }: { snap: Snapshot; 
   const n = needsCount(snap, p.id)
   const dim = !!placeDown(snap, p.id) || p.archived
   const tilde = isTilde(snap, p)
+  const fresh = at !== p.id && spaceUnread(snap, p)
   return (
     <div className="rowx" data-project={p.id} data-section={section} data-machine={p.machine} data-drop={under} onPointerDown={dragSpace(snap, p, under, siblings)}>
-      <Row lead={<SpaceIcon snap={snap} id={p.id} />} label={tilde ? '~' : p.name} {...(tilde ? { 'aria-label': spaceLabel(snap, p.id) } : {})} className={[sub ? 'sub' : '', dim ? 'dim' : ''].join(' ')} current={at === p.id} end={<Cnt n={n} />} onClick={() => go(p.id)} />
+      <Row lead={<SpaceIcon snap={snap} id={p.id} />} label={tilde ? '~' : p.name} {...(tilde ? { 'aria-label': spaceLabel(snap, p.id) } : {})} className={[sub ? 'sub' : '', dim ? 'dim' : '', fresh ? 'unread' : ''].join(' ')} current={at === p.id} end={<Cnt n={n} />} onClick={() => go(p.id)} />
       <IB
         icon="dots"
         label={`More for ${tilde ? spaceLabel(snap, p.id) : p.name}`}
@@ -430,6 +446,7 @@ export function machineMenu(anchor: Element | null, key: string, snap = getState
   const renamed = m.name !== own
   const rename = (name: string) => tryAct({ type: 'rename', id: m.id, name })
   const rows: MenuRow[] = [
+    ...readRow(snap.places.filter((p) => p.machine === key && !isEverything(snap, p.id))),
     { icon: 'pen', label: 'Rename', run: () => renameDialog(m.name, rename) },
     ...(renamed ? [{ icon: 'reload' as const, label: `Use its own name (${own})`, run: () => void rename('') }] : []),
     { icon: 'gear', label: 'Machine settings', line: true, run: () => openSettings('all', 'Machines') },
@@ -661,9 +678,9 @@ export function List({ snap }: { snap: Snapshot }) {
               }}
             >
               <Row icon={ui.shut[g.id] ? 'right' : 'down'} label={g.name} expanded={!ui.shut[g.id]} onClick={() => setUI({ shut: { ...ui.shut, [g.id]: !ui.shut[g.id] } })} />
-              <IB icon="dots" label={`More for ${g.name}`} aria-haspopup="menu" onClick={(e) => groupMenu(e.currentTarget, g.id, g.name)} />
+              <IB icon="dots" label={`More for ${g.name}`} aria-haspopup="menu" onClick={(e) => groupMenu(e.currentTarget, g.id, g.name, g.spaces)} />
             </div>,
-            ...(ui.shut[g.id] ? [] : g.spaces.map((p) => <SpaceRow key={p.id} snap={snap} p={p} sub under={g.id} siblings={g.spaces.map((x) => x.id)} section={g.id} />)),
+            ...(ui.shut[g.id] ? g.spaces.filter((p) => p.id === ui.at || spaceUnread(snap, p)) : g.spaces).map((p) => <SpaceRow key={p.id} snap={snap} p={p} sub under={g.id} siblings={g.spaces.map((x) => x.id)} section={g.id} />),
           ]),
           ...spaces.map((p) => <SpaceRow key={p.id} snap={snap} p={p} under={`m:${key}`} siblings={spaces.map((x) => x.id)} />),
         ]

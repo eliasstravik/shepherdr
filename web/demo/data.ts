@@ -169,6 +169,9 @@ export function snapshot(mode: 'normal' | 'empty' | 'down' | 'more' | 'long' | '
       // SHEP-429: every other machine's home space, its first row as ~; pi has nothing else
       place('p:mac-mini:tilde', 'home', 'mac-mini', at('/Users/sam', '~', { home: true, unnamed: true })), place('p:vm:home', 'home', 'vm', at('/home/sam', '~', { home: true, unnamed: true })), place('p:studio:home', 'home', 'studio', at('/Users/sam', '~', { home: true, unnamed: true })), place('p:pi:home', 'home', 'pi', at('/home/sam', '~', { home: true, unnamed: true }))],
     sections: [{ id: 's:store', name: 'Store', machine: 'mac-mini', spaces: [P.shop, P.blog] }],
+    // #1560: blog's and garden-app's Assistants said something you haven't read: their rows are bold until opened
+    last: empty ? {} : { [P.blog]: 3, [P.garden]: 2, [P.shop]: 5 },
+    read: empty ? {} : { [P.blog]: 2, [P.garden]: 1, [P.shop]: 5 },
     machines: [
       { id: 'm:mac-mini', machine: 'mac-mini', name: 'mac-mini', status: 'idle', here: true, health: { meters: [{ name: 'CPU', pct: 34, detail: '', level: 'ok' }, { name: 'Memory', pct: 71, detail: '', level: 'ok' }, { name: 'Disk', pct: 58, detail: '', level: 'ok' }], herdr: true, working: 5, held: 0, at: '' } },
       { id: 'm:vm', machine: 'vm', name: 'vm', status: down ? 'off' : 'idle', ...(down ? { unreachableSince: '14:02' } : {}), health: { meters: [{ name: 'CPU', pct: 12, detail: '', level: 'ok' }, { name: 'Memory', pct: 40, detail: '', level: 'ok' }, { name: 'Disk', pct: empty ? 40 : 91, detail: '', level: 'over' }], herdr: true, working: 2, held: 0, at: '' } },
