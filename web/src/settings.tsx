@@ -12,6 +12,7 @@ import { newerServed, notice, openSettings, registry, setUI, tryAct, updateNow, 
 import { openDialog, openForm } from './overlay.tsx'
 import { openPicker, PickerHead, pickFor, sayPick, useCatalog, type Role } from './picker.tsx'
 import { MOTIONS, setPref, THEMES, usePrefs, WIDTHS } from './prefs.ts'
+import { canKeepAwake, setAwake, useAwake } from './awake.ts'
 import { setChatSide, useSides, type Layout, type Side } from './sides.ts'
 import { OWN_VERSION } from './update.ts'
 import { IconButton } from './space-icon.tsx'
@@ -158,6 +159,7 @@ function SpaceRepos({ snap, place }: { snap: Snapshot; place: string }) {
 function General() {
   const p = usePrefs()
   const sides = useSides()
+  const awake = useAwake()
   const { now, read } = useDeviceAlerts()
   const run = async (f: () => Promise<string | void>) => {
     try {
@@ -176,6 +178,7 @@ function General() {
       <SRow label="Chat width" wrap><Seg label="Chat width" values={WIDTHS} value={p.width} onChange={(v) => setPref('width', v)} /></SRow>
       <SRow label="Motion"><Seg label="Motion" values={MOTIONS} value={p.motion} onChange={(v) => setPref('motion', v)} /></SRow>
       <SidesRow {...sides} />
+      {canKeepAwake() && <SRow label="Keep the screen on"><Tgl label="Keep the screen on" on={awake} onChange={setAwake} /></SRow>}
       <h3>Notifications</h3>
       {now && now.state !== 'on' && (
         <div className="banner" style={{ margin: '0 0 4px' }}>

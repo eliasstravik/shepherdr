@@ -3,3 +3,5 @@
 
 /** a pointer that is a finger: a phone or a tablet, where the plus menu is */
 export const touch = () => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches
+/** a mouse or trackpad as the main pointer: a desktop (a phone's or tablet's is a finger) */
+export const fineOnly = () => typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches
