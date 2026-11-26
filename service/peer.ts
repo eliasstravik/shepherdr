@@ -103,11 +103,15 @@ export const trustedPeer = (port: number | undefined, service: number) => {
   return process.platform === "darwin" && peerProblem !== null && lsofPeer(port, service, run) !== null;
 };
 
-/** A finished command's output, or "" when it was stopped by the timeout or failed: a ps cut short could miss a person. */
+/** id's output, or "" when it was stopped by its timeout or failed (a directory lookup that hangs must not hold the
+ *  service, and a cut-short answer must not count). */
 export const outputOf = (r: { stdout?: { toString(): string } | null; exitCode?: number | null; exitedDueToTimeout?: boolean }) =>
   r.exitedDueToTimeout || r.exitCode !== 0 ? "" : r.stdout?.toString() ?? "";
 const run = (argv: string[]) => {
-  try { return outputOf(spawnSync(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore", timeout: 5000 })); } catch { return ""; }
+  try {
+    if (argv[0] === ID) return outputOf(spawnSync(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore", timeout: 5000 }));
+    return spawnSync(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore" }).stdout.toString();
+  } catch { return ""; }
 };
 
 /** lsof -F's sockets: [pid, uid, "local->remote"] for each socket line. */
