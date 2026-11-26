@@ -51,8 +51,11 @@ def holds_open(s, t):
     if t.get("kept_open"):
         return True
     live = [k for k in live_agents(s.key(t)) if agent_running(k)] if t["state"] == "running" else []
-    # #1554: one that ended its turn without ready (Needs you: out of review rounds, a question) no longer holds it
-    return bool(live) and task_status(t, live)[0] == "working"
+    if live and t.get("review_out"):
+        # #1554: its agent said ready, refused only for being out of review rounds (Needs you): its work was done, so
+        # its merge finishes it, unless its agent is at work again
+        return any(status_word(k) == "working" for k in live)
+    return bool(live)
 
 
 def merge_held(s, t):

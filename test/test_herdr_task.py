@@ -2927,13 +2927,17 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         self.assertEqual(self.task["pr"]["number"], 704)
 
     def test_a_merged_pull_request_finishes_a_task_waiting_on_the_person(self):
-        """#1554: its agent ended its turn without ready (Out of review rounds: Needs you), then its pull request merged
-        on GitHub: the tick files it as done. An agent still at work keeps it open."""
+        """#1554: its agent said ready, refused for being out of review rounds (Needs you), then its pull request merged
+        on GitHub: the tick files it as done. An agent at work again keeps it open, and so does an idle one that never
+        said ready (#844: a fix merged on the way)."""
         tip = self.change(self.task["worktree"], "reactions on the left")
         self.tick_once()
         self.github([{"number": 706, "url": "u", "isCrossRepository": False, "baseRefName": "main", "headRefOid": tip}])
-        self.task.update(review_out=True, started=0)
+        self.task.update(started=0)
         idle = {"address": "t1", "status": {"state": "idle"}, "foreground": {"name": "claude"}}
+        self.live, self.task["gh_checked"] = [idle], 0
+        self.assertEqual(self.tick_once(), ("running", False))  # never said ready: its work may go on (#844)
+        self.task["review_out"] = 1
         self.live, self.task["gh_checked"] = [{**idle, "status": {"state": "working"}}], 0
         self.assertEqual(self.tick_once(), ("running", False))  # its agent at work: never under it
         self.live, self.task["gh_checked"] = [idle], 0
