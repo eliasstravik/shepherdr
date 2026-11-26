@@ -61,7 +61,7 @@ function AlertToasts() {
     if (!primed) return void (primed = true)
     for (const a of fresh) {
       if (!a.notify || a.ended || !(Date.now() - (Number(a.at) || 0) < ALERT_FRESH_MS)) continue
-      const url = a.place ? alertUrl({ place: a.place, ...(a.task ? { task: a.task } : {}) }) : null
+      const url = a.place ? alertUrl({ place: a.place, ...(a.task ? { task: a.task } : {}) }) : a.task ? `./?${new URLSearchParams({ task: a.task })}` : null
       notice(a.title, { sub: a.body || undefined, sticky: true, ...(url ? { act: { label: 'Open', run: () => openLink(url, true) } } : {}) })
     }
   }, [alerts, !!snap])
