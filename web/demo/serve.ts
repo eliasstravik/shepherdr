@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Chat, Message, Snapshot, Task } from '../shared/types.ts'
 import { withLinks } from '../../service/artifact-links.ts'
+import { commandList } from '../../core/slash.js'
 import { artifacts, catalog, chats as seed, config, EV, snapshot } from './data.ts'
 
 const dist = join(fileURLToPath(new URL('../', import.meta.url)), 'dist')
@@ -259,6 +260,8 @@ Bun.serve<Sock['data'], never>({
     if (path === '/api/screen/shot') return new Response(Bun.file(shotFile(url.searchParams.get('key') ?? '')), { headers: { 'content-type': 'image/jpeg', 'cache-control': 'no-store' } })
     if (path === '/api/me') return Response.json({ login: 'sam', off: [] })
     // the # list's spaces (service/main.ts reachOf): every space but Everything, this machine's and the others'
+    // the / list's commands (service/main.ts, core/slash.js): Claude Code's, and one of the person's own
+    if (path === '/api/commands') return Response.json({ commands: commandList('claude', [{ name: 'ship', about: 'Commit, push and open a pull request' }]) })
     if (path === '/api/reach') return Response.json({ from: state.normal.host, checked: Date.now(), spaces: state.normal.places.filter((p) => p.id !== EV).map((p) => { const id = p.id.split('/').pop()!, far = p.machine && p.machine !== state.normal.host; return { id, name: p.name, route: far ? p.machine : '', machine: p.machine ?? state.normal.host, target: far ? `${p.machine}/${id}` : id } }) })
     if (path === '/api/action') return Response.json(action((await req.json()) as Record<string, any>) ?? { ok: true })
     if (path === '/api/upload') {

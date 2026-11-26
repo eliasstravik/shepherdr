@@ -34,6 +34,7 @@ export const NOT_DATA: Record<string, string> = {
   "api:action": "the actions themselves (act; their read ones are SOURCES)",
   "api:dictate": "dictation turns speech into text, nothing shown",
   "api:upload": "uploads a file to send",
+  "api:commands": "the agent's own commands, for the / list in the message box: voice says a command by itself",
   "api:reach": "the spaces a chat's agent can reach, for the # and @ list in the message box: voice names a space or task by itself",
   "api:spaces": "makes a new space (a change: asked for in Everything, or done on the page with screen)",
   "api:file": "a picture or file sent in a chat, as bytes",

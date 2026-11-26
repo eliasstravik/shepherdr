@@ -214,7 +214,7 @@ export function choiceList(f: 'effort' | 'speed' | 'mode', p: Pick, cat?: Catalo
   }
 }
 
-function AgentPicker({ title, machine, start, onChange, close }: { title: string; machine: string; start: Pick; onChange: (p: Pick) => void; close: () => void }) {
+function AgentPicker({ title, machine, start, typed, onChange, close }: { title: string; machine: string; start: Pick; typed?: string; onChange: (p: Pick) => void; close: () => void }) {
   const snap = getState().snap
   const cat = useCatalog(machine)
   const [p, setP] = useState<Pick>(start)
@@ -224,6 +224,20 @@ function AgentPicker({ title, machine, start, onChange, close }: { title: string
     setP(next)
     onChange(next)
   }
+  // "/model sonnet" in a chat: once the models are read, the one it names is picked; a name no model has opens the
+  // Model list searching for it
+  const named = useRef(!typed)
+  useEffect(() => {
+    if (named.current || !cat || !typed) return
+    named.current = true
+    const hit = findModel(cat, start.agent, typed)
+    const ha = hit && agentOf(cat, hit.agent), hm = ha?.models.find((x) => x.id === hit!.model)
+    if (ha && hm) set(withModel(hit!.agent === start.agent ? start : { agent: ha.id }, ha, hm))
+    else {
+      setField('model')
+      setQ(typed)
+    }
+  }, [cat])
   const a = agentOf(cat, p.agent)
   const m = modelOf(a, p)
   const w = pickWords(p, cat)
@@ -353,8 +367,7 @@ function AgentPicker({ title, machine, start, onChange, close }: { title: string
                       </>
                     }
                     onClick={() => {
-                      const eff = x.efforts?.length ? x.efforts : (a?.efforts ?? [])
-                      set({ ...p, model: x.id, effort: p.effort && eff.includes(p.effort) ? p.effort : (x.defaultEffort ?? p.effort ?? null), fast: (x.speeds ?? ['regular']).includes(speedOf(p)) ? p.fast : false })
+                      set(withModel(p, a, x))
                       open('')
                     }}
                   />
@@ -368,10 +381,29 @@ function AgentPicker({ title, machine, start, onChange, close }: { title: string
   )
 }
 
-/** Open the agent picker. `title` says what it sets: "This chat runs on", "Tasks run on", "The new space runs on". */
-export function openPicker(o: { title: string; machine: string; pick: Pick; onChange: (p: Pick) => void; onClose?: (p: Pick) => void }) {
+/** a pick with another model: its effort and speed kept where the model has them */
+function withModel(p: Pick, a: CatalogAgent | undefined, x: CatalogModel): Pick {
+  const eff = x.efforts?.length ? x.efforts : (a?.efforts ?? [])
+  return { ...p, model: x.id, effort: p.effort && eff.includes(p.effort) ? p.effort : (x.defaultEffort ?? p.effort ?? null), fast: (x.speeds ?? ['regular']).includes(speedOf(p)) ? p.fast : false }
+}
+
+/** the model a typed name means ("sonnet", "gpt-5.5", "Opus 5.5"): by id or name, then by their start; the agent's
+ *  own models first */
+export function findModel(cat: Catalog, agent: string, name: string): { agent: string; model: string } | null {
+  const n = (s: string) => String(s ?? '').toLowerCase().replace(/[^a-z0-9.]+/g, '')
+  const q = n(name)
+  if (!q) return null
+  const agents = [...cat.agents.filter((a) => a.id === agent), ...cat.agents.filter((a) => a.id !== agent && a.installed)]
+  const rows = agents.flatMap((a) => a.models.map((m) => ({ agent: a.id, model: m.id, keys: [n(m.id), n(m.name)] })))
+  const hit = rows.find((r) => r.keys.includes(q)) ?? rows.find((r) => r.keys.some((k) => k.startsWith(q)))
+  return hit ? { agent: hit.agent, model: hit.model } : null
+}
+
+/** Open the agent picker. `title` says what it sets: "This chat runs on", "Tasks run on", "The new space runs on".
+ *  `typed`: the model a /model named, picked once the models are read */
+export function openPicker(o: { title: string; machine: string; pick: Pick; typed?: string; onChange: (p: Pick) => void; onClose?: (p: Pick) => void }) {
   let last = o.pick
-  openDialog((close) => <AgentPicker title={o.title} machine={o.machine} start={o.pick} onChange={(p) => { last = p; o.onChange(p) }} close={close} />, { wide: true, bare: true, label: o.title, onClose: () => o.onClose?.(last) })
+  openDialog((close) => <AgentPicker title={o.title} machine={o.machine} start={o.pick} typed={o.typed} onChange={(p) => { last = p; o.onChange(p) }} close={close} />, { wide: true, bare: true, label: o.title, onClose: () => o.onClose?.(last) })
 }
 
 /* ---------- machines and spaces ---------- */
