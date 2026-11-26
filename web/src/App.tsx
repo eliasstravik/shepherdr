@@ -195,7 +195,8 @@ function Toasts() {
           onPointerLeave={() => hold('hover', false)}
         >
           {t.busy ? <I n="working" c="s16" /> : t.tone === 'error' ? <I n="warn" c="s16 c-red" /> : null}
-          <span className="tt">{t.text}</span>
+          <span className="tt">{t.text}{t.sub && <span className="ts">{t.sub}</span>}</span>
+          {t.act && <button type="button" className="ta" onClick={(e) => { t.act!.run(); close(t.id, e) }}>{t.act.label}</button>}
           <button type="button" className="tx" aria-label="Dismiss" onClick={(e) => close(t.id, e)}>
             <I n="x" c="s16" />
           </button>

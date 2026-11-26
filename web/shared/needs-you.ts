@@ -13,11 +13,11 @@
 // Assistant's own card, a helper's alert that is no task's (the VM sign-in helper's "Finish sign-in"), a machine's
 // memory alert, an automation that failed (its row in Automations says so): none of them are rows, counts or badges here.
 // Each leaves at the same moment everywhere: answered (its need goes), its alert over (its
-// agent ended, its task done, 15 minutes old, or its machine's memory back).
+// agent ended, its task done, 15 minutes old while its task does not wait on you, or its machine's memory back).
 import { notifyOf } from './alerts.ts'
 import type { Need, Place, Snapshot, Task } from './types.ts'
 
-type Alert = NonNullable<Snapshot['alerts']>[number]
+export type Alert = NonNullable<Snapshot['alerts']>[number]
 
 export type Waiting = {
   /** stable while it lasts, the glance feed's item key: need:<chat>:<id>, task:<id>, alert:<id> */
@@ -35,7 +35,8 @@ export type Waiting = {
 
 export type NeedsSnap = Pick<Snapshot, 'places' | 'tasks' | 'needs'> & Partial<Pick<Snapshot, 'alerts' | 'last' | 'read' | 'settings' | 'machines'>>
 
-/** an agent's own alert is a moment, as in the app (a toast, once): Needs you lists it this long, then lets it go */
+/** an agent's own alert is a moment, as in the app (a toast, once): Needs you lists it this long, then lets it go;
+ *  longer while its task still waits on you (#1561: a guard's approval code it is stuck on) */
 export const ALERT_FRESH_MS = 15 * 60_000
 /** a memory guard's alert is over once its machine's memory is back under this (herdr-task tick GUARD_BACK_UNDER) */
 export const MEMORY_BACK_UNDER = 75
@@ -59,9 +60,13 @@ const taskOfAlert = (snap: Pick<Snapshot, 'tasks'>, a: Alert) => (a.task ? snap.
  * last read; none: by age alone).
  */
 export function alertStands(a: Alert | undefined | null, snap: Pick<NeedsSnap, 'tasks' | 'machines'>, now: number): boolean {
-  if (!a?.notify || a.ended || !(now - (Number(a.at) || 0) < ALERT_FRESH_MS)) return false
+  if (!a?.notify || a.ended) return false
+  const at = Number(a.at) || 0
   const task = taskOfAlert(snap, a)
   if (task && (task.archived || task.status === 'done')) return false
+  // past its 15 minutes, it stands while its task still waits on you, a wait that began while it was fresh
+  const waits = !!task && task.status === 'need' && !(task.needsAt && task.needsAt - at > ALERT_FRESH_MS)
+  if (!(now - at < ALERT_FRESH_MS) && !waits) return false
   if (a.memory) {
     const m = (snap.machines ?? []).find((x) => (a.machine ? x.machine === a.machine && !x.here : x.here))
     const mem = (m?.stats?.health as { memory?: unknown } | undefined)?.memory
@@ -94,6 +99,21 @@ export function needsYou(snap: NeedsSnap, now = Date.now()): Waiting[] {
   }
   return out.sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
 }
+
+/** each task's standing alert, its newest (#1561): its words show on its row, in it and in a toast */
+export function taskAlerts(snap: Pick<NeedsSnap, 'tasks' | 'alerts' | 'machines'>, now = Date.now()): Map<string, Alert> {
+  const out = new Map<string, Alert>()
+  for (const a of snap.alerts ?? []) {
+    const t = taskOfAlert(snap, a)
+    if (!t || !alertStands(a, snap, now)) continue
+    const had = out.get(t.id)
+    if (!had || (Number(a.at) || 0) > (Number(had.at) || 0)) out.set(t.id, a)
+  }
+  return out
+}
+
+/** an alert's own words, without the "<task> · " its toast title starts with */
+export const alertWhat = (a: Pick<Alert, 'title' | 'what'>) => a.what || a.title
 
 /** the Assistants' chats with a new message you haven't read (their space not muted, no card of their own waiting):
  *  Chat's, never Needs you's (SHEP-253) */

@@ -12,8 +12,12 @@ export type ToastOpts = {
   busy?: boolean
   /** stays until it is closed: an error that asks the person to do something */
   sticky?: boolean
+  /** more words under its first line (an agent's alert's body) */
+  sub?: string
+  /** a button that goes where it is about ("Open") */
+  act?: { label: string; run: () => void }
 }
-export type Toast = { id: number; text: string; tone: Tone; busy: boolean; sticky: boolean }
+export type Toast = { id: number; text: string; tone: Tone; busy: boolean; sticky: boolean; sub?: string; act?: ToastOpts['act'] }
 
 /** the most shown at once: an older one gives its place to a new one */
 export const MAX = 3
@@ -35,7 +39,7 @@ const holds = new Set<string>()
 const listeners = new Set<() => void>()
 
 function changed() {
-  shown = live.map(({ id, text, tone, busy, sticky }) => ({ id, text, tone, busy, sticky }))
+  shown = live.map(({ id, text, tone, busy, sticky, sub, act }) => ({ id, text, tone, busy, sticky, sub, act }))
   listeners.forEach((l) => l())
 }
 function run(t: Live) {
@@ -57,7 +61,7 @@ export function toast(text: string, o: ToastOpts = {}): number {
   const tone = o.tone ?? 'info'
   const same = live.find((t) => t.text === text)
   if (same) dismiss(same.id, true)
-  const t: Live = { id: next++, text, tone, busy: !!o.busy, sticky: !!o.sticky, left: o.busy ? (o.ms ?? 60_000) : lasts(text, tone, o.ms), since: 0, timer: null }
+  const t: Live = { id: next++, text, tone, busy: !!o.busy, sticky: !!o.sticky, sub: o.sub, act: o.act, left: o.busy ? (o.ms ?? 60_000) : lasts(o.sub ? `${text} ${o.sub}` : text, tone, o.ms), since: 0, timer: null }
   live = [...live, t]
   while (live.length > MAX) dismiss(live[0].id, true)
   run(t)

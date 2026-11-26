@@ -11,6 +11,8 @@ import { AgentField, pickFor, type Pick } from '@client/picker.tsx'
 import { edge } from '@client/resize.ts'
 import { ActBtn, ActError, Btn, Cnt, cx, Empty, Hd, I, IB, MenuGroup, Row, useCardActs } from '@client/ui.tsx'
 import { waiting } from '@client/pending.ts'
+import { copyText } from '@client/copy.ts'
+import { alertWhat, taskAlerts, type Alert } from '@shared/needs-you.ts'
 import { focusBox, focusChat, focusTask } from '@client/commands.ts'
 import { SpaceIcon } from '@client/space-icon.tsx'
 import type { MergeEvidence, Message, Snapshot, Task } from '@shared/types.ts'
@@ -350,6 +352,21 @@ export function StoppedCard({ t }: { t: Task }) {
   )
 }
 
+/** its agent's alert while it stands (#1561): its words, say a guard's one-time approval code, and Copy */
+function AlertCard({ a }: { a: Alert }) {
+  return (
+    <div className="card" data-card={`alert:${a.id}`}>
+      <span className="t">{alertWhat(a)}</span>
+      {a.body && <span>{a.body}</span>}
+      {a.body && (
+        <div className="acts">
+          <Btn onClick={(e) => void copyText(a.body, e.currentTarget).then((ok) => ok && notice('Copied'))}>Copy</Btn>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** In a chat: the cards of the tasks that need the person there (a review, a stopped agent), each where it came up.
  *  The app puts them there from each task's status, not an agent. In a task: its own review or stopped card. */
 function taskCards(snap: Snapshot, thread: Thread): { key: string; at?: number; past?: boolean; after?: (m: Message) => boolean; node: ReactNode }[] {
@@ -358,9 +375,10 @@ function taskCards(snap: Snapshot, thread: Thread): { key: string; at?: number; 
   const halted = (t: Task) => tstate(t) === 'ask' && !!t.stopped && t.stopped.by !== 'you'
   if (thread.task) {
     const t = thread.task
+    const alert = taskAlerts(snap).get(t.id)
     // each where it came up among the messages, never held at the end (SHEP-419)
     // a Ready card still waiting goes below what was said after it (#1475)
-    return [...(reviewing(t) ? [{ key: `review:${t.id}`, at: t.needsAt ?? t.needsAtWas, past: tstate(t) === 'done', after: () => true, node: <ReviewCard t={t} ctx="thread" /> }] : []), ...(halted(t) ? [{ key: `stopped:${t.id}`, at: t.needsAt, node: <StoppedCard t={t} /> }] : [])]
+    return [...(reviewing(t) ? [{ key: `review:${t.id}`, at: t.needsAt ?? t.needsAtWas, past: tstate(t) === 'done', after: () => true, node: <ReviewCard t={t} ctx="thread" /> }] : []), ...(halted(t) ? [{ key: `stopped:${t.id}`, at: t.needsAt, node: <StoppedCard t={t} /> }] : []), ...(alert ? [{ key: `alert:${alert.id}`, at: alert.at, after: () => true, node: <AlertCard a={alert} /> }] : [])]
   }
   // cards stay in the chat that asked (SHEP-325): a space's Tasks also holds what works in its folder, its chat does not
   const mine = tasksIn(snap, thread.place).filter((t) => isEverything(snap, thread.place) || t.place === thread.place)
@@ -482,7 +500,7 @@ function TaskPane({ t }: { t: Task }) {
 
 /* ---------- the list ---------- */
 
-function TaskRow({ snap, t, tag }: { snap: Snapshot; t: Task; tag: boolean }) {
+function TaskRow({ snap, t, tag, alert }: { snap: Snapshot; t: Task; tag: boolean; alert?: Alert }) {
   const cur = useUI((u) => u.task === t.id)
   const down = placeDown(snap, t.place)
   const s = tstate(t)
@@ -497,7 +515,12 @@ function TaskRow({ snap, t, tag }: { snap: Snapshot; t: Task; tag: boolean }) {
         <StatusIcon t={t} dim={!!down} />
         <span className="n">
           <span className="l1">{t.name}</span>
-          {sub && <span className="l2">{sub}</span>}
+          {alert && !down ? (
+            <>
+              <span className="l2 alw">{alertWhat(alert)}</span>
+              {alert.body && <span className="l2">{alert.body}</span>}
+            </>
+          ) : sub && <span className="l2">{sub}</span>}
           {tag && t.work && <RepoLine snap={snap} t={t} />}
         </span>
         {when && <span className="v">{when}</span>}
@@ -535,7 +558,8 @@ function Now({ snap, place }: { snap: Snapshot; place: string }) {
   // one repo picked: its head on top (its space, or Make it a space), and the rows leave out its tag
   const repo = f.repo.length === 1 ? reposOf(snap).find((r) => r.key === f.repo[0]) : undefined
   const top = repo && <RepoHead snap={snap} r={repo} />
-  const groups = nowGroups(filterTasks(snap, f, place)).filter((g) => g.tasks.length)
+  const alerts = taskAlerts(snap)
+  const groups = nowGroups(filterTasks(snap, f, place), alerts).filter((g) => g.tasks.length)
   if (!groups.length)
     return snap.tasks.length ? (
       <>
@@ -560,7 +584,7 @@ function Now({ snap, place }: { snap: Snapshot; place: string }) {
               {g.name} · {g.tasks.length}
               <I n="down" c="s16" />
             </button>
-            {o && shown.map((t) => <TaskRow key={t.id} snap={snap} t={t} tag={!repo} />)}
+            {o && shown.map((t) => <TaskRow key={t.id} snap={snap} t={t} tag={!repo} alert={alerts.get(t.id)} />)}
             {o && shown.length < g.tasks.length && (
               <button type="button" className="grp" onClick={() => setUI({ doneShown: ui.doneShown + 20 })}>Show more</button>
             )}

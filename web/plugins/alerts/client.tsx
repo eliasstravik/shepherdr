@@ -2,8 +2,9 @@
 // alerts left on the phone in step with what still waits, and takes a tapped alert straight to its task. The choice
 // itself is in Settings › General (device.ts).
 import { useEffect, useState } from 'react'
-import { definePlugin, openLink, setPushEndpoint, useSnap, useStore, visibleChats } from '@client/kernel.ts'
-import { keptTags } from '@shared/alerts.ts'
+import { definePlugin, notice, openLink, setPushEndpoint, useSnap, useStore, visibleChats } from '@client/kernel.ts'
+import { alertUrl, keptTags } from '@shared/alerts.ts'
+import { ALERT_FRESH_MS } from '@shared/needs-you.ts'
 import { needsCount } from '@shared/view.ts'
 import { registerWorker } from './worker.ts'
 
@@ -44,10 +45,33 @@ function Keeper() {
   return null
 }
 
+/** the alerts this screen has seen: the ones there when it opened show on their task's row, not as a toast */
+const seen = new Set<string>()
+let primed = false
+
+/** an agent's new alert as a toast that stays until closed (#1561): its push is dropped while the app is on screen,
+ *  and its words (a guard's approval code) must reach the person; Open goes to its task */
+function AlertToasts() {
+  const snap = useSnap()
+  const alerts = snap?.alerts
+  useEffect(() => {
+    if (!snap) return
+    const fresh = (alerts ?? []).filter((a) => !seen.has(a.id))
+    for (const a of fresh) seen.add(a.id)
+    if (!primed) return void (primed = true)
+    for (const a of fresh) {
+      if (!a.notify || a.ended || !(Date.now() - (Number(a.at) || 0) < ALERT_FRESH_MS)) continue
+      const url = a.place ? alertUrl({ place: a.place, ...(a.task ? { task: a.task } : {}) }) : a.task ? `./?${new URLSearchParams({ task: a.task })}` : null
+      notice(a.title, { sub: a.body || undefined, sticky: true, ...(url ? { act: { label: 'Open', run: () => openLink(url, true) } } : {}) })
+    }
+  }, [alerts, !!snap])
+  return null
+}
+
 export default definePlugin({
   name: 'alerts',
   setup(reg) {
-    reg.overlays.push(Keeper)
+    reg.overlays.push(Keeper, AlertToasts)
     if (!('serviceWorker' in navigator)) return
     registerWorker()
       // tell the server which push subscription is this screen, so it sends none while the app is on screen
