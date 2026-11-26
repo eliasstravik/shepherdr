@@ -1095,9 +1095,12 @@ const server = Bun.serve<{ who: string }>({
       if (path === "/api/push/test") return json(await push.test(endpoint));
     }
     if (path === "/api/worktree") {
+      // a task's worktree, or a space's own folder (space=<id>: only what isn't committed there)
       const t = compat.taskOf(url.searchParams.get("task") ?? "");
-      if (!t) return json({ error: "No such task." }, 404);
-      try { return json(await worktree(hub, t.where, url.searchParams.get("what") ?? "", url.searchParams.get("path") ?? undefined)); }
+      const sp = t ? null : compat.spaceOf(url.searchParams.get("space") ?? "");
+      const where = t?.where ?? (sp?.folder ? { folder: sp.folder, machine: sp.machine } : null);
+      if (!where) return json({ error: t || url.searchParams.get("task") ? "No such task." : "No such space." }, 404);
+      try { return json(await worktree(hub, where, url.searchParams.get("what") ?? "", url.searchParams.get("path") ?? undefined)); }
       catch (err) { return json({ error: (err as Error).message }, 400); }
     }
     if (path === "/api/activity") {
