@@ -26,6 +26,7 @@ import { quickFit, type QuickFit } from './press.ts'
 import { replyToTask, SlideHint, useSlide } from './slide.tsx'
 import { dayLabel } from './days.ts'
 import { Markdown, withLinks } from './markdown.tsx'
+import { expandPicked, useMentions } from './mentions.tsx'
 import { dropped, pasted } from './paste.ts'
 import { addPaste, dropPaste, isLongMessage, isLongPaste, joined, peekOf, setPastes, sizeOf, usePastes, type Paste } from './fold.ts'
 import { fineOnly, touch } from './clip.ts'
@@ -976,6 +977,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
     box.focus({ preventScroll: true })
     box.setSelectionRange(box.value.length, box.value.length)
   }, [key])
+  const ment = useMentions(key, thread.task?.place ?? thread.place, text, setText, ref)
   const sg = suggestionOf(chat, suggestionsOn(snap.settings))
   const busy = !!chat?.working && !chat.finished
   const call = useUI((u) => u.call)
@@ -1006,7 +1008,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
     }
     if (composing.current) endComposition(ref.current)
     sentRef.current = { text, at: Date.now() }
-    send(key, key, t, wait && busy, false, dictatedInto.delete(key) ? 'dictated' : 'typed')
+    send(key, key, expandPicked(key, t), wait && busy, false, dictatedInto.delete(key) ? 'dictated' : 'typed')
     setText('')
     setPastes(key, () => [])
     if (shared) putAway()
@@ -1091,8 +1093,10 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
           )}
         </div>
       )}
+      {ment.list}
       <div className="crow">
         <textarea
+          {...ment.box}
           ref={ref}
           className={cx('cin', mode && 'mono')}
           rows={1}
@@ -1124,6 +1128,8 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
             addPaste(key, t)
           }}
           onKeyDown={(e) => {
+            // the # or @ list takes its keys first: Up, Down, Enter or Tab to pick, Escape
+            if (ment.onKey(e)) return
             // Enter sends and Shift+Enter makes a new line, the same on phone and desktop
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
               e.preventDefault()

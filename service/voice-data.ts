@@ -34,6 +34,7 @@ export const NOT_DATA: Record<string, string> = {
   "api:action": "the actions themselves (act; their read ones are SOURCES)",
   "api:dictate": "dictation turns speech into text, nothing shown",
   "api:upload": "uploads a file to send",
+  "api:reach": "the spaces a chat's agent can reach, for the # and @ list in the message box: voice names a space or task by itself",
   "api:spaces": "makes a new space (a change: asked for in Everything, or done on the page with screen)",
   "api:file": "a picture or file sent in a chat, as bytes",
   "api:files": "Files (a plugin, off by default): a space's folder on disk, browsed and read on the page; not read out",
