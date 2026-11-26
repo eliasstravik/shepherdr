@@ -12,6 +12,7 @@ const ME = process.getuid?.() ?? -1;
 const NETSTAT = ["/usr/sbin/netstat", "/usr/bin/netstat"].find((p) => existsSync(p)) ?? "netstat";
 const PS = ["/bin/ps", "/usr/bin/ps"].find((p) => existsSync(p)) ?? "ps";
 const LSOF = ["/usr/sbin/lsof", "/usr/bin/lsof", "/bin/lsof"].find((p) => existsSync(p)) ?? "lsof";
+const ID = ["/usr/bin/id", "/bin/id"].find((p) => existsSync(p)) ?? "id";
 const LOOP4 = "0100007F";                              // 127.0.0.1 as /proc/net/tcp writes it
 const LOOP6 = "0000000000000000FFFF00000100007F";      // ::ffff:127.0.0.1 in tcp6
 const hex = (n: number) => n.toString(16).toUpperCase().padStart(4, "0");
@@ -117,9 +118,20 @@ export function lsofSockets(text: string): [number, number, string][] {
   return out;
 }
 
-/** The uids of processes run by another person: a login account (macOS: 501 and up) other than the owner. */
-export const otherPeople = (ps: string, me = ME) =>
-  [...new Set(ps.split("\n").map((x) => x.trim()).filter((x) => /^\d+$/.test(x)).map(Number))].filter((u) => u >= 501 && u < 2 ** 31 && u !== me);
+/** A service account no one can log in to: its passwd line (`id -P <uid>`) ends in a no-login shell. Endpoint agents
+ *  such as McAfee's run as one (mfe, uid 503, /usr/bin/false). An account id can't read counts as a person. */
+const NO_LOGIN = new Set(["/usr/bin/false", "/bin/false", "/sbin/nologin", "/usr/sbin/nologin", "/usr/bin/nologin"]);
+export const serviceAccount = (passwd: string) => {
+  const f = passwd.trim().split("\n")[0]?.split(":") ?? [];
+  return f.length >= 7 && NO_LOGIN.has(f[f.length - 1]);
+};
+
+/** The uids of processes run by another person: a login account (macOS: 501 and up) other than the owner. With
+ *  passwd (uid -> its `id -P` line), a service account no one can log in to doesn't count. */
+export const otherPeople = (ps: string, me = ME, passwd?: (uid: number) => string) =>
+  [...new Set(ps.split("\n").map((x) => x.trim()).filter((x) => /^\d+$/.test(x)).map(Number))]
+    .filter((u) => u >= 501 && u < 2 ** 31 && u !== me)
+    .filter((u) => !passwd || !serviceAccount(passwd(u)));
 
 /** macOS without a netstat table (GitHub #777): who holds the caller's side, by lsof. lsof sees every socket of this
  *  user and none of another's (root's, another person's), and always this service's own side of the connection:
@@ -141,7 +153,7 @@ export function lsofPeer(port: number, service: number, exec: (argv: string[]) =
   if (first.callers.length) return first.callers.every((u) => u === me) ? ((lsofProblem = null), "owner") : say("another user opened it");
   const ps = exec([PS, "-axo", "uid="]);
   if (!ps.split("\n").some((x) => x.trim() === String(me))) return say("ps gave no process list"); // ps must list us too
-  if (otherPeople(ps, me).length) return say("another person has processes on this Mac, so a hidden caller could be theirs");
+  if (otherPeople(ps, me, (u) => exec([ID, "-P", String(u)])).length) return say("another person has processes on this Mac, so a hidden caller could be theirs");
   const again = look();
   if (!again.ours || again.callers.length) return say("the connection changed while looking");
   lsofProblem = null;
