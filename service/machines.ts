@@ -56,6 +56,13 @@ export class Machines {
     }
   }
 
+  /** Each machine's start limits read again from the settings file (#1547: a change on the web shows at once). */
+  rehold() {
+    let cfg: any = null;
+    try { cfg = JSON.parse(readFileSync(settingsFile(), "utf8")); } catch {}
+    for (const [m, s] of this.stats) s.hold = holdOf(cfg, m);
+  }
+
   async poll() {
     const voice = this.readVoice();
     if (this.busy || !SCRIPT) { if (await voice) this.onChange(); return; }

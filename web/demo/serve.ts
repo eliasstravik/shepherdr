@@ -176,6 +176,8 @@ function action(a: Record<string, any>): unknown {
   if (a.type === 'move') return each((snap) => { snap.sections = snap.sections?.map((s) => ({ ...s, spaces: [...s.spaces.filter((x) => x !== a.id), ...(s.id === a.to ? [a.id] : [])] })) }), { ok: true }
   if (a.type === 'section' && a.op === 'new') { const id = `s:g${++n}`; each((snap) => { snap.sections = [...(snap.sections ?? []), { id, name: a.name, machine: a.machine, spaces: [] }] }); return { ok: true, id } }
   if (a.type === 'section' && a.op === 'delete') return each((snap) => { snap.sections = snap.sections?.filter((s) => s.id !== a.id) }), { ok: true }
+  // #1547: a machine's start limit (null: back to all machines')
+  if (a.type === 'setting' && /^machine\.start_/.test(a.key)) return each((snap) => { snap.settings = snap.settings.map((sec) => ({ ...sec, rows: sec.rows.map((r) => (r.key !== a.key ? r : a.value === null ? { ...r, value: r.stepFrom ?? r.value, inherits: undefined, from: 'all machines' } : { ...r, value: a.value, inherits: { value: r.stepFrom ?? '', from: 'all machines' }, from: undefined })) })) }), { ok: true }
   if (a.type === 'config') {
     each((snap) => {
       const c = snap.config!

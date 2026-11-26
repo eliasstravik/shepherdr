@@ -843,6 +843,9 @@ async function doAction(body: any): Promise<Response> {
         if (!there) return json({ ok: false, error: SC.BASE.missing(want) });
       }
       settings.set(body.key, value, level, sp ? { id: sp.id, name: sp.name, machine: sp.machine ?? null, folder, repo: spaceRepo(sp) } : null);
+      // a machine's start limits (#1547): its card and meters show the new ones now, not at the next read
+      if (body.key.startsWith("machine.")) machines.rehold();
+      model.rebuild();
       return json({ ok: true });
     } catch (err) { return json({ ok: false, error: (err as Error).message }); }
   }
