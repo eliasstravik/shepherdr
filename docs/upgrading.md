@@ -49,6 +49,33 @@ What does not:
   switch on in Settings › Plugins: [plugins.md](plugins.md#files).)
 - Your own changes to Shepherdr's window mods and layout. They are in the backup folder.
 
+Also left out on purpose, each with what to do instead:
+
+- Up to recall an earlier message, and Esc to stop. Use the Stop button; copy an earlier message from its menu.
+- Find in chat (Ctrl+F). Ask the Assistant "where did we talk about X?", or use the browser's find.
+- Rewind and Fork on a message. Ask the agent to undo it, or use the agent's own /rewind in the terminal view.
+- The timer on the working line, and the "Start of conversation" row. Earlier messages load as you scroll up.
+- Start later and Reschedule on a task. Ask the Assistant: "start X at 9".
+- Pin a task. Needs you and Working already put what matters on top.
+- The pull request's details on a task (the failing check's name, title, draft, file counts, Copy link). Tap the pull
+  request to see it on GitHub. The task's agent is told about failed checks and fixes them itself.
+- Grouping tasks by For you or by Space. Filter by space.
+- Worktree rows in a space's menu, and worktree spaces under their repo. Start a task: it gets its own worktree.
+- Browse in New space. Type or paste the folder's path.
+- Plan usage per machine. Settings › Usage shows this machine's; an agent at its limit tells you.
+- The folder hint that told two spaces with the same name apart. Rename one.
+- The Home Assistant switch and Make home space. Ask in a chat and its agent edits the settings file
+  ([Settings](settings.md)).
+- The line explaining each setting under its row. Each setting is explained in [Settings](settings.md).
+- "N spaces set their own" in Settings. Open a space's menu to see its own settings.
+- Adding a machine by clicking, and the Mac's Full Disk Access card. Copy the command in Settings › Machines. On a Mac,
+  give herdr-core Full Disk Access in System Settings › Privacy & Security, or macOS asks on its own screen each time an
+  agent reads Desktop, Documents or Downloads.
+- The app's link, Copy and QR in Settings. `shepherdr web status` prints the link.
+- Marking an area on an artifact. Tap a spot and write what should change.
+- Artifact search by who made it, and the version on each row. Search by title; open one to see its versions.
+- The Machines group in the search box. Settings › Machines lists them.
+
 Shepherdr's agents now run in a herdr-core session of their own. They no longer show in the Herdr app.
 
 Other machines: a machine that only runs tasks gets the new helpers by itself once `shepherdr doctor` passes here. A
