@@ -227,7 +227,7 @@ test("3.2: the app's own words: Everything, spaces, tasks by title, Ready for re
   expect(spec).not.toMatch(/\b(Files|Changes) (panel|pane)|\bReview card\b/);
   // what the page can open and the app can do (service/voice-tools.ts answers each)
   expect(TOOLS.find((t) => t.name === "look").parameters.properties.what.enum).toEqual(LOOKS);
-  expect(LOOKS).toEqual(["here", "chat", "spaces", "machines", "tasks", "task", "needs", "news", "schedules", "settings", "secrets", "artifacts", "data"]);
+  expect(LOOKS).toEqual(["here", "chat", "spaces", "machines", "tasks", "task", "needs", "news", "schedules", "settings", "secrets", "artifacts", "page", "data"]);
   expect(OPENS).toEqual(["space", "chat", "task", "screen", "terminal", "tasks", "needs", "artifacts", "artifact", "settings"]);
   expect(TOOLS.find((t) => t.name === "open").parameters.properties.view.enum).toEqual(["browser", "desktop"]);
   expect(SETTINGS).toEqual(["General", "Agents", "Tasks", "Secrets", "Machines", "Usage", "Plugins"]);

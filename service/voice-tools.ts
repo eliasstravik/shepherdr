@@ -11,6 +11,7 @@ import { screenParams, screenWords } from "../core/screen.js";
 import { planRows, windowWords, whyWords, healthWords } from "../core/machines.js";
 import { artifactsIn, everything, isEverything, isTilde, listOf, machineLabel, machineWarn, needsCount, nowGroups, onBranch, scheduleLine, schedulesOf, spaceLabel, spacesOf, etaOf, leftWords, statusWord, taskInSpace, taskLine, taskWhen, tstate, unreachable, whereWords } from "../web/shared/view.ts";
 import { SOURCES, scrub, render, at, search, segments, type SourceArgs } from "./voice-data.ts";
+import { lookPage, type PageRead } from "./voice-page.ts";
 
 /** Where a call comes from and what its app shows now (sent by the page as it changes). SHEP-105: a call is with
  *  Shepherdr as a whole, not one chat: "here" is what the screen shows. */
@@ -28,6 +29,8 @@ export type Where = {
   task?: string | null;
   tab?: string | null;
   artifact?: string | null;
+  /** #1509: the version of the open artifact on screen (none: its newest) */
+  version?: number | null;
   settings?: boolean;
   /** (3.2: the call runs over the app, there is no full-screen call) */
   full?: boolean;
@@ -70,6 +73,8 @@ export interface VoiceIO {
   taskWhere?(id: string): { ref: string; folder: string; machine: string | null } | null;
   /** one of the other reads (voice-data.ts SOURCES): its data, or throws an Error in plain words */
   read?(source: string, args: SourceArgs): Promise<unknown>;
+  /** #1509: an artifact version's page (its index.html) as text, or null: not there */
+  page?: PageRead;
 }
 
 /** a tool's answer: words for the voice agent; an open's nav, and what it shows in words, for the app to show and confirm */
@@ -337,7 +342,7 @@ export function lookHere(snap: Snapshot, where: Where) {
   const p = where.place ? snap.places.find((x) => x.id === where.place) : null;
   if (p) shows.push(`${t ? "in " : ""}${isEverything(snap, p.id) ? "Everything" : `the space ${spaceSaid(snap, p)}`}`);
   const a = where.artifact ? snap.artifacts.find((x) => x.id === where.artifact) : null;
-  if (a) shows.push(`the artifact "${cut(a.title, 80)}"`);
+  if (a) shows.push(`the artifact "${cut(a.title, 80)}" (look page reads its words)`);
   if (where.tab && !t && !a && PANES[where.tab]) shows.push(where.tab === "screen" ? "its agent's Screen" : PANES[where.tab]);
   if (shows.length) out.push(`The app shows ${shows.join(", ")}.`);
   if (where.locked === true) out.push("The person is on their phone with it locked: the app is not on its screen, but you can do all you can do unlocked.");
@@ -663,9 +668,10 @@ export async function voiceTool(name: string, params: any, where: Where, io: Voi
         case "settings": return lookSettings(snap, where, id, query);
         case "secrets": return lookSecrets(snap);
         case "artifacts": return lookArtifacts(snap, where, id, query, p.count ? count : 8);
+        case "page": return await lookPage(io.page, snap, where, query, Number.isFinite(Number(p.part)) ? Math.round(Number(p.part)) : 1);
         case "data": return await lookData(io, snap, where, id, typeof p.path === "string" ? p.path.slice(0, 300) : "", query);
       }
-      return fail(`look can read: here, chat, spaces, machines, tasks, task, needs, news, schedules, settings, secrets, artifacts, data.`);
+      return fail(`look can read: here, chat, spaces, machines, tasks, task, needs, news, schedules, settings, secrets, artifacts, page, data.`);
     }
     if (name === "open") return open(snap, where, String(p.what ?? ""), id, typeof p.view === "string" ? p.view : typeof p.tab === "string" ? p.tab : "");
     if (name === "send") {
