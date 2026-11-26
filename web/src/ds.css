@@ -366,6 +366,12 @@ button.fake .n span,button.fake>.i{color:var(--muted)}
    It has its own space under the chat (the chat's scroll ends above it, nothing of the chat behind it), its first
    bubble at the box's left edge (its 4 px padding, pulled back out at the sides, only makes room for a focus ring, never over the chat), 8 px between bubbles and
    down to the box. Where more bubbles continue sideways, that edge fades softly (--fl, --fr: stick.ts rowEdges). */
+/* what the agent left running in the background (chat/jobs.tsx), over the replies and the box: quiet rows, one
+   line for two or more that opens to the list (it scrolls in place past a few), each opening to its output and Stop */
+.jobs{display:grid;justify-items:start;gap:2px;margin:0 0 6px}.jobs .fold.quiet{max-width:100%}
+.jobl{display:grid;justify-items:start;gap:2px;max-height:min(40svh,320px);overflow:auto;overscroll-behavior:contain;width:100%}
+.jobb{justify-items:start;justify-self:stretch;max-width:640px}.jobb .jobc{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:18px;color:var(--muted)}
+.jobb .jobo{margin:0;max-height:180px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:18px}.jobb .jobw{margin:0;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .sugs{--fl:0px;--fr:0px;display:flex;align-items:center;gap:8px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;margin:0 -4px 4px;padding:4px;-webkit-mask-image:linear-gradient(to right,transparent,#000 var(--fl),#000 calc(100% - var(--fr)),transparent);mask-image:linear-gradient(to right,transparent,#000 var(--fl),#000 calc(100% - var(--fr)),transparent)}
 /* the chat's bottom edge, above the box and the replies: what scrolls under it fades over 16 px (the list's own
    bottom gap, so at the end nothing is faded) instead of being sliced. Only over a chat with its box, never a terminal. A space's chat and
