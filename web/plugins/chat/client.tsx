@@ -118,7 +118,7 @@ function RecapNote({ text, at }: { text: string; at?: number }) {
   return (
     <section className="recap" aria-label="Recap">
       <div className="rh">
-        <I n="feed" c="s16" />
+        <I n="clock" c="s16" />
         <span>Recap</span>
         {at ? <span className="qm">{clock(at)}</span> : null}
       </div>

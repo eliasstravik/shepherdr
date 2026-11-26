@@ -74,7 +74,7 @@ function RecapSettings() {
   )
 }
 
-const row = (chat: string | undefined): MenuRow[] => (chat ? [{ icon: 'feed', label: 'Recap', run: () => recapNow(chat) }] : [])
+const row = (chat: string | undefined): MenuRow[] => (chat ? [{ icon: 'clock', label: 'Recap', run: () => recapNow(chat) }] : [])
 
 export default definePlugin({
   name: 'recaps',
@@ -82,7 +82,7 @@ export default definePlugin({
     reg.chatTail.push({ order: 90, View: AutoRecap })
     reg.spaceMenu.push({ order: 20, rows: (p, head) => (head ? row(p.chat) : []) })
     reg.taskMenu.push({ order: 20, rows: (t, where) => (where === 'thread' ? row(taskChat(t)) : []) })
-    reg.commands.push({ id: 'recaps.now', title: 'Recap this chat', area: 'Chat', icon: 'feed', words: 'summary catch up away what happened', when: () => Boolean(focusChat()), run: () => { const c = focusChat(); if (c) recapNow(c) } })
-    reg.settings.push({ name: 'Recaps', icon: 'feed', order: 70, scope: 'all', View: RecapSettings })
+    reg.commands.push({ id: 'recaps.now', title: 'Recap this chat', area: 'Chat', icon: 'clock', words: 'summary catch up away what happened', when: () => Boolean(focusChat()), run: () => { const c = focusChat(); if (c) recapNow(c) } })
+    reg.settings.push({ name: 'Recaps', icon: 'clock', order: 70, scope: 'all', View: RecapSettings })
   },
 })

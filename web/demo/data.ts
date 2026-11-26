@@ -238,6 +238,9 @@ export const chats: Record<string, Chat> = Object.fromEntries(
       a('Added Bigger checkout button on phones to #shop and started it.', { at: today(9, 12), reactions: [{ emoji: '🎉', by: 'me' }] }),
       did(today(9, 12), [['run', 'herdr-task add', '"Bigger checkout button on phones"'], ['run', 'herdr-task start', '"Bigger checkout button on phones"']]),
       a("I'll tell you here when it's ready.", { at: today(9, 13), reactions: [{ emoji: '👍', by: 'me' }] }),
+      // a heads-up its CLI wrote, and a recap when you came back (Recaps)
+      { id: `m${++n}`, who: 'agent', at: today(9, 13), recap: 'heads', text: 'Compacted while idle, before the prompt cache expired' },
+      { id: `m${++n}`, who: 'agent', at: today(9, 13), recap: 'recap', text: 'The bigger checkout button is being built in #shop and the watering reminders are still in progress. Two tasks wait on you: pick Stripe or Adyen, and allow the photo library.' },
       relay('to', '#root on vm', 'Can you check the disk on the vm? A task there said it is nearly full.', today(9, 14), { how: 'assistant', state: 'delivered' }),
       relay('from', '#shop', LONG_NOTE, today(9, 20), { files: ['supplier-quotes-november.pdf'] }),
       relay('to', '#garden-app on vm', 'The photo task waits on a library. Pillow is fine to install.', today(9, 22), { how: 'assistant', state: 'waiting', why: 'the person is writing to it' }),
