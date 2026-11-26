@@ -1,10 +1,11 @@
-import { expect, test } from 'bun:test'
+import { afterAll, expect, test } from 'bun:test'
 
 // #1553: the switch holds the screen on while the app is on screen, asks again when it comes back, lets go when off
 const events = new Map<string, () => void>()
 const asked: { released: boolean; release(): Promise<void> }[] = []
 const g = globalThis as any
 const doc = { visibilityState: 'visible', addEventListener: (t: string, f: () => void) => events.set(t, f) }
+const had = { document: 'document' in g, localStorage: 'localStorage' in g, isSecureContext: 'isSecureContext' in g }
 g.document ??= doc
 const store = new Map<string, string>()
 g.localStorage ??= { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => store.set(k, v), removeItem: (k: string) => store.delete(k) }
@@ -14,6 +15,12 @@ Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { requ
   asked.push(l)
   return l
 } } })
+
+// the fakes go after this file: other tests see no page
+afterAll(() => {
+  for (const k of Object.keys(had) as (keyof typeof had)[]) if (!had[k]) delete g[k]
+  delete (navigator as any).wakeLock
+})
 
 const { canKeepAwake, setAwake } = await import('./awake.ts')
 const tick = () => new Promise((r) => setTimeout(r, 0))
