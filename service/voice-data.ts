@@ -20,7 +20,7 @@ export const SOURCES: Record<string, { about: string; arg?: "task" | "task-or-sp
   pr: { about: "a task's pull request: state, checks, files", arg: "task", serves: [] },
   files: { about: "a task's or space's folder: its entries (path: the folder)", arg: "task-or-space", rest: true, serves: [] },
   file: { about: "a file's text in a task's or space's folder (path: the file)", arg: "task-or-space", rest: true, serves: [] },
-  activity: { about: "a chat's latest tool calls and background jobs", arg: "chat", serves: [] },
+  activity: { about: "a chat's latest tool calls and background jobs", arg: "chat", serves: ["api:activity"] },
   model: { about: "what a chat's agent runs on (agent, model, effort, speed) and its choices", arg: "chat", serves: ["action:restart-info", "action:model-menu"] },
   models: { about: "every agent's models, efforts, speeds and permission modes, as the picker lists them", serves: ["action:role-info"] },
   hosts: { about: "machines on the person's network that can be added", serves: ["action:machine-hosts"] },
