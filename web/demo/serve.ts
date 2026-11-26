@@ -19,6 +19,7 @@ const chats: Record<string, Chat> = structuredClone(seed)
 let n = 1000
 /** the group a Remove group took, for its Undo */
 let gone: NonNullable<Snapshot['sections']>[number] | null = null
+const held = new Map<string, any>()
 function resetDemo() {
   for (const mode of ['normal', 'empty', 'down', 'more', 'long', 'one', 'five'] as const) state[mode] = structuredClone(snapshot(mode))
   for (const key of Object.keys(chats)) delete chats[key]
@@ -105,6 +106,18 @@ function action(a: Record<string, any>): unknown {
     if (a.do === 'delete') return { ok: true, deleted: { 'this machine': true, mini: true } }
     return { ok: true }
   }
+  // #1560: a message held for the agent's turn waits here until Send now (or goes with Remove)
+  if (a.type === 'send' && a.hold) {
+    held.set(a.cid, a)
+    return { ok: true, waiting: true, waitsFor: 'turn' }
+  }
+  if (a.type === 'held-now' || a.type === 'held-drop') {
+    const h = held.get(a.cid)
+    if (!h) return { ok: false, error: 'That message has gone in already.' }
+    held.delete(a.cid)
+    if (a.type === 'held-now') say(h.chat, { who: 'you', text: h.text, cid: h.cid })
+    return { ok: true }
+  }
   if (a.type === 'send') {
     // as the service gives your message back from the log: its words, then each file under them, a moment later
     const paths: string[] = Array.isArray(a.attachments) ? a.attachments.filter(Boolean) : []
@@ -147,7 +160,7 @@ function action(a: Record<string, any>): unknown {
     return { ok: true, at: Date.now() }
   }
   if (a.type === 'answer') {
-    for (const c of Object.values(chats)) for (const m of c.messages) if (m.question?.id === a.question) { m.question = { ...m.question, sent: a.choice ?? 0, said: m.question.choices[a.choice ?? 0]?.label, ...(a.byVoice ? { via: 'voice' as const } : {}) }; pushChat(c.key) }
+    for (const c of Object.values(chats)) for (const m of c.messages) if (m.question?.id === a.question) { m.question = a.talk ? { ...m.question, closed: 'Left to talk over in the chat' } : { ...m.question, sent: a.other ? -1 : a.choice ?? 0, said: a.other || m.question.choices[a.choice ?? 0]?.label, ...(a.byVoice ? { via: 'voice' as const } : {}) }; pushChat(c.key) }
     const t = a.question === 'q-pay' ? 'SHOP-14' : 'vm:GARDEN-4'
     patchTask(t, { status: 'work', blocked: undefined, report: { msg: 'Carrying on' } })
     if (a.byVoice && a.question === 'q-pay') setTimeout(() => say('SHOP-14/worker', { text: "Going with Stripe. I'll tell you when it's ready." }), 500)

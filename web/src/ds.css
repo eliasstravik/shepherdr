@@ -216,6 +216,7 @@ button.b{cursor:pointer}
 .chat .scroll{overflow-x:hidden}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
 .chip{height:var(--chip);padding:0 12px;border-radius:999px;box-shadow:inset 0 0 0 1px var(--line2);font-size:14px;line-height:20px;font-weight:500}
+.oth{flex-basis:100%;display:grid;gap:8px}
 .chip:hover{background:var(--control)}
 .card{display:grid;gap:8px;width:min(82%,560px);padding:12px 16px;border-radius:12px;box-shadow:inset 0 0 0 1px var(--line2);font-size:var(--ui);line-height:var(--uil)}
 .pane .card,.pane .b{max-width:92%}.pane .card{width:92%}
@@ -386,6 +387,11 @@ button.fake .n span,button.fake>.i{color:var(--muted)}
 .toend{position:absolute;right:4px;bottom:calc(100% + 12px);z-index:2;display:grid;place-items:center;width:40px;height:40px;border-radius:50%;background:var(--overlay);color:var(--sub);box-shadow:inset 0 0 0 1px var(--line2),var(--shadow);animation:fade .15s ease-out}
 .toend::after{content:"";position:absolute;inset:-4px;border-radius:50%}
 .toend .cnt{position:absolute;top:-6px;right:-6px;min-width:18px;background:var(--fg);color:var(--canvas);box-shadow:0 0 0 2px var(--canvas)}
+.toend.asks{width:auto;gap:8px;grid-auto-flow:column;padding:0 14px;border-radius:999px;color:var(--fg);font-size:14px;font-weight:500}.toend.asks::after{border-radius:999px}.toend.asks .dot{width:8px;height:8px;border-radius:50%;background:var(--red)}
+.msgs>.ref.mine{justify-self:end}
+/* #1560: messages held for the agent's turn, a row each over the box: Send now, Edit, Remove */
+.held{display:grid;gap:4px;margin-bottom:8px}.hrow{display:flex;align-items:center;gap:8px;min-height:44px;padding:4px 4px 4px 12px;border-radius:12px;background:var(--well);box-shadow:inset 0 0 0 1px var(--line2)}
+.hw{display:grid;flex:1;min-width:0}.hw>span{overflow:hidden;overflow-wrap:anywhere}.ht{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;font-size:14px;line-height:20px}.hs{color:var(--muted);font-size:13px;line-height:18px}.hrow>.fold{flex:none;margin:0;padding:0 8px;min-height:36px;color:var(--fg);font-weight:500}
 @media(hover:hover){.toend:hover{color:var(--fg);background:var(--raised)}}
 .sug{--sugh:max(36px,var(--send));flex:none;max-width:min(280px,78%);min-width:var(--sugh);min-height:var(--sugh);padding:2px 14px;border-radius:calc(var(--sugh)/2);text-align:center;box-shadow:inset 0 0 0 1px var(--line2);background:var(--canvas);color:var(--sub);font-size:var(--sec);line-height:var(--secl);overflow-wrap:anywhere;text-wrap:balance;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;touch-action:pan-x}
 @media (hover:hover) and (pointer:fine){.sug:hover{background:var(--control)}}

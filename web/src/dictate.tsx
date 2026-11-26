@@ -229,7 +229,11 @@ export const TEXT_IN_CALL = false
  *  yourself, and End call (red). round: false is Feedback's box, which has its own Send: its second button shows only
  *  while dictating, as Cancel. */
 export type Slots = { k: 'idle'; filled: boolean } | { k: 'dict'; d: DictState['k'] } | { k: 'call'; muted: boolean }
-export function SlotsView({ at, round, on }: { at: Slots; round: boolean; on: { mic: () => void; press?: () => void; second: () => void } }) {
+export function SlotsView({ at, round, on }: { at: Slots; round: boolean; on: { mic: () => void; press?: () => void; second: () => void; later?: () => void } }) {
+  // Send held down (half a second) while the agent works: it waits for its turn instead (a phone's Ctrl+Enter, #1560)
+  const later = at.k === 'idle' && at.filled ? on.later : undefined
+  const hold = useRef<{ t?: ReturnType<typeof setTimeout>; fired?: boolean }>({})
+  const letGo = () => clearTimeout(hold.current.t)
   const a =
     at.k === 'idle'
       ? { icon: 'mic' as const, label: 'Dictate', c: '' }
@@ -257,7 +261,21 @@ export function SlotsView({ at, round, on }: { at: Slots; round: boolean; on: { 
         {a.icon ? <I n={a.icon} /> : <i className="dspin" aria-hidden />}
       </button>
       {round ? (
-        <button type="button" className={cx('send vs', b.c)} data-slot="main" aria-label={b.label} onClick={on.second}>
+        <button
+          type="button"
+          className={cx('send vs', b.c)}
+          data-slot="main"
+          aria-label={b.label}
+          onPointerDown={() => {
+            hold.current.fired = false
+            if (later) hold.current.t = setTimeout(() => { hold.current.fired = true; navigator.vibrate?.(10); later() }, 500)
+          }}
+          onPointerUp={letGo}
+          onPointerLeave={letGo}
+          onPointerCancel={letGo}
+          onContextMenu={(e) => later && e.preventDefault()}
+          onClick={() => (hold.current.fired ? void (hold.current.fired = false) : on.second())}
+        >
           {/* keyed: a new icon fades in, the button keeps its size */}
           <span key={b.icon} className="vsi">
             <I n={b.icon} c={round ? 's16' : undefined} />

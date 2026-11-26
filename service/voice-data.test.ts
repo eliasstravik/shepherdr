@@ -58,7 +58,7 @@ test("every action the web app sends is a voice data source (a read) or a change
   for (const t of ["accept", "close", "task-start", "task-resume", "task-rename", "task-move", "archive", "delete", "stop", "answer", "automation", "space-archive", "space-remove", "agent-restart", "assistant-close",
     "config", "artifact-pin", "artifact-rename", "artifact-restore", "artifact-keep", "artifact-delete"]) expect(WRITES).toContain(t);
   // nothing of what 3.2 dropped is still listed
-  for (const t of ["mode", "autopilot-run", "tab-new", "tab-close", "tab-rename", "tab-switch", "tab-move", "fork", "worktree", "space-commit", "held-drop", "held-now", "rewind", "model-pin"]) expect(WRITES.includes(t) || served.has(`action:${t}`)).toBe(false);
+  for (const t of ["mode", "autopilot-run", "tab-new", "tab-close", "tab-rename", "tab-switch", "tab-move", "fork", "worktree", "space-commit", "rewind", "model-pin"]) expect(WRITES.includes(t) || served.has(`action:${t}`)).toBe(false);
 });
 
 const now = Date.now();

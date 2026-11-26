@@ -63,6 +63,7 @@ div.b[data-menu]{cursor:pointer}
 .pic.mine{justify-self:end}
 .pic img,.pic video{display:block;max-width:100%;max-height:320px}
 .quote{display:block;margin-bottom:4px;padding-left:8px;border-left:2px solid var(--line2);color:var(--muted);font-size:14px;line-height:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+button.quote{border:0;border-left:2px solid var(--line2);background:none;font:inherit;font-size:14px;line-height:20px;text-align:start;max-width:100%;cursor:pointer}
 .b.jump{box-shadow:0 0 0 2px var(--fg)}
 
 /* a real terminal (xterm) in the dark drawer */

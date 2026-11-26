@@ -97,7 +97,7 @@ export interface Registry {
     box?: FC<{ thread: Thread; placeholder: string }>
     /** the message box's right end (voice): the mic, and the round button where Send is, a voice call while the box
      *  is empty (SHEP-363); without it the box ends with Send */
-    boxEnd?: FC<{ thread: Thread; setText: (value: string) => void; filled: boolean; send: () => void }>
+    boxEnd?: FC<{ thread: Thread; setText: (value: string) => void; filled: boolean; send: () => void; later?: () => void }>
     /** an open task's header: back, title, its menu (Terminal and Screen are in it), and Expand and Close in the pane */
     taskHead?: FC<{ task: Task; where: 'chat' | 'pane'; scrolled?: boolean }>
     /** an open task's status line, over its messages */

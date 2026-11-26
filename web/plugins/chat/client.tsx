@@ -6,7 +6,7 @@ import { copyText } from '@client/copy.ts'
 import { dictatedInto, TEXT_IN_CALL, useDictating } from '@client/dictate.tsx'
 import { attr } from '@client/attr.ts'
 import { boxPart, focusBox, focusChat } from '@client/commands.ts'
-import { act, attempt, definePlugin, getState, has, notice, openTask, registry, setUI, tryAct, useChat, useDraft, useSnap, useStore, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
+import { act, attempt, definePlugin, getDraft, getState, has, notice, openTask, registry, setDraft, setUI, tryAct, useChat, useDraft, useSnap, useStore, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
 import { endComposition, isEcho, type Sent } from './echo.ts'
 import { partsOf, placeOutgoing, placesOf, keyOf, readNow, showsAs, type Outgoing } from '@client/outbox.ts'
 import { confirm, openMenu } from '@client/overlay.tsx'
@@ -42,7 +42,8 @@ import { Jobs } from './jobs.tsx'
 import { newsRow, type NewsRow } from './news.ts'
 import { cardsAfter, cardsNow, stillLoading, TRIES, wantsEarlier } from './hold.ts'
 import { keepAtEnd, rowEdges } from './stick.ts'
-import { OFF_PX, isOffEnd, newSince, onEnd, setOffEnd, toEnd, useOffEnd } from './newest.ts'
+import { OFF_PX, asksBelow, isOffEnd, newSince, onAsk, onEnd, questionsBelow, setOffEnd, toAsk, toEnd, useOffEnd } from './newest.ts'
+import { editedDraft, heldOf, isHeld, ownAsk } from './queued.ts'
 import { commandMode, commandOf, commandWord, type CommandState } from './command.ts'
 import { toggleSpaceTerm, toggleTaskTerm } from '@plugins/terminal/menu.ts'
 
@@ -198,6 +199,23 @@ function TaskQuote({ id, title }: { id: string; title: string }) {
       {t ? <StatusIcon t={t} time="none" /> : <I n="tasks" c="s16" />}
       <span className="qt1">{t?.name ?? title}</span>
       {word && <span className="qt2">{word}</span>}
+    </button>
+  )
+}
+
+/** the message a reply answers, quoted above its words: a tap goes to it and lights it, while the chat still has it */
+function Quote({ q }: { q: NonNullable<Message['reply']> }) {
+  if (!q.id) return <span className="quote">{q.text}</span>
+  return (
+    <button
+      type="button"
+      className="quote"
+      onClick={(e) => {
+        e.stopPropagation()
+        setUI({ jump: q.id! })
+      }}
+    >
+      {q.text}
     </button>
   )
 }
@@ -377,7 +395,7 @@ function Bubble({ msg, chat, thread, gap, pending, failed, mark, onReply }: { ms
             }}
             onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && e.target === e.currentTarget && (e.preventDefault(), full(e.currentTarget))}
           >
-            {msg.reply?.task ? <TaskQuote id={msg.reply.task} title={msg.reply.text} /> : msg.reply && <span className="quote">{msg.reply.text}</span>}
+            {msg.reply?.task ? <TaskQuote id={msg.reply.task} title={msg.reply.text} /> : msg.reply && <Quote q={msg.reply} />}
             <Folded text={msg.text ?? ''}>
               {mine ? <div className="md" style={{ whiteSpace: 'pre-wrap' }}>{withLinks(msg.text ?? '')}</div> : <Markdown text={msg.text ?? ''} mentions={msg.mentions} />}
             </Folded>
@@ -558,7 +576,8 @@ function shownOf(chat: Chat | undefined, key: string, outbox: Outgoing[]): Shown
   const rows: Shown[] = (chat?.messages ?? [])
     .filter((m) => !(m.waiting && m.waitsFor === 'turn' && m.cid && outbox.some((o) => o.cid === m.cid)))
     .map((msg) => (msg.waiting && msg.waitsFor === 'queue' ? { msg, mark: 'sent' } : { msg, pending: !!msg.waiting }))
-  const mine = outbox.filter((o) => o.chat === key)
+  // held for the agent's turn (Ctrl+Enter, a long press on Send): a row over the box (Held), not in the chat yet
+  const mine = outbox.filter((o) => o.chat === key && !isHeld(o))
   if (mine.length) {
     const at = placesOf(rows.map((r) => ({ id: r.msg.id, cid: r.msg.cid })), mine)
     rows.splice(0, rows.length, ...placeOutgoing(rows, mine.map((o) => ({ at: at.get(o.cid) ?? rows.length, rows: partsOf(o, chat).map((msg) => ({ msg, ...showsAs(o) })) }))))
@@ -616,7 +635,7 @@ function Messages({ thread }: { thread: Thread }) {
       // well away from the end: the jump button shows, counting what comes from now; back at the end it goes
       if (off > OFF_PX) {
         if (left.current == null) left.current = seen.current.at(-1)?.id ?? ''
-        setOffEnd(thread.chat, { count: newSince(seen.current, left.current) })
+        setOffEnd(thread.chat, { count: newSince(seen.current, left.current), asks: asksBelow(sc).length })
       } else if (stuck.current) {
         left.current = null
         setOffEnd(thread.chat, null)
@@ -639,10 +658,16 @@ function Messages({ thread }: { thread: Thread }) {
       const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
       sc.scrollTo({ top: sc.scrollHeight, behavior: still ? 'auto' : 'smooth' })
     })
+    // the "1 question below" pill: the first question under the view, in its middle
+    const offAsk = onAsk(thread.chat, () => {
+      const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+      asksBelow(sc)[0]?.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' })
+    })
     left.current = null
     setOffEnd(thread.chat, null)
     return () => {
       sc.removeEventListener('scroll', on)
+      offAsk()
       off()
       setOffEnd(thread.chat, null)
     }
@@ -653,7 +678,8 @@ function Messages({ thread }: { thread: Thread }) {
   })
   // new messages while you're away from the end: the button's count goes up
   useEffect(() => {
-    if (left.current != null) setOffEnd(thread.chat, { count: newSince(seen.current, left.current) })
+    const sc = end.current?.closest<HTMLElement>('.scroll')
+    if (left.current != null) setOffEnd(thread.chat, { count: newSince(seen.current, left.current), asks: sc ? asksBelow(sc).length : 0 })
   }, [rows, thread.chat])
   // a picture that loads later (a card's, a tile's) grows the chat: it stays at the newest message
   useEffect(() => {
@@ -752,6 +778,9 @@ function Messages({ thread }: { thread: Thread }) {
     else if (m.recap) out.push(<RecapNote key={k} text={m.text ?? ''} at={m.at} />)
     else if (m.error) out.push(<div key={k} className="ref c-red"><I n="warn" c="s16" /><span>{m.text}</span></div>)
     else if (m.file) out.push(<FileRow key={k} msg={m} chat={stub} gap={gap} />)
+    // pictures the chat can't show (another machine's, or still in its CLI's queue), and an artifact on its way
+    else if (m.images) out.push(<div key={k} className={cx('ref', m.who === 'you' && 'mine')} data-msg={m.id}><I n="image" c="s16" /><span>{m.images === 1 ? '1 image' : `${m.images} images`}</span></div>)
+    else if (m.publishing) out.push(<div key={k} className="ref" role="status" data-msg={m.id}><I n="doc" c="s16" /><span>Publishing an artifact…</span></div>)
     else if (cmd) {
       lastRef = ''
       out.push(<CommandRow key={k} msg={m} state={cmd} failed={failed} gap={gap} />)
@@ -785,12 +814,50 @@ const loading = new Set<string>()
 /** how many earlier pages a chat read by itself when it opened (SHEP-445), so opening it again doesn't read more */
 const opened = new Map<string, number>()
 
+/** held for the agent's turn: a row each over the box, its words, Send now, Edit (back in the box) and Remove */
+function Held({ thread }: { thread: Thread }) {
+  const key = thread.chat
+  const chat = useChat(key)
+  const outbox = useStore((s) => s.outbox)
+  const rows = heldOf(outbox, key, chat)
+  if (!rows.length) return null
+  // taken back from Shepherdr's line first: one that went in meanwhile stays (it says so)
+  const take = (o: Outgoing, then?: () => void) =>
+    void act({ type: 'held-drop', cid: o.cid } as never).then(() => (dropOut(o.cid), then?.()), (e) => notice(e instanceof Error ? e.message : 'That did not work.'))
+  return (
+    <div className="held" role="list" aria-label="Waiting to send">
+      {rows.map((o) => (
+        <div key={o.cid} className="hrow" role="listitem">
+          <I n="clock" c="s16 c-mute" />
+          <span className="hw">
+            <span className="ht">{o.text || o.files.map((f) => f.name).join(', ')}</span>
+            <span className="hs">Queued</span>
+          </span>
+          <button type="button" className="fold" onClick={() => void tryAct({ type: 'held-now', cid: o.cid } as never)}>Send now</button>
+          <button type="button" className="fold" onClick={() => take(o, () => { setDraft(key, editedDraft(o.text, getDraft(key) ?? '')); focusBox(key) })}>Edit</button>
+          <IB icon="x" label="Remove" onClick={() => take(o)} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /** a round ↓ above the box while the chat is scrolled away from its end, with how many messages came since; a tap
  *  goes back to the newest (#1504) */
 function ToEnd({ thread }: { thread: Thread }) {
   const off = useOffEnd(thread.chat)
   if (!off) return null
   const n = off.count
+  // questions wait below: the pill says so and goes to the first of them
+  if (off.asks)
+    return (
+      <button type="button" className="toend asks" onClick={() => {
+        if (!toAsk(thread.chat)) toEnd(thread.chat)
+      }}>
+        <span className="dot" aria-hidden="true" />
+        {questionsBelow(off.asks)}
+      </button>
+    )
   return (
     <button type="button" className="toend" aria-label={n ? `${n} new ${n === 1 ? 'message' : 'messages'}, go to the newest` : 'Go to the newest message'} onClick={() => toEnd(thread.chat)}>
       <I n="toend" />
@@ -990,6 +1057,9 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   const sug = sg && !repliesHidden({ dictating, call, working: busy, sending, spent: spent.has(sg.id) }) ? sg : null
   const machine = snap.places.find((p) => p.id === thread.place)?.machine ?? snap.host
   const pick = pickOf(snap, chat, thread)
+  // a question of its agent's is open: what you type here answers it too (it closes the card, the agent gets your words)
+  const asked = !!ownAsk(chat)
+  const hint = asked ? 'Or type your own answer' : placeholder
   // a message sent while the agent works goes in at once (it steers); only Ctrl/Cmd+Enter asks it to wait its turn.
   // The round button and Enter send only what is in the box, never a suggested reply (those are their own bubbles).
   // In a voice call the box takes no text (TEXT_IN_CALL).
@@ -1055,6 +1125,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   return (
     <>
     <Jobs chat={chat} />
+    <Held thread={thread} />
     {sug && <Replies texts={sug.texts} onSend={sendSug} onEdit={editSug} />}
     <div
       className="cbox"
@@ -1118,8 +1189,8 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
           rows={1}
           name="message"
           data-box={key}
-          aria-label={placeholder}
-          placeholder={placeholder}
+          aria-label={hint}
+          placeholder={hint}
           enterKeyHint="send"
           autoComplete="off"
           value={text}
@@ -1167,7 +1238,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
         <span className="sp" />
         {registry.boxButtons.map((b, i) => <b.View key={i} thread={thread} setText={setText} />)}
         {BoxEnd ? (
-          <BoxEnd thread={thread} setText={setText} filled={filled} send={() => go()} />
+          <BoxEnd thread={thread} setText={setText} filled={filled} send={() => go()} later={busy && mode !== 'run' ? () => go(true) : undefined} />
         ) : stop ? (
           <button type="button" className="send" aria-label="Stop" onClick={() => void tryAct({ type: 'stop', chat: key }, undefined, 'Stopping…')}>
             <I n="square" c="s16" />
