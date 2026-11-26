@@ -2901,6 +2901,20 @@ class MergedOnlyWithOwnWork(unittest.TestCase):
         self.assertEqual(self.tick_once(), ("done", True))
         self.assertEqual(self.task["pr"]["number"], 704)
 
+    def test_a_merged_pull_request_finishes_a_task_waiting_on_the_person(self):
+        """#1554: its agent ended its turn without ready (Out of review rounds: Needs you), then its pull request merged
+        on GitHub: the tick files it as done. An agent still at work keeps it open."""
+        tip = self.change(self.task["worktree"], "reactions on the left")
+        self.tick_once()
+        self.github([{"number": 706, "url": "u", "isCrossRepository": False, "baseRefName": "main", "headRefOid": tip}])
+        self.task.update(review_out=True, started=0)
+        idle = {"address": "t1", "status": {"state": "idle"}, "foreground": {"name": "claude"}}
+        self.live, self.task["gh_checked"] = [{**idle, "status": {"state": "working"}}], 0
+        self.assertEqual(self.tick_once(), ("running", False))  # its agent at work: never under it
+        self.live, self.task["gh_checked"] = [idle], 0
+        self.assertEqual(self.tick_once(), ("done", True))
+        self.assertEqual(self.task["pr"]["number"], 706)
+
     def test_a_pull_request_merged_into_another_branch_is_done_too(self):
         """#1157: its pull request merged into a parent pull request's branch, not its base: its work merged all the
         same, so the task is done (before, it stayed open until someone ran herdr-task done)."""
@@ -6932,6 +6946,25 @@ class ExpectedChecks(unittest.TestCase):
         # a commit not here yet (pushed elsewhere): its branch's workflows stand in
         self.assertEqual(self.expect("0" * 40), "yes")
 
+    def test_a_workflow_switched_off_on_github_brings_no_checks(self):
+        """#1558: a workflow disabled on GitHub never runs: its file doesn't count. One lookup per repo, kept a while;
+        a lookup that fails keeps every file (the wait as before)."""
+        from unittest import mock
+        sha = self.commit({"ci.yml": "on: pull_request\n", "docs.yml": "on: [push]\n"})
+        asked, answer = [], [True, ".github/workflows/ci.yml\tdisabled_manually\n.github/workflows/docs.yml\tactive", ""]
+        gh = lambda *a, cwd=None: asked.append(a) or tuple(answer)
+        task = lambda: {"pr": {"number": 1, "repo": "o/r"}, "base": "main", "branch": "main"}
+        clock = [10_000_000]
+        with mock.patch.object(self.github, "gh", gh), mock.patch.object(self.github, "now", lambda: clock[0]), \
+                mock.patch.dict(self.github._WORKFLOW_STATES, clear=True):
+            self.assertEqual(self.expect(sha, task()), "maybe")  # only the push one is left
+            self.assertEqual(self.expect(sha, task()), "maybe")
+            self.assertEqual(len(asked), 1)  # asked once
+            self.assertIn("repos/o/r/actions/workflows?per_page=100", asked[0])
+            clock[0] += self.github.WORKFLOW_STATES_MS
+            answer[:] = [False, "", "HTTP 403"]
+            self.assertEqual(self.expect(sha, task()), "yes")  # couldn't ask: as before
+
 
 class DoubleStart(unittest.TestCase):
     """#1053: a queued task started by the tick, then by an explicit start (or a message) a moment
@@ -7421,6 +7454,43 @@ class ReadyMergeGit(unittest.TestCase):
         self.assertEqual((t["worktree"], t["branch"], t["base"]), (path, "task/1-flow-reland", "main"))
         self.assertEqual(t["start"], self.git(self.main, "rev-parse", "main"))
 
+
+    def test_a_detached_folder_gives_no_base(self):
+        """#1533: the folder on a detached commit: a worktree task with no base of its own is refused at add and at
+        start (its pull request couldn't open); one with --base starts; ready adopts the open pull request of a task
+        that already took a commit as its base, and takes that pull request's base."""
+        from herdr_task import github, launch
+        wts = os.path.join(self.root, "worktrees")
+        self.patch(launch, "settings_for", lambda s, space=None: {"tasks": {"worktree_root": wts}})
+        self.git(self.main, "checkout", "-q", "--detach")
+        t = {"id": 2, "title": "Flow", "state": "todo", "mode": "worktree", "agents": []}
+        self.store.data["tasks"] = list(self.store.data["tasks"]) + [t]
+        with self.assertRaises(self.commands.Fail) as e:
+            self.commands.detached_refusal(self.store, t)  # cmd_add's check
+        self.assertIn("detached commit", str(e.exception))
+        self.assertIsNone(self.commands.detached_refusal(self.store, {**t, "base": "main"}))
+        with self.assertRaises(launch.Fail) as e:
+            launch.folder_for(self.store, t)
+        self.assertIn("--base <branch>", str(e.exception))
+        t.update(base="main", base_set=True)
+        self.assertEqual(launch.folder_for(self.store, t), t["worktree"])
+        self.assertEqual(t["base"], "main")
+        # started before this fix: its base a commit. Its agent's open pull request into main is taken, base too.
+        tip = self.git(t["worktree"], "rev-parse", "HEAD")
+        t.update(base=self.git(self.main, "rev-parse", "HEAD"), base_set=False)
+        listed = [{"number": 9, "url": "u", "isCrossRepository": False, "baseRefName": "main", "headRefOid": tip}]
+        self.patch(github, "gh", lambda *a, cwd=None: (True, json.dumps(listed), ""))
+        self.assertEqual(github.pr_adopt(t, "o/r")["number"], 9)
+        self.assertEqual(t["base"], "main")
+        t.pop("pr")
+        t["base"] = self.git(self.main, "rev-parse", "HEAD")
+        self.patch(github, "gh", lambda *a, cwd=None: (True, "[]", ""))
+        self.patch(github, "pr_push", lambda s, task, repo: None)
+        self.patch(github, "pr_at_tip", lambda task, repo: None)
+        self.patch(github, "pr_merged", lambda task, repo: None)
+        with self.assertRaises(github.Fail) as e:
+            github.pr_open(self.store, t, "o/r")
+        self.assertIn("not a branch", str(e.exception))
 
     def test_a_like_named_branch_never_takes_another_tasks_worktree(self):
         """#1108: feature/a and feature-a make the same folder name: the second task gets its own worktree, never the

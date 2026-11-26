@@ -48,7 +48,11 @@ def holds_open(s, t):
     """A merge GitHub reports never closes the task under it (#802, #844): reopened after its pull
     request merged (until its agent says ready), or Working with its agent still there (its brief
     may go on after the merge: it says ready, or ends, and is done then)."""
-    return bool(t.get("kept_open")) or (t["state"] == "running" and any(agent_running(k) for k in live_agents(s.key(t))))
+    if t.get("kept_open"):
+        return True
+    live = [k for k in live_agents(s.key(t)) if agent_running(k)] if t["state"] == "running" else []
+    # #1554: one that ended its turn without ready (Needs you: out of review rounds, a question) no longer holds it
+    return bool(live) and task_status(t, live)[0] == "working"
 
 
 def merge_held(s, t):
