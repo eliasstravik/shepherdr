@@ -258,6 +258,8 @@ Bun.serve<Sock['data'], never>({
       return server.upgrade(req, { data: { mode: c === 'empty' || c === 'down' || c === 'more' || c === 'long' || c === 'one' || c === 'five' ? c : 'normal', watch: [], app } }) ? undefined : new Response('no', { status: 400 })
     }
     if (path === '/api/screen/shot') return new Response(Bun.file(shotFile(url.searchParams.get('key') ?? '')), { headers: { 'content-type': 'image/jpeg', 'cache-control': 'no-store' } })
+    // a background shell's last lines (chat/jobs.tsx)
+    if (path === '/api/activity' && url.searchParams.get('what') === 'job') return Response.json({ output: `  VITE v6.0.0  ready in 412 ms\n\n  ➜  Local:   http://127.0.0.1:5173/\n  page reload src/checkout.css (${new Date().toLocaleTimeString()})` })
     if (path === '/api/me') return Response.json({ login: 'sam', off: [] })
     // the # list's spaces (service/main.ts reachOf): every space but Everything, this machine's and the others'
     // the / list's commands (service/main.ts, core/slash.js): Claude Code's, and one of the person's own

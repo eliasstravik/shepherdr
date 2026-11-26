@@ -37,6 +37,7 @@ import { ReplyPress, repliesHidden, suggestionOf, suggestionsOn } from './sugges
 import { UpdateHint, updateRows } from './update.tsx'
 import { BoxThumb, openPreview, SentThumb, sourcesOf } from './thumbs.tsx'
 import { heldStep, signOf } from './typing.ts'
+import { Jobs } from './jobs.tsx'
 import { newsRow, type NewsRow } from './news.ts'
 import { cardsAfter, cardsNow, stillLoading, TRIES, wantsEarlier } from './hold.ts'
 import { keepAtEnd, rowEdges } from './stick.ts'
@@ -1052,6 +1053,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   }
   return (
     <>
+    <Jobs chat={chat} />
     {sug && <Replies texts={sug.texts} onSend={sendSug} onEdit={editSug} />}
     <div
       className="cbox"
