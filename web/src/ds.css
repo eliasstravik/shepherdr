@@ -248,6 +248,8 @@ button.b{cursor:pointer}
 /* short of room, the line drops its logo, then its chevron, then its permission mode before the effort is cut (picker.tsx) */
 .agent[data-drop~="logo"]>.logo,.agent[data-drop~="chev"]>.i:last-child,.agent[data-drop~="perm"]>.pm{display:none}
 .agent .i{color:var(--muted)}.agent .bolt{color:var(--fg);margin-left:-4px}.agent .bolt+.bolt{margin-left:-10px}
+/* Update <agent> (plugins/chat/update.tsx): a quiet button beside the agent line, a small blue dot on it */
+.agent-upd{position:relative}.agent-upd::after{content:"";position:absolute;top:calc(50% - 9px);right:calc(50% - 9px);width:6px;height:6px;border-radius:50%;background:var(--blue)}
 .send{display:grid;place-items:center;width:var(--send);height:var(--send);border-radius:50%;background:var(--fg);color:var(--canvas);flex:none}
 .chat>.foot,.pane>.foot{padding-bottom:12px}.pane>.foot{padding-inline:var(--gut)}
 .empty{display:grid;justify-items:center;gap:4px;padding:64px 24px;text-align:center;justify-self:stretch}

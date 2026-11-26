@@ -17,7 +17,7 @@ import { ActBtn, ActError, Btn, cx, Empty, I, IB, useCardActs, useGrow } from '@
 import type { IconName } from '@client/icons.ts'
 import { isImage, isVideo } from '@shared/files.ts'
 import type { Chat, Message, Relay, Snapshot, Task, TaskBrief, TurnActivity } from '@shared/types.ts'
-import { isEverything, placeOf, spaceLabel, statusWord, taskOf } from '@shared/view.ts'
+import { isEverything, placeOf, spaceLabel, statusWord, taskChat, taskOf } from '@shared/view.ts'
 import { StatusIcon } from '@plugins/tasks/icon.tsx'
 import { DoneRow, QuestionCard, SecretCard } from './cards.tsx'
 import { briefFrom, deliveryWord, looksLong, startWords } from './brief.ts'
@@ -32,6 +32,7 @@ import { fineOnly, touch } from './clip.ts'
 import { landLaunchShare, putAway, useLanded, watchLastChat } from './share.ts'
 import { openSendTo } from './sendto.tsx'
 import { ReplyPress, repliesHidden, suggestionOf, suggestionsOn } from './suggest.ts'
+import { UpdateHint, updateRows } from './update.tsx'
 import { BoxThumb, openPreview, SentThumb, sourcesOf } from './thumbs.tsx'
 import { heldStep, signOf } from './typing.ts'
 import { newsRow, type NewsRow } from './news.ts'
@@ -1138,6 +1139,7 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
           machine={machine}
           onClick={() => openPicker({ title: thread.task ? 'This task runs on' : 'This chat runs on', machine, pick, onChange: () => undefined, onClose: (now) => applyPick(key, pick, now, { agent: pickWords(now).agent }) })}
         />
+        <UpdateHint chat={chat} />
         <span className="sp" />
         {registry.boxButtons.map((b, i) => <b.View key={i} thread={thread} setText={setText} />)}
         {BoxEnd ? (
@@ -1219,6 +1221,9 @@ export default definePlugin({
     reg.views.box = Box
     reg.chatTail.push({ order: 15, View: StoppedChat }, { order: 95, View: WorkingSign }, { order: 96, View: BackgroundNote })
     reg.aboveBox.push({ order: 5, View: ToEnd })
+    // Update <agent> (update.tsx): a row in the space's header menu and in a task's ⋯, while a newer version is out
+    reg.spaceMenu.push({ order: 7, rows: (p, head) => (head ? updateRows(p.chat) : []) })
+    reg.taskMenu.push({ order: 7, rows: (t, where) => (where === 'thread' ? updateRows(taskChat(t)) : []) })
   },
 })
 

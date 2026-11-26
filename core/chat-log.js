@@ -1085,6 +1085,8 @@ export class Conversation {
 
   claude(l, off) {
     if (l.isSidechain) return;
+    // the CLI version that wrote it (Update <agent>: core/agent-update.js runningVersion)
+    if (typeof l.version === "string" && l.timestamp) this.meta = { ...this.meta, version: l.version, versionAt: time(l.timestamp) };
     // a /model, /effort or /fast run in place (SHEP-181): what it runs on from now, before its next turn says so
     const local = l.type === "user" && typeof l.message?.content === "string" ? l.message.content : l.type === "system" && l.subtype === "local_command" && typeof l.content === "string" ? l.content : null;
     if (local?.startsWith("<local-command-stdout>")) {
@@ -1194,6 +1196,7 @@ export class Conversation {
   codex(l, off) {
     const p = l.payload;
     if (!p || typeof p !== "object") return;
+    if (l.type === "session_meta" && typeof p.cli_version === "string") this.meta = { ...this.meta, version: p.cli_version, versionAt: time(l.timestamp ?? p.timestamp) };
     if (l.type === "response_item") {
       if (p.type === "message" && p.role === "user") {
         const items = Array.isArray(p.content) ? p.content : [];
