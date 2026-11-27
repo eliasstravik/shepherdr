@@ -108,6 +108,8 @@ def pr_push(s, task, repo):
     has, tip, _ = git(wt, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")
     seen, there, _ = git(wt, "ls-remote", remote, ref)
     if has and tip and seen and there.split()[:1] == [tip]:
+        if to != br:
+            pr["lease"] = tip
         return
     # #1215: GitHub locks a branch while its pull request sits in the merge queue (its push is refused):
     # out of the queue first; ready puts it back once its checks pass (finalize()).
@@ -674,6 +676,24 @@ def drop_branch(s, task):
         # --no-verify: a pre-push hook (a typecheck) checks what is pushed; a deletion has nothing to
         # check, and the hook would hold the task list's lock for minutes (#1007).
         git(main, "push", "--quiet", "--no-verify", remote_of(main), "--delete", task["branch"])
+
+
+def merge_method(repo):
+    """The first enabled merge method in the repository's settings."""
+    ok, out, err = gh("api", f"repos/{repo}")
+    if not ok:
+        raise Fail(f"Couldn't read merge methods for {repo}: {err or 'no answer'}")
+    try:
+        settings = json.loads(out)
+    except ValueError:
+        settings = None
+    if not isinstance(settings, dict):
+        raise Fail(f"Couldn't read merge methods for {repo}: unreadable answer")
+    for key, flag in (("allow_squash_merge", "--squash"), ("allow_merge_commit", "--merge"),
+                      ("allow_rebase_merge", "--rebase")):
+        if settings.get(key) is True:
+            return flag
+    raise Fail(f"{repo} doesn't allow squash, merge commits or rebase. Enable a merge method in GitHub's repository settings.")
 
 
 def queue_merge(task, head):

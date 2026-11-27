@@ -970,6 +970,7 @@ class BackToWork(unittest.TestCase):
         views, merges = list(views), list(merges)
         done = []
         patches = [(self.commands, "pr_view", lambda t: views.pop(0)),
+                   (self.commands, "merge_method", lambda repo: "--squash"),
                    (self.commands, "gh", lambda *a, **k: merges.pop(0)),
                    (self.commands, "watch_main", lambda *a: None), (self.commands, "update_main", lambda *a: None),
                    (self.commands, "drop_branch", lambda s, t: None),
@@ -1073,6 +1074,25 @@ class BackToWork(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
         return calls, done, dropped
+
+    def test_accept_uses_the_repositorys_allowed_merge_method(self):
+        from contextlib import ExitStack
+        from herdr_task import github
+        options = ("allow_squash_merge", "allow_merge_commit", "allow_rebase_merge")
+        for i, flag in enumerate(("--squash", "--merge", "--rebase")):
+            with self.subTest(flag=flag), ExitStack() as stack:
+                settings = {k: j >= i for j, k in enumerate(options)}
+                policy = stack.enter_context(self.mock.patch.object(github, "gh", return_value=(True, json.dumps(settings), "")))
+                stack.enter_context(self.mock.patch.object(self.commands, "pr_view", side_effect=[
+                    self.FINE, {"state": "MERGED", "mergeCommit": {"oid": "f00"}}]))
+                merge = stack.enter_context(self.mock.patch.object(self.commands, "gh", return_value=(True, "", "")))
+                for name in ("finish", "drop_branch", "watch_main", "update_main"):
+                    stack.enter_context(self.mock.patch.object(self.commands, name))
+                t = self.pr_task()
+                self.assertIsNone(self.commands.merge_now(self.store, t, accept=True))
+                policy.assert_called_once_with("api", "repos/o/r")
+                self.assertIn(flag, merge.call_args.args)
+                self.assertIn("abc", merge.call_args.args)
 
     def test_a_merge_queue_queues_it_and_it_is_not_done(self):
         t = self.pr_task()
@@ -3517,6 +3537,7 @@ class RequiredChecksOnly(PrLooks):
                 f"    print(open({os.path.join(self.dir, 'view.json')!r}).read())\n"
                 "elif sys.argv[1:3] == ['api', 'graphql'] and 'isRequired' in ' '.join(sys.argv):\n"
                 f"    print(open({required!r}).read())\n"
+                "elif sys.argv[1:3] == ['api', 'repos/o/r']:\n    print(json.dumps({'allow_squash_merge': True}))\n"
                 "elif sys.argv[1] == 'api':\n    print('[]')\n")
 
     def requires(self, *names, rows=("build", "lint")):
@@ -3673,6 +3694,7 @@ class ChecksUnreadable(PrLooks):
                 "elif a[0] == 'api' and a[1].endswith('/status'):\n"
                 "    print(file('status.json') or json.dumps({'state': 'pending', 'statuses': []}))\n"
                 "elif a[0] == 'api' and '/check-runs' in a[1] and file('runs.json'):\n    print(file('runs.json'))\n"
+                "elif a[:2] == ['api', 'repos/o/r']:\n    print(json.dumps({'allow_squash_merge': True}))\n"
                 "elif a[0] == 'api':\n"
                 f"    print({self.DENIED!r}); sys.stderr.write('gh: Resource not accessible by personal access token (HTTP 403)'); sys.exit(1)\n")
 
@@ -3848,6 +3870,18 @@ class Scheduled(unittest.TestCase):
     def task(self, n):
         with self.store_mod.Store(self.store_mod.locate(self.folder), write=False) as s:
             return dict(s.find(n))
+
+    def test_start_keeps_a_scheduled_time_and_records_the_plan(self):
+        v = self.add("Later", here=True, in_="1h")
+        at = self.task(v["ref"])["scheduled_for"]
+        self.run_cmd(self.commands.cmd_start, id=v["ref"], parent="t8", space="sp2")
+        t = self.task(v["ref"])
+        self.assertEqual((t["state"], t["scheduled_for"], t["queue"]["space"], t["queue"]["parent"]),
+                         ("scheduled", at, "sp2", "t8"))
+        self.assertEqual(self.started, [])
+        self.run_cmd(self.commands.cmd_start, id=v["ref"], now=True)
+        self.assertEqual(self.started[-1][2:], ("sp2", "t8"))
+        self.assertNotIn("scheduled_for", self.task(v["ref"]))
 
     def test_parsing_absolute_relative_and_refused(self):
         import datetime
@@ -4059,11 +4093,11 @@ class ProofFromAnotherFolder(unittest.TestCase):
     def found(self, given=None):
         from unittest import mock
         sys.path.insert(0, BIN)
-        import herdr_task.proof as proof
+        from herdr_task import proof, store
         s = Store([{"id": 1, "title": "Reactions", "state": "doing", "started": 0, "agents": []}])
         s.loc["folder"] = self.task_folder
         with mock.patch.object(proof, "ARTIFACTS", os.path.join(self.home, ".herdr", "artifacts")), \
-                mock.patch.object(proof, "HOME", self.home):
+                mock.patch.object(store, "HOME", self.home):
             return proof.find_proof(s, s.data["tasks"][0], given)
 
     def test_published_from_a_scratch_folder_ready_finds_it(self):
@@ -6233,6 +6267,33 @@ class TaskFlow(unittest.TestCase):
         import argparse
         return argparse.Namespace(**{"id": "SHEP-1", "json": True, "folder": None, **kw})
 
+    def test_delete_removes_a_clean_worktree_but_keeps_local_files(self):
+        wt = self.task["worktree"]
+        self.commit(wt, "committed work", "tracked.txt")
+        path = os.path.join(wt, "untracked.txt")
+        with open(path, "w") as f:
+            f.write("keep this")
+        task = self.task
+        self.commands.cmd_rm(self.args())
+        self.assertTrue(os.path.isfile(path))
+        self.assertEqual(self.git(self.main, "branch", "--list", "task/1").strip("* "), "+ task/1")
+        self.store.data["tasks"].append(task)
+        os.remove(path)
+        self.commands.cmd_rm(self.args())
+        self.assertFalse(os.path.exists(wt))
+        self.assertEqual(self.git(self.main, "branch", "--list", "task/1"), "")
+
+    def test_unknown_agent_and_reviewer_settings_say_how_to_fix_them(self):
+        from herdr_task import settings
+        for key in ("agent", "reviewer"):
+            with self.subTest(key=key), self.assertRaisesRegex(settings.Fail, f"Settings › Tasks.*{key}=claude"):
+                settings.set_task({}, key, "sleep")
+        for role in ("agent", "reviewer"):
+            with self.subTest(role=role):
+                task = {**self.task, role: "sleep", "set": {"review": "on"}}
+                with self.assertRaisesRegex(settings.Fail, f"Unknown {role.title()} 'sleep'"):
+                    settings.task_settings(self.store, task)
+
     def test_switch_moves_the_task_to_the_given_space(self):
         """#837: an explicit --space wins over the old agent's herdr.task.space label."""
         self.task["space"] = "sp-a"
@@ -8367,6 +8428,7 @@ class Systemic(unittest.TestCase):
         self.patch(self.commands, "pr_view", lambda t: v)
         self.patch(self.commands, "gh", lambda *a, **k: (calls.append(a), (True, "", ""))[1])
         self.patch(self.commands, "note_checks", lambda *a: None)
+        self.patch(self.commands, "merge_method", lambda repo: "--squash")
         why = self.commands.merge_now(self.store, self.task)
         self.assertIn("dropped it at this same commit", why)
         self.assertEqual((calls, self.task["attention"]), ([], why))
@@ -9395,6 +9457,7 @@ class ReadyAndPrFlow(unittest.TestCase):
         views = [{"state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "DRAFT", "statusCheckRollup": [],
                   "headRefOid": "abc"}, {"state": "MERGED", "mergeCommit": {"oid": "f00"}}]
         asked = []
+        self.patch(self.commands, "merge_method", lambda repo: "--squash")
         for name, value in (("pr_view", lambda t: views.pop(0)), ("gh", lambda *a, **k: (asked.append(a[:2]), (True, "", ""))[1]),
                             ("watch_main", lambda *a: None), ("update_main", lambda *a: None),
                             ("drop_branch", lambda s, t: None), ("finish", lambda s, t, even_if_busy=False: t.update(state="done")),
@@ -9427,20 +9490,41 @@ class ReadyAndPrFlow(unittest.TestCase):
         self.git(self.main, "branch", "feature", "main")
         base = self.git(self.main, "rev-parse", "feature")
         tip = self.commit(wt, "stacked change", "stack.txt")
-        remote, _ = self.taking({})
+        pr = {"number": 41, "state": "OPEN", "headRefName": "feature", "baseRefName": "main", "headRefOid": base}
+        remote, asked = self.taking({41: pr})
         self.git(self.main, "push", "-q", "origin", "feature")
         self.task.update(base="feature", base_set=True)
-        self.patch(self.commands, "gh", lambda *a, **k: (True, json.dumps([
-            {"number": 41, "headRefName": "feature", "baseRefName": "main", "headRefOid": base}
-        ]), ""))
+        self.patch(self.commands, "gh", lambda *a, **k: (True, json.dumps([pr]), ""))
         for name in ("review_refusal", "find_proof", "already_merged"):
             self.patch(self.commands, name, lambda *a, **k: None)
         self.patch(self.commands, "task_settings", lambda *a: [])
         self.patch(self.commands, "merge_policy", lambda *a: "ask")
         self.commands.cmd_ready(self.args(summary="Done.", details=None, agents_md=None))
         self.assertEqual(self.task["pr"]["number"], 99)
+        create = next(a for a in asked if a[:2] == ("pr", "create"))
+        self.assertEqual(create[create.index("--base") + 1], "feature")
         self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "feature"), base)
         self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "task/1"), tip)
+
+    def test_ready_links_a_merged_pr_for_its_branch(self):
+        from herdr_task import github
+        wt = self.task["worktree"]
+        tip = self.commit(wt, "already landed", "landed.txt")
+        self.git(self.main, "merge", "-q", "--ff-only", "task/1")
+        self.taking({12: {"state": "MERGED", "headRefName": "task/1", "headRefOid": tip, "mergeCommit": {"oid": tip}},
+                     13: {"state": "MERGED", "headRefName": "another", "headRefOid": tip}})
+        for name in ("review_refusal", "find_proof", "watch_main", "update_main"):
+            self.patch(self.commands, name, lambda *a, **k: None)
+        self.patch(self.commands, "task_settings", lambda *a: [])
+        self.patch(self.commands, "finish", lambda s, t, **k: t.update(state="done"))
+        self.patch(github, "pr_push", lambda *a: self.fail("a merged PR must not be pushed to"))
+        args = self.args(pr="13", summary="Done.", details=None, agents_md=None)
+        with self.assertRaisesRegex(self.commands.Fail, "is merged"):
+            self.commands.cmd_ready(args)
+        args.pr = "12"
+        self.commands.cmd_ready(args)
+        self.assertEqual((self.task["state"], self.task["merged"], self.task["pr"]["number"]), ("done", True, 12))
+        self.assertIn("pull request #12 is merged", self.said[-1])
 
     def test_ready_pushes_a_rebased_taken_branch(self):
         from herdr_task import github, launch
@@ -9460,6 +9544,12 @@ class ReadyAndPrFlow(unittest.TestCase):
         self.assertNotEqual(original, rebased)
         self.assertEqual(github.pr_open(self.store, t, "o/r")["number"], 12)
         self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "taken"), rebased)
+        outsider = self.commit(wt, "someone else pushed", "other.txt")
+        self.git(wt, "push", "-q", "--force", "origin", "task/1:refs/heads/taken")
+        self.commit(taken, "one more task change", "taken.txt")
+        with self.assertRaisesRegex(self.commands.Fail, "stale info"):
+            github.pr_open(self.store, t, "o/r")
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "taken"), outsider)
 
     # ---- #1116: a later round reviews what changed since the last one -------------------------------------------
     def test_the_refusal_names_what_changed_since_the_last_reviewed_commit(self):

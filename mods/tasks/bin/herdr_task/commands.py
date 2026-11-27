@@ -14,7 +14,7 @@ from . import sandbox, stack
 from .base import Fail, git, guard, now, own_core_check, run, STORE, stop_note, VERSION
 from .settings import (
     agent_argv, agent_key, bare, check_automatic_agent, merge_policy, review_limits, set_opts, set_task, settings_block, settings_for, space_base,
-    task_settings, worker_argv, worktrees_on, setting_sources, SET_BY,
+    require_task_cli, reviewer_pick, task_settings, worker_argv, worktrees_on, setting_sources, SET_BY,
 )
 from .agents import (
     agent_log, agent_running, background_jobs, busy_again, BY_YOU, NOT_TRUSTED, clear_stopped, job_names, own_jobs, detail, fit, LINE_MAX, live_agents, ready_turns,
@@ -22,7 +22,7 @@ from .agents import (
 )
 from .sessions import refresh_sessions
 from .github import (already_merged, checks_missing, collision, collision_reason, collision_words, github_unreachable, pr_for_branch, checks_since, drop_branch, expected_checks, finish, gh, github, landed, merged_here, needs_approval, note_checks, own_work, pr_adopt, pr_open,
-                     merge_checks, mid_turn, pr_pending, pr_problem, pr_view, queue_refusal, remote_of, update_main, watch_main)
+                     merge_checks, merge_method, mid_turn, pr_pending, pr_problem, pr_view, queue_refusal, remote_of, update_main, watch_main)
 from .github import CHECKS_RUNNING as PR_CHECKS_RUNNING
 from .launch import (
     base_ref, brief, caller_labels, DETACHED, caller_space, current_base, default_branch, default_space, folder_for, handoff, launch,
@@ -51,6 +51,11 @@ def cmd_where(args):
 def cmd_list(args):
     if args.all:
         folders = [d["folder"] for d in map(read_list, store_files()) if is_task_list(d)]
+        if any(not os.path.isdir(folder) for folder in folders):
+            here = locate(args.folder)["folder"]
+            if here not in folders and any(os.path.isfile(path) for path in store_files(here)):
+                folders.append(here)
+        folders = list(dict.fromkeys(folders))
     else:
         folders = [locate(args.folder)["folder"]]
     groups = []
@@ -454,6 +459,7 @@ def cmd_show(args):
 
 def begin(s, t, argv, space, parent=None):
     """Starts the task's first agent. Returns its record."""
+    reviewer_pick(s, t, space)
     t["state"], t["started"] = "running", now()
     # Its brief teaches `reviewed`: ready waits for a review of its final commit (review_refusal).
     t["review_gate"] = True
@@ -557,6 +563,8 @@ def cmd_start(args):
                 q.pop("argv")
         argv = agent_argv(None, args.argv) if args.argv else worker_argv(s, t, space, args.agent) if args.agent else \
             (q.get("argv") or worker_argv(s, t, space))
+        if not args.argv and not q.get("custom"):
+            require_task_cli(agent_key(argv))
         parent = args.parent or q.get("parent")
         plan = {"argv": argv, "space": space, "parent": parent, **({"custom": True} if args.argv else {})}
         at = scheduled_at(args)
@@ -720,7 +728,7 @@ def cmd_ready(args):
             raise Fail(f"{s.name(t)} is already done.")
         wt = t.get("worktree") if t.get("mode") == "worktree" else None
         pr = t.get("pr") or {}
-        if pr.get("from_base") or (pr.get("branch") and not pr.get("taken")):
+        if pr.get("from_base") or (pr.get("branch") and (not pr.get("taken") or pr["branch"] == t.get("base"))):
             t.pop("pr")  # Older versions took another branch's PR without being asked.
             for k in ("pr_note", "merge_queued"):
                 t.pop(k, None)
@@ -1552,22 +1560,46 @@ def cmd_config(args):
                                "Settings for its tasks (a task's own --set wins):", *shown]))
 
 
+def remove_deleted_worktree(s, t):
+    """Use git's clean-worktree check, then delete the branch only if it belongs to this task."""
+    wt, branch, folder = t.get("worktree"), t.get("branch"), s.loc["folder"]
+    if t.get("mode") != "worktree" or not wt:
+        return None
+    trees = worktree_list(folder)
+    tree = next((w for w in trees if os.path.realpath(w["path"]) == os.path.realpath(wt)), None)
+    if not branch or not tree or tree["branch"] != branch or os.path.realpath(wt) == os.path.realpath(folder) or \
+            branch in {t.get("base") or "main", default_branch(folder)} or any(
+                o is not t and branch in (o.get("branch"), o.get("base")) for o in s.data["tasks"]
+                if o.get("state") != "done"):
+        return f"Its worktree {wt} and branch were kept."
+    if not git(folder, "worktree", "remove", wt)[0]:
+        return f"Its worktree {wt} and branch were kept. Check for local changes or files there."
+    if not git(folder, "branch", "-D", "--", branch)[0]:
+        return f"Its branch {branch} was kept."
+    return None
+
+
 def cmd_rm(args):
     with open_store(args) as s:
         t = s.find(args.id)
-        # 3.2: deleting a task stops its agent; its branch, worktree and files are left alone
-        ended = []
+        # Stop the task before asking git to remove its worktree.
+        ended, busy = [], False
         if t["state"] in ("running", "ready") or t.get("agents"):
             for k in live_agents(s.key(t)):
                 stop_note("rm-kill", task=s.ref(t), terminal=k["address"], by="rm")
                 if run(["hc", "kill", k["address"]]).returncode == 0:
                     ended.append(k["address"])
+                else:
+                    busy = True
+        kept = "Its worktree was kept because its agent is still running." if busy and t.get("worktree") else None
+        if not busy:
+            kept = remove_deleted_worktree(s, t)
         s.data["tasks"].remove(t)
         for o in s.data["tasks"]:
             if t["id"] in (o.get("after") or []):
                 o["after"] = [i for i in o["after"] if i != t["id"]]
         s.dirty = True
-    note = f" Its worktree {t['worktree']} is still there." if t.get("worktree") and os.path.isdir(t["worktree"]) else ""
+    note = f" {kept}" if kept else ""
     say(args, {"id": t["id"], "removed": True, "ended": ended}, f"{s.name(t)} removed.{note}")
 
 
@@ -1594,13 +1626,22 @@ def start_again(s, t, space, key=None, argv_json=None, message=None, parent=None
         raise
 
 
-def _start_again(s, t, space, key, argv_json, message, parent, nudge):
+def restart_argv(s, t, space, key, argv_json):
     prev = last_agent(t)
-    parent = parent_for(parent or (prev or {}).get("parent"), space)
     # The last agent's argv again, unless the task's agent, model, effort or flags changed since (edit).
     keep = prev and prev.get("argv") and (t.get("pick_at") or 0) <= (prev.get("at") or 0)
     argv = agent_argv(None, argv_json) if argv_json else worker_argv(s, t, space, key) if key else \
         (prev["argv"] if keep else worker_argv(s, t, space))
+    if not argv_json:
+        require_task_cli(agent_key(argv))
+    reviewer_pick(s, t, space)
+    return argv
+
+
+def _start_again(s, t, space, key, argv_json, message, parent, nudge):
+    prev = last_agent(t)
+    parent = parent_for(parent or (prev or {}).get("parent"), space)
+    argv = restart_argv(s, t, space, key, argv_json)
     same = prev and agent_key(argv) == prev.get("agent")
     res = resume_argv(argv, prev["session"], folder_for(s, t)) if same and prev.get("session") else None
     if res:
@@ -1678,6 +1719,7 @@ def cmd_switch(args):
         me = os.environ.get("HC_TERMINAL_ID")
         own = bool(old and me and old["address"].split("/")[-1] == me)
         if old and not args.keep and not own:
+            restart_argv(s, t, space, args.agent, args.argv)
             # The old agent ends before the new one starts (SHEP-211): the new one may resume the same session,
             # and killing the old one after that cut the session's turn short under the new agent, which then
             # sat on "Interrupted" with nothing to do. Its worktree and session stay for the new agent.
@@ -1859,7 +1901,7 @@ IN_QUEUE = "It is in GitHub's merge queue."  # #802: merging, done once GitHub m
 
 
 def merge_now(s, t, accept=False):
-    """Merges the task's pull request on GitHub (squash) and tidies up here. Returns why it
+    """Merges the task's pull request on GitHub and tidies up here. Returns why it
     couldn't, or None when it's merged (and the task done). A base branch with GitHub's merge
     queue (#742, #801, #802): the pull request joins the queue and the task stays Merging until
     GitHub merged it (the tick finishes it then, and deletes its branch there)."""
@@ -1899,11 +1941,15 @@ def merge_now(s, t, accept=False):
         # doesn't know the base has a merge queue (a ruleset's queue, an older gh): GitHub only queued
         # it, and a pull request whose branch goes is closed and leaves the queue. Its branch on GitHub
         # goes below, once GitHub says it merged (drop_branch()).
+        try:
+            method = merge_method(repo)
+        except Fail as e:
+            return str(e)
         if v.get("mergeStateStatus") == "DRAFT" or t.get("pr_draft"):
             # #1155: opened as a draft (ready --draft): the person's Accept takes it out of draft first; GitHub
             # merges no draft.
             gh("pr", "ready", n, "--repo", repo)
-        ok, _, err = gh("pr", "merge", n, "--repo", repo, "--squash", "--match-head-commit", v.get("headRefOid") or "")
+        ok, _, err = gh("pr", "merge", n, "--repo", repo, method, "--match-head-commit", v.get("headRefOid") or "")
         # Merged, or only queued (or set to merge by itself)? Asked again; a one-off GitHub error can
         # also come after the merge went through.
         again = pr_view(t)

@@ -623,30 +623,78 @@ class MixedVersions(unittest.TestCase):
 class ProjectId(unittest.TestCase):
     """A repo's tasks follow it when its folder is renamed: its id in .git/config, recorded in its list."""
 
-    def test_a_renamed_repo_keeps_its_tasks(self):
+    def test_a_renamed_repo_keeps_its_tasks_and_artifacts(self):
         from herdr_task import store
-        tmp = tempfile.mkdtemp(prefix="shep-pid-")
-        self.addCleanup(shutil.rmtree, tmp, True)
-        repo = os.path.join(tmp, "shop")
-        os.makedirs(repo)
-        git(repo, "init", "-q", "-b", "main")
-        with mock.patch.object(store, "STORE", os.path.join(tmp, "tasks")):
-            with store.Store(store.locate(repo)) as s:
-                s.new("Cart")
-                s.dirty = True
-            pid = git(repo, "config", "--local", "--get", "shepherdr.id")
-            self.assertTrue(pid)
-            self.assertEqual(json.load(open(s.path))["project_id"], pid)
-            os.rename(repo, os.path.join(tmp, "shop-renamed"))
-            with store.Store(store.locate(os.path.join(tmp, "shop-renamed"))) as s2:
-                self.assertEqual(s2.path, s.path, "the same list, its slug and task keys kept")
-                self.assertEqual([t["title"] for t in s2.data["tasks"]], ["Cart"])
-            self.assertEqual(json.load(open(s.path))["folder"], os.path.realpath(os.path.join(tmp, "shop-renamed")))
-            # a second clone (its own .git/config, no id yet) gets its own list
-            other = os.path.join(tmp, "shop")
-            os.makedirs(other)
-            git(other, "init", "-q", "-b", "main")
-            self.assertNotEqual(store.store_path(store.locate(other)["folder"])[1], s.path)
+        with tempfile.TemporaryDirectory(prefix="shep-pid-") as tmp:
+            repo = os.path.join(tmp, "shop")
+            git(tmp, "init", "-q", "-b", "main", repo)
+            git(repo, "remote", "add", "origin", "git@github.com:owner/shop.git")
+            artifacts = os.path.join(tmp, "artifacts")
+            os.makedirs(artifacts)
+            with mock.patch.multiple(store, STORE=os.path.join(tmp, "tasks"), ARTIFACTS=artifacts):
+                with store.Store(store.locate(repo)) as s:
+                    ref = s.ref(s.new("Cart"))
+                    s.data["github"] = {"repo": "owner/shop", "at": 123}
+                pid = git(repo, "config", "--local", "--get", "shepherdr.id")
+                self.assertEqual(store.read_list(s.path)["project_id"], pid)
+                old_art = store.folder_store_path(repo, artifacts)[1]
+                store.write_list(old_art, {"folder": repo, "name": "shop", "slug": s.slug,
+                                           "artifacts": [{"id": "cart", "folder": repo, "at": 10}]})
+                changed = os.path.join(tmp, "finance")
+                os.rename(repo, changed)
+                git(changed, "remote", "set-url", "origin", "https://github.com/owner/finance.git")
+                with store.Store(store.locate(changed), write=False) as old:
+                    self.assertEqual(old.find(ref)["title"], "Cart")
+                self.assertTrue(os.path.exists(s.path))
+                with store.Store(store.locate(changed)) as moved:
+                    self.assertEqual(moved.find(ref)["title"], "Cart")
+                    self.assertEqual(moved.new("Payments")["id"], 2)
+                self.assertEqual(moved.slug, store.slug_of(changed))
+                self.assertFalse(os.path.exists(s.path))
+                self.assertFalse(os.path.exists(old_art))
+                data = store.read_list(moved.path)
+                self.assertEqual((data["folder"], data["name"], data["github"]["repo"], data["project_id"]),
+                                 (changed, "finance", "owner/finance", pid))
+                new_art = store.read_list(store.folder_store_path(changed, artifacts)[1])
+                self.assertEqual((new_art["folder"], new_art["name"], new_art["artifacts"][0]["folder"]),
+                                 (changed, "finance", changed))
+
+    def test_a_new_list_uses_the_highest_peer_counter(self):
+        from herdr_task import machines, store
+        with tempfile.TemporaryDirectory(prefix="shep-next-") as tmp:
+            repo, other = os.path.join(tmp, "here"), os.path.join(tmp, "there")
+            git(tmp, "init", "-q", "-b", "main", repo)
+            git(tmp, "init", "-q", "-b", "main", other)
+            git(repo, "remote", "add", "origin", "git@github.com:owner/shop.git")
+            git(other, "remote", "add", "origin", "https://github.com/OWNER/SHOP")
+            peers = ("moved", "clone", "other")
+            for peer in peers:
+                os.makedirs(os.path.join(tmp, peer))
+            loc = store.locate(repo)
+
+            def read(peer, script, args, **kwargs):
+                pid, _ = args
+                if peer == "moved":
+                    d = {"folder": "/former", "project_id": pid, "tasks": [{"id": 18}], "next": 17}
+                elif peer == "clone":
+                    d = {"folder": other, "tasks": [{"id": 20}], "next": 32}
+                else:
+                    d = {"folder": "/elsewhere", "project_id": "different", "tasks": [{"id": 500}]}
+                root = os.path.join(tmp, peer)
+                store.write_list(os.path.join(root, "list.json"), d)
+                got = subprocess.run([sys.executable, "-c", script], input=json.dumps(args), capture_output=True, text=True,
+                                     env={**os.environ, "HERDR_TASK_STORE": root}, check=True)
+                return json.loads(got.stdout)
+
+            with mock.patch.object(store, "STORE", os.path.join(tmp, "tasks")), \
+                    mock.patch.object(machines, "connected_machines", return_value=[
+                        {"name": p, "state": "connected"} for p in peers]), \
+                    mock.patch.object(machines, "_remote_python", side_effect=read) as query:
+                with store.Store(loc) as s:
+                    self.assertEqual(s.new("Start here")["id"], 32)
+                with store.Store(loc) as s:
+                    self.assertEqual(s.new("Continue here")["id"], 33)
+                self.assertEqual(query.call_count, 3)
 
 
 class OneTable(unittest.TestCase):

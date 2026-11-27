@@ -7,14 +7,18 @@ import json
 import os
 import re
 import time
-from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack, contextmanager
 
 from . import analytics
-from .base import Fail, git, hc_json, HOME, LEGACY, now, run, STORE
+from .base import beside_store, Fail, git, hc_json, HOME, LEGACY, now, run, STORE
 from .settings import settings_for
-from .agents import agent_running
+from .agents import agent_running, live_agents, live_helpers
 from .sessions import session_of
 from .launch import retag_tabs
+from .layout import PY
+
+ARTIFACTS = beside_store("artifacts", "artifacts")
 
 
 # ---- where a folder's tasks live ------------------------------------------------------------
@@ -58,7 +62,7 @@ def slug_of(folder):
 # A repo's tasks are kept by its folder's name (the slug), so renaming or moving the folder would lose them. Each
 # repo gets an id of its own in its .git/config (`git config --local shepherdr.id`: never committed, shared by its
 # worktrees, moved with it), recorded in its task list as "project_id": a folder with no list of its own finds the
-# list whose repo it is, when that list's folder is gone, and goes on with it (same slug, so its tasks' keys stay).
+# list whose repo it is when the old folder is gone. Its task numbers and prefix stay the same.
 
 def project_id(folder, make=False):
     """The repo's id (None outside git); make: give it one when it has none."""
@@ -72,37 +76,154 @@ def project_id(folder, make=False):
     return new if git(folder, "config", "--local", "shepherdr.id", new)[0] else None
 
 
-def moved_list(folder):
-    """The list of the repo now at `folder` that was kept under its old folder (gone now), or None."""
-    pid = project_id(folder) if os.path.isdir(os.path.join(folder, ".git")) else None
-    if not pid:
-        return None
-    for p in (os.path.join(STORE, f) for f in sorted(os.listdir(STORE))) if os.path.isdir(STORE) else []:
-        if not p.endswith(".json"):
-            continue
-        d = read_list(p)
-        if is_task_list(d) and d.get("project_id") == pid and d.get("folder") != folder and not os.path.isdir(d.get("folder") or ""):
-            return p
-    return None
+def folder_store_path(folder, root, pid=None):
+    """The filename for a folder, disambiguated when two paths produce the same slug."""
+    slug = slug_of(folder)
+    p = os.path.join(root, slug + ".json")
+    data = read_list(p)
+    if isinstance(data, dict) and data.get("folder") not in (None, folder):
+        if not pid or data.get("project_id") != pid or os.path.isdir(data["folder"]):
+            slug = f"{slug}-{hashlib.sha1(folder.encode()).hexdigest()[:6]}"
+            p = os.path.join(root, slug + ".json")
+    return slug, p
+
+
+def resolve_store(folder):
+    """Canonical task list and, when the repo moved, the older file it still lives in."""
+    pid = project_id(folder) if os.path.exists(os.path.join(folder, ".git")) else None
+    slug, path = folder_store_path(folder, STORE, pid)
+    data = read_list(path)
+    if is_task_list(data) and data["folder"] == folder:
+        return slug, path, None
+    if pid:
+        for p in store_files():
+            d = read_list(p)
+            if is_task_list(d) and d.get("project_id") == pid and (
+                    d["folder"] == folder or not os.path.isdir(d["folder"])):
+                return slug, path, p
+    return slug, path, None
 
 
 def store_path(folder):
-    slug = slug_of(folder)
-    p = os.path.join(STORE, slug + ".json")
-    if not os.path.exists(p):
-        moved = moved_list(folder)
-        if moved:
-            return os.path.basename(moved)[:-5], moved
-    # Two folders can share a readable slug ("a-b/c", "a/b-c"): the second gets a hash.
-    if os.path.exists(p):
+    slug, path, old = resolve_store(folder)
+    return (os.path.basename(old)[:-5], old) if old else (slug, path)
+
+
+def lock_path(path):
+    return os.path.join(os.path.dirname(path), "." + os.path.basename(path) + ".lock")
+
+
+def write_list(path, data):
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, separators=(",", ":"))
+        f.write("\n")
+    os.replace(tmp, path)
+
+
+def move_artifacts(old_folder, old_slug, loc):
+    """Move the artifact index. Version files are stored by artifact ID and stay where they are."""
+    folder = loc["folder"]
+    slug, destination = folder_store_path(folder, ARTIFACTS)
+    source = folder_store_path(old_folder, ARTIFACTS)[1] if old_folder != folder else os.path.join(
+        ARTIFACTS, old_slug + ".json")
+    if source == destination or not os.path.isfile(source):
+        return
+    with ExitStack() as locks:
+        for path in sorted((source, destination)):
+            f = locks.enter_context(open(lock_path(path), "a"))
+            fcntl.flock(f, fcntl.LOCK_EX)
+        if not os.path.isfile(source):
+            return
+        old = read_list(source)
+        if not isinstance(old, dict) or not isinstance(old.get("artifacts"), list):
+            raise Fail(f"Can't move the artifacts in {source}: the list isn't readable.")
+        origin = old.get("folder")
+        if origin not in (old_folder, folder) and (old_folder != folder or os.path.isdir(origin or "")):
+            return  # The old task slug also happens to name a different folder's artifacts.
+        new = read_list(destination)
+        if os.path.exists(destination) and not isinstance(new, dict):
+            raise Fail(f"Can't move the artifacts: {destination} isn't readable.")
+        new = new or {}
+        if new.get("folder") not in (None, folder):
+            raise Fail(f"Can't move the artifacts: {destination} belongs to another folder.")
+        items = {a["id"]: a for a in old["artifacts"]}
+        items.update((a["id"], a) for a in new.get("artifacts") or [])
+        values = sorted((dict(a, folder=folder) for a in items.values()), key=lambda a: a.get("at") or 0, reverse=True)
+        write_list(destination, {**old, **new, "artifacts": values, "slug": slug,
+                                 **{k: loc[k] for k in ("folder", "kind", "name")}})
+        os.unlink(source)
+
+
+def remote_repo(folder):
+    """GitHub's owner/name from the git remote, with no network or credentials."""
+    ok, out, _ = git(folder, "remote", "-v")
+    lines = [ln.split() for ln in out.splitlines()] if ok else []
+    rows = [row for row in lines if len(row) == 3 and row[-1] == "(fetch)"]
+    rows.sort(key=lambda row: row[0] != "origin")
+    for _, url, _ in rows:
+        m = re.search(r"(?:^|[@/])github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$", url, re.I)
+        if m:
+            return m[1]
+    return None
+
+
+# Ask peers for a number only, using their own store path (including on older Shepherdr installs).
+PEER_NEXT = "import json, os, re, subprocess, sys\n" + PY + r"""
+pid, repo = json.load(sys.stdin)
+root = os.environ.get("HERDR_TASK_STORE") or SHEP(".herdr/tasks")
+highest = 0
+for name in os.listdir(root) if os.path.isdir(root) else []:
+    if not name.endswith(".json"):
+        continue
+    try:
+        with open(os.path.join(root, name)) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        continue
+    if not isinstance(d, dict) or not isinstance(d.get("tasks"), list) or not isinstance(d.get("folder"), str):
+        continue
+    if not (pid and d.get("project_id") == pid):
+        if not repo:
+            continue
+        known = (d.get("github") or {}).get("repo")
+        if not known and os.path.isdir(d["folder"]):
+            try:
+                result = subprocess.run(["git", "-C", d["folder"], "remote", "get-url", "origin"],
+                                        capture_output=True, text=True, timeout=1)
+                match = re.search(r"(?:^|[@/])github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?/?$",
+                                  result.stdout.strip(), re.I)
+                known = match[1] if match else None
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        if not known or known.lower() != repo:
+            continue
+    highest = max(highest, *(t["id"] for t in d["tasks"] if isinstance(t, dict) and isinstance(t.get("id"), int)),
+                  int(d.get("next") or 1) - 1)
+print(json.dumps(highest))
+"""
+
+
+def peer_next(folder, pid):
+    """Seed a new repo list from the highest number reachable on its linked machines."""
+    from .machines import connected_machines, _remote_python
+    try:
+        peers = [m["name"] for m in connected_machines() if m.get("state") == "connected" and m.get("name")]
+    except (Fail, OSError):
+        return 1
+    if not peers:
+        return 1
+    repo = remote_repo(folder)
+
+    def read(peer):
         try:
-            with open(p) as f:
-                if json.load(f).get("folder") not in (None, folder):
-                    slug = f"{slug}-{hashlib.sha1(folder.encode()).hexdigest()[:6]}"
-                    p = os.path.join(STORE, slug + ".json")
-        except (OSError, ValueError):
-            pass
-    return slug, p
+            result = _remote_python(peer, PEER_NEXT, [pid, repo.lower() if repo else None], timeout=5)
+            return result if type(result) is int else 0
+        except (Fail, OSError):
+            return 0
+
+    with ThreadPoolExecutor(max_workers=min(8, len(peers))) as pool:
+        return 1 + max(pool.map(read, peers))
 
 
 def words_of(name):
@@ -206,7 +327,7 @@ class Store:
 
     def __init__(self, loc, write=True, wait=None):
         self.loc, self.write, self.best_effort = loc, bool(write), write == "try"
-        self.slug, self.path = store_path(loc["folder"])
+        self.slug, self.path, self.moved = resolve_store(loc["folder"])
         self.dirty = self.read_only = False
         self.read_as = None   # the list as read or saved last (save() writes when it differs)
         self.wait = wait  # seconds a change waits for the lock before it gives up (None: as long as it takes)
@@ -216,7 +337,7 @@ class Store:
             os.makedirs(STORE, exist_ok=True)
         except OSError:
             pass
-        self.lock, can = open_lock(os.path.join(STORE, "." + os.path.basename(self.path) + ".lock"))
+        self.lock, can = open_lock(lock_path(self.path))
         if not can:
             if self.write and not self.best_effort:
                 if self.lock:
@@ -232,16 +353,25 @@ class Store:
         elif self.lock:
             self.take_lock()
         try:
-            with open(self.path) as f:
-                self.data = json.load(f)
-        except FileNotFoundError:
-            self.data = {}
-        except ValueError:
-            raise Fail(f"{self.path} isn't valid JSON. Fix it first.")
+            _, _, moved = resolve_store(self.loc["folder"]) if self.moved else (None, None, None)
+            if moved and self.write:
+                self.move(moved)
+            source = (moved if not self.write else None) or self.path
+            try:
+                with open(source) as f:
+                    self.data = json.load(f)
+                if source != self.path:
+                    self.slug, self.path = os.path.basename(source)[:-5], source
+            except FileNotFoundError:
+                self.data = (read_list(self.path) if source != self.path else None) or {}
+            except ValueError:
+                raise Fail(f"{self.path} isn't valid JSON. Fix it first.")
+        except BaseException:
+            if self.lock:
+                self.lock.close()
+            raise
         d = self.data
         d.setdefault("version", 1)
-        if self.write and d.get("folder") not in (None, self.loc["folder"]) and os.path.exists(self.path):
-            self.dirty = True   # its repo moved (moved_list): kept under its new folder from now on
         d["folder"], d["kind"], d["name"] = self.loc["folder"], self.loc["kind"], self.loc["name"]
         if d.get("slug") != self.slug and os.path.exists(self.path):
             d["slug"] = self.slug
@@ -268,6 +398,52 @@ class Store:
                 self.dirty = self.new_prefix = bool(d["tasks"]) or os.path.exists(self.path)
         self.read_as = self.text() if self.write else None
         return self
+
+    def move(self, source):
+        """Move under both locks. A reader can still use the old file until the move completes."""
+        if source == self.path:
+            self.move_locked(source)
+            return
+        lock, can = open_lock(lock_path(source))
+        if not can:
+            if lock:
+                lock.close()
+            raise Fail("Can't move the old task list here: it is read-only.")
+        with lock:
+            flags = fcntl.LOCK_EX | (fcntl.LOCK_NB if self.best_effort else 0)
+            try:
+                fcntl.flock(lock, flags)
+            except BlockingIOError:
+                self.write = False
+                return
+            self.move_locked(source)
+
+    def move_locked(self, source):
+        d = read_list(source)
+        if not is_task_list(d):
+            return
+        old_folder, folder = d["folder"], self.loc["folder"]
+        old_slug = d.get("slug") or os.path.basename(source)[:-5]
+        if old_folder == folder and source == self.path:
+            return
+        if source != self.path and os.path.exists(self.path):
+            raise Fail("The old and new folders each have a task list. Move one aside before retrying.")
+        move_artifacts(old_folder, old_slug, self.loc)
+        if old_folder != folder and any(t.get("worktree") for t in d["tasks"]):
+            git(folder, "worktree", "repair")
+        if source != self.path:
+            os.replace(source, self.path)
+        repo = remote_repo(folder)
+        d.update(folder=folder, name=self.loc["name"], slug=self.slug,
+                 github={"repo": repo, "at": 0})
+        write_list(self.path, d)
+        if old_slug != self.slug:
+            for t in d["tasks"]:
+                if not t.get("agents"):
+                    continue
+                old_key = f"{old_slug}#{t['id']}"
+                for k in live_agents(old_key) + live_helpers(old_key):
+                    run(["hc", "label", k["address"], f"herdr.task={self.key(t)}"])
 
     def text(self):
         # compact (#1175: the panels read every list through one capped exec; indented, a busy list was
@@ -392,6 +568,9 @@ class Store:
                 self.before = analytics.snapshot(tasks)
                 # what is on disk now: anything the caller changes after this is saved on the way out (save())
                 self.read_as = self.text()
+            elif not os.path.isdir(self.loc["folder"]):
+                self.write = False
+                raise Fail("The task folder moved while this command was running. Try again from the new folder.")
             else:
                 self.dirty = True   # unreadable just now: what this command holds is saved on the way out
 
@@ -446,6 +625,8 @@ class Store:
 
     def new(self, title, prompt="", mode="here"):
         d = self.data
+        if d["next"] == 1 and not d["tasks"] and d.get("kind") == "repo":
+            d["next"] = peer_next(d["folder"], d.get("project_id"))
         t = {"id": d["next"], "title": title, "prompt": prompt, "mode": mode, "state": "todo",
              "created": now(), "agents": []}
         d["next"] += 1
@@ -504,6 +685,11 @@ def open_store(args, write=True, wait=None):
         m = re.fullmatch(r"([A-Za-z]+[0-9]*)-[Aa]?[0-9]+", str(ref).strip())
         if m:
             folder = prefixes_in_use().get(m.group(1).upper())
+            if folder and not os.path.isdir(folder):
+                here = locate(None)
+                candidate = read_list(store_path(here["folder"])[1])
+                if is_task_list(candidate) and candidate.get("prefix") == m.group(1).upper():
+                    folder = here["folder"]
     return Store(locate(folder), write, wait)
 
 
