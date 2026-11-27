@@ -557,6 +557,12 @@ const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } 
 
 // One tool call in words: its kind (for the summary), a line for the open row, and what it is
 // doing (for the working line: "Editing main.js", "Run the auth tests").
+// An MCP tool's name as Claude Code and Codex give it to the model, mcp__<server>__<tool> -> { server, tool }, or null.
+export function mcpTool(name) {
+  const m = /^mcp__(.+?)__(.+)$/.exec(String(name ?? ""));
+  return m ? { server: m[1], tool: m[2] } : null;
+}
+
 function claudeStep(name, input = {}) {
   switch (name) {
     case "Read": return { kind: "read", line: `Read ${short(input.file_path)}`, doing: `Reading ${base(input.file_path)}` };
@@ -748,6 +754,13 @@ export class Conversation {
   push(item) {
     this.items.push(item);
     return item;
+  }
+
+  // A call to an MCP tool (mcp__<server>__<tool>): a place for its view, should it have one (MCP Apps; the service
+  // finds the call herdr-mcp kept, service/mcp/records.js matchCall): { kind: "app", id, at, server, tool, input }.
+  mcpApp(name, input, off, at) {
+    const m = mcpTool(name);
+    if (m) this.push({ kind: "app", id: `mcp${off}`, at, server: m.server, tool: m.tool, input: input ?? {} });
   }
 
   // A `!` command the person ran (shellRun): its row ({ kind: "command", id, at, text, state, out? }), running until
@@ -1192,6 +1205,7 @@ export class Conversation {
             if (st) st.at = time(l.timestamp) || Date.now();
             this.step(String(b.id), off, st, b.name === "Agent" || b.name === "Task" ? String(b.id) : null);
             if (b.name === "Bash" && ARTIFACT.test(String(b.input?.command ?? ""))) this.push({ kind: "artifact", id: `art${off}`, at: time(l.timestamp) });
+            this.mcpApp(String(b.name ?? ""), b.input, off, time(l.timestamp));
             // a command run in the background only starts: a send in it is no message yet (it may never run)
             if (b.name === "Bash" && !b.input?.run_in_background) this.sent(String(b.input?.command ?? ""), off, time(l.timestamp), String(b.id));
           }
@@ -1287,6 +1301,7 @@ export class Conversation {
         if (st?.spawn) this.helpers.set(cid, { desc: st.spawn, done: false, untilTurn: true });
         this.step(cid, off, st, st?.spawn ? cid : null);
         if (ARTIFACT.test(JSON.stringify(p.arguments ?? p.input ?? p.action ?? ""))) this.push({ kind: "artifact", id: `art${off}`, at: time(l.timestamp) });
+        this.mcpApp(String(p.name ?? ""), typeof p.arguments === "string" ? parse(p.arguments) : p.arguments, off, time(l.timestamp));
         this.sent(codexCommand(p.arguments ?? p.input ?? p.action), off, time(l.timestamp), cid);
       } else if (p.type === "function_call_output" || p.type === "custom_tool_call_output") {
         const asked = this.asyncQuestionCalls.get(p.call_id);

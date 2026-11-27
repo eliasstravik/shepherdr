@@ -1,0 +1,19 @@
+#!/bin/sh
+# herdr-mcp: Shepherdr's MCP gateway (service/mcp/gateway.ts). An agent starts it as an MCP server, from its own
+# documented MCP config, in front of the real server, so Shepherdr can show that server's MCP Apps views in its chat:
+#   claude mcp add flowbound -- herdr-mcp flowbound -- npx -y flowbound mcp
+#   codex mcp add flowbound -- herdr-mcp flowbound -- npx -y flowbound mcp
+# It runs on Bun, as the service does.
+self=$0
+while [ -L "$self" ]; do
+  to=$(readlink "$self")
+  case $to in /*) self=$to ;; *) self=$(dirname "$self")/$to ;; esac
+done
+root=$(cd "$(dirname "$self")/.." && pwd)
+bun=$(command -v bun 2>/dev/null)
+[ -n "$bun" ] || bun="$HOME/.bun/bin/bun"
+if [ ! -x "$bun" ]; then
+  echo "herdr-mcp: Bun isn't here (Shepherdr's installer puts it in ~/.bun/bin)" >&2
+  exit 1
+fi
+exec "$bun" "$root/service/mcp/gateway.ts" "$@"

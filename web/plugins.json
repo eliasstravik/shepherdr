@@ -1,3 +1,3 @@
 {
-  "plugins": ["chat", "tasks", "artifacts", "files", "diff", "terminal", "screens", "voice", "schedules", "reactions", "recaps", "search", "shortcuts", "alerts", "analytics"]
+  "plugins": ["chat", "tasks", "artifacts", "mcp-apps", "files", "diff", "terminal", "screens", "voice", "schedules", "reactions", "recaps", "search", "shortcuts", "alerts", "analytics"]
 }

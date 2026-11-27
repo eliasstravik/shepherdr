@@ -29,7 +29,7 @@ What goes where (each under --root, default your home):
                                         (mods/artifacts/bin), the helpers and this installer (bin/), the agents' hooks
                                         (hooks/), the role instructions (templates/), the Herdr button (herdr/)
   .local/share/shepherdr/installed.json what it installed (a sha256 per file), so running it again changes only what changed
-  .local/bin/{herdr-task,herdr-artifact,herdr-secret,herdr-browser,herdr-desktop,shepherdr}   links into that folder
+  .local/bin/{herdr-task,herdr-artifact,herdr-secret,herdr-browser,herdr-desktop,herdr-mcp,shepherdr}   links into that folder
   .config/herdr-core/templates/*.md     the Assistant's, worker's and reviewer's instructions
   .config/systemd/user/shepherdr.service    Linux: keeps the service running (systemctl --user)
   Library/LaunchAgents/dev.shepherdr.service.plist   macOS: the same with launchd
@@ -465,7 +465,7 @@ def move_repo_settings(r, a, root):
 # herdr-artifact keep their 3.1 paths, so machines on 3.1 and 3.2 find each other's copies.
 LINKS = {"herdr-task": "mods/tasks/bin/herdr-task", "herdr-artifact": "mods/artifacts/bin/herdr-artifact",
          "herdr-secret": "bin/herdr-secret", "herdr-browser": "bin/herdr-browser", "herdr-desktop": "bin/herdr-desktop",
-         "shepherdr": "bin/shepherdr"}
+         "herdr-mcp": "bin/herdr-mcp", "shepherdr": "bin/shepherdr"}
 # Written by Herdr into each mod (editor types): never ours, never touched.
 GENERATED = {"gpui-kit.d.ts", "jsconfig.json"}
 SKIP = {"__pycache__", ".DS_Store"}
