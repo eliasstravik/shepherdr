@@ -2,9 +2,11 @@
  *  came) and when its window gets shorter (the box grew, the suggested replies came above it), its end stays in view.
  *  A ResizeObserver runs after layout and before paint, so the move never shows as a jump. No imports: the layout test
  *  (test/test_reply_row.py) runs this very file in a real Chrome. */
-export function keepAtEnd(sc: HTMLElement, box: HTMLElement, stuck: () => boolean): () => void {
+export function keepAtEnd(sc: HTMLElement, box: HTMLElement, stuck: () => boolean, pinned?: () => void): () => void {
   const ro = new ResizeObserver(() => {
-    if (stuck()) sc.scrollTop = sc.scrollHeight
+    if (!stuck()) return
+    sc.scrollTo({ top: sc.scrollHeight, behavior: 'instant' })
+    pinned?.()
   })
   ro.observe(box)
   ro.observe(sc)

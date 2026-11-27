@@ -3,6 +3,18 @@
 // up, under the status bar. There the app takes the height of what's visible (window.visualViewport), keeps the page
 // from scrolling, and tells the layout when the keyboard is up, so the message box sits on the keyboard.
 
+/** Returning to a tab or WebView, including a page restored without mounting it again. */
+export function onPageReturn(reopen: () => void) {
+  const visible = () => { if (!document.hidden) reopen() }
+  const restored = (event: PageTransitionEvent) => { if (event.persisted) reopen() }
+  document.addEventListener('visibilitychange', visible)
+  window.addEventListener('pageshow', restored)
+  return () => {
+    document.removeEventListener('visibilitychange', visible)
+    window.removeEventListener('pageshow', restored)
+  }
+}
+
 /** a keyboard is taller than this; browser bars that come and go are shorter */
 const KEYBOARD = 150
 

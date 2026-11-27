@@ -1,5 +1,5 @@
 // A link that points at this same app (an artifact's, a task's or a space's own address, what `herdr-artifact link`
-// prints) opens inside the app: no reload, the chat stays where it was, and Back returns (SHEP-339). Only links to
+// prints) opens inside the app without a reload, and Back returns to the previous view (SHEP-339). Only links to
 // other sites open a new tab.
 
 /** the app's own folder: `/shepherdr/` for `/shepherdr/`, `/shepherdr/index.html` or `/shepherdr` */

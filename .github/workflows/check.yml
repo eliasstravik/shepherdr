@@ -62,6 +62,8 @@ jobs:
       - name: every tappable thing is big enough for a finger (the built demo, phone and tablet widths)
         # SHEP-317: web/demo/tap-check.ts in the runner's own Chrome; it names what's under the minimum
         run: bun web/demo/tap-check.ts
+      - name: chats and terminals open at the newest line (the built demo, phone and desktop)
+        run: bun web/demo/scroll-check.ts
       - name: dictation and the call stay inside the message box, their wave moves, their buttons stay put
         # web/demo/dict-check.ts in the runner's own Chrome with a fake microphone (3.2.3's broken dictation)
         run: bun web/demo/dict-check.ts
