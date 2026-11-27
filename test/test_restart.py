@@ -119,11 +119,11 @@ class NoTab(unittest.TestCase):
     stderr: all anyone saw was "It didn't restart". It restarts in the background under its space now, and a
     restart that can't says why, across machines too."""
 
-    def restart(self, labels, env=None, argv=("claude", "--resume", "s1")):
+    def restart(self, labels, env=None, argv=("claude", "--resume", "s1"), state="idle"):
         d = tempfile.mkdtemp()
         os.makedirs(os.path.join(d, "bin"))
         hc = os.path.join(d, "bin", "hc")
-        rec = json.dumps({"address": "t2", "cwd": "/tmp", "template": "assistant", "labels": labels})
+        rec = json.dumps({"address": "t2", "cwd": "/tmp", "template": "assistant", "labels": labels, "status": {"state": state}})
         with open(hc, "w") as f:
             f.write(LOCAL_HC.replace(LOCAL_HC.split("\n")[3], f"  get) echo '{rec}' ;;"))
         os.chmod(hc, 0o755)
@@ -140,6 +140,12 @@ class NoTab(unittest.TestCase):
         for label in ("herdr.space=sp1", "herdr.coordinator.space=sp1", "herdr.role=coordinator"):
             self.assertIn(label, args)
         self.assertFalse(any(a.startswith("herdr.tab=") for a in args), "no empty tab label")
+
+    def test_chat_picker_does_not_restart_a_busy_assistant(self):
+        r, args = self.restart({"herdr.space": "sp1"}, {"HERDR_RESTART_WHEN_IDLE": "1"}, state="working")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("Wait for this turn to finish", r.stderr)
+        self.assertIsNone(args)
 
     def test_nowhere_to_go_says_why(self):
         r, args = self.restart({"herdr.role": "coordinator"})

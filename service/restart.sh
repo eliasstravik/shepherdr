@@ -10,6 +10,7 @@
 #   HERDR_RESTART_CHAT=<chat pane>  the new agent starts parked behind that chat pane
 #                                   (herdr.chat label) instead of getting a pane in the tab.
 #   HERDR_RESTART_RESUME=1          argv resumes the same conversation: no handoff is sent.
+#   HERDR_RESTART_WHEN_IDLE=1       a chat picker leaves an active agent alone.
 set -u
 old=$1 argv=${2:-}
 # #1431: a herdr-core started outside a login shell (launchd, ssh) runs this, and each terminal it starts, with only
@@ -25,6 +26,7 @@ if [[ "$old" == */* ]]; then
   envs=()
   [ -n "${HERDR_RESTART_CHAT:-}" ] && envs+=(--env "HERDR_RESTART_CHAT=$HERDR_RESTART_CHAT")
   [ -n "${HERDR_RESTART_RESUME:-}" ] && envs+=(--env "HERDR_RESTART_RESUME=1")
+  [ -n "${HERDR_RESTART_WHEN_IDLE:-}" ] && envs+=(--env "HERDR_RESTART_WHEN_IDLE=1")
   # its own say on why it didn't (#980: a silent exit there read only as "It didn't restart"), kept apart from hc's
   errf=$(mktemp "${TMPDIR:-/tmp}/herdr-restart.XXXXXX")
   out=$(hc exec --on "$on" --stdin --timeout 300 ${envs[@]+"${envs[@]}"} -- bash -s "$here" "$argv" <"$0" 2>"$errf")
@@ -44,6 +46,11 @@ if [[ "$old" == */* ]]; then
 fi
 info=$(hc get "$old" --json) || { echo "$old isn't running here any more." >&2; exit 1; }
 get() { jq -r "$1 // empty" <<<"$info"; }
+if [ -n "${HERDR_RESTART_WHEN_IDLE:-}" ]; then
+  case $(get '.status.state') in
+    working|blocked) echo "Wait for this turn to finish, then update." >&2; exit 1 ;;
+  esac
+fi
 space=$(get '.labels["herdr.space"]') tab=$(get '.labels["herdr.tab"]') role=$(get '.labels["herdr.role"]')
 # Assistants start from the assistant template (earlier ones from "coordinator").
 case $(get .template) in assistant|coordinator) role=coordinator ;; esac

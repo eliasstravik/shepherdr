@@ -6209,9 +6209,9 @@ class TaskFlow(unittest.TestCase):
         self.commands.cmd_switch(self.args(space=None, agent="claude", argv=None, parent=None, keep=False))
         self.assertEqual(got, ["sp-a"])  # none given: the old agent's own space
 
-    def switch_events(self, me=None):
-        """cmd_switch with the old agent t1 mid-turn on session S1: what it ran, in order."""
-        self.live = [{"address": "t1", "status": {"state": "working"}, "labels": {"herdr.task.space": "sp-a"}}]
+    def switch_events(self, me=None, state="working", when_idle=False):
+        """cmd_switch with the old agent t1 on session S1: what it ran, in order."""
+        self.live = [{"address": "t1", "status": {"state": state}, "labels": {"herdr.task.space": "sp-a"}}]
         self.task["agents"] = [{"address": "t1", "agent": "claude", "argv": ["claude"], "at": 1, "session": "S1"}]
         events = []
         self.patch(self.commands, "agent_running", lambda k: True)
@@ -6230,7 +6230,7 @@ class TaskFlow(unittest.TestCase):
             env["HC_TERMINAL_ID"] = me
         with self.mock.patch.dict(os.environ, env, clear=True):
             self.commands.cmd_switch(self.args(space=None, agent=None, argv='["claude", "--model", "opus"]', parent=None,
-                                               keep=False))
+                                               keep=False, when_idle=when_idle))
         return events
 
     def test_switch_ends_the_old_agent_before_resuming_its_session(self):
@@ -6245,6 +6245,18 @@ class TaskFlow(unittest.TestCase):
         self.assertEqual(resume, ["claude", "--model", "opus", "--permission-mode", "default", "--resume", "S1"])
         self.assertEqual(message, self.commands.SWITCH_NUDGE)
         self.assertEqual(self.said[-1], '"Flow": claude t2 resumed its session, t1 ended')
+
+    def test_chat_picker_resumes_the_idle_session_without_a_new_message(self):
+        events = self.switch_events(state="idle", when_idle=True)
+        self.assertEqual(events, [
+            ("run", ["hc", "kill", "t1"]),
+            ("launch", ["claude", "--model", "opus", "--permission-mode", "default", "--resume", "S1"], None),
+        ])
+
+    def test_chat_picker_leaves_a_working_session_running(self):
+        with self.assertRaisesRegex(self.commands.Fail, "Wait for this turn to finish"):
+            self.switch_events(when_idle=True)
+        self.assertEqual(self.said, [])
 
     def test_a_resumed_claude_starts_in_the_configured_mode(self):
         """#1056: Claude Code resumes a session in the permission mode it ended in (a stuck agent left in plan or
