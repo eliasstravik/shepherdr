@@ -24,7 +24,6 @@ NO_WEB_CALLER = {
     "assistant-close": "back if End comes with Restart a running Assistant",
     # later (#1560's accepted plan)
     # dropped on purpose: a line each in docs/upgrading.md, What does not
-    "rewind": "dropped: Rewind a message",
     "schedule": "dropped: Start later and Reschedule",
     "pin": "dropped: Pin a task",
     "machine-add": "dropped: add a machine by clicking",
