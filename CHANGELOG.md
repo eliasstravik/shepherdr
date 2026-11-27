@@ -1,11 +1,38 @@
 # Changelog
 
-## Unreleased
+## 3.2.22
 
-- Codex and Claude Code startup prompts show up under Needs you, with their choices and a link to the terminal.
-- The terminal keeps startup menus in view, even when the app is narrow and the agent hides its cursor.
-- Codex may ask you to review Shepherdr's permission hook once after updating. The hook now starts directly
-  from the installed Shepherdr command, and its definition stays the same when you switch permission modes.
+### What you will notice first
+
+- Needs you alerts are for questions only you can answer. Routine task waits go to the space's Assistant, and
+  old alerts clear when the task can move on.
+- New Codex tasks use a permission hook that stays the same across updates and permission modes. That keeps
+  changes to the hook from stopping new tasks.
+- Codex and Claude Code start screens show up as cards under Needs you. The card shows your choices and opens
+  the terminal so you can answer there. Startup menus stay visible on narrow screens, too.
+- Effort levels use capitals, and Fast and Ultra-fast have lightning bolts. The labels fit on narrow screens.
+
+### Fixes from GitHub triage
+
+- Find Everything by name and tag it in chat. Kept artifacts stay in their space, and Back from an artifact
+  takes you to the chat, task or list you came from. The task pane opens at the newest reply.
+- Task names in messages open the right task on the right machine. You can send a reply to a task's own chat.
+- Codex keeps its reviewer when signed in with an API key. If Shepherdr needs to change the reviewer, the
+  review card says why. The Codex permission choices explain what each one lets the agent do.
+- Secret requests show which vault will keep the secret. The terminal warns you if it and the app use different
+  vaults.
+- A scheduled task keeps its start time when started again unless you ask to run it now. Deleting a task
+  also clears its branch and checkout when the checkout is clean and the branch belongs to that task.
+- Tasks and artifacts follow a moved or renamed repo. Marking work ready keeps the pull request on the task's
+  branch unless you pick another one. Accept uses a merge method the repo allows.
+- On macOS 27, a background service account can block the web app from letting you in. If you hit that problem,
+  see [macOS service accounts](https://github.com/eliasstravik/shepherdr/blob/v3.2.22/docs/settings.md#macos-service-accounts)
+  for how to let a trusted service account through and what access that gives it.
+
+### Updating
+
+Run `shepherdr update`. Codex may ask you to review Shepherdr's permission hook once after this update. If it does,
+review it in the Codex terminal before starting work.
 
 ## 3.2.21
 

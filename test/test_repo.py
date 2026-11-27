@@ -364,7 +364,7 @@ console.log(JSON.stringify(out));"""
 
     def test_version_everywhere(self):
         v = re.search(r'^VERSION = "([^"]+)"', open(J("bin", "shepherdr")).read(), re.M).group(1)
-        self.assertEqual(v, "3.2.21")
+        self.assertEqual(v, "3.2.22")
         self.assertEqual(json.load(open(J("package.json")))["version"], v)
         self.assertRegex(open(J("CHANGELOG.md")).read(), rf"(?m)^## {re.escape(v)}\b", "CHANGELOG's newest entry")
         self.assertEqual(re.search(r"(?m)^## (\d+\.\d+\.\d+)", open(J("CHANGELOG.md")).read()).group(1), v, "CHANGELOG's top heading")

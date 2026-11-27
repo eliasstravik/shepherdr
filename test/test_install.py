@@ -135,7 +135,7 @@ class Install(unittest.TestCase):
         out = run("install", "--root", self.root, "--yes").stdout
         self.assertRegex(out, r"files: \d+ new\n")
         rec = json.load(open(self.p(RECORD)))
-        self.assertEqual(rec["version"], "3.2.21")
+        self.assertEqual(rec["version"], "3.2.22")
         self.assertFalse(os.path.exists(self.p(OLD_RECORD)), "no record in the Herdr app any more")
         self.assertTrue(os.path.isfile(self.p(SHARE, "mods/tasks/bin/herdr-task")))
         self.assertEqual(os.path.realpath(self.p(".local/bin/herdr-task")), os.path.realpath(self.p(SHARE, "mods/tasks/bin/herdr-task")))
@@ -1202,7 +1202,7 @@ class SwitchFromTheWindow(unittest.TestCase):
         # the task finished: the same update switches
         self.set_tasks("done")
         out = run("update", "--root", self.root, "--yes", "--source", ROOT).stdout
-        self.assertIn("Shepherdr 3.2.21 update", out)
+        self.assertIn("Shepherdr 3.2.22 update", out)
         self.assertIn("switching from Shepherdr 3.1.46 (the Herdr-window install)", out)
         self.assertIn("removed what 3.1 put in the Herdr app: 28 mods, 1 artifact mod (kept in the backup)", out)
         self.assertIn("3 files you changed are in the backup", out)
@@ -1251,7 +1251,7 @@ class SwitchFromTheWindow(unittest.TestCase):
         self.assertNotIn("3.1.46", open(self.p(SHARE, "bin/shepherdr")).read()[:200])
         # (e) the new record is written, the old one gone; nothing of the window is in it
         rec = json.load(open(self.p(RECORD)))
-        self.assertEqual(rec["version"], "3.2.21")
+        self.assertEqual(rec["version"], "3.2.22")
         self.assertFalse(os.path.exists(self.p(OLD_RECORD)))
         self.assertFalse([f for f in rec["files"] if f.startswith(APP) and "/mods/open-shepherdr/" not in f])
         self.assertNotIn("mods", rec)
@@ -1283,7 +1283,7 @@ class SwitchFromTheWindow(unittest.TestCase):
     def test_force_switches_while_tasks_work(self):
         out = run("install", "--root", self.root, "--yes", "--source", ROOT, "--force").stdout
         self.assertIn("switched while these tasks were working (--force): SHOP-3 Fix the cart", out)
-        self.assertEqual(json.load(open(self.p(RECORD)))["version"], "3.2.21")
+        self.assertEqual(json.load(open(self.p(RECORD)))["version"], "3.2.22")
         self.assertFalse(os.path.exists(self.p(APP, "mods/tasks/live.js")), "3.1's code is gone")
         assert_notices(self, self.root, ["tasks"])
 
@@ -1364,7 +1364,7 @@ class SwitchFromTheWindow(unittest.TestCase):
             for gone in ("lib", "mods/coordinator", "mods/artifacts/recipe-view.js"):
                 self.assertFalse(os.path.exists(P(SHARE, gone)), gone)
             rec = json.load(open(P(RECORD)))
-            self.assertEqual(rec["version"], "3.2.21")
+            self.assertEqual(rec["version"], "3.2.22")
             self.assertNotIn("web", rec)
             self.assertNotIn("backups", rec)
             self.assertFalse(os.path.exists(P(APP, "mods")), "no Herdr app here: no button")
