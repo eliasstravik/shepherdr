@@ -273,6 +273,10 @@ def limits():
 
 
 def main(argv):
+    if "--codex-models" in argv:
+        _, result = codex_request("model/list", {"includeHidden": False})
+        print(json.dumps(result or {}))
+        return 0
     out = {"health": sample()}
     if "--limits" in argv:
         out["limits"] = limits()

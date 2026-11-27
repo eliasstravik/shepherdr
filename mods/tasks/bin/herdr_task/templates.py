@@ -201,8 +201,12 @@ ROUNDS_GATE_OLD = ("Rounds used and your final commit unreviewed: say why in you
                    "turn; only your Assistant can add a round.")
 ROUNDS_GATE_RULE = ("Once all rounds are used, `ready` takes your final commit unreviewed. Never ask for or wait on another round: "
                     "only the person adds one.")
-WORKER_MD = WORKER_MD_BEFORE_LIMIT_ROUNDS.replace(ROUNDS_DELTA_OLD, ROUNDS_DELTA_RULE).replace(
+WORKER_MD_BEFORE_TRUST = WORKER_MD_BEFORE_LIMIT_ROUNDS.replace(ROUNDS_DELTA_OLD, ROUNDS_DELTA_RULE).replace(
     ROUNDS_MUST_OLD, ROUNDS_MUST_RULE).replace(ROUNDS_GATE_OLD, ROUNDS_GATE_RULE)
+
+TRUST_OLD = 'a startup dialog such as "Allow external CLAUDE.md imports?" or "Trust this folder?" waits for an answer, which you give with `hc keys <its name> enter` (or `down enter`), then wait again'
+TRUST_RULE = 'if a startup dialog asks about trust, hooks, imports or sign-in, ask the person to answer in the reviewer terminal, then wait again'
+WORKER_MD = WORKER_MD_BEFORE_TRUST.replace(TRUST_OLD, TRUST_RULE)
 
 REVIEWER_MD_BEFORE_SUBAGENT = """You review one Herdr task's work before it can merge. Read only: never edit files, commit or push.
 - Read the task, then the diff of its branch against its base, and run the project's checks.
@@ -260,7 +264,7 @@ OLD_WORKER_READY = """You work on one Herdr task. Stay within the task's scope a
 - When the work is finished, run the `herdr-task ready` command given at the end of your brief, with a short summary. That puts the task in Ready for the person, who accepts it. Never mark a task done yourself.
 """
 OLD_WORKER_MD = OLD_WORKER_READY.split("- When the work is finished")[0]
-OLD_WORKERS = (WORKER_MD_BEFORE_LIMIT_ROUNDS, WORKER_MD_BEFORE_TURN0, WORKER_MD_BEFORE_NOROUND, WORKER_MD_BEFORE_LIMIT, WORKER_MD_BEFORE_OPTIONS, WORKER_MD_BEFORE_REPLIES, WORKER_MD_BEFORE_DELTA, WORKER_MD_BEFORE_TESTS, WORKER_MD_BEFORE_ROW, WORKER_MD_BEFORE_CLOCK, WORKER_MD_BEFORE_LIVE, WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
+OLD_WORKERS = (WORKER_MD_BEFORE_TRUST, WORKER_MD_BEFORE_LIMIT_ROUNDS, WORKER_MD_BEFORE_TURN0, WORKER_MD_BEFORE_NOROUND, WORKER_MD_BEFORE_LIMIT, WORKER_MD_BEFORE_OPTIONS, WORKER_MD_BEFORE_REPLIES, WORKER_MD_BEFORE_DELTA, WORKER_MD_BEFORE_TESTS, WORKER_MD_BEFORE_ROW, WORKER_MD_BEFORE_CLOCK, WORKER_MD_BEFORE_LIVE, WORKER_MD_BEFORE_WAIT, WORKER_MD_BEFORE_ASK, WORKER_MD_BEFORE_OFTEN, WORKER_MD_BEFORE_SUGGEST, WORKER_MD_BEFORE_COMMAND, WORKER_MD_BEFORE_FEEDBACK, WORKER_MD_BEFORE_SUBAGENTS, WORKER_MD_BEFORE_LEFT, WORKER_MD_BEFORE_DETAILS, WORKER_MD_BEFORE_CUT, WORKER_MD_BEFORE_ESTIMATE, WORKER_MD_BEFORE_SUMMARY, WORKER_MD_BEFORE_GATE, WORKER_MD_BEFORE_TEMPLATES, WORKER_MD_BEFORE_NEWS, OLD_WORKER_READY, OLD_WORKER_MD, OLD_WORKER_MD.replace(OLD_WORKER_MD.split("\n")[0], OLD_WORKER_FIRST), OLD_WORKER_REVIEW)
 
 
 TEMPLATE_HEADS = {

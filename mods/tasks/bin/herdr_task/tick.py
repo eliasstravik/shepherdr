@@ -9,7 +9,7 @@ import subprocess
 import time
 
 from .base import Fail, git, guard, hc_json, now, PR_EVERY, run, SHELLS, STORE, stop_note
-from .settings import machine_name, worker_argv
+from .settings import check_automatic_agent, machine_name, worker_argv
 from .agents import (
     agent_log, agent_running, busy_again, carried_on, clear_stopped, detail, error_words, GONE, held_ask, last_question, live_agents,
     mid_turn_agents, own_work, ready_turns, starting, status_word,
@@ -523,7 +523,11 @@ def tick_turn(s, report):
     due_pass(s, report)
     queued = sorted((t for t in s.data["tasks"] if t["state"] == "queued"), key=lambda t: t.get("queued_at") or 0)
     budget = [3]  # other machines asked this pass, at most
+    provider_paused = {a["id"] for a in (s.data.get("automations") or [])
+                       if a.get("paused") and (a.get("last_error") or {}).get("kind") == "provider"}
     for t in queued:
+        if t.get("automation") in provider_paused:
+            continue
         waits = bool(waiting_for(s, t))
         if not waits:
             refresh_ext(s, t, budget=budget)
@@ -544,7 +548,9 @@ def tick_turn(s, report):
         q = t.get("queue") or {}
         try:
             sp = q.get("space") or t.get("space") or default_space()
-            a = begin(s, t, q.get("argv") or worker_argv(s, t, sp), sp, q.get("parent"))
+            argv = q.get("argv") or worker_argv(s, t, sp)
+            check_automatic_agent(argv)
+            a = begin(s, t, argv, sp, q.get("parent"))
         except Fail as e:
             t["attention"] = f"Couldn't start: {e}"
             s.dirty = True
@@ -753,13 +759,13 @@ def stopped_now(s, t, mine):
     for k in workers:
         if held_ask(k["address"]):
             continue
-        if status_word(k) == "error":
-            return "error", error_words([k])
         if not agent_log(t, k["address"]):
             refresh_sessions(s, t, [k])
         log = agent_log(t, k["address"])
         cut = provider_cut(log) if log else None
         if not cut:
+            if status_word(k) == "error":
+                return "error", error_words([k])
             continue
         f = provider_error(cut["text"], cut["code"], cut["status"])
         words = " ".join(str(cut.get("text") or "").split())
@@ -815,11 +821,25 @@ def stopped_pass(report):
                         if want:
                             t["stopped_by"], t["stopped_why"] = want
                             t.setdefault("stopped_at", now())
+                            pause_restricted_schedule(s, t, *want)
                             report["stopped"].append({"task": s.ref(t), "by": want[0], "why": want[1]})
                         else:
                             clear_stopped(t)
                         s.dirty = True
                 progress_clock(s, t, task_status(t, running)[0])
+
+
+def pause_restricted_schedule(s, task, by, reason):
+    """Avoid starting a fresh scheduled run in response to a provider limit or denial."""
+    automation = task.get("automation")
+    if not automation or not (by == "limit" or reason.startswith(("Rate limited", "Signed out", "Provider refused it"))):
+        return
+    for schedule in s.data.get("automations") or []:
+        if schedule["id"] == automation and not schedule.get("paused"):
+            schedule["paused"] = True
+            schedule["last_error"] = {"at": now(), "message": f"Paused after the provider stopped a run. {reason}", "kind": "provider"}
+            s.dirty = True
+            break
 
 
 def cmd_tick(args):

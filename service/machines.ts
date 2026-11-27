@@ -10,7 +10,7 @@ import * as MC from "../core/machines.js";
 
 const { holdOf, nextRead, healthMeters } = MC as any;
 // Run this version's probe on every machine, including machines with an older install.
-const SCRIPT = join(import.meta.dir, "..", "mods", "tasks", "bin", "herdr_task", "machine.py");
+export const MACHINE_PROBE = join(import.meta.dir, "..", "mods", "tasks", "bin", "herdr_task", "machine.py");
 
 export class Machines {
   stats = new Map<string | null, any>();
@@ -64,12 +64,12 @@ export class Machines {
 
   async poll() {
     const voice = this.readVoice();
-    if (this.busy || !existsSync(SCRIPT)) { if (await voice) this.onChange(); return; }
+    if (this.busy || !existsSync(MACHINE_PROBE)) { if (await voice) this.onChange(); return; }
     this.busy = true;
     try {
       let cfg: any = null;
       try { cfg = JSON.parse(readFileSync(settingsFile(), "utf8")); } catch {}
-      const script = readFileSync(SCRIPT, "utf8"), now = Date.now();
+      const script = readFileSync(MACHINE_PROBE, "utf8"), now = Date.now();
       await Promise.all([null, ...this.list()].map(async (m) => {
         const was = this.stats.get(m) ?? {};
         const limits = now - (was.limitsAt ?? 0) > 10 * 60_000;

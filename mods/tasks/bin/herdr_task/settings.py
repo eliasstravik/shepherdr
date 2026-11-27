@@ -518,23 +518,22 @@ CLI_NAMES = {"claude": "Claude Code", "codex": "Codex"}
 LOGIN = {"claude": "claude auth login", "codex": "codex login"}
 
 
-def codex_models():
-    """The model ids Codex offers here: its models_cache.json, which Codex fetches for the account it is signed in
-    with (a ChatGPT account gets fewer than an API key, #948); None when there is none to read."""
-    home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
-    try:
-        with open(os.path.join(home, "models_cache.json")) as f:
-            d = json.load(f)
-    except (OSError, ValueError):
-        return None
-    ids = [m.get("slug") for m in (d.get("models") or [] if isinstance(d, dict) else []) if isinstance(m, dict) and m.get("slug")]
-    return ids or None
+def check_automatic_agent(argv):
+    if agent_key(argv) not in CLI_NAMES:
+        raise Fail("Automatic starts are available for Claude Code and Codex. Start other agents in their own terminal.")
 
 
 def codex_lacks(model):
-    """The models Codex offers here when `model` isn't one of them (it would refuse to start on it), else None."""
-    ids = codex_models()
-    return ids if model and ids and model not in ids else None
+    """The models Codex offers here when it can confirm the requested model is missing."""
+    if not model or not (binary := cli_path("codex")):
+        return None
+    from .machine import codex_request
+    env = {**os.environ, "PATH": ":".join(cli_dirs("codex") + [os.environ.get("PATH") or "/usr/bin:/bin"])}
+    state, result = codex_request("model/list", {"includeHidden": False}, binary=binary, env=env)
+    if state != "ok" or result.get("nextCursor"):
+        return None
+    ids = [m["model"] for m in result.get("data") or [] if isinstance(m, dict) and m.get("model") and not m.get("hidden")]
+    return ids if ids and model not in ids else None
 
 
 # ---- finding a CLI as the person's shell does (#1228, #1190) -------------------------------------
@@ -660,36 +659,10 @@ def codex_login_now():
     return False, said[:160]
 
 
-def trust_roots(folder):
-    """The folders Codex asks to trust for an agent started in folder: the folder itself and its git
-    repository's root, which for a worktree is the main checkout's (Codex: "Trusting will apply to
-    the repository root")."""
-    if not folder:
-        return []
-    out = [folder]
-    ok, common, _ = git(folder, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    if ok and common:
-        root = os.path.dirname(common) if os.path.basename(common) == ".git" else \
-            git(folder, "rev-parse", "--show-toplevel")[1]
-        if root and root not in out:
-            out.append(root)
-    return out
-
-
 def reviewer_command(who, model=None, effort=None, folder=None, fast=None):
-    """The command a worker starts its reviewer with (the brief's Reviewer line): read-only, and for
-    Codex on its own app server (--no-daemon, as task agents run: a shared one can keep a sign-in
-    since replaced, and every turn then fails, #745). Codex would first stop on its own screens,
-    nobody at the keys (#798, #753): "Trust this folder?" in a folder it hasn't seen (the task's
-    folder and its repository's root are trusted for this run only, as a table: a dotted
-    projects."<path>" key breaks on a dot in the path, as in ~/.local) and "Hooks need review"
-    when a hook is new or changed (hooks off: a read-only reviewer needs none, and they would run
-    outside its sandbox)."""
+    """The worker's read-only reviewer. Codex keeps its own project trust and runs without user hooks."""
     if who == "codex":
         a = ["codex", "--no-daemon", "--sandbox", "read-only", "--ask-for-approval", "never", "--disable", "hooks"]
-        roots = trust_roots(folder)
-        if roots:
-            a += ["-c", "projects={" + ",".join(f'{json.dumps(r)}={{trust_level="trusted"}}' for r in roots) + "}"]
         a += ["-m", model] if model else []
         a += ["-c", f'model_reasoning_effort="{effort}"'] if effort else []
         if fast is not None:
@@ -777,7 +750,7 @@ def task_settings(s, t, space=None, argv=None, live=False):
         if old:
             who, rv = agent, {}
         # #948: a model Codex here doesn't offer this account stops it at once: its own default instead, said
-        lacks = codex_lacks(rv.get("model")) if who == "codex" else None
+        lacks = codex_lacks(rv.get("model")) if who == "codex" and live else None
         dropped = rv.get("model")
         if lacks:
             rv = {k: v for k, v in rv.items() if k not in ("model", "fast")}
