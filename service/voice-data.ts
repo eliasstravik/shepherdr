@@ -42,6 +42,7 @@ export const NOT_DATA: Record<string, string> = {
   "api:file": "a picture or file sent in a chat, as bytes",
   "api:files": "Files (a plugin, off by default): a space's folder on disk, browsed and read on the page; not read out",
   "api:artifacts": "an artifact's own page (HTML made by an agent): opened, not read out; its title, versions and space are in the snapshot's artifacts",
+  "api:mcp-apps": "an MCP tool's view (MCP Apps): its HTML and sandbox, drawn in the chat and opened, not read out",
   "api:terminal": "a live terminal's raw screen: its agent's chat is look chat, and screen reads what the page shows",
   "api:screen": "an agent's browser, live (its Screen): a picture, not data; what it shows and who drives is in the snapshot's screens",
   "api:desktop": "a machine's desktop, live (its Screen): a picture, not data",
