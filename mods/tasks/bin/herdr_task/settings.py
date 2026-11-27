@@ -184,7 +184,8 @@ def worktrees_on(s, space=None):
 
 def tier_args(agent, fast):
     if agent == "claude":
-        return ["--settings", json.dumps({"fastMode": fast is True})]
+        # Older settings can carry the Codex tier across. Claude treats it as Fast.
+        return ["--settings", json.dumps({"fastMode": bool(fast)})]
     if agent == "codex":
         tier = "ultrafast" if fast == "ultrafast" else "fast" if fast else "default"
         return ["-c", f'service_tier="{tier}"']
@@ -823,9 +824,11 @@ def task_settings(s, t, space=None, argv=None, live=False):
         "task" if "proof" in sets else by_layer(s, space, "tasks", "proof", proof, True))
     model, effort = argv_model(argv)
     speed = argv_speed(agent, argv)
+    # The launch command always spells out Standard. Say it in the brief when it was chosen in the task or Settings.
+    named_speed = speed and (speed != "regular" or t.get("speed") in SPEEDS or (cfg.get("worker") or {}).get("fast") is False)
     extra = FLAGS.extra(agent, argv)
     text = agent + (f", model {model}" if model else "") + (f", effort {effort}" if effort else "") + \
-        (f", {SPEED_NAMES[speed]}" if speed else "") + \
+        (f", {SPEED_NAMES[speed]}" if named_speed else "") + \
         (f", extra flags {FLAGS.words(extra)}" if extra else "")
     own_flags = agent in (t.get("flags") or {}) if isinstance(t.get("flags"), dict) else False
     a_by = "task" if any(t.get(f) for f in ("agent", "model", "effort", "speed")) or own_flags else \
