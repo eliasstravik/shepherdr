@@ -1,5 +1,41 @@
 # Changelog
 
+## 3.2.21
+
+### What you will notice first
+
+- Pick Standard, Fast or Ultra-fast under Speed wherever the agent and model offer them. Set defaults for chats,
+  tasks and reviews, or pick a speed for one chat, task or schedule. A chat keeps its own speed, including when
+  you reopen it. Faster tiers can use more of your plan.
+- When you change a running chat's settings, the button says Update in place of Done. With the agent idle,
+  Update reopens the same conversation with your choices and shows what changed in the chat.
+- Chats and terminals open at the bottom so you see the newest line first. Chat reactions and reply quotes are
+  easier to tap.
+- Codex questions show up in the chat. The card opens the agent's terminal so you can answer there.
+- When Claude Code or Codex needs you to sign in again or connect a tool, the app shows which command to run and
+  opens the agent's terminal for you to sign in.
+
+### Changes that protect your agent account
+
+- Shepherdr no longer reads Claude Code or Codex login files, asks private services for usage or model lists, or
+  shows their plan meters and limit alerts. For plan usage, run `/usage` in Claude Code or `/status` in Codex.
+  Model menus use the providers' published lists. ElevenLabs usage still uses its official API with your own key.
+- Shepherdr leaves the agent's settings files and menus alone. Update applies your choices when the agent
+  reopens, through its own supported options. For sign-in, enter any codes or keys in the agent's own sign-in
+  flow. Shepherdr does not run the sign-in or keep the key.
+- The app no longer presses keys to answer Codex questions or accept an agent's start or folder-trust prompt.
+  Answer those in the terminal, including for reviewers. Claude Code's question and permission cards still take
+  answers in chat. For Rewind, use the agent's own command in its terminal where available.
+- Send now for queued messages and automatic key presses after sending are gone. Claude Code can queue a message
+  during a turn. If a send gets stuck, you can tap Retry yourself. Answer any open terminal question before sending
+  a new message. Automatic recaps are gone, and Recap is still in the chat menu.
+- A recurring task pauses when its agent reports a limit, needs to sign in, or gets a provider refusal. Check
+  the agent on its own machine before resuming the schedule.
+
+### Updating
+
+Run `shepherdr update`. There is no one-time setup.
+
 ## 3.2.20
 
 Recaps in the chat, an Update button for any agent, alerts that show their words, two new plug-ins you can switch on
