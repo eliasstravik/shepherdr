@@ -485,6 +485,8 @@ function writeUrl(replace: boolean) {
 const depth = (s: Step) => (s.drawer || s.search ? 1 : 0) + (s.settings ? 1 + (s.settings.sec ? 1 : 0) : 0) + (s.pane ? 1 : 0) + (s.task || s.art ? 1 : 0) + (s.max ? 1 : 0) + (s.artWide ? 1 : 0) + (s.scrFull && s.pane === 'screen' ? 1 : 0)
 
 if (typeof window !== 'undefined') {
+  // The chat and terminal position themselves when a history entry comes back.
+  history.scrollRestoration = 'manual'
   addEventListener('popstate', (e) => {
     const st = (e as PopStateEvent).state as { shep?: number; step?: Step } | null
     const q = new URLSearchParams(location.search)
@@ -516,6 +518,7 @@ export function openLink(href: string, step = false) {
   const targetTask = state.snap && chatLink?.task ? taskOf(state.snap, chatLink.task) : undefined
   const targetPlace = state.snap && chatLink && !chatLink.task ? placeOf(state.snap, chatLink.place) : undefined
   const chat = targetTask ? taskChat(targetTask) : targetPlace?.chat
+  const clearMax = (task && task === state.ui.max) || (place && (place !== state.ui.at || (chatLink && !chatLink.task)))
   stepNext = step
   try {
     setUI({
@@ -527,8 +530,8 @@ export function openLink(href: string, step = false) {
       art,
       ...(art ? { artV: null } : {}),
       pane: art ? 'artifacts' : task || (max && state.ui.phone) ? 'tasks' : pane && pane !== 'screen' ? pane : state.ui.phone ? null : state.ui.pane,
-      // a link that names a maximized task lands in it; a space link gives the middle back to the space
-      max: max && !state.ui.phone ? max : place ? null : state.ui.max,
+      // A space link gives the middle back to the space. A task link must show the task only once.
+      max: max && !state.ui.phone ? max : clearMax ? null : state.ui.max,
       artWide: false,
       scrFull: false,
       jump: focus,
