@@ -452,6 +452,19 @@ export interface Choice {
   preview?: string
 }
 
+export interface SignIn {
+  cli: string
+  stage: 'start' | 'methods' | 'key' | 'browser' | 'waiting' | 'continue' | 'retry' | 'fallback' | 'signed'
+  connector?: string
+  url?: string
+  deviceCode?: string
+  input?: 'code' | 'callback'
+  instructions?: string
+  restart?: boolean
+  terminal?: string
+  methods?: { label: string; fallback?: string }[]
+}
+
 export interface Question {
   /** Answer from its card while the rest of the chat carries on. */
   queued?: boolean
@@ -467,6 +480,7 @@ export interface Question {
   plan?: string
   /** CLI prompt context, read from its visible screen. */
   screen?: string
+  login?: SignIn
   terminal?: boolean
   /** A CLI's own menu: a tap presses that choice at once. */
   press?: boolean

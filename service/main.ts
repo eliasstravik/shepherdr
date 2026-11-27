@@ -372,6 +372,12 @@ const watch = new AgentWatch(hub, hcRun, {
     }
     return out;
   },
+  loginWatches: () => [...hub.terminals].filter(([addr]) => !!compat.trustWho(addr)).map(([addr]) => addr),
+  log: (addr) => compat.reader?.(addr)?.conv?.items ?? [],
+  storeKey: async (machine, key) => {
+    await secrets.keepLoginKey(`m:${machine}`, key);
+    await refreshSecrets();
+  },
   changed: () => { live.chats?.refreshAll(); model.rebuild(); },
 });
 (compat as any).watch = watch;
@@ -704,6 +710,16 @@ async function doAction(body: any): Promise<Response> {
   if (typeof body?.type === "string" && body.type.startsWith("artifact-")) {
     const done = await artifactAction(body).catch((e) => ({ ok: false, error: (e as Error).message }));
     if (done) { void artifacts.read(); return json(done); }
+  }
+  if (body?.type === "sign-in") {
+    try {
+      if (typeof body.chat !== "string" || typeof body.id !== "string") throw new Error("Open the latest sign-in card.");
+      const addr = watch.login.address(body.id);
+      if (!addr || (compat.addrOf(body.chat) !== addr && compat.trustWho(addr)?.chat !== body.chat))
+        throw new Error("Open the latest sign-in card.");
+      await watch.login.act(addr, body.id, body);
+      return json({ ok: true });
+    } catch (err) { return json({ ok: false, error: (err as Error).message }); }
   }
   // Settings › Personal analytics, and the page's own events for it (service/analytics.ts)
   if (body?.type === "analytics") {

@@ -1,0 +1,39 @@
+.sign-in-card {
+  overflow-wrap: anywhere;
+}
+.sign-in-card .acts {
+  margin-top: 0;
+}
+.sign-in-card .btn {
+  height: auto;
+  min-height: var(--btn);
+  white-space: normal;
+  padding-block: 5px;
+  text-align: center;
+}
+.sign-in-card .btn.s {
+  min-height: var(--btns);
+}
+.sign-in-methods,
+.sign-in-form {
+  display: grid;
+  gap: 8px;
+}
+.sign-in-code {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.sign-in-code code {
+  font-variant-numeric: tabular-nums;
+}
+@media (pointer: coarse) {
+  .sign-in-card .btn,
+  .sign-in-card .btn.s {
+    min-height: var(--hit);
+  }
+  .sign-in-form .inp {
+    font-size: 16px;
+  }
+}

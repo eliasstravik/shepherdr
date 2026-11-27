@@ -1,3 +1,4 @@
+import type { SignInWatch } from "./sign-in.ts";
 // The web app is Shepherdr 2.1's screen (its design, phone layout and motion, kept as they were), fed with
 // Shepherdr 3's data: this turns what the service builds with the shared core (spaces, tasks, chats) into the
 // shapes 2.1's screen reads (web/shared/types.ts: Snapshot, Chat), and its chat keys back into terminals.
@@ -540,6 +541,13 @@ export class Compat {
       needs.push({ id: card.id, chat: w.chat, place, ...(w.task ? { task: w.task } : {}), at: card.opened, question: this.screenQuestion(card, w.chat) });
     }
 
+    for (const card of this.loginWatch()?.needs() ?? []) {
+      const w = this.trustWho(card.addr, chats);
+      if (!w) continue;
+      const place = w.task ? tasks.find((x) => x.id === w.task)?.place ?? "" : places.find((p) => p.chat === w.chat)?.id ?? "";
+      needs.push({ id: card.id, chat: w.chat, place, ...(w.task ? { task: w.task } : {}), at: card.opened, question: this.loginQuestion(card, w.chat) });
+    }
+
     // 'attention' is an agent waiting with no card: one whose chat has a card (its question, a secret) needs you once,
     // not twice (one toast, one alert, one in the counts)
     const carded = new Set(needs.filter((x) => x.id !== "attention" && !x.question?.queued).map((x) => x.chat));
@@ -597,6 +605,18 @@ export class Compat {
     if (of) return { chat: `${taskId(of)}/worker`, task: taskId(of) };
     const key = [...chats].find(([, a]) => a === addr)?.[0];
     return key ? { chat: key } : null;
+  }
+
+  loginWatch(): SignInWatch | undefined { return (this as any).watch?.login; }
+
+  private loginQuestion(card: NonNullable<ReturnType<SignInWatch["card"]>>, key: string, by?: Question["by"]): Question {
+    const { options, cursor: _cursor, closeMenu: _close, ...step } = card.step;
+    const title = step.connector !== undefined
+      ? `${step.connector || "A connector"} needs you to sign in`
+      : `${step.cli} needs you to sign in`;
+    const terminal = this.addrOf(key) === card.addr ? key : `t:${card.addr}`;
+    return { id: card.id, to: key, title, kind: "Question", choices: [], ...(by ? { by } : {}),
+      login: { ...step, terminal, methods: options?.map(({ label, fallback }) => ({ label, fallback })) } };
   }
 
   /** A CLI's start screen (core/screens.js card) as a card that presses a choice on a tap. A folder-trust screen
@@ -831,9 +851,14 @@ export class Compat {
         else messages.push(quiet(`se:${c.id}`, c.opened, `${ref ? `${ref} · ` : ""}${SCREEN.ended(c.cli, c.how)}`));
       }
     };
-    if (addr) screens(addr, null);
+    const signIn = (who: string, by?: Question["by"]) => {
+      const card = this.loginWatch()?.card(who);
+      if (card) messages.push({ id: `card:${card.addr}:login`, who: "agent", at: card.opened, question: this.loginQuestion(card, by?.chat ?? key, by) });
+    };
+    if (addr) { screens(addr, null); signIn(addr); }
     // its helpers' folder-trust screens (#1441: a reviewer that never started), on its own chat too
     if (addr) for (const kid of subagentsOf((this as any).terminalsAll?.() ?? [], addr)) {
+      signIn(kid.address);
       const c = watch?.openCard?.(kid.address);
       if (c && trustOf(c)) messages.push({ id: `card:${c.id}`, who: "agent", at: c.opened, question: this.screenQuestion(c, key) });
     }
@@ -848,6 +873,7 @@ export class Compat {
       // SHEP-322: by its title, never its key
       for (const e of (this.asks as any)?.endsOf?.(r.worker) ?? []) messages.push(quiet(`ae:${e.id}`, e.at, `${r.title} · ${e.title} · ${e.how}`));
       screens(r.worker, r.title, by);
+      signIn(r.worker, by);
     }
     // a card never sticks to the end (SHEP-419): newer messages come under it
     const placed = placeByTime(messages.slice(0, cardsFrom), messages.slice(cardsFrom));

@@ -9,6 +9,7 @@ import { press, waiting } from '@client/pending.ts'
 import { ActBtn, ActError, Btn, I, IB, Seg, useCardActs } from '@client/ui.tsx'
 import type { Question, SecretAsk, Snapshot } from '@shared/types.ts'
 import { machineLabel, placeDown, placeOf, spaceLabel } from '@shared/view.ts'
+import { SignInCard } from './sign-in.tsx'
 import { Markdown } from './markdown.tsx'
 
 /** a quiet line where a card was, once it is settled */
@@ -51,6 +52,7 @@ export function QuestionCard({ q, chat, place }: { q: Question; chat: string; pl
   // "Other…" opened: a box on the card for your own answer
   const [other, setOther] = useState<string | null>(null)
   const down = downLine(snap, place)
+  if (q.login) return down || <SignInCard key={q.id} question={q} login={q.login} chat={chat} />
   if (q.sent !== undefined && q.command !== undefined) return <DoneRow>{q.sent === 0 ? 'You allowed this' : 'You declined this'}</DoneRow>
   // an answered question: the answer shows as your message (the agent's reply follows it in the chat)
   if (q.sent !== undefined) return <p className="b mine gap">{q.said || q.choices[q.sent]?.label || 'Answered'}</p>

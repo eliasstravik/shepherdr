@@ -5,6 +5,7 @@
 // - any agent still before its session (a task's, an Assistant, a reviewer) whose chat nobody has open too, so a
 //   folder-trust screen reaches Needs you, the phone and the watch (#1441: an agent sat 80 minutes at one).
 // - a session that is gone ("No conversation found"): show a note and wait for the person to restart it.
+import { SignInWatch } from "./sign-in.ts";
 import type { Hub } from "./hub.ts";
 import * as SC from "../core/screens.js";
 import * as CV from "../core/chat-view.js";
@@ -21,12 +22,17 @@ export class AgentWatch {
   /** the service's own start-screen cards, by agent */
   private own = new Map<string, any[]>();
   screens: any;
+  login: SignInWatch;
+  private logins = new Set<string>();
   /** a note under an agent's chat ("Earlier session was gone, starting a new one…"), by agent */
   notes = new Map<string, { text: string; at: number }>();
   private tried = new Set<string>();
   private busy = false;
 
-  constructor(private hub: Hub, private hc: Run, private o: { watched: () => Watched[]; changed: () => void }) {
+  constructor(private hub: Hub, private hc: Run, private o: { watched: () => Watched[]; changed: () => void;
+    loginWatches?: () => string[]; log?: (addr: string) => { id: string; kind: string; text?: string }[];
+    storeKey?: (machine: string, key: string) => Promise<void> }) {
+    this.login = new SignInWatch(hub, hc, o.changed, o.log, o.storeKey);
     this.screens = new ScreenWatch({ hc: (a: string[]) => this.hc(a), cards: (a: string) => this.own.get(a) ?? [], save: (a: string, list: any[]) => { this.own.set(a, list); this.o.changed(); } }, () => this.o.changed());
   }
 
@@ -43,15 +49,31 @@ export class AgentWatch {
     this.busy = true;
     try {
       const watched = this.o.watched(), seen = new Set(watched.map((w) => w.addr));
+      const now = new Set([...seen, ...(this.o.loginWatches?.() ?? []), ...[...this.hub.terminals].filter(([, k]) => starting(k)).map(([addr]) => addr)]);
+      const inspecting = new Set([...this.logins, ...now]);
+      const login = new Set<string>();
+      const addrs = [...inspecting];
+      for (let i = 0; i < addrs.length; i += 8) {
+        await Promise.all(addrs.slice(i, i + 8).map(async (addr) => {
+          if (this.login.helper(addr)) { login.add(addr); return; }
+          const k = now.has(addr) ? this.hub.terminals.get(addr) : undefined;
+          if (await this.login.tick(addr, k).catch(() => false)) {
+            login.add(addr);
+            const open = this.screens.open(addr);
+            if (open) this.screens.close(open, SCREEN.changed);
+          }
+        }));
+      }
+      this.logins = now;
       for (const w of watched) {
         const k: any = this.hub.terminals.get(w.addr);
         if (!k) continue;
-        if (starting(k) || this.screens.open(w.addr)) await this.screens.tick(w.addr, k).catch(() => undefined);
+        if (!login.has(w.addr) && (starting(k) || this.screens.open(w.addr))) await this.screens.tick(w.addr, k).catch(() => undefined);
         if (this.lostCandidate(k)) await this.checkLost(w).catch(() => undefined);
       }
       // the rest: only their start screens, while they are starting (or a card of theirs is still open)
       for (const [addr, k] of this.hub.terminals as Map<string, any>) {
-        if (seen.has(addr) || !(starting(k) || this.screens.open(addr))) continue;
+        if (seen.has(addr) || login.has(addr) || !(starting(k) || this.screens.open(addr))) continue;
         await this.screens.tick(addr, k).catch(() => undefined);
       }
     } finally { this.busy = false; }

@@ -96,7 +96,7 @@ const useCoarse = () => useSyncExternalStore(onCoarse, () => typeof matchMedia =
  *  least the pane's): herdr sends only the screen, never older lines, so its tall screen is the history you scroll
  *  up through. It opens at the last line shown and follows new output, unless you scroll up; back down, it follows
  *  again. */
-function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; onEnd?: () => void }) {
+export function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; onEnd?: () => void }) {
   const phone = useUI((u) => u.phone)
   const coarse = useCoarse()
   const own = stream.startsWith('sh:')
