@@ -4,8 +4,9 @@
 // picked, a chevron) that opens its own list, and Done.
 // A sheet on a phone, a 560 px dialog on a desktop; an open list takes the form's place, with a back arrow.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
-import type { AgentPick, Catalog, CatalogAgent, CatalogModel, Snapshot } from '@shared/types.ts'
+import type { AgentPick, Catalog, CatalogAgent, CatalogModel, ChatAgent, Snapshot } from '@shared/types.ts'
 import { everything, isEverything, machineLabel, machineOf, spaceName, spacesOf, unreachable } from '@shared/view.ts'
+import { levelName } from '@core/agents.js'
 import { act, getState, useChat } from './kernel.ts'
 import { openDialog } from './overlay.tsx'
 import { Btn, I, IB, Logo, Row } from './ui.tsx'
@@ -14,11 +15,24 @@ import { SpaceIcon } from './space-icon.tsx'
 /** what runs: the agent, its model, effort, speed and permission mode; `label`: the model's name as a running agent reports it */
 export type Pick = AgentPick & { label?: string | null }
 
+export function reportedPick(a?: ChatAgent): Pick | undefined {
+  if (!a?.kind) return undefined
+  return {
+    agent: a.kind,
+    label: a.modelLabel ?? a.planned?.modelLabel ?? null,
+    model: a.model ?? a.planned?.model ?? null,
+    effort: a.effort ?? a.planned?.effort ?? null,
+    fast: a.speed === 'ultrafast' ? 'ultrafast' : a.speed === 'fast',
+    perm: a.perm ?? null,
+  }
+}
+
 /* ---------- each machine's catalog: its agents and their own models, read once and kept ---------- */
 
 const catalogs = new Map<string, { data?: Catalog; readAt: number }>()
 const catListeners = new Set<() => void>()
 let catTick = 0
+const catalogVersion = () => catTick
 
 function loadCatalog(machine: string) {
   const old = catalogs.get(machine)
@@ -43,7 +57,8 @@ export function useCatalog(machine: string | undefined): Catalog | undefined {
       catListeners.add(l)
       return () => void catListeners.delete(l)
     },
-    () => catTick,
+    catalogVersion,
+    catalogVersion,
   )
   useEffect(() => {
     if (machine) loadCatalog(machine)
@@ -68,9 +83,9 @@ const modelOf = (a: CatalogAgent | undefined, p: Pick & { label?: string | null 
   ?? (p.model ? undefined : (a?.models.find((m) => m.id === a.defaultModel) ?? a?.models[0]))
 
 const SPEEDS = { regular: 'Standard', fast: 'Fast', ultrafast: 'Ultra-fast' }
-const speedOf = (p: Pick): keyof typeof SPEEDS => p.fast === 'ultrafast' ? 'ultrafast' : p.fast ? 'fast' : 'regular'
+type Speed = keyof typeof SPEEDS
+const speedOf = (p: Pick): Speed => p.fast === 'ultrafast' ? 'ultrafast' : p.fast ? 'fast' : 'regular'
 const tiersOf = (m?: CatalogModel) => ['regular', ...(['fast', 'ultrafast'] as const).filter((tier) => m?.speeds?.includes(tier))] as const
-const cap = (s: string) => (s === 'xhigh' ? 'Extra high' : s.charAt(0).toUpperCase() + s.slice(1))
 const NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi' }
 
 /** the words a pick shows: the agent's and model's own names once the catalog has them */
@@ -79,13 +94,26 @@ export function pickWords(p: Pick, cat?: Catalog) {
   const m = modelOf(a, p)
   const effort = p.effort ?? m?.defaultEffort ?? a?.defaultEffort ?? ''
   const perm = p.perm && a && p.perm !== a.permDefault ? (a.perms.find((x) => x.id === p.perm)?.label ?? p.perm) : ''
-  return { agent: a?.name ?? NAMES[p.agent] ?? p.agent, model: m?.name ?? (p as { label?: string | null }).label ?? p.model ?? '', group: m?.group ?? '', effort: effort ? cap(effort) : '', speed: speedOf(p), perm }
+  return { agent: a?.name ?? NAMES[p.agent] ?? p.agent, model: m?.name ?? p.label ?? p.model ?? '', group: m?.group ?? '', effort: levelName(effort) ?? '', speed: speedOf(p), perm }
 }
 
-/** "Claude Code · Sonnet 5.5 · medium effort · fast · plan" */
-export function sayPick(p: Pick, cat?: Catalog): string {
-  const w = pickWords(p, cat)
-  return [w.agent, w.model, w.effort && `${w.effort.toLowerCase()} effort`, SPEEDS[w.speed], w.perm.toLowerCase()].filter(Boolean).join(' · ')
+/** The spoken label for settings buttons. */
+function sayPick(w: ReturnType<typeof pickWords>): string {
+  return [w.agent, w.model, w.effort && `${w.effort} effort`, w.speed === 'regular' ? '' : SPEEDS[w.speed], w.perm.toLowerCase()].filter(Boolean).join(', ')
+}
+
+/** A compact model and effort label with a named speed icon. */
+export function PickSummary({ pick, cat, full = false }: { pick: Pick; cat?: Catalog; full?: boolean }) {
+  const w = pickWords(pick, cat)
+  const model = [full || !w.model ? w.agent : '', w.model].filter(Boolean).join(' · ')
+  return (
+    <span className="pick-summary">
+      <span className="pick-model">{model}</span>
+      {w.effort && <span className="pick-effort"> · {w.effort}</span>}
+      {full && w.perm && <span className="pick-mode"> · {w.perm.toLowerCase()}</span>}
+      <Bolts speed={w.speed} />
+    </span>
+  )
 }
 
 export type Role = 'Chats' | 'Tasks' | 'Reviews'
@@ -102,8 +130,14 @@ export function pickFor(snap: Snapshot, level: string, role: Role): Pick {
 
 /* ---------- the agent picker ---------- */
 
-function Bolts({ speed, c = 's16 bolt' }: { speed: string; c?: string }) {
-  return speed === 'fast' ? <I n="bolt" c={c} /> : speed === 'ultrafast' ? <><I n="bolt" c={c} /><I n="bolt" c={c} /></> : null
+function Bolts({ speed, decorative = false }: { speed: Speed; decorative?: boolean }) {
+  if (speed === 'regular') return null
+  return (
+    <span className="speed-bolts" role={decorative ? undefined : 'img'} aria-label={decorative ? undefined : SPEEDS[speed]} aria-hidden={decorative || undefined}>
+      <I n="bolt" c="s16" />
+      {speed === 'ultrafast' && <I n="bolt" c="s16" />}
+    </span>
+  )
 }
 
 /** the message box's agent line: the logo, the model, the effort as a quiet word, a bolt when fast (two for
@@ -120,16 +154,16 @@ export function AgentLine({ pick, machine, onClick }: { pick: Pick; machine: str
     fit()
     if (typeof ResizeObserver === 'undefined' || !el.parentElement) return
     const ro = new ResizeObserver(fit)
+    ro.observe(el)
     ro.observe(el.parentElement)
     return () => ro.disconnect()
   }, [words])
   return (
-    <button ref={ref} type="button" className="agent" aria-label={`${sayPick(pick, cat).replace(/ · /g, ', ')}. Change`} onClick={onClick}>
+    <button ref={ref} type="button" className="agent" aria-label={`${sayPick(w)}. Change`} onClick={onClick}>
       <Logo agent={pick.agent} name={w.agent} />
       <span className="m">{w.model || w.agent}</span>
-      {w.effort && <span className="e">{w.effort.toLowerCase()}</span>}
-      <Bolts speed={w.speed} />
-      <span className="e tier">{SPEEDS[w.speed]}</span>
+      {w.effort && <span className="e">{w.effort}</span>}
+      <Bolts speed={w.speed} decorative />
       {w.perm && <span className="e pm">· {w.perm.toLowerCase()}</span>}
       <I n="down" c="s16" />
     </button>
@@ -137,8 +171,8 @@ export function AgentLine({ pick, machine, onClick }: { pick: Pick; machine: str
 }
 
 /** what goes from the message box's agent line when it is short of room (SHEP-356), in this order, so the model and
- *  its effort stay whole: logo, chevron, permission mode, then the speed word (the bolts still show faster tiers). */
-export const AGENT_DROPS = ['logo', 'chev', 'perm', 'tier'] as const
+ *  its effort stay whole: logo, chevron, then permission mode. */
+export const AGENT_DROPS = ['logo', 'chev', 'perm'] as const
 
 /** sets the agent line's data-drop to the fewest drops that let its words fit */
 export function fitAgentLine(el: HTMLElement) {
@@ -157,10 +191,10 @@ export function AgentField({ title, machine, pick, onChange }: { title: string; 
   return (
     <div className="fld">
       <span>Agent</span>
-      <button type="button" className="fake" aria-label={`Agent: ${sayPick(pick, cat).replace(/ · /g, ', ')}. Change`} onClick={() => openPicker({ title, machine, pick, onChange })}>
+      <button type="button" className="fake" aria-label={`Agent: ${sayPick(w)}. Change`} onClick={() => openPicker({ title, machine, pick, onChange })}>
         <Logo agent={pick.agent} name={w.agent} />
         <span className="n">
-          <b>{w.agent}</b> <span>{[w.model, w.effort.toLowerCase(), SPEEDS[w.speed], w.perm.toLowerCase()].filter(Boolean).join(' · ')}</span>
+          <b>{w.agent}</b> <span>{[w.model, w.effort, w.perm.toLowerCase()].filter(Boolean).join(' · ')}<Bolts speed={w.speed} decorative /></span>
         </span>
         <I n="right" c="s16" />
       </button>
@@ -207,7 +241,7 @@ export function choiceList(f: 'effort' | 'speed' | 'mode', p: Pick, cat?: Catalo
   const w = pickWords(p, cat)
   if (f === 'effort') {
     const efforts = m?.efforts ?? a?.efforts ?? []
-    return { title: `Effort · ${w.model || w.agent}`, items: efforts.map((e) => ({ id: e, label: cap(e), on: cap(e) === w.effort, pick: { ...p, effort: e } })) }
+    return { title: `Effort · ${w.model || w.agent}`, items: efforts.map((e) => ({ id: e, label: levelName(e) ?? e, on: levelName(e) === w.effort, pick: { ...p, effort: e } })) }
   }
   if (f === 'speed')
     return {
@@ -299,7 +333,9 @@ function AgentPicker({ title, machine, start, typed, onChange, close, live }: { 
             {r.f === 'agent' ? <Logo agent={p.agent} name={w.agent} /> : <span className="pk-gap" />}
             <span className="n">
               <span className="l2">{r.label}</span>
-              <span className="l1 pk-v">{r.value}</span>
+              {r.f === 'speed'
+                ? w.speed !== 'regular' && <span className="l1 pk-v"><Bolts speed={w.speed} decorative /></span>
+                : <span className="l1 pk-v">{r.value}</span>}
             </span>
             <I n="right" c="s16" />
           </button>
@@ -324,15 +360,10 @@ function AgentPicker({ title, machine, start, typed, onChange, close, live }: { 
           {c.items.map((x) => (
             <Row
               key={x.id}
-              label={x.label}
+              label={field === 'speed' ? <>{x.label}<Bolts speed={speedOf(x.pick)} decorative /></> : x.label}
               sub={x.sub}
               current={x.on}
-              end={
-                <>
-                  {field === 'speed' && <Bolts speed={x.id} c="s16 bolt c-mute" />}
-                  {x.on && <I n="check" />}
-                </>
-              }
+              end={x.on && <I n="check" />}
               onClick={() => {
                 set(x.pick)
                 open('')

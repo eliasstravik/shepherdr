@@ -180,7 +180,10 @@ export function snapshot(mode: 'normal' | 'empty' | 'down' | 'more' | 'long' | '
       { id: 'm:studio', machine: 'studio', name: 'studio', status: 'idle' },
       { id: 'm:pi', machine: 'pi', name: 'pi', status: 'idle' },
     ],
-    tasks: empty ? [] : tasks,
+    tasks: empty ? [] : tasks.map((t) => {
+      const settings = t.agent && chats[t.agent.chat]?.agent
+      return t.agent && settings ? { ...t, agent: { ...t.agent, settings } } : t
+    }),
     automations: empty ? {} : automations,
     artifacts: empty ? [] : artifacts,
     asks: {},
@@ -240,9 +243,9 @@ const LONG_NOTE = 'The supplier quotes are in. Short version: the second supplie
   'Nothing else needs you today. I will tell you here when the quotes task is ready.'
 const chat = (key: string, messages: Message[], agent: Chat['agent'], x: Partial<Chat> = {}): Chat => ({ key, messages, cli: agent?.kind ?? 'claude', top: true, agent, ...x })
 const sonnet = { kind: 'claude', model: 'sonnet', modelLabel: 'Sonnet 5.5', effort: 'medium' }
-const opus = { kind: 'claude', model: 'opus', modelLabel: 'Opus 5.5', effort: 'high' }
+const opus = { kind: 'claude', model: 'opus', modelLabel: 'Opus 5.5', effort: 'high', speed: 'fast' }
 // a newer Codex is out: the chat shows Update Codex (plugins/chat/update.tsx)
-const gpt = { kind: 'codex', model: 'gpt-6.2-sol', modelLabel: 'GPT-6.2 Sol', effort: 'high', update: '0.172.0' }
+const gpt = { kind: 'codex', model: 'gpt-6.2-sol', modelLabel: 'GPT-6.2 Sol', effort: 'xhigh', speed: 'ultrafast', update: '0.172.0' }
 const payQ = () => [a("Which provider should I switch to, Stripe or Adyen? I'd go with Stripe."), ask('q-pay', '', undefined, ['Stripe', 'Adyen'])]
 const permQ = (by?: typeof byPhoto) => [a('I need an image library to resize the photos.'), ask('q-pil', 'Run a command', by, ['Allow once', 'Decline'], { command: 'pip install pillow' })]
 

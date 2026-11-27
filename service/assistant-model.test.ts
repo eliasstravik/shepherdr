@@ -32,6 +32,15 @@ test("a space's place names the model its running Assistant runs, not Settings'"
   expect(p.agent).toMatchObject({ kind: "claude", model: "claude-fable-5-2", modelLabel: "Fable 5.2", effort: "low", speed: "normal" });
 });
 
+test("a task row has the worker's model, effort and speed before anyone opens its chat", () => {
+  const argv = ["codex", "--model", "gpt-6.2-sol", "-c", 'model_reasoning_effort="xhigh"', "-c", 'service_tier="ultrafast"'];
+  const c = world({ worker: { address: "worker", state: "live", argv, foreground: { argv, name: "codex" } } });
+  const snapshot = c.snapshot({ host: "mini", user: "me", machines: [], spaces: [], sections: [], rows: [
+    { id: "1", slug: "demo", ref: "DEMO-1", title: "Make a demo", section: "working", worker: "worker" },
+  ] });
+  expect(snapshot.tasks[0].agent.settings).toMatchObject({ kind: "codex", model: "gpt-6.2-sol", effort: "xhigh", speed: "ultrafast" });
+});
+
 test("an Assistant that ended still names what it ran, from its resume label", () => {
   const ended = { address: "t1", state: "finished", argv: SH, labels: { ...label("sp1"), "herdr.resume": JSON.stringify({ kind: "claude", argv: FABLE }) }, created_ms: 1 };
   const p = snap(world({ t1: ended }), [{ id: "sp1", name: "demo", folder: "/srv/demo", machine: null, assistant: "t1" }]).places[0];

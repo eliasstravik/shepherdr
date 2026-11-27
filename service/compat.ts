@@ -310,19 +310,22 @@ export class Compat {
     const agents = this.agents as any;
     return liveAgent(kind, t, (addr ? agents?.meta?.(addr, t, meta) : meta) ?? {}, agents?.cached?.(kind, machine) ?? {});
   }
+  terminalAgent(addr: string, machine: string | null): Chat["agent"] {
+    try {
+      const t: any = (this as any).terminalsOf?.(addr);
+      if (!t) return;
+      const kind = kindOfTerm(t) ?? JSON.parse(t.labels?.["herdr.resume"] || "{}").kind;
+      if (kind !== "claude" && kind !== "codex") return;
+      const { flags: _, ...agent } = this.agentNow(kind, t, this.reader?.(addr)?.conv?.meta, machine, addr);
+      return agent;
+    } catch { return undefined; }
+  }
   /** What a space's Assistant runs on, for its place (SHEP-298: the chat's model button said Settings' Assistant until
    *  the chat itself came): the Assistant's own (live, else the one that ended, whose chat it reads), else what its
    *  first message starts (freshChat: the choice kept for it, else Settings'). null: not known. */
   placeAgent(s: Space, key: string): Chat["agent"] | null {
     try {
-      if (s.assistant) {
-        const t: any = (this as any).terminalsOf?.(s.assistant);
-        let kind: string | null = kindOfTerm(t);
-        if (!kind) { try { kind = JSON.parse(t?.labels?.["herdr.resume"] || "{}").kind ?? null; } catch {} }
-        if (!t || (kind !== "claude" && kind !== "codex")) return null;
-        const { flags: _, ...a } = this.agentNow(kind, t, this.reader?.(s.assistant)?.conv?.meta, s.machine ?? null, s.assistant);
-        return a;
-      }
+      if (s.assistant) return this.terminalAgent(s.assistant, s.machine ?? null) ?? null;
       return this.freshChat(key)?.agent ?? null;
     } catch { return null; }
   }
@@ -495,7 +498,7 @@ export class Compat {
         ...(r.said ? { report: { msg: r.section === "working" && r.why ? r.why : r.said.text, ...(r.said.done != null ? { progress: r.said.done } : {}),
           ...(r.said.left != null && !r.said.paused ? { eta: r.said.left } : {}), ...(r.said.paused ? { paused: true } : {}) } }
           : r.section === "working" && r.why ? { report: { msg: r.why, ...(r.pct != null ? { progress: r.pct } : {}) } } : {}),
-        ...(r.worker ? { agent: { chat: `${id}/worker`, role: "worker", cli: "claude", status: r.section === "needs" ? "need" : "work", running: true, age: "", note: "" } } : {}),
+        ...(r.worker ? { agent: { chat: `${id}/worker`, role: "worker", cli: "claude", settings: this.terminalAgent(r.worker, r.machine ?? null), status: r.section === "needs" ? "need" : "work", running: true, age: "", note: "" } } : {}),
         ...(!r.worker && r.lastLog ? { agent: { chat: `${id}/worker`, role: "worker", cli: r.lastLog.kind, status: "idle", running: false, age: "", note: "" } } : {}),
       };
       return t;

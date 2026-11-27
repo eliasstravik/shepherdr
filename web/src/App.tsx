@@ -5,7 +5,7 @@
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import type { Snapshot } from '@shared/types.ts'
 import { downWords, isEverything, needsCount, placeDown, placeOf, spaceLabel, spaceName, taskOf, type Space } from '@shared/view.ts'
-import { getState, openSettings, registry, setUI, sideHidden, togglePane, useSnap, useUI, type Thread } from './kernel.ts'
+import { getState, openSettings, registry, setUI, sideHidden, togglePane, useSnap, useStore, useUI, type Thread } from './kernel.ts'
 import { dismiss, hold, subscribe, toasts } from './toasts.ts'
 import { handleKey } from './commands.ts'
 import { List, spaceMenu } from './list.tsx'
@@ -17,6 +17,7 @@ import { SettingsWindow } from './settings.tsx'
 import { cx, Empty, I, IB, useScrolled } from './ui.tsx'
 import { SpaceIcon } from './space-icon.tsx'
 import { MarkRead } from './read-marks.ts'
+import { pickFor, PickSummary, reportedPick, useCatalog } from './picker.tsx'
 
 /** the thread the middle column shows: the open task when it has the middle, else the space's chat */
 export function middleThread(snap: Snapshot, ui: { at: string; max: string | null }): Thread | null {
@@ -35,19 +36,25 @@ export function placeholderOf(snap: Snapshot, thread: Thread): string {
 function ChatHeader({ snap, thread, place, scrolled }: { snap: Snapshot; thread: Thread; place: Space; scrolled: boolean }) {
   const phone = useUI((u) => u.phone)
   const hidden = useUI(sideHidden)
+  const agent = useStore((s) => s.chats[thread.chat]?.agent)
+  const cat = useCatalog(thread.task ? undefined : place.machine)
   const TaskHead = registry.views.taskHead
   if (thread.task && TaskHead) return <TaskHead task={thread.task} where="chat" scrolled={scrolled} />
   const every = isEverything(snap, place.id)
+  const pick = reportedPick(agent ?? place.agent) ?? pickFor(snap, every ? 'all' : place.id, 'Chats')
   return (
     <header className={cx('hd', scrolled && 'sc')}>
       {phone ? <IB icon="burger" label="Spaces" onClick={() => setUI({ drawer: true })} /> : hidden ? <IB icon="panel" label="Show the list" onClick={showList} /> : null}
-      <div className="ttl">
-        <button type="button" className="tbtn" aria-haspopup="menu" onClick={(e) => spaceMenu(e.currentTarget, place.id, true)}>
-          {(!every || place.emoji) && <SpaceIcon snap={snap} id={place.id} c="s16" />}
-          <span>{every ? 'Everything' : spaceName(snap, place)}</span>
-          <I n="down" c="s16 c-mute" />
-        </button>
-        <HeaderPath snap={snap} place={place} />
+      <div className="chat-heading">
+        <div className="ttl">
+          <button type="button" className="tbtn" aria-haspopup="menu" onClick={(e) => spaceMenu(e.currentTarget, place.id, true)}>
+            {(!every || place.emoji) && <SpaceIcon snap={snap} id={place.id} c="s16" />}
+            <span>{every ? 'Everything' : spaceName(snap, place)}</span>
+            <I n="down" c="s16 c-mute" />
+          </button>
+          <HeaderPath snap={snap} place={place} />
+        </div>
+        <span className="t2"><PickSummary pick={pick} cat={cat} /></span>
       </div>
       {registry.header.filter((h) => !phone || h.phone).map((h, i) => <h.View key={i} thread={thread} />)}
     </header>
