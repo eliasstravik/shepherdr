@@ -3206,21 +3206,21 @@ class ReviewerLine(unittest.TestCase):
         self.assertIn('service_tier="default"', shlex.split(self.settings.reviewer_command("codex", fast=False)))
 
     def test_codex_asked_now_for_a_brief(self):
-        """#947: an unreadable Codex auth file answers `codex login status` with an error, which the periodic check
-        can't read (unknown), and the reviewer sat on Codex's sign-in screen. A brief asks Codex now: not signed in,
-        the task's own CLI reviews and the line says what Codex said."""
+        """The brief checks now and show repeats the fallback without calling Codex again."""
         from unittest import mock
         with open(self.checks, "w") as f:
             json.dump({"machines": {"": {"claude": "ready", "codex": None}}}, f)
         t = {"id": 1, "title": "x", "mode": "worktree"}
         said = "Error: premature end of input at line 10 column 46"
-        with mock.patch.object(self.settings, "codex_login_now", lambda: (False, said)):
-            r = next(x for x in self.settings.task_settings(Store([t]), t, argv=["claude"], live=True) if x["label"] == "Reviewer")
+        with mock.patch.object(self.settings, "codex_login_now", lambda: (False, said)), \
+                mock.patch.object(__import__("herdr_task.sandbox", fromlist=["check"]), "check", return_value=None):
+            block = self.settings.settings_block(Store([t]), t, argv=["claude"], live=True)
             shown = next(x for x in self.settings.task_settings(Store([t]), t, argv=["claude"]) if x["label"] == "Reviewer")
-        self.assertEqual(r["value"]["agent"], "claude")
-        self.assertIn("Codex isn't signed in here", r["text"])
-        self.assertIn(said, r["text"])
-        self.assertEqual(shown["value"]["agent"], "codex", "show never runs Codex: only a brief asks it now")
+        self.assertIn("Codex sign-in could not be confirmed", block)
+        self.assertNotIn(said, block)
+        self.assertEqual(shown["value"]["agent"], "claude")
+        self.assertIn("Review uses Claude Code", shown["notice"])
+        self.line("signed-out")
         with mock.patch.object(self.settings, "codex_login_now", lambda: (True, "")):
             r = next(x for x in self.settings.task_settings(Store([t]), t, argv=["claude"], live=True) if x["label"] == "Reviewer")
         self.assertEqual(r["value"]["agent"], "codex")
@@ -3230,7 +3230,7 @@ class ReviewerLine(unittest.TestCase):
         from unittest import mock
         d = tempfile.mkdtemp()
         codex = os.path.join(d, "codex")
-        for out, want in (("Logged in using ChatGPT", True), ("Not logged in", False),
+        for out, want in (("Logged in using ChatGPT", True), ("API key configured - example", True), ("Not logged in", False),
                           ("Error: premature end of input at line 10 column 46", False)):
             with open(codex, "w") as f:
                 f.write(f"#!/bin/sh\necho '{out}' >&2\nexit 1\n" if want is False else f"#!/bin/sh\necho '{out}'\n")
@@ -3239,7 +3239,20 @@ class ReviewerLine(unittest.TestCase):
                     mock.patch.object(self.settings.shutil, "which", lambda name: codex):
                 ok, said = self.settings.codex_login_now()
             self.assertEqual(ok, want, out)
-            self.assertEqual(said, "" if want else out)
+            self.assertEqual(said, "Sign-in status could not be confirmed." if out.startswith("Error") else "")
+
+    def test_periodic_check_only_keeps_the_status_words(self):
+        import subprocess
+        from herdr_task import takeover
+        with tempfile.TemporaryDirectory() as path:
+            codex = os.path.join(path, "codex")
+            with open(codex, "w") as f:
+                f.write("#!/bin/sh\n[ \"$*\" = 'login status' ] && echo 'API key configured - example' >&2\n")
+            os.chmod(codex, 0o755)
+            out = subprocess.check_output(["sh", "-c", takeover.CHECK], text=True, env={**os.environ, "PATH": path + ":/usr/bin:/bin"})
+        self.assertIn("codex=API key configured\n", out.replace(" \n", "\n"))
+        self.assertNotIn("example", out)
+        self.assertEqual(takeover.cli_state("API key configured"), "ready")
 
     def test_a_codex_reviewer_model_is_passed_as_picked(self):
         """Shepherdr no longer asks Codex's App Server which models an account has: a picked reviewer model goes to
@@ -10987,6 +11000,35 @@ class NeverTypedIntoAShell(unittest.TestCase):
         self.assertIn("plain shell", str(e.exception))
         self.assertIn("nothing was typed", str(e.exception))
         self.assertEqual(self.typed(), [])
+
+    def test_tell_assistant_task_can_receive_the_reply_at_its_from_address(self):
+        from unittest import mock
+        assistant = {"target": "t3", "route": None, "address": "t3", "space": "sp1", "space_name": "shop"}
+        same_name = {"target": "t9", "route": None, "address": "t9", "space": "sp3", "space_name": "t5"}
+        graph = {"core": {"name": "vm", "id": "c1"}, "assistants": [assistant, same_name],
+                 "spaces": [{"id": "sp2", "name": "ops"}]}
+        self.term("t3", self.CLAUDE, {"herdr.role": "coordinator", "herdr.space": "sp1"})["status"] = "idle"
+        worker = self.term("t5", self.CLAUDE, {"herdr.task": self.WORKER_KEY, "herdr.task.space": "sp2"})
+        worker["status"] = "idle"
+        with mock.patch.object(self.machines, "directory", return_value=({"graph": graph}, [assistant, same_name])), \
+                mock.patch.object(self.machines, "hc_json", self.news.hc_json):
+            sent = self.machines.tell("sp1", "Can you check this?", sender="t5")
+            self.assertTrue(sent["can_reply"])
+            self.assertIn('space="ops" can-reply="yes" task="dev-shop#7"', self.typed()[-1][-1])
+            worker["status"] = "blocked"
+            reply = self.machines.tell(sent["from"], "Yes, checked", sender="t3")
+            self.assertTrue(reply["held"])
+            self.assertEqual([c[2] for c in self.typed()], ["t3"])
+            worker["status"] = "idle"
+            self.news.held_pass({})
+            self.assertEqual(self.typed()[-1][2], "t5")
+            self.assertIn("Yes, checked", self.typed()[-1][-1])
+
+    def test_tell_assistant_does_not_advertise_an_unregistered_sender(self):
+        self.term("t3", self.CLAUDE, {"herdr.role": "coordinator"})
+        result = self.tell({"target": "t3", "route": "", "address": "t3", "space": "sp1", "space_name": "shop"})
+        self.assertFalse(result["can_reply"])
+        self.assertIn('can-reply="no"', self.typed()[-1][-1])
 
     def test_tell_assistant_on_another_machine_types_nothing_into_its_shell(self):
         from unittest import mock

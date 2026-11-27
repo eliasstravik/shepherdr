@@ -377,6 +377,7 @@ const watch = new AgentWatch(hub, hcRun, {
     return out;
   },
   loginWatches: () => [...hub.terminals].filter(([addr]) => !!compat.trustWho(addr)).map(([addr]) => addr),
+  alreadyCarded: (addr) => !!asks.of(addr).length || !!compat.queued?.(addr).length,
   log: (addr) => compat.reader?.(addr)?.conv?.items ?? [],
   changed: () => { live.chats?.refreshAll(); model.rebuild(); },
 });

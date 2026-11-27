@@ -57,16 +57,15 @@ function TerminalCard({ q, chat }: { q: Question; chat: string }) {
         : context ? <span style={{ whiteSpace: 'pre-line' }}>{context}</span>
         : q.parts?.map((p) => <span key={p.title}>{p.title}</span>)}
       {q.choices.map((c, i) => <span className="s" key={i}>{c.label}{c.description ? ` ${c.description}` : ''}</span>)}
-      <span className="s">Answer it in its terminal.</span>
-      {has('terminal') && (
+      {has('terminal') ? (
         <div className="acts">
           <Btn kind="pri" onClick={() => {
             if (q.terminalChat) { setShowTerminal(!showTerminal); return }
             if (q.by) openTask(q.by.chat.slice(0, -7))
             switchView(terminal, true)
-          }}>{showTerminal ? 'Close terminal' : 'Open terminal'}</Btn>
+          }}>{showTerminal ? 'Close terminal' : 'Answer in the terminal'}</Btn>
         </div>
-      )}
+      ) : <span className="s">Answer in the terminal.</span>}
       {showTerminal && <Term stream={terminal} />}
     </div>
   )

@@ -10,7 +10,7 @@ import * as SC from "../core/screens.js";
 import * as CV from "../core/chat-view.js";
 import * as AG from "../core/agents.js";
 
-const { ScreenWatch, starting, cliOf, SCREEN } = SC as any;
+const { ScreenWatch, starting, mayHaveDialog, cliOf, SCREEN } = SC as any;
 const { LOST } = CV as any;
 const { freshArgv } = AG as any;
 type Run = (args: string[]) => Promise<{ code: number; stdout: string; stderr?: string }>;
@@ -29,7 +29,8 @@ export class AgentWatch {
   private busy = false;
 
   constructor(private hub: Hub, private hc: Run, private o: { watched: () => Watched[]; changed: () => void;
-    loginWatches?: () => string[]; log?: (addr: string) => { id: string; kind: string; text?: string }[]; }) {
+    loginWatches?: () => string[]; alreadyCarded?: (addr: string) => boolean;
+    log?: (addr: string) => { id: string; kind: string; text?: string }[]; }) {
     this.login = new SignInWatch(hub, o.changed, o.log);
     this.screens = new ScreenWatch({ hc: (a: string[]) => this.hc(a), cards: (a: string) => this.own.get(a) ?? [], save: (a: string, list: any[]) => { this.own.set(a, list); this.o.changed(); } }, () => this.o.changed());
   }
@@ -62,16 +63,14 @@ export class AgentWatch {
         }));
       }
       this.logins = now;
-      for (const w of watched) {
-        const k: any = this.hub.terminals.get(w.addr);
-        if (!k) continue;
-        if (!login.has(w.addr) && (starting(k) || this.screens.open(w.addr))) await this.screens.tick(w.addr, k).catch(() => undefined);
-        if (this.lostCandidate(k)) await this.checkLost(w).catch(() => undefined);
+      const screens = [...this.hub.terminals].filter(([addr, k]) => !login.has(addr) &&
+        (starting(k) || this.screens.open(addr) || (now.has(addr) && mayHaveDialog(k))));
+      for (let i = 0; i < screens.length; i += 8) {
+        await Promise.all(screens.slice(i, i + 8).map(([addr, k]) =>
+          this.screens.tick(addr, k, Date.now(), this.o.alreadyCarded?.(addr)).catch(() => undefined)));
       }
-      // the rest: only their start screens, while they are starting (or a card of theirs is still open)
-      for (const [addr, k] of this.hub.terminals as Map<string, any>) {
-        if (seen.has(addr) || login.has(addr) || !(starting(k) || this.screens.open(addr))) continue;
-        await this.screens.tick(addr, k).catch(() => undefined);
+      for (const w of watched) {
+        if (this.lostCandidate(this.hub.terminals.get(w.addr))) await this.checkLost(w).catch(() => undefined);
       }
       for (const card of this.openCards()) {
         if (!this.hub.terminals.has(card.addr)) await this.screens.tick(card.addr, undefined);

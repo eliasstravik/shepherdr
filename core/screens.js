@@ -1,11 +1,9 @@
 // Shared core: the source is core/screens.js; bin/sync-shared copies it into mods/chat/core/. Edit it here.
-// A CLI's own screens before its session starts (trust this folder, theme, sign in, an update prompt, whatever a later
-// version adds), read from the agent's screen as cards with choices, and watched the same way by the window's chat
-// (mods/chat/screens.js, its cards in shared "chat.screens") and by the service for the web app (service/screens.ts).
+// A CLI's own startup screens and in-session dialogs, shown as cards that open its terminal.
 // No hook reports these, so the screen is read: two matching reads a poll apart put a card up, and the card opens the
 // terminal for the person to answer there (Shepherdr never presses keys in an agent's screens). A screen with
 // nothing to choose makes no card (it may be a slow start), unless a card came before and this one holds a link (a
-// sign-in). An agent that reports a status (its session started) or took a turn never gets one.
+// sign-in). After startup, only a reported question or a visible active dialog makes a card.
 // A card: { id, addr, cli, words, choices: [{ label, description? }], at (the cursor's choice), all (screenText),
 // seen (sameScreen), state: "open" | "answered" | "closed", how, opened, changed }.
 
@@ -14,7 +12,7 @@
 const MARKER = /^(\s*[❯›▶►➤→>]\s+)(.*)$/u;
 const TICK = /^[✔✓]\s+/u;
 const NUMBER = /^\d{1,2}[.)]\s+/;
-const ENTER = /press enter|enter to continue/i;
+const ENTER = /press (?:enter|return)|(?:enter|return) to continue/i;
 const MOST_WORDS = 8;
 // A frame of the usual Braille spinner or Claude Code's, starting a line, in a box or not.
 const SPINNER = /^([\s│┃]*)[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏✢✳✶✻✽](?=\s|$)/u;
@@ -132,9 +130,39 @@ export function starting(k) {
   return Boolean(k) && k.state === "live" && !st && !(k.turn > 0) && Boolean(cliOf(k));
 }
 
+export function mayHaveDialog(k) {
+  return k?.state === "live" && !!cliOf(k) && !starting(k);
+}
+
+const DIALOG_FOOTER = /^(?:(?:enter|press enter|esc|escape|tab)\b|[↑↓]).*\b(?:confirm|select|cancel|deny|continue|close|dismiss|skip|submit|choose|navigate)\b/i;
+const BASH_CONFIRM = /can(?:not|'t|’t) (?:safely parse|parse .* safely)/i;
+
+function dialogScreen(text, k) {
+  const lines = cleaned(text).slice(-40);
+  const line = cursorLine(lines);
+  if (line >= 0) {
+    const menu = menuAt(lines, line);
+    const end = menu.options.at(-1).line + 1;
+    const after = lines.slice(end).map((l) => l.trim()).filter(Boolean);
+    const before = wordsAbove(lines, menu.top, MOST_WORDS);
+    // A menu in scrollback does not count once the normal input prompt is visible below it.
+    if ((after.length <= 3 && after.some((l) => DIALOG_FOOTER.test(l)) && !after.some((l) => /^[❯›>](?:\s|$)/.test(l))) ||
+        (!after.length && BASH_CONFIRM.test(before))) {
+      return lines.slice(Math.max(0, menu.top - MOST_WORDS), end).join("\n");
+    }
+  }
+  const last = lines.findLastIndex((l) => l.trim());
+  if (/^press (?:enter|return) to continue[.!]?$/i.test(lines[last]?.trim() ?? ""))
+    return lines.slice(Math.max(0, last - MOST_WORDS), last + 1).join("\n");
+  const st = k.status;
+  if (st?.state === "blocked" && ["permission", "question", "prompt"].includes(st.kind)) return "";
+  return null;
+}
+
 // The words a start screen's card says: its title, how a press went, how it closed.
 export const SCREEN = {
   title: (cli) => `${cli} is waiting on its screen`,
+  dialog: (cli) => `${cli} is waiting for an answer`,
   answered: (label) => `Answered: ${label}`,
   inTerminal: "Answered in the terminal",
   stopped: "The agent stopped",
@@ -142,7 +170,7 @@ export const SCREEN = {
   gone: "This screen is no longer waiting.",
   changedNothing: "That screen has changed, so nothing was pressed.",
   failed: "It didn't go through.",
-  ended: (cli, how) => `${cli}'s start screen · ${how}`,
+  ended: (cli, how, dialog = false) => `${cli}'s ${dialog ? "dialog" : "start screen"} · ${how}`,
 };
 
 // A CLI's folder-trust screen (#1441): Claude Code's "Quick safety check" / "Do you trust the files in this folder?" (its
@@ -186,9 +214,10 @@ export class ScreenWatch {
   close(card, how) { this.update(card, { state: "closed", how }); }
 
   // k: the terminal as hc get has it (created_ms, cols) or the live list's entry.
-  async tick(addr, k, now = Date.now()) {
+  async tick(addr, k, now = Date.now(), alreadyCarded = false) {
     const was = this.open(addr);
-    if (!starting(k)) {
+    const start = starting(k);
+    if (alreadyCarded || (!start && !mayHaveDialog(k))) {
       this.last.delete(addr);
       // Its session started (it reports, or took a turn), or it ended: the card's wait is over.
       if (was) this.close(was, k?.state === "live" ? SCREEN.inTerminal : SCREEN.stopped);
@@ -202,7 +231,13 @@ export class ScreenWatch {
       if (k.created_ms && now - k.created_ms < FIRST_LOOK) return;
       const r = await this.io.hc(["read", addr]);
       if (r.code !== 0) return;
-      const text = r.stdout ?? "";
+      const text = start ? r.stdout ?? "" : dialogScreen(r.stdout ?? "", k);
+      if (text === null) {
+        this.last.delete(addr);
+        if (was) this.close(was, SCREEN.inTerminal);
+        return;
+      }
+      const dialog = !start;
       const seen = sameScreen(text), all = screenText(text), { words, choices, at } = readScreen(text, k.cols ?? Infinity);
       const shown = JSON.stringify([all, choices]);
       const before = this.last.get(addr);
@@ -212,11 +247,11 @@ export class ScreenWatch {
       const open = last?.state === "open" && last.seen === seen ? last : null;
       // The same screen with a new code or number on it: a new card, so a press on the old one can't reach words it
       // didn't show.
-      if (open && before.shown === shown && JSON.stringify([open.all, open.choices]) !== shown) { this.close(open, SCREEN.changed); this.post(addr, k, { seen, all, words, choices, at }); return; }
+      if (open && before.shown === shown && JSON.stringify([open.all, open.choices]) !== shown) { this.close(open, SCREEN.changed); this.post(addr, k, { seen, all, words, choices, at, dialog }); return; }
       if (open || cards.some((c) => c.seen === seen && now - (c.changed ?? c.opened) < RETRY)) return;
       if (last?.state === "open") this.close(last, SCREEN.inTerminal);
-      if (!choices.length && !(words && cards.length && /https?:\/\//.test(text))) return;
-      this.post(addr, k, { seen, all, words, choices, at });
+      if (!dialog && !choices.length && !(words && cards.length && /https?:\/\//.test(text))) return;
+      this.post(addr, k, { seen, all, words, choices, at, dialog });
     } finally {
       this.looking.delete(addr);
     }

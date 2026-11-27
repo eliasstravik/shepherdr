@@ -328,7 +328,7 @@ def news_send(address, text, check=True):
         return False
     if check and typing(address, k):
         return False
-    if busy(k):
+    if waits_for_news(k):
         return False
     env = {k: v for k, v in os.environ.items() if k != "HC_TERMINAL_ID"}
     guard(["hc"])
@@ -339,6 +339,14 @@ def news_send(address, text, check=True):
 def busy(k):
     """A live agent in the middle of a turn: Shepherdr's own news waits until it's idle."""
     return bool(k) and status_word(k) == "working"
+
+
+def waits_for_news(k):
+    """An agent turning, at a prompt, or before its first status report can't take news yet."""
+    if not k:
+        return False
+    state = status_word(k)
+    return state in ("working", "blocked") or (not state and k.get("turn") == 0)
 
 
 # ---- Codex mid-turn (#1227) -------------------------------------------------------------------
@@ -646,7 +654,7 @@ def send_or_hold(address, text, how="send"):
     f = front(k)
     if f == "shell":
         return NO_AGENT
-    if f == "other" or typing(address, k) or codex_busy(k) or (how == "news" and busy(k)):
+    if f == "other" or typing(address, k) or codex_busy(k) or (how == "news" and waits_for_news(k)):
         hold(address, text, how)
         return "held"
     if how == "news":

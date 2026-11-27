@@ -26,8 +26,8 @@ import threading
 import time
 
 from .base import ASK_HOME, OLD_SESSION, SESSION, SHARE, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, layout, now, PACKAGE, run, STORE, WHERE
-from .news import NO_AGENT, news_send, send_or_hold, typing
-from .agents import front
+from .news import NO_AGENT, is_assistant, news_send, send_or_hold, typing
+from .agents import front, status_word
 from .revive import restart_assistant
 from .settings import TEMPLATES
 
@@ -1334,6 +1334,10 @@ def _everything_name(target):
 
 
 def _find(rows, target):
+    address = target.strip()
+    if re.fullmatch(r"(?:[\w.>-]+/)?t\d[0-9a-z]*", address):
+        # A reply address must never be mistaken for an equally named space.
+        return [a for a in rows if a["target"] == address]
     t = _space_target(target)
     if _everything_name(t):
         roots = [a for a in rows if a.get("role") == "everything"]
@@ -1378,8 +1382,7 @@ def _hops(route_names, hows, inner):
 
 
 def _deliver(names, hows, address, text):
-    """hc send on the receiver's own machine, reached through the route: there it's a plain
-    send, as news is (no <hc from> of this machine's). Mid-turn, Claude Code queues it itself."""
+    """Send to an idle agent through herdr-core on the receiver's own machine."""
     guard(["hc"])
     env = {k: v for k, v in os.environ.items() if k != "HC_TERMINAL_ID"}
     there = lambda inner: subprocess.run(_hops(names, hows, inner), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -1389,7 +1392,7 @@ def _deliver(names, hows, address, text):
         if not typing(address, there=there):
             break
         if i == 5:
-            raise Fail("not sent: the person is writing to that Assistant right now; try again in a few minutes")
+            raise Fail("not sent: the person is writing in that chat right now; try again in a few minutes")
         time.sleep(5)
     # SHEP-324: never into a terminal whose agent isn't in front (a plain shell would run it), checked last thing
     try:
@@ -1399,15 +1402,66 @@ def _deliver(names, hows, address, text):
     f = front(k)
     if f == "shell":
         raise Fail("its agent isn't running there (its terminal is a plain shell now), so nothing was typed into it. "
-                   "Restart that Assistant from its chat, then send again")
+                   "Restart the agent from its chat, then send again")
     if f == "other":
         raise Fail("another program than its agent is in front of its terminal, so nothing was typed into it; try again "
                    "in a few minutes")
     if f != "agent":
         return False
-    # herdr-core's send alone: mid-turn, Claude Code queues it itself (no Ctrl+Enter of ours, AGENTS.md "Nothing that
-    # risks a ban")
+    if status_word(k) in (None, "blocked", "working"):
+        raise Fail("the agent is starting, working or waiting for an answer; try again when it is ready")
     return there(["hc", "send", address, text]).returncode == 0
+
+
+def _task_terminal(node, address, k):
+    labels = (k or {}).get("labels") or {}
+    task = labels.get("herdr.task")
+    if not task or labels.get("herdr.role") not in (None, "", "worker") or front(k) != "agent":
+        return None
+    space = labels.get("herdr.task.space") or labels.get("herdr.space")
+    named = next((s.get("name") for s in node.get("spaces") or [] if s.get("id") == space), None)
+    return {"address": address, "space": space, "space_name": named or space, "task": task}
+
+
+def _task_target(graph, target):
+    """Look up a task only by its exact terminal address, on a machine already in the reach map."""
+    route, _, address = target.strip().rpartition("/")
+    if not ADDRESS.fullmatch(address):
+        return None
+    for n in nodes(graph):
+        if route_text(n["route"]) != route:
+            continue
+        names, how = [h["to"] for h in n["route"]], [h["how"] for h in n["route"]]
+        if names:
+            guard(["hc"])
+            try:
+                r = subprocess.run(_hops(names, how, ["hc", "get", address, "--json"]), capture_output=True, text=True, timeout=15)
+                k = json.loads(r.stdout) if r.returncode == 0 else None
+            except (OSError, ValueError, subprocess.SubprocessError):
+                return None
+        else:
+            k = hc_json("get", address)
+        row = _task_terminal(n["node"], address, k)
+        return {**row, "target": target.strip(), "route": route, "how": how} if row else None
+    return None
+
+
+def _sender(graph, address):
+    if not address or not ADDRESS.fullmatch(address):
+        return None
+    assistant = next((a for a in graph.get("assistants") or [] if a["address"] == address), None)
+    return assistant or _task_terminal(graph, address, hc_json("get", address))
+
+
+def _space_of(row):
+    return (row or {}).get("space_name") or (row or {}).get("space") or ""
+
+
+def _peer_message(attrs, text):
+    def escape(s):
+        return str(s or "").replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+    tag = " ".join(f'{k}="{escape(v)}"' for k, v in attrs.items())
+    return f"<herdr-assistant {tag}>" + text.replace("</herdr-assistant", "&lt;/herdr-assistant") + "</herdr-assistant>"
 
 
 def tell(target, text, sender=None):
@@ -1416,6 +1470,10 @@ def tell(target, text, sender=None):
     if not hits:
         d, rows = directory(refresh=True)
         hits = _find(rows, target)
+        if not hits:
+            task = _task_target(d["graph"], target)
+            if task:
+                hits = [task]
     if not hits:
         t = _space_target(target)
         for n in nodes(d["graph"]):
@@ -1423,28 +1481,35 @@ def tell(target, text, sender=None):
             route = route_text(n["route"])
             if every and (_everything_name(t) or t == (f"{route}/{every}" if route else every)):
                 raise Fail("Everything's Assistant isn't running. Open Everything and send a message to start it")
-        left = _leave(d["graph"], rows, target, text, sender)
+        left = _leave(d["graph"], target, text, sender)
         if left:
             return left
-        raise Fail(f"no live Assistant {target!r} reachable from here (herdr-task assistants lists them)")
+        raise Fail(f"no live Assistant or task terminal {target!r} reachable from here (herdr-task assistants lists Assistants)")
     if len(hits) > 1:
         raise Fail(f"{target!r} is more than one Assistant: " + ", ".join(a["target"] for a in hits))
     to = hits[0]
     me = sender or os.environ.get("HC_TERMINAL_ID")
     graph = d["graph"]
     here = graph.get("core") or {}
-    mine = next((a for a in graph.get("assistants") or [] if a["address"] == me), None)
+    mine = _sender(graph, me)
     receiver = next((n["node"] for n in nodes(graph) if route_text(n["route"]) == (to["route"] or "")), {})
     back = _path_back(graph, (receiver.get("core") or {}).get("id"), here.get("id")) if to["route"] else []
-    attrs = {"from": f"{'>'.join(back)}/{me}" if back else (me if back == [] else f"{here.get('name')}/{me}"),
-             "machine": here.get("name"), "space": (mine or {}).get("space_name") or (mine or {}).get("space") or "", "can-reply": "yes" if me else "no"}
-    esc = lambda s: str(s).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
-    msg = "<herdr-assistant " + " ".join(f'{k}="{esc(v)}"' for k, v in attrs.items()) + ">" + text.replace("</herdr-assistant", "&lt;/herdr-assistant") + "</herdr-assistant>"
+    machine = here.get("name") or ""
+    fetchable = back is None and bool(re.fullmatch(r"[\w.-]+", machine))
+    can_reply = bool(mine and (back is not None or fetchable))
+    origin = f"{'>'.join(back)}/{me}" if back else (me if back == [] or not machine else f"{machine}/{me}")
+    attrs = {"from": origin if me else machine,
+             "machine": machine, "space": _space_of(mine), "can-reply": "yes" if can_reply else "no"}
+    if (mine or {}).get("task"):
+        attrs["task"] = mine["task"]
+    msg = _peer_message(attrs, text)
     held, restarted = False, None
     if not to["route"]:
         # While the person writes to it, it waits for them (news.py's held_pass).
         got = send_or_hold(to["address"], msg, "news")
         if got == NO_AGENT:
+            if to.get("task"):
+                raise Fail("that task's agent stopped. Restart it from its chat, then send again")
             # SHEP-324: its agent exited (a plain shell is in front): never typed there; it starts again with this
             restarted = restart_assistant(hc_json("get", to["address"]), msg)
             if not restarted:
@@ -1455,7 +1520,7 @@ def tell(target, text, sender=None):
         ok = _deliver(to["route"].split(">"), to["how"], to["address"], msg)
     if not ok:
         raise Fail(f"couldn't deliver to {to['target']}")
-    if back is None and me:
+    if fetchable and can_reply:
         # it can't reach this machine: its answer waits there, and this machine fetches it (replies_pass)
         _await(to["route"], to["how"], (receiver.get("core") or {}).get("name") or to["route"].split(">")[-1], here.get("name"))
     return {"to": to["target"], "space": to.get("space_name"), "can_reply": attrs["can-reply"] == "yes", "from": attrs["from"], "held": held,
@@ -1475,8 +1540,8 @@ OUTBOX_KEEP_MS = 24 * 3600000   # an answer nobody fetched: dropped after this
 ADDRESS = re.compile(r"t\d[0-9a-z]*")
 
 
-def _leave(graph, rows, target, text, sender=None):
-    """target is an Assistant on a machine this one can't reach (mac/t13, from a message it got): leaves the message
+def _leave(graph, target, text, sender=None):
+    """target is an agent on a machine this one can't reach (mac/t13, from a message it got): leaves the message
     for that machine to fetch. None when target isn't machine/address, or that machine is reachable from here."""
     m = re.fullmatch(r"([\w.-]+)/(t\d[0-9a-z]*)", target.strip())
     me = sender or os.environ.get("HC_TERMINAL_ID")
@@ -1487,17 +1552,17 @@ def _leave(graph, rows, target, text, sender=None):
     known = {route_text(n["route"]) for n in nodes(graph)} | {(n["node"].get("core") or {}).get("name") for n in nodes(graph)}
     if machine in known or machine == here.get("name"):
         return None
-    mine = next((a for a in graph.get("assistants") or [] if a["address"] == me), None)
+    mine = _sender(graph, me)
     os.makedirs(OUTBOX, exist_ok=True)
     _prune_outbox()
     item = {"for": machine, "to": address, "from": me, "machine": here.get("name") or "", "at": now(), "text": text,
-            "space": (mine or {}).get("space_name") or (mine or {}).get("space") or ""}
+            "space": _space_of(mine), "task": (mine or {}).get("task"), "reply": bool(mine)}
     name = f"{now()}-{secrets_token()}.json"
     tmp = os.path.join(OUTBOX, "." + name)
     with open(tmp, "w") as f:
         json.dump(item, f)
     os.replace(tmp, os.path.join(OUTBOX, name))
-    return {"to": target, "left": True, "machine": machine, "can_reply": True, "from": me, "held": False}
+    return {"to": target, "left": True, "machine": machine, "can_reply": bool(mine), "from": me, "held": False}
 
 
 def secrets_token():
@@ -1592,12 +1657,16 @@ def replies_pass(report):
             continue
         for x in items if isinstance(items, list) else []:
             to = str(x.get("to") or "")
-            if not ADDRESS.fullmatch(to) or not x.get("from"):
+            if not ADDRESS.fullmatch(to) or not ADDRESS.fullmatch(str(x.get("from") or "")):
                 continue
-            esc = lambda s: str(s).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
-            attrs = {"from": f"{route}/{x['from']}", "machine": x.get("machine") or v.get("name") or "", "space": x.get("space") or "", "can-reply": "yes"}
-            msg = "<herdr-assistant " + " ".join(f'{k}="{esc(val)}"' for k, val in attrs.items()) + ">" + \
-                str(x.get("text") or "").replace("</herdr-assistant", "&lt;/herdr-assistant") + "</herdr-assistant>"
+            k = hc_json("get", to)
+            if not is_assistant(k) and not _task_terminal({}, to, k):
+                continue
+            attrs = {"from": f"{route}/{x['from']}", "machine": x.get("machine") or v.get("name") or "", "space": x.get("space") or "",
+                     "can-reply": "yes" if x.get("reply") else "no"}
+            if x.get("task"):
+                attrs["task"] = x["task"]
+            msg = _peer_message(attrs, str(x.get("text") or ""))
             got = send_or_hold(to, msg, "news")
             report.setdefault("replies", []).append({"from": attrs["from"], "to": to, "got": got if isinstance(got, str) else bool(got)})
 
@@ -1659,4 +1728,4 @@ def cmd_tell(args):
     say(args, r, ("Not delivered yet, held for" if r.get("held") else "Delivered to") + f" {r['to']}" + (f" ({r['space']})" if r.get("space") else "") +
         (f": its agent had stopped, so it started again ({r['restarted']}) with this as its first message" if r.get("restarted") else "") +
         (": the person is writing to it; it goes once they've sent or cleared that" if r.get("held") else "") +
-        ("." if r["can_reply"] else ". It can't reach this machine back, so it can't reply."))
+        ("." if r["can_reply"] else ". This message has no reply address."))
