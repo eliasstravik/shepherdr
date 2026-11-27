@@ -738,6 +738,61 @@ class Install(unittest.TestCase):
                 s.shutdown()
                 s.server_close()
 
+    def test_doctor_signs_in_to_local_health(self):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        sh = installer()
+
+        class Health(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path != "/api/health":
+                    self.send_error(404)
+                elif self.headers.get("Authorization") != "Bearer test-token":
+                    self.send_error(401)
+                else:
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b'{"ok": true, "id": "test-service"}')
+
+            def log_message(self, *args):
+                pass
+
+        with ThreadingHTTPServer(("127.0.0.1", 0), Health) as server:
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            try:
+                with mock.patch.object(sh, "real_home", return_value=self.root), \
+                        mock.patch.object(sh, "check_tools", return_value=([], [])), \
+                        mock.patch.object(sh, "data_check", return_value=([], [])), \
+                        mock.patch.object(sh, "unit_session_problem", return_value=None), \
+                        mock.patch.object(sh, "codex_sandbox_state", return_value=None):
+                    for path in (self.p(RECORD), self.p(UNIT), sh.service_file(self.root, "service.json")):
+                        os.makedirs(os.path.dirname(path), exist_ok=True)
+                    sh.save_record(self.root, {"version": sh.VERSION})
+                    open(self.p(UNIT), "w").close()
+                    with open(sh.service_file(self.root, "service.json"), "w") as f:
+                        json.dump({"port": server.server_port, "id": "test-service"}, f)
+
+                    token_file = sh.service_file(self.root, "token")
+                    for token in ("test-token", "wrong-token", None):
+                        with self.subTest(has_token=token is not None, valid=token == "test-token"):
+                            if token is None:
+                                os.unlink(token_file)
+                            else:
+                                with open(token_file, "w") as f:
+                                    f.write(token + "\n")
+                            output = io.StringIO()
+                            with contextlib.redirect_stdout(output):
+                                result = sh.cmd_doctor(types.SimpleNamespace(root=self.root))
+                            self.assertEqual(result, 0, output.getvalue())
+                            self.assertNotIn("✗", output.getvalue())
+                            sign_in_note = "the service is up, but Doctor couldn't sign in"
+                            if token == "test-token":
+                                self.assertNotIn(sign_in_note, output.getvalue())
+                            else:
+                                self.assertIn(sign_in_note, output.getvalue())
+            finally:
+                server.shutdown()
+
     def test_pack_installs_another_machine(self):
         """Serve from: what `shepherdr web install-on` sends (pack) installs from itself, the installed folder is a
         whole source to send on again (the Herdr button and the hooks with it), and uninstall puts back the helper it
