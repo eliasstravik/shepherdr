@@ -88,6 +88,25 @@ served from another machine, its service keeps the file in step with that machin
 
 Secrets live in one vault, `~/.local/share/shepherdr/secrets/vault.json`, on the machine that keeps them.
 
+## macOS service accounts
+
+On macOS 27, a background service account can keep the web app from letting you in. If the refusal says another
+person has processes on this Mac, you can list trusted service accounts in `everywhere.web.ignore_accounts` in
+`~/.config/shepherdr/settings.json` on the Mac that serves the app. Add this inside the existing `everywhere` object,
+keeping your other settings:
+
+```json
+"web": {
+  "ignore_accounts": ["mfe"]
+}
+```
+
+Use each account's exact short name. The list is empty by default. Remove a name or set the list to `[]` to undo
+the exception. The next request picks up the change. Check the list again if you move the web app to another Mac.
+
+This weakens the web app's check when macOS hides who opened a connection. A listed account could pretend to be
+you and get into Shepherdr from that Mac. List only service accounts you trust with that access.
+
 ## Settings from 3.1 with no row
 
 These have no row in the window. They still apply from the settings file. To change one, ask in a chat and its agent

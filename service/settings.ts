@@ -136,6 +136,16 @@ export class Settings {
     for (const fn of this.listeners) fn();
   }
 
+  /** File-only so the owner can change it even when the web app refuses entry. */
+  webIgnoreAccounts(): readonly string[] {
+    this.fresh();
+    const names: unknown = this.file.everywhere?.web?.ignore_accounts;
+    if (!Array.isArray(names) || !names.every((name) => typeof name === "string" && /^\S+$/.test(name) && !/^\d+$/.test(name))) {
+      return [];
+    }
+    return names;
+  }
+
   private layer(scope: string | null, section?: string) {
     if (!scope) return this.file.everywhere;
     // a task section: the repo the space sits on (a file not moved yet: the space's own, as herdr-task reads it)

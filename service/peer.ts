@@ -94,11 +94,12 @@ export const refusedWhy = (why: string) =>
 export let lsofProblem: string | null = null;
 
 /** Tailscale (root) or the owner. */
-export const trustedPeer = (port: number | undefined, service: number) => {
+export const trustedPeer = (port: number | undefined, service: number, ignoreAccounts?: () => readonly string[]) => {
   if (!port) return false;
   const uid = peerUid(port, service);
   if (uid === 0 || (uid !== null && uid === ME)) return true;
-  return process.platform === "darwin" && peerProblem !== null && lsofPeer(port, service, run) !== null;
+  return process.platform === "darwin" && peerProblem !== null &&
+    lsofPeer(port, service, run, ME, process.pid, ignoreAccounts?.()) !== null;
 };
 
 const run = (argv: string[]) => {
@@ -117,18 +118,15 @@ export function lsofSockets(text: string): [number, number, string][] {
   return out;
 }
 
-/** The uids of processes run by another person: a login account (macOS: 501 and up) other than the owner. */
-export const otherPeople = (ps: string, me = ME) =>
-  [...new Set(ps.split("\n").map((x) => x.trim()).filter((x) => /^\d+$/.test(x)).map(Number))].filter((u) => u >= 501 && u < 2 ** 31 && u !== me);
-
 /** macOS without a netstat table (GitHub #777): who holds the caller's side, by lsof. lsof sees every socket of this
  *  user and none of another's (root's, another person's), and always this service's own side of the connection:
  *  - the caller's side seen: the owner's ("owner", the uid lsof gives must be the owner's);
  *  - not seen: another account holds it. Tailscale's extension runs as root; it counts as Tailscale only when no
- *    other person has a process on this Mac (ps lists everyone's) and the connection is still up after ps looked,
- *    so the holder was alive while ps listed it ("system").
+ *    other login account (501 and up) has a process on this Mac, apart from explicitly ignored service accounts.
+ *    The connection must still be up after ps looked, so the holder was alive while ps listed it ("system").
  *  lsof not seeing the service's own side means it can't look here: null, as for anything else. */
-export function lsofPeer(port: number, service: number, exec: (argv: string[]) => string, me = ME, self = process.pid): "owner" | "system" | null {
+export function lsofPeer(port: number, service: number, exec: (argv: string[]) => string,
+  me = ME, self = process.pid, ignoreAccounts: readonly string[] = []): "owner" | "system" | null {
   const look = () => {
     const socks = lsofSockets(exec([LSOF, "-nP", `-iTCP@127.0.0.1:${port}`, "-sTCP:ESTABLISHED", "-Fpun"]));
     const ours = socks.some(([pid, , n]) => pid === self && n === `127.0.0.1:${service}->127.0.0.1:${port}`);
@@ -139,9 +137,17 @@ export function lsofPeer(port: number, service: number, exec: (argv: string[]) =
   const first = look();
   if (!first.ours) return say("lsof didn't see the connection either");
   if (first.callers.length) return first.callers.every((u) => u === me) ? ((lsofProblem = null), "owner") : say("another user opened it");
-  const ps = exec([PS, "-axo", "uid="]);
-  if (!ps.split("\n").some((x) => x.trim() === String(me))) return say("ps gave no process list"); // ps must list us too
-  if (otherPeople(ps, me).length) return say("another person has processes on this Mac, so a hidden caller could be theirs");
+  const ps = exec([PS, "-axo", "uid=", ...(ignoreAccounts.length ? ["-o", "user="] : [])]);
+  const processes = ps.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+    const [, uid, name = ""] = /^(\d+)(?:[ \t]+(.+))?$/.exec(line) ?? [];
+    return { uid: Number(uid), name };
+  });
+  if (processes.some(({ uid }) => !Number.isInteger(uid)) || !processes.some(({ uid }) => uid === me)) {
+    return say("ps gave no process list");
+  }
+  if (processes.some(({ uid, name }) => uid >= 501 && uid < 2 ** 31 && uid !== me && !ignoreAccounts.includes(name))) {
+    return say("another person has processes on this Mac, so a hidden caller could be theirs");
+  }
   const again = look();
   if (!again.ours || again.callers.length) return say("the connection changed while looking");
   lsofProblem = null;

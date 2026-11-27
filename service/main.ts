@@ -951,7 +951,8 @@ const server = Bun.serve<{ who: string }>({
     const viaTailnet = req.headers.has("tailscale-user-login");
     // the glance feed (SHEP-246) is read by the phone's own app: checked as a write (its origin, x-shepherdr: 1)
     const native = path === "/api/glance" && url.searchParams.get("native") === "1";
-    const pass = gate(req, g, socket, viaTailnet && trustedPeer(srv.requestIP(req)?.port, PORT), path === "/api/glance" || path === "/api/chat");
+    const trusted = viaTailnet && trustedPeer(srv.requestIP(req)?.port, PORT, () => settings.webIgnoreAccounts());
+    const pass = gate(req, g, socket, trusted, path === "/api/glance" || path === "/api/chat");
     if (!pass.ok) {
       const why = refusedWhy(pass.why);
       if (why !== pass.why && why !== saidPeer) console.error(`web: ${(saidPeer = why)}`);
