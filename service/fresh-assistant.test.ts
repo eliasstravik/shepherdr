@@ -6,7 +6,7 @@
 // the file's old name, so a start could run on stale settings: Fast where Settings said Ultrafast), and a CLI held on
 // its own start screen (Codex's "Update available", "Hooks need review") is an empty chat with that screen's card,
 // not "Can't find this conversation".
-// A hub whose machine.exec runs here with HOME a throwaway: its ~/.codex names the models, its templates folder
+// A hub whose machine.exec runs here with HOME a throwaway: its Codex stand-in names the models, its templates folder
 // holds the Assistant's, and PATH has stand-in CLIs. hc is a script that records what it was asked to run.
 import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, utimesSync } from "node:fs";
@@ -24,11 +24,20 @@ const home = mkdtempSync(join(tmpdir(), "shep-fresh-")), bin = join(home, "bin")
 mkdirSync(bin); mkdirSync(tpl, { recursive: true }); mkdirSync(join(home, ".codex"));
 writeFileSync(join(tpl, "assistant.md"), "---\nname: assistant\ndescription: The Assistant\ncommand: claude\n---\nYou are the Assistant.\n");
 for (const c of ["claude", "codex"]) { writeFileSync(join(bin, c), "#!/bin/sh\n"); chmodSync(join(bin, c), 0o755); }
-// Codex's own model list, as its models_cache.json has it: Sol takes Fast and Ultrafast, Luna only Fast
-writeFileSync(join(home, ".codex", "models_cache.json"), JSON.stringify({ models: [
-  { slug: "gpt-6.2-sol", display_name: "GPT-6.2 Sol", supported_reasoning_levels: [{ effort: "low" }, { effort: "medium" }, { effort: "high" }], default_reasoning_level: "medium", service_tiers: [{ id: "fast" }, { id: "ultrafast" }] },
-  { slug: "gpt-6-luna", display_name: "GPT-6 Luna", supported_reasoning_levels: [{ effort: "low" }], default_reasoning_level: "low", service_tiers: [{ id: "fast" }] },
-] }));
+// Codex's documented model list: Sol takes Fast and Ultrafast, Luna only Fast.
+const catalog = { data: [
+  { model: "gpt-6.2-sol", displayName: "GPT-6.2 Sol", supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "medium" }, { reasoningEffort: "high" }], defaultReasoningEffort: "medium", serviceTiers: [{ id: "fast" }, { id: "ultrafast" }] },
+  { model: "gpt-6-luna", displayName: "GPT-6 Luna", supportedReasoningEfforts: [{ reasoningEffort: "low" }], defaultReasoningEffort: "low", serviceTiers: [{ id: "fast" }] },
+] };
+writeFileSync(join(bin, "codex"), `#!/usr/bin/env python3
+import json, sys
+assert sys.argv[1] == "app-server"
+for line in sys.stdin:
+    msg = json.loads(line)
+    if "id" in msg:
+        result = ${JSON.stringify(JSON.stringify(catalog))} if msg["method"] == "model/list" else "{}"
+        print(json.dumps({"id": msg["id"], "result": json.loads(result)}), flush=True)
+`);
 // hc: `run` answers as herdr-core does and keeps its arguments and the one-off template it was given
 const ran = join(home, "ran.json"), hcFile = join(bin, "hc");
 writeFileSync(hcFile, `#!/bin/sh

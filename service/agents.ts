@@ -16,8 +16,9 @@ import { inFront } from "../core/send.js";
 import * as LS from "../core/live-switch.js";
 import * as SC from "../core/settings.js";
 import { spawn } from "./spawn.ts";
+import { MACHINE_PROBE } from "./machines.ts";
 
-const { DEFAULTS, CLAUDE_CATALOG, CODEX_CATALOG, parseDefaults, current, menuFor, rowFor, argvOf, argvFor, sessionOf, NAMES, line, PICKS_FILE, parsePicks, pickKey, withPin, withRecent, speedOf, speedWordOf } = AG as any;
+const { DEFAULTS, parseDefaults, current, menuFor, rowFor, argvOf, argvFor, sessionOf, NAMES, line, PICKS_FILE, parsePicks, pickKey, withPin, withRecent, speedOf, speedWordOf } = AG as any;
 /** a chat's speed as kept: false, true (Fast) or "ultrafast" */
 const fastOf = (f: unknown) => (f === "ultrafast" ? "ultrafast" : !!f);
 /** the speeds a CLI's models offer: normal, then fast and ultrafast where one has them (SHEP-258) */
@@ -51,17 +52,17 @@ export class Agents {
   private async defaults(kind: string, machine: string | null) {
     const [r, models] = await Promise.all([
       exec(this.hub, ["sh", "-c", DEFAULTS, "defaults", kind], machine, 10).catch(() => null),
-      this.modelCatalog(kind, machine),
+      kind === "codex" ? this.modelCatalog(machine) : "",
     ]);
     return parseDefaults(kind, r?.stdout ?? "", models);
   }
 
   private catalogs = new Map<string, { at: number; models: Promise<string> }>();
-  private modelCatalog(kind: string, machine: string | null) {
-    const key = `${machine ?? ""}|${kind}`;
+  private modelCatalog(machine: string | null) {
+    const key = machine ?? "";
     const old = this.catalogs.get(key);
     if (old && Date.now() - old.at < 60_000) return old.models;
-    const models = exec(this.hub, ["sh", "-c", kind === "claude" ? CLAUDE_CATALOG : CODEX_CATALOG], machine, 8)
+    const models = Promise.resolve().then(() => exec(this.hub, ["python3", "-c", readFileSync(MACHINE_PROBE, "utf8"), "--codex-models"], machine, 10))
       .then((r) => r.code === 0 ? r.stdout.trim() : "", () => "");
     this.catalogs.set(key, { at: Date.now(), models });
     return models;

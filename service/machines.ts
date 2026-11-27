@@ -4,14 +4,13 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Hub } from "./hub.ts";
-import { HOME, settingsFile } from "./paths.ts";
+import { settingsFile } from "./paths.ts";
 import { exec } from "./model.ts";
 import * as MC from "../core/machines.js";
 
 const { holdOf, nextRead, healthMeters } = MC as any;
-// machine.py beside this service (Shepherdr's own folder, or a checkout: <it>/service and <it>/mods/tasks/bin), else the installed one
-const SCRIPT = [join(import.meta.dir, ".."), join(HOME, ".local", "share", "shepherdr")]
-  .map((root) => join(root, "mods", "tasks", "bin", "herdr_task", "machine.py")).find(existsSync);
+// Run this version's probe on every machine, including machines with an older install.
+export const MACHINE_PROBE = join(import.meta.dir, "..", "mods", "tasks", "bin", "herdr_task", "machine.py");
 
 export class Machines {
   stats = new Map<string | null, any>();
@@ -65,12 +64,12 @@ export class Machines {
 
   async poll() {
     const voice = this.readVoice();
-    if (this.busy || !SCRIPT) { if (await voice) this.onChange(); return; }
+    if (this.busy || !existsSync(MACHINE_PROBE)) { if (await voice) this.onChange(); return; }
     this.busy = true;
     try {
       let cfg: any = null;
       try { cfg = JSON.parse(readFileSync(settingsFile(), "utf8")); } catch {}
-      const script = readFileSync(SCRIPT, "utf8"), now = Date.now();
+      const script = readFileSync(MACHINE_PROBE, "utf8"), now = Date.now();
       await Promise.all([null, ...this.list()].map(async (m) => {
         const was = this.stats.get(m) ?? {};
         const limits = now - (was.limitsAt ?? 0) > 10 * 60_000;

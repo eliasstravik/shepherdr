@@ -7,9 +7,9 @@ export const NAMES = { claude: "Claude Code", codex: "Codex" };
 // Claude Code's current models, as its /model menu offers them. `id` is what --model gets;
 // `match` the names a running agent may report for it.
 const CLAUDE_MODELS = [
-  { id: "opus", name: "Opus 5.5", match: ["opus", "claude-opus-5-5"] },
-  { id: "opus[1m]", name: "Opus 5.5 · 1M", match: ["opus[1m]", "claude-opus-5-5[1m]"] },
-  { id: "claude-fable-5-2", name: "Fable 5.2", match: ["fable", "claude-fable-5-2"] },
+  { id: "opus", fast: true, name: "Opus 5.5", match: ["opus", "claude-opus-5-5"] },
+  { id: "opus[1m]", fast: true, name: "Opus 5.5 · 1M", match: ["opus[1m]", "claude-opus-5-5[1m]"] },
+  { id: "claude-fable-5-2", fast: true, name: "Fable 5.2", match: ["fable", "claude-fable-5-2"] },
   { id: "sonnet", name: "Sonnet 5.5", match: ["sonnet", "claude-sonnet-5-5"] },
   { id: "haiku", name: "Haiku 5.5", match: ["haiku", "claude-haiku-5-5"] },
 ];
@@ -78,30 +78,8 @@ else
   for k in model model_reasoning_effort service_tier sandbox_mode approval_policy; do
     printf '%s\\t%s\\n' "$k" "$(sed -n "s/^$k[[:space:]]*=[[:space:]]*\\"\\{0,1\\}\\([^\\"]*\\)\\"\\{0,1\\}.*/\\1/p" "$f" 2>/dev/null | head -1)"
   done
-  c="$d/models_cache.json"
-  [ -s "$c" ] && { printf 'models\\t'; tr -d '\\n' < "$c"; echo; }
 fi
 true`;
-
-// Claude Code exposes per-model capabilities in its Agent SDK initialize reply. Send only the handshake,
-// without a user turn, workspace settings, tools, MCP servers or a session to keep.
-export const CLAUDE_CATALOG = `
-command -v claude >/dev/null && command -v jq >/dev/null || exit 0
-cd /
-printf '%s\\n' '{"type":"control_request","request_id":"models","request":{"subtype":"initialize","agents":{}}}' |
-  claude -p --input-format stream-json --output-format stream-json --verbose --setting-sources '' \\
-    --strict-mcp-config --mcp-config '{"mcpServers":{}}' --no-session-persistence --tools '' 2>/dev/null |
-  jq -nc 'first(inputs | select(.type == "control_response" and .response.request_id == "models") | .response.response.models | select(type == "array"))'`;
-
-// The debug catalog merges Codex's bundled models and account catalog. The on-disk cache alone can
-// have the right model ids and still be missing their service tiers.
-export const CODEX_CATALOG = `
-cd /
-if command -v jq >/dev/null; then
-  codex debug models | jq -ec '{models: [.models[] | {slug, display_name, visibility, supported_reasoning_levels, default_reasoning_level, service_tiers}]}'
-else
-  exec codex debug models
-fi`;
 
 function parsePer(text) {
   try { return JSON.parse(text || "{}") ?? {}; } catch { return {}; }
@@ -116,21 +94,20 @@ export function parseDefaults(kind, stdout, catalog = "") {
   }
   let models = null;
   if (kind === "codex") {
-    const fresh = parsePer(catalog).models;
-    const listed = Array.isArray(fresh) ? fresh : parsePer(out.models).models;
+    const listed = parsePer(catalog).data;
     if (Array.isArray(listed)) {
-      models = listed.filter((m) => m?.slug && m.visibility !== "hide").map((m) => ({
-        id: m.slug, label: m.display_name || m.slug,
-        efforts: (m.supported_reasoning_levels ?? []).map((l) => l.effort).filter(Boolean),
-        fast: (m.service_tiers ?? []).some((t) => speedOf(t?.id) === true),
-        ultrafast: (m.service_tiers ?? []).some((t) => t?.id === "ultrafast"),
-        defaultEffort: m.default_reasoning_level ?? null,
+      models = listed.filter((m) => m?.model && !m.hidden).map((m) => ({
+        id: m.model, label: m.displayName || m.model,
+        efforts: (m.supportedReasoningEfforts ?? []).map((l) => l.reasoningEffort).filter(Boolean),
+        fast: (m.serviceTiers ?? []).some((t) => speedOf(t?.id) === true),
+        ultrafast: (m.serviceTiers ?? []).some((t) => t?.id === "ultrafast"),
+        defaultEffort: m.defaultReasoningEffort ?? null,
       }));
+      if (!out.model) out.model = listed.find((m) => m.isDefault)?.model;
     }
   }
   return kind === "claude"
-    ? { model: out.model || null, effort: out.effort || null, fast: Boolean(out.fast), per: parsePer(out.per), mode: out.mode || null,
-      claudeModels: parsePer(catalog || out.claudeModels) }
+    ? { model: out.model || null, effort: out.effort || null, fast: Boolean(out.fast), per: parsePer(out.per), mode: out.mode || null }
     : { model: out.model || null, effort: out.model_reasoning_effort || null, fast: speedOf(out.service_tier),
       sandbox: out.sandbox_mode || null, approval: out.approval_policy || null, models };
 }
@@ -221,29 +198,16 @@ export function contextWords(c) {
 
 // What the model picker (mods/chat-models, the web's restart.tsx) shows for one agent, as plain data:
 // { name, models: [{ id, name, efforts, defaultEffort, fast, ultrafast }], perms }: every model the CLI
-// offers (Codex: its own models_cache.json; Claude Code: its /model menu), the picker searches them.
+// offers (Codex App Server), or Claude Code’s published models, the picker searches them.
 // `dflt` is that agent's settings (defaults()); `current` its running model, kept in the list.
 export function menuFor(agent, dflt, current = null) {
   if (agent === "claude") {
-    const offered = Array.isArray(dflt?.claudeModels) ? dflt.claudeModels : [];
-    const models = CLAUDE_MODELS.map((m) => {
-      const reported = offered.find((x) => x.value === m.id)
-        ?? offered.find((x) => x.value !== "default" && x.resolvedModel === m.match[1].replace(/\[1m\]$/, ""));
-      const long = m.id.endsWith("[1m]");
-      const name = reported?.displayName ? reported.displayName + (long ? " · 1M" : "") : m.name;
-      const aliases = reported?.resolvedModel ? [m.id, reported.resolvedModel + (long ? "[1m]" : "")] : m.match;
-      return {
-        id: m.id, name, aliases,
-        efforts: reported?.supportedEffortLevels ?? CLAUDE_EFFORTS,
-        defaultEffort: dflt?.per?.[reported?.resolvedModel ?? m.match[1].replace(/\[1m\]$/, "")] ?? dflt?.effort ?? null,
-        fast: reported?.supportsFastMode === true,
-      };
-    });
-    for (const m of offered) {
-      if (!m.value || m.value === "default" || models.some((x) => x.aliases.includes(m.value) || x.aliases.includes(m.resolvedModel))) continue;
-      models.push({ id: m.value, name: m.displayName ?? modelName(m.value), aliases: [m.value, m.resolvedModel].filter(Boolean),
-        efforts: m.supportedEffortLevels ?? [], defaultEffort: dflt?.per?.[m.resolvedModel] ?? dflt?.effort ?? null, fast: m.supportsFastMode === true });
-    }
+    // https://code.claude.com/docs/en/model-config and /en/fast-mode. Claude enforces account availability.
+    const models = CLAUDE_MODELS.map((m) => ({
+      id: m.id, name: m.name, aliases: m.match, efforts: CLAUDE_EFFORTS,
+      defaultEffort: dflt?.per?.[m.match[1].replace(/\[1m\]$/, "")] ?? dflt?.effort ?? null,
+      fast: m.fast ?? false,
+    }));
     // a model typed by id (an older one it still takes) stays in the list while it runs
     if (current && !models.some((m) => m.id === current)) {
       const m = models.find((m) => m.aliases.includes(current));

@@ -177,7 +177,7 @@ export interface LimitWindow {
 }
 
 /** ok: read. no-plan: an API key or the like, with no plan to run out of. unknown: never a guess; why says what happened */
-export type CliLimits = { state: 'ok'; windows: LimitWindow[]; plan?: string } | { state: 'signed-out' | 'no-plan' } | { state: 'unknown'; why: string }
+export type CliLimits = { state: 'ok'; windows: LimitWindow[]; plan?: string } | { state: 'signed-out' | 'no-plan' } | { state: 'unknown' | 'no-access'; why: string }
 
 /** at: when this was read (ms). failed: a later read didn't work, so what is here is that old */
 export type CliLimitsRead = CliLimits & { at: number; failed?: string }

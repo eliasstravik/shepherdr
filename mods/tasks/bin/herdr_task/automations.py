@@ -15,7 +15,7 @@ import time
 from . import analytics
 from .base import ENTRY, Fail, git, guard, hc_json, layout, now, plugin_off, STORE, WHERE
 from .when import parse_at
-from .settings import bare, set_task, settings_for, SET_KEYS, worker_argv, worktrees_on
+from .settings import bare, check_automatic_agent, set_task, settings_for, SET_KEYS, worker_argv, worktrees_on
 from .agents import agent_running, live_agents, starting, status_of, task_status
 from .sessions import session_of
 from .launch import default_space
@@ -400,6 +400,7 @@ def set_auto_fields(s, a, args, adding=False):
             else:
                 a["warning"] = watch_from(s, a)
     if args.agent:
+        check_automatic_agent([args.agent])
         a["agent"] = args.agent
     if args.here or args.worktree:
         if args.worktree and s.loc["kind"] != "repo":
@@ -597,6 +598,7 @@ def fire(s, a, why, brief=None):
         if not space:
             raise Fail("It has no space to start in.")
         argv = worker_argv(s, t, space)
+        check_automatic_agent(argv)
         parent = a.get("parent")
         reason = queue_reason(s, t)
         if reason:

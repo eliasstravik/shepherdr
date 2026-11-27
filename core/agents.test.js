@@ -52,14 +52,14 @@ test("a pinned or recent model typed by id stays on offer", () => {
 
 // SHEP-41: Fast was hidden (and stuck on) for a Codex whose config.toml set service_tier.
 test("every agent with a fast mode shows the Fast switch, and turning it off sticks", () => {
-  const cache = JSON.stringify({ models: [{ slug: "gpt-x", display_name: "GPT-X", supported_reasoning_levels: [{ effort: "high" }], service_tiers: [{ id: "priority" }] },
-    { slug: "gpt-slow", display_name: "GPT-Slow", service_tiers: [] }] });
-  const dflt = parseDefaults("codex", `model\tgpt-x\nservice_tier\tfast\nmodels\t${cache}\n`);
+  const catalog = JSON.stringify({ data: [{ model: "gpt-x", displayName: "GPT-X", supportedReasoningEfforts: [{ reasoningEffort: "high" }], serviceTiers: [{ id: "priority" }] },
+    { model: "gpt-slow", displayName: "GPT-Slow", serviceTiers: [] }] });
+  const dflt = parseDefaults("codex", `model\tgpt-x\nservice_tier\tfast\n`, catalog);
   const codexMenu = menuFor("codex", dflt);
   expect(codexMenu.models.find((m) => m.id === "gpt-x").fast).toBe(true);
   expect(codexMenu.models.find((m) => m.id === "gpt-slow").fast).toBe(false);
   expect(codexMenu.fastLocked).toBeUndefined();
-  expect(menuFor("claude", {}).models.find((m) => m.id === "opus").fast).toBe(false);
+  expect(menuFor("claude", {}).models.find((m) => m.id === "opus").fast).toBe(true);
   // off: said on the command line, so config.toml's fast loses, and the label reads it back
   const off = argvFor({ agent: "codex", model: "gpt-x", effort: "high", fast: false }, { agent: "codex", argv: ["codex", "-c", 'service_tier="fast"'] }).argv;
   expect(off.filter((a) => a.startsWith("service_tier"))).toEqual(['service_tier="default"']);
@@ -71,26 +71,21 @@ test("every agent with a fast mode shows the Fast switch, and turning it off sti
   expect(current("claude", claudeOff, {}, { fast: true }).fast).toBe(false);
 });
 
-test("the model catalog is the source for each faster tier", () => {
-  const models = [
-    { value: "default", resolvedModel: "claude-opus-5-5", displayName: "Default (recommended)", supportsFastMode: true },
-    { value: "opus", resolvedModel: "claude-opus-5-5", displayName: "Opus 5.5", supportsFastMode: true },
-    { value: "fable", resolvedModel: "claude-fable-5-2", displayName: "Fable 5.2", supportsFastMode: true },
-    { value: "sonnet", displayName: "Sonnet 5.5" },
-    { value: "claude-opus-5", displayName: "Opus 5", supportsFastMode: true },
-  ];
-  const claude = menuFor("claude", parseDefaults("claude", `claudeModels\t${JSON.stringify(models)}`));
-  expect(claude.models.filter((m) => m.fast).map((m) => m.id)).toEqual(["opus", "opus[1m]", "claude-fable-5-2", "claude-opus-5"]);
-  expect(claude.models[0].name).toBe("Opus 5.5");
-  const codex = menuFor("codex", parseDefaults("codex", `models\t${JSON.stringify({ models: [
-    { slug: "only-ultra", service_tiers: [{ id: "ultrafast" }] },
-    { slug: "unknown", service_tiers: [{ id: "other" }] },
-  ] })}`));
+test("only published Claude models and Codex App Server capabilities get faster tiers", () => {
+  const claude = menuFor("claude", parseDefaults("claude", ""));
+  expect(claude.models.filter((m) => m.fast).map((m) => m.id)).toEqual(["opus", "opus[1m]", "claude-fable-5-2"]);
+  const catalog = JSON.stringify({ data: [
+    { model: "only-ultra", serviceTiers: [{ id: "ultrafast" }], isDefault: true },
+    { model: "unknown", serviceTiers: [{ id: "other" }] },
+    { model: "hidden", hidden: true, serviceTiers: [{ id: "fast" }] },
+  ] });
+  const dflt = parseDefaults("codex", "", catalog);
+  expect(dflt.model).toBe("only-ultra");
+  const codex = menuFor("codex", dflt);
+  expect(codex.models).toHaveLength(2);
   expect(codex.models[0]).toMatchObject({ fast: false, ultrafast: true });
   expect(codex.models[1]).toMatchObject({ fast: false });
-  const stale = 'models\t{"models":[{"slug":"live","service_tiers":[]}]}';
-  const fresh = '{"models":[{"slug":"live","service_tiers":[{"id":"fast"},{"id":"ultrafast"}]}]}';
-  expect(parseDefaults("codex", stale, fresh).models[0]).toMatchObject({ fast: true, ultrafast: true });
+  expect(parseDefaults("codex", 'models\t{"models":[{"slug":"old"}]}').models).toBeNull();
 });
 
 // A terminal's own argv as herdr-task runs a worker: nice, sh -c, env and the person's `bash -ic` before the agent.
@@ -158,11 +153,11 @@ test("an Assistant that was itself resumed resumes the session it ran last, once
 
 // SHEP-258: Codex's Ultrafast tier (service_tier="ultrafast"), beside Fast, on the models whose catalog offers it.
 test("Ultrafast shows where Codex's catalog offers it, and starts Codex on that tier", () => {
-  const cache = JSON.stringify({ models: [
-    { slug: "gpt-6.2-sol", display_name: "GPT-6.2-Sol", default_reasoning_level: "low", supported_reasoning_levels: ["low", "medium", "high", "xhigh", "max", "ultra"].map((effort) => ({ effort })),
-      service_tiers: [{ id: "priority", name: "Fast" }, { id: "ultrafast", name: "Ultrafast" }] },
-    { slug: "gpt-6.2-astra", display_name: "GPT-6.2-Astra", default_reasoning_level: "low", supported_reasoning_levels: [{ effort: "low" }], service_tiers: [{ id: "priority", name: "Fast" }] }] });
-  const dflt = parseDefaults("codex", `model\tgpt-6.2-sol\nservice_tier\tultrafast\nmodels\t${cache}\n`);
+  const catalog = JSON.stringify({ data: [
+    { model: "gpt-6.2-sol", displayName: "GPT-6.2-Sol", defaultReasoningEffort: "low", supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"].map((reasoningEffort) => ({ reasoningEffort })),
+      serviceTiers: [{ id: "priority", name: "Fast" }, { id: "ultrafast", name: "Ultrafast" }] },
+    { model: "gpt-6.2-astra", displayName: "GPT-6.2-Astra", defaultReasoningEffort: "low", supportedReasoningEfforts: [{ reasoningEffort: "low" }], serviceTiers: [{ id: "priority", name: "Fast" }] }] });
+  const dflt = parseDefaults("codex", `model\tgpt-6.2-sol\nservice_tier\tultrafast\n`, catalog);
   expect(dflt.fast).toBe("ultrafast");
   const menu = menuFor("codex", dflt);
   expect(menu.models.map((m) => [m.id, m.name, m.fast, !!m.ultrafast])).toEqual([["gpt-6.2-sol", "GPT-6.2-Sol", true, true], ["gpt-6.2-astra", "GPT-6.2-Astra", true, false]]);

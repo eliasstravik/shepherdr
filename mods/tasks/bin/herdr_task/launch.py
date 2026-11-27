@@ -4,7 +4,6 @@ The launch allow-list ("an agent's own herdr-task commands never ask": OWN, own_
 cmd_allow) is the one place an agent's launch is given commands it may run without asking; allow
 another command (herdr-secret's, say) there."""
 
-import hashlib
 import json
 import os
 import re
@@ -16,7 +15,7 @@ import sys
 import time
 
 from .base import ASK_HOME, ENTRY, Fail, git, hc_json, HOME, now, run, SHARE, WORKTREES
-from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, CLAUDE_PROFILE, REVIEW_TOOLS, codex_too_old, codex_update_words, trust_roots, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for, TEMPLATES
+from .settings import agent_key, ASSISTANT_TEMPLATES, cli_env, CLAUDE_PROFILE, REVIEW_TOOLS, codex_too_old, codex_update_words, bare, BRANCH_PATTERN, branch_pattern_problem, keep_review, notes, notes_part, review_limits, settings_block, settings_for, TEMPLATES
 from .templates import instructions
 from .agents import detail, LINE_MAX, live_agents, ROW_MAX, SUMMARY_MAX
 from .github import finish, remote_of
@@ -139,64 +138,8 @@ def own_argv(argv, folder=None):
         # #1464: Approve for me. Codex runs this hook before its own review: a card here would wait on the person
         # for what the review answers by itself, so the hook then only allows the worker's own commands.
         hook = ask_command(path, sandboxed=True, auto_review=any(a in ("--approve-for-me", "--not-so-yolo") for a in out))
-        # Codex runs a new hook only once trusted. This one hook's trust comes with it, for this
-        # launch only: Codex's own key and hash for a -c hook (codex-rs/hooks discovery.rs
-        # hook_hash, config fingerprint.rs version_for_toml), so no other hook is trusted by it.
-        ident = {"event_name": "permission_request", "hooks": [{"async": False, "command": hook, "timeout": ASK_TIMEOUT, "type": "command"}]}
-        state = {"/<session-flags>/config.toml:permission_request:0:0": codex_hook_hash(ident)}
-        # #977: Shepherdr's own hooks in ~/.codex/hooks.json (the chat's question card) trusted for
-        # this launch too, else a new or updated one stops the worker at "Hooks need review" with
-        # nobody at its keys. Only ours, exactly as written there: the person's own stay theirs.
-        state.update(own_codex_hooks())
-        # Its folder trusted for this run (#866: "Trust this folder?" would stop it before the brief, nobody at the
-        # keys), its repository's root too: Codex asks for that one in a worktree. Skipped when argv says already.
-        roots = [] if any(str(a).startswith("projects") for a in out) else trust_roots(folder)
-        trust = ["-c", "projects={" + ",".join(f'{json.dumps(r)}={{trust_level="trusted"}}' for r in roots) + "}"] if roots else []
-        return out[:1] + ["-c", f"hooks.PermissionRequest=[{{hooks=[{{type=\"command\",command={json.dumps(hook)},timeout={ASK_TIMEOUT}}}]}}]",
-                          "-c", "hooks.state={" + ",".join(f'{json.dumps(k)}={{trusted_hash="sha256:{v}"}}' for k, v in state.items()) + "}",
-                          *trust] + out[1:]
-    return out
-
-
-def codex_hook_hash(ident):
-    """Codex's trusted_hash for one hook group (codex-rs/hooks discovery.rs hook_hash)."""
-    return hashlib.sha256(json.dumps(ident, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-
-
-# Shepherdr's own chat hooks as the installer writes them in Codex's hooks.json (bin/shepherdr).
-OWN_HOOK = re.compile(r"sh '[^'\n]*/(?:hooks|mods/chat)/(session-note|ask-hook)\.sh'")
-# Codex's event names in hooks.state keys, from hooks.json's.
-CODEX_EVENTS = {"SessionStart": "session_start", "PermissionRequest": "permission_request"}
-
-
-def own_codex_hooks():
-    """{hooks.state key: hash} for Shepherdr's own hooks in Codex's hooks.json (the installer's
-    session-note.sh and ask-hook.sh), as Codex keys and hashes them; {} when there are none or
-    one has a shape whose hash we can't be sure of (it then asks, as before)."""
-    path = os.path.join(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"), "hooks.json")
-    try:
-        with open(path) as f:
-            hooks = json.load(f).get("hooks") or {}
-    except (OSError, ValueError, AttributeError):
-        return {}
-    out = {}
-    for event, name in CODEX_EVENTS.items():
-        groups = hooks.get(event) if isinstance(hooks, dict) else None
-        for g, group in enumerate(groups if isinstance(groups, list) else []):
-            entries = group.get("hooks") if isinstance(group, dict) else None
-            if not isinstance(entries, list) or len(entries) != 1 or set(group) - {"hooks", "matcher"}:
-                continue
-            h = entries[0]
-            cmd = h.get("command") if isinstance(h, dict) else None
-            # exactly the installer's `sh '<app>/mods/chat/<hook>.sh'` (#1108): never a longer command that ends so
-            if (not isinstance(cmd, str) or not OWN_HOOK.fullmatch(cmd)
-                    or set(h) - {"type", "command", "timeout", "async"} or not isinstance(h.get("timeout"), int)):
-                continue
-            ident = {"event_name": name, "hooks": [{"async": bool(h.get("async", False)), "command": cmd,
-                                                    "timeout": h["timeout"], "type": h.get("type", "command")}]}
-            if group.get("matcher") is not None:
-                ident["matcher"] = group["matcher"]
-            out[f"{path}:{name}:{g}:0"] = codex_hook_hash(ident)
+        # Codex gives the person the choice of trusting the folder and this hook.
+        return out[:1] + ["-c", f"hooks.PermissionRequest=[{{hooks=[{{type=\"command\",command={json.dumps(hook)},timeout={ASK_TIMEOUT}}}]}}]"] + out[1:]
     return out
 
 

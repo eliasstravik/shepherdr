@@ -13,7 +13,7 @@ import time
 from . import sandbox, stack
 from .base import Fail, git, guard, now, own_core_check, run, STORE, stop_note, VERSION
 from .settings import (
-    agent_argv, agent_key, bare, merge_policy, review_limits, set_opts, set_task, settings_block, settings_for, space_base,
+    agent_argv, agent_key, bare, check_automatic_agent, merge_policy, review_limits, set_opts, set_task, settings_block, settings_for, space_base,
     task_settings, worker_argv, worktrees_on, setting_sources, SET_BY,
 )
 from .agents import (
@@ -179,6 +179,8 @@ def scheduled_at(args):
 def schedule(s, t, at, plan=None):
     if t["state"] not in ("todo", "scheduled", "queued"):
         raise Fail(f"{s.name(t)} has already started ({STATUSES.get(t['state'], t['state'])}); only a task not started yet can be scheduled.")
+    q = plan or t.get("queue") or {}
+    check_automatic_agent(q.get("argv") or worker_argv(s, t, q.get("space") or t.get("space")))
     t["state"], t["scheduled_for"] = "scheduled", at
     if plan is not None:
         t["queue"] = plan

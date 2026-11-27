@@ -24,6 +24,7 @@ copies.
 
 ## Rules
 
+- Agent account integrations and provider rules are tracked in [Agent accounts and provider rules](agents-and-terms.md).
 - A new feature is a plugin: [Plugins](plugins.md).
 - Behaviour is words, not code. A setting reaches an agent as a line in its brief or its instructions. Shepherdr's
   code never judges work.

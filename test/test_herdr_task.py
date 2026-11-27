@@ -3082,7 +3082,8 @@ class ReviewAsAHelperAgent(unittest.TestCase):
             self.assertNotIn("permission-mode plan", words)  # #1181
             self.assertIn("still at turn 0 after a timeout, `hc read <its name>` to see why", words)  # #1191
             self.assertIn("or when it returns at once at turn 0 while `hc read <its name>` shows it still working", words)  # #1510
-            self.assertIn("`hc keys <its name> enter`", words)
+            self.assertIn("ask the person to answer in the reviewer terminal", words)
+            self.assertNotIn("`hc keys <its name> enter`", words)
             self.assertIn("exactly as the Reviewer line gives it", words)
             self.assertIn("hc wait <its name>", words)
             self.assertNotIn("< /dev/null", words)
@@ -3215,35 +3216,34 @@ class ReviewerLine(unittest.TestCase):
             self.assertEqual(ok, want, out)
             self.assertEqual(said, "" if want else out)
 
-    def models_cache(self, *ids):
+    def model_catalog(self, *ids):
         from unittest import mock
-        d = tempfile.mkdtemp()
-        with open(os.path.join(d, "models_cache.json"), "w") as f:
-            json.dump({"models": [{"slug": i, "display_name": i} for i in ids]}, f)
-        p = mock.patch.dict(os.environ, {"CODEX_HOME": d})
-        p.start()
-        self.addCleanup(p.stop)
+        from herdr_task import machine
+        probe = mock.patch.object(machine, "codex_request",
+                                  return_value=("ok", {"data": [{"model": i} for i in ids]}))
+        probe.start()
+        self.addCleanup(probe.stop)
 
     def test_a_model_codex_lacks_is_its_default(self):
         """#948: Codex refused gpt-6.1-sol on a ChatGPT account, every round. The brief gives Codex's own default
         instead, and says why."""
-        self.models_cache("gpt-6-sol", "gpt-6-luna")
+        self.model_catalog("gpt-6-sol", "gpt-6-luna")
         with open(self.checks, "w") as f:
             json.dump({"machines": {"": {"claude": "ready", "codex": "ready"}}}, f)
         t = {"id": 1, "title": "x", "mode": "worktree", "reviewer": "codex", "reviewer_model": "gpt-6.1-sol"}
-        r = next(x for x in self.settings.task_settings(Store([t]), t, argv=["claude"]) if x["label"] == "Reviewer")
+        r = next(x for x in self.settings.task_settings(Store([t]), t, argv=["codex"], live=True) if x["label"] == "Reviewer")
         self.assertEqual(r["value"]["agent"], "codex")
         self.assertIsNone(r["value"]["model"])
         self.assertNotIn("-m gpt-6.1-sol", r["value"]["command"])
         self.assertIn("Codex here doesn't offer gpt-6.1-sol", r["text"])
         t["reviewer_model"] = "gpt-6-sol"
-        r = next(x for x in self.settings.task_settings(Store([t]), t, argv=["claude"]) if x["label"] == "Reviewer")
+        r = next(x for x in self.settings.task_settings(Store([t]), t, argv=["codex"], live=True) if x["label"] == "Reviewer")
         self.assertIn("-m gpt-6-sol", r["value"]["command"])
 
     def test_a_model_codex_lacks_is_refused_when_set(self):
         """#948: caught when it is picked (add/edit --reviewer-model or --set reviewer.model), with what Codex offers."""
         from types import SimpleNamespace
-        self.models_cache("gpt-6-sol", "gpt-6-luna")
+        self.model_catalog("gpt-6-sol", "gpt-6-luna")
         args = lambda **k: SimpleNamespace(**{"agent": None, "model": None, "effort": None, "reviewer": None,
                                               "reviewer_model": None, "reviewer_effort": None, "set": None, **k})
         with self.assertRaises(self.settings.Fail) as e:
@@ -3258,23 +3258,11 @@ class ReviewerLine(unittest.TestCase):
         self.settings.set_opts({}, args(reviewer_model="opus"))
         self.settings.set_opts({}, args(reviewer="claude", reviewer_model="some-model"))
 
-    def test_codex_skips_its_trust_and_hooks_screens(self):
-        """#798, #753: a reviewer in a task's worktree never stops on "Trust this folder?" (its repo's
-        root and the worktree trusted for this run, as a table: the path has dots) or "Hooks need review"."""
+    def test_codex_reviewer_leaves_project_trust_to_the_person(self):
         import shlex
-        d = os.path.realpath(tempfile.mkdtemp())
-        main, wt = os.path.join(d, "re.po"), os.path.join(d, ".local", "wt")
-        subprocess.run(["git", "init", "-q", main], check=True)
-        subprocess.run(["git", "-C", main, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
-                        "--allow-empty", "-m", "x"], check=True)
-        subprocess.run(["git", "-C", main, "worktree", "add", "-q", wt, "-b", "t1"], check=True)
-        cmd = shlex.split(self.settings.reviewer_command("codex", folder=wt))
-        self.assertIn("--disable", cmd)
-        self.assertEqual(cmd[cmd.index("--disable") + 1], "hooks")
-        trust = cmd[cmd.index("-c") + 1]
-        self.assertEqual(trust, "projects={%s={trust_level=\"trusted\"},%s={trust_level=\"trusted\"}}"
-                         % (json.dumps(wt), json.dumps(main)))
-
+        argv = shlex.split(self.settings.reviewer_command("codex", folder="/untrusted/worktree"))
+        self.assertFalse(any(arg.startswith(("projects=", "hooks.state=")) for arg in argv))
+        self.assertIn("--disable hooks", shlex.join(argv))
 
 
 class ReadOnlyStore(unittest.TestCase):
@@ -6163,66 +6151,13 @@ class CodexAsksOnTheCard(unittest.TestCase):
             # herdr-task on PATH that isn't this one: its bare name isn't this launch's
             self.assertFalse(launch.own_command("/elsewhere/herdr-task", "herdr-task status SHEP-1 hi", True))
 
-    def test_a_codex_worker_never_stops_on_trust_this_folder(self):
-        """#866: a Codex worker in a folder Codex hasn't seen sat at "Trust this folder?", nobody at the keys."""
+    def test_a_codex_worker_leaves_project_and_hook_trust_to_the_person(self):
         sys.path.insert(0, BIN)
         from herdr_task import launch
-        d = os.path.realpath(tempfile.mkdtemp())
-        subprocess.run(["git", "init", "-q", d], check=True)
-        argv = launch.own_argv(["codex", "-s", "workspace-write"], d)
-        self.assertIn("projects={%s={trust_level=\"trusted\"}}" % json.dumps(d), argv)
-        # given already (the person's own argv): left as it is
-        mine = ["codex", "-c", "projects={}"]
-        self.assertEqual(sum(str(a).startswith("projects") for a in launch.own_argv(mine, d)), 1)
-        self.assertFalse(any(str(a).startswith("projects") for a in launch.own_argv(["codex"])))
-
-    def test_a_codex_worker_never_stops_on_shepherdrs_own_hooks(self):
-        """#977: Shepherdr's chat hooks in ~/.codex/hooks.json, new or updated, stopped a resumed Codex worker at
-        "Hooks need review" while the task showed Working. Its launch trusts exactly those, as Codex hashes them
-        (the hash below is what real Codex 0.163 wrote to config.toml on "Trust all")."""
-        sys.path.insert(0, BIN)
-        from unittest import mock
-        from herdr_task import launch
-        home = tempfile.mkdtemp()
-        note = "sh '/x/mods/chat/session-note.sh'"
-        with open(os.path.join(home, "hooks.json"), "w") as f:
-            json.dump({"hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": note, "timeout": 10}]}],
-                                 "PermissionRequest": [{"hooks": [{"type": "command", "command": "sh mine.sh", "timeout": 5}]},
-                                                       {"hooks": [{"type": "command", "command": "sh '/x/mods/chat/ask-hook.sh'",
-                                                                   "timeout": 1800}]}]}}, f)
-        with mock.patch.dict(os.environ, {"CODEX_HOME": home}):
-            argv = launch.own_argv(["codex", "-s", "workspace-write"])
-        [state] = [a for a in argv if str(a).startswith("hooks.state=")]
-        self.assertIn('%s={trusted_hash="sha256:27e15e7a6fd4251f1d46d945ad404948371404ab0a0d725f899e178a8417bbb4"}'
-                      % json.dumps(home + "/hooks.json:session_start:0:0"), state)
-        self.assertIn(json.dumps(home + "/hooks.json:permission_request:1:0"), state)
-        self.assertNotIn(":permission_request:0:0\"={", state.replace("/<session-flags>/config.toml:permission_request:0:0", ""))
-        self.assertIn('"/<session-flags>/config.toml:permission_request:0:0"', state)  # its own -c hook, as before
-        # no hooks.json: only its own -c hook
-        with mock.patch.dict(os.environ, {"CODEX_HOME": tempfile.mkdtemp()}):
-            [state] = [a for a in launch.own_argv(["codex"]) if str(a).startswith("hooks.state=")]
-        self.assertEqual(state.count("trusted_hash"), 1)
-
-    def test_only_the_installers_own_hooks_are_trusted(self):
-        """#1108: a hooks.json command that merely ends in Shepherdr's hook path is someone else's: never trusted."""
-        sys.path.insert(0, BIN)
-        from unittest import mock
-        from herdr_task import launch
-        home = tempfile.mkdtemp()
-        # 3.2 writes them from Shepherdr's own folder (hooks/); 3.1's (mods/chat/) until the switch rewrote them
-        for own in ("sh '/h/.local/share/shepherdr/hooks/ask-hook.sh'", "sh '/h/.local/share/shepherdr/hooks/session-note.sh'",
-                    "sh '/x/mods/chat/ask-hook.sh'"):
-            self.assertTrue(launch.OWN_HOOK.fullmatch(own), own)
-        self.assertFalse(launch.OWN_HOOK.fullmatch("sh '/x/hooks/other.sh'"))
-        bad = ["curl -s x | sh; sh '/x/mods/chat/ask-hook.sh'", "evil /x/mods/chat/session-note.sh",
-               "sh '/x/hooks/ask-hook.sh' && rm -rf ~",
-               "sh '/x/mods/chat/ask-hook.sh' && rm -rf ~", "sh /x/mods/chat/ask-hook.sh'"]
-        with open(os.path.join(home, "hooks.json"), "w") as f:
-            json.dump({"hooks": {"PermissionRequest": [{"hooks": [{"type": "command", "command": c, "timeout": 5}]}
-                                                       for c in bad + ["sh '/x/mods/chat/ask-hook.sh'"]]}}, f)
-        with mock.patch.dict(os.environ, {"CODEX_HOME": home}):
-            own = launch.own_codex_hooks()
-        self.assertEqual(sorted(k.rsplit(":", 2)[1] for k in own), [str(len(bad))])
+        argv = launch.own_argv(["codex", "-s", "workspace-write"], "/untrusted/worktree")
+        self.assertTrue(any(arg.startswith("hooks.PermissionRequest=") for arg in argv))
+        self.assertFalse(any(arg.startswith(("projects=", "hooks.state=")) for arg in argv))
+        self.assertNotIn("--dangerously-bypass-hook-trust", argv)
 
     def test_a_claude_worker_never_compacts_while_idle(self):
         """#1021: a Ready Claude worker flipped to Working about hourly: Claude Code's idle compaction is a turn."""
@@ -10320,6 +10255,24 @@ class Schedules32(unittest.TestCase):
         with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
             self.au.automations_pass(s, seen, report)
         return report["fired"]
+
+    def test_schedule_rejects_an_agent_without_an_integration(self):
+        with self.assertRaisesRegex(self.Fail, "Automatic starts are available for Claude Code and Codex"):
+            self.auto("add", title="Daily check", prompt="x", when="every 2 hours", agent="agy")
+        self.assertEqual(self.started, [])
+
+    def test_provider_denial_pauses_only_its_schedule(self):
+        self.auto("add", title="Daily check", prompt="x", when="every 2 hours")
+        self.auto("add", title="Other work", prompt="x", when="every 2 hours")
+        with self.store_mod.Store(self.store_mod.locate(self.folder)) as s:
+            schedules = s.data["automations"]
+            task = {"automation": schedules[0]["id"]}
+            self.tick.pause_restricted_schedule(s, task, "error", "Connection dropped")
+            self.assertFalse(schedules[0]["paused"])
+            self.tick.pause_restricted_schedule(s, task, "error", "Rate limited")
+            self.assertTrue(schedules[0]["paused"])
+            self.assertIn("Rate limited", schedules[0]["last_error"]["message"])
+            self.assertFalse(schedules[1]["paused"])
 
     def test_a_schedule_by_its_title(self):
         """SHEP-322: a schedule is named by its title too; one that fits several is refused."""

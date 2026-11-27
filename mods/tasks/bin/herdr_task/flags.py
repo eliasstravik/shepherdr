@@ -63,7 +63,7 @@ CLAUDE_REFUSED = {
 
 # Codex: `codex --help` and `codex resume --help` (0.163.0; resume takes the same flags).
 CODEX = {"--config": ONE, "--enable": ONE, "--disable": ONE, "--strict-config": N, "--image": MANY, "--oss": N,
-         "--local-provider": ONE, "--profile": ONE, "--dangerously-bypass-hook-trust": N, "--add-dir": ONE, "--search": N,
+         "--local-provider": ONE, "--profile": ONE, "--add-dir": ONE, "--search": N,
          "--no-alt-screen": N}
 CODEX_SHORT = {"-c": "--config", "-i": "--image", "-p": "--profile", "-m": "--model", "-s": "--sandbox",
                "-a": "--ask-for-approval", "-C": "--cd", "-h": "--help", "-V": "--version"}
@@ -72,6 +72,8 @@ CODEX_REFUSED = {
     "--model": f"{_SET} model: use --model (or --set model=...)", "--sandbox": _PERM, "--ask-for-approval": _PERM,
     "--dangerously-bypass-approvals-and-sandbox": _PERM + ": pick Full access there", "--approve-for-me": _PERM + ": pick Approve for me there",
     "--not-so-yolo": _PERM + ": pick Approve for me there",
+    "--dangerously-bypass-hook-trust": "review hooks in Codex with /hooks",
+    "--trust": "review project trust in Codex",
     "--full-auto": _PERM, "--no-daemon": "Shepherdr passes it already",
     "--remote": "a task's agent runs on its own app server (--no-daemon)", "--remote-auth-token-env": "a task's agent runs on its own app server (--no-daemon)",
     "--cd": "Shepherdr starts the agent in the task's folder", "--worktree": "Shepherdr gives each task its own worktree already",
@@ -82,7 +84,7 @@ CODEX_REFUSED = {
 # -c keys Shepherdr sets itself.
 CODEX_KEYS = {"model": f"{_SET} model: use --model", "model_reasoning_effort": f"{_SET} effort: use --effort",
               "service_tier": "Shepherdr sets the speed from Settings › Agents (Task agent)", "sandbox_mode": _PERM,
-              "approval_policy": _PERM, "approvals_reviewer": _PERM + ": pick Approve for me there", "projects": "Shepherdr trusts the task's folder itself",
+              "approval_policy": _PERM, "approvals_reviewer": _PERM + ": pick Approve for me there", "projects": "review project trust in Codex",
               "hooks": "Shepherdr sets the chat's question card's hook itself"}
 
 TABLES = {"claude": (CLAUDE, CLAUDE_SHORT, CLAUDE_REFUSED), "codex": (CODEX, CODEX_SHORT, CODEX_REFUSED)}
