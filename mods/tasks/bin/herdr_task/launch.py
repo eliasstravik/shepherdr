@@ -875,7 +875,9 @@ def folder_for(s, task):
         ok, _, err = git(main, "fetch", "--quiet", "--no-tags", remote, f"+refs/heads/{taken}:refs/remotes/{remote}/{taken}")
         if not ok:
             raise Fail(f"Couldn't fetch {taken}, pull request #{task['pr']['number']}'s branch: {err}")
-        add = ["worktree", "add", "--no-track", "-b", branch, path, f"refs/remotes/{remote}/{taken}"]
+        ref = f"refs/remotes/{remote}/{taken}"
+        task["pr"]["lease"] = git(main, "rev-parse", ref)[1]
+        add = ["worktree", "add", "--no-track", "-b", branch, path, ref]
     else:
         # From the base's latest (fetched first); a detached folder (base is a commit) from HEAD.
         branchy = git(main, "show-ref", "--verify", "--quiet", f"refs/heads/{base}")[0]

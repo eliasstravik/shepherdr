@@ -96,20 +96,23 @@ def remote_of(main):
 
 
 def pr_push(s, task, repo):
-    """Pushes the task's branch for its pull request, with the task list's lock let go meanwhile
-    (#1007: a pre-push hook can run for many minutes, and every other herdr-task command here waited
-    on it). Only what its remote lacks (#795); a pull request it continues gets its new commits on
-    its own branch, never forced (#828)."""
+    """Push the task's branch, or the branch of a PR it explicitly took, under a branch-specific lease."""
     wt, br = task["worktree"], task["branch"]
     remote = remote_of(s.loc["folder"])
-    to = (task.get("pr") or {}).get("branch") or br
+    pr = task.get("pr") or {}
+    to = pr.get("branch") or br
+    base = task.get("base") or "main"
+    if to == base or pr.get("from_base") or (to != br and not pr.get("taken")):
+        raise Fail(f"Can't push this task to {to}. Use the task's own branch or explicitly take its pull request.")
+    ref = f"refs/heads/{to}"
     has, tip, _ = git(wt, "rev-parse", "--verify", "--quiet", f"refs/heads/{br}")
-    seen, there, _ = git(wt, "ls-remote", remote, f"refs/heads/{to}")
+    seen, there, _ = git(wt, "ls-remote", remote, ref)
     if has and tip and seen and there.split()[:1] == [tip]:
+        if to != br:
+            pr["lease"] = tip
         return
     # #1215: GitHub locks a branch while its pull request sits in the merge queue (its push is refused):
     # out of the queue first; ready puts it back once its checks pass (finalize()).
-    pr = task.get("pr") or {}
     q = queue_entry(task) if pr.get("number") and pr.get("repo") else None
     if q and q["in"]:
         ok, err = unqueue(q)
@@ -125,12 +128,17 @@ def pr_push(s, task, repo):
         if done:
             raise Fail(f"Pull request #{done['number']} for {br} is already merged (GitHub deleted its branch), and {br} has "
                        f"commits since. Put them on a new branch (a new task) rather than a second pull request.")
-    lease = f"--force-with-lease=refs/heads/{br}:" if gone else "--force-with-lease"
+    tracking = git(wt, "rev-parse", "--verify", "--quiet", f"refs/remotes/{remote}/{to}")[1]
+    expected = (pr.get("lease") or tracking) if to != br else ("" if gone else tracking)
+    # Older taken PRs may have no saved tip and no tracking ref. Git can still push a fast-forward.
+    lease = [f"--force-with-lease={ref}:{expected}"] if to == br or expected else []
     with released(s):
-        ok, out, err = git(wt, "push", lease, "-u", remote, br) if to == br else \
-            git(wt, "push", remote, f"{br}:refs/heads/{to}")
+        ok, out, err = git(wt, "push", *lease, *(["-u"] if to == br else []), remote, f"refs/heads/{br}:{ref}")
     if not ok:
         raise Fail(f"Couldn't push {br}" + (f" to {to}" if to != br else "") + f": {push_error(out, err)}")
+    current = task.get("pr") or {}
+    if to != br and current.get("branch") == to and current.get("number") == pr.get("number"):
+        current["lease"] = tip
 
 
 def pr_open(s, task, repo, summary=None):
@@ -138,12 +146,6 @@ def pr_open(s, task, repo, summary=None):
     by hand or by its agent for the branch: SHEP-13's "already exists"). Its description follows
     each ready (#1004) when Herdr wrote it."""
     br = task["branch"]
-    # Continuing a pull request already open on another branch, its work pushed there (#828): that
-    # one is the task's, never a second with the same commits.
-    if not (task.get("pr") or {}).get("number") and pr_at_tip(task, repo):
-        if summary:
-            pr_note(task, repo, summary)
-        return task["pr"]
     pr_push(s, task, repo)
     pr = task.get("pr") or {}
     if pr.get("number"):
@@ -327,25 +329,6 @@ def pr_for_branch(task, repo):
                      and p.get("baseRefName") == (task.get("base") or "main")), None) if ok and out else None
     except (ValueError, TypeError, AttributeError):
         return None
-
-
-def pr_at_tip(task, repo):
-    """An open pull request from this repo, into the task's base, on another branch whose head is
-    exactly the task branch's tip: recorded on the task, else None (#828)."""
-    ok, tip, _ = git(task["worktree"], "rev-parse", "--verify", "--quiet", f"refs/heads/{task['branch']}")
-    if not (ok and tip):
-        return None
-    ok, out, _ = gh("pr", "list", "--repo", repo, "--state", "open", "--search", tip,
-                    "--json", "number,url,isCrossRepository,baseRefName,headRefName,headRefOid")
-    try:
-        found = next((p for p in json.loads(out) if not p.get("isCrossRepository") and p.get("headRefOid") == tip
-                      and p.get("headRefName") and p.get("headRefName") != task["branch"]
-                      and p.get("baseRefName") == (task.get("base") or "main")), None) if ok and out else None
-    except (ValueError, TypeError, AttributeError):
-        found = None
-    if found:
-        task["pr"] = {"number": found["number"], "url": found["url"], "repo": repo, "branch": found["headRefName"]}
-    return task.get("pr") if found else None
 
 
 def pr_merged(task, repo, any_base=False):
@@ -693,6 +676,24 @@ def drop_branch(s, task):
         # --no-verify: a pre-push hook (a typecheck) checks what is pushed; a deletion has nothing to
         # check, and the hook would hold the task list's lock for minutes (#1007).
         git(main, "push", "--quiet", "--no-verify", remote_of(main), "--delete", task["branch"])
+
+
+def merge_method(repo):
+    """The first enabled merge method in the repository's settings."""
+    ok, out, err = gh("api", f"repos/{repo}")
+    if not ok:
+        raise Fail(f"Couldn't read merge methods for {repo}: {err or 'no answer'}")
+    try:
+        settings = json.loads(out)
+    except ValueError:
+        settings = None
+    if not isinstance(settings, dict):
+        raise Fail(f"Couldn't read merge methods for {repo}: unreadable answer")
+    for key, flag in (("allow_squash_merge", "--squash"), ("allow_merge_commit", "--merge"),
+                      ("allow_rebase_merge", "--rebase")):
+        if settings.get(key) is True:
+            return flag
+    raise Fail(f"{repo} doesn't allow squash, merge commits or rebase. Enable a merge method in GitHub's repository settings.")
 
 
 def queue_merge(task, head):

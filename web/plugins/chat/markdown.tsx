@@ -10,8 +10,7 @@ import { IC } from '@client/icons.ts'
 import { go, notice, openTask, useSnap } from '@client/kernel.ts'
 import type { Message, Snapshot } from '@shared/types.ts'
 import { spacesOf, taskRef } from '@shared/view.ts'
-import { parseTask } from '@core/mentions.js'
-import { withMentions } from './mentions.tsx'
+import { taskFor, withMentions } from './mentions.tsx'
 
 marked.setOptions({ gfm: true, breaks: false })
 // #1549: an agent's raw HTML shows as typed: a placeholder like <code> or <id> stays words and styles nothing after it.
@@ -96,11 +95,8 @@ const escMd = (t: string) => t.replace(/[\\\[\]]/g, (c) => `\\${c}`)
 
 /** Task names and #spaces as links: a picked `[#shop](space:…)` or `[@Fix login](task:SHOP-2…)`, a task's key the agent wrote
  *  (shown as the task's title, never its id) and a #space the list has. Code is left alone. */
-export function linked(text: string, snap: Snapshot | null, mentions: Message['mentions'] = []): string {
+export function linked(text: string, snap: Snapshot | null, mentions: Message['mentions'] = [], place?: string): string {
   if (!snap) return text
-  const tasks = new Map<string, { id: string; title: string }>()
-  for (const t of snap.tasks) tasks.set(taskRef(t), { id: t.id, title: t.name })
-  for (const m of mentions ?? []) tasks.set(m.ref, { id: m.task, title: m.title })
   const spaces = new Map(spacesOf(snap).map((p) => [p.name.toLowerCase(), p.id]))
   // outside code spans and blocks only
   return text
@@ -111,11 +107,13 @@ export function linked(text: string, snap: Snapshot | null, mentions: Message['m
         .replace(/\[#([^\]\n]+)\]\(space:([^)\s]+)\)/g, (_, name: string, target: string) => `[#${escMd(name)}](#space=${encodeURIComponent(target)})`)
         .replace(/\[@([^\]\n]+)\]\(task:([^)\s]+)\)/g, (_, words: string, target: string) => {
           // SHEP-322: the task its target names (its key there); its words are its title (an older one's, its key)
-          const t = tasks.get(parseTask(target).ref) ?? tasks.get(words)
-          return `[${escMd(t?.title ?? (/^[A-Z][A-Z0-9]*-\d+$/.test(words) ? 'a task' : words))}](#task=${encodeURIComponent(t?.id ?? target)})`
+          const task = taskFor(snap, target, place)
+          return `[${escMd(task?.name ?? (/^[A-Z][A-Z0-9]*-\d+$/.test(words) ? 'a task' : words))}](#task=${encodeURIComponent(task?.id ?? target)})`
         })
         .replace(/(^|[^\w\[/=#-])([A-Z][A-Z0-9]*-\d+)\b(?!\]\()/g, (all, pre: string, ref: string) => {
-          const t = tasks.get(ref)
+          const task = taskFor(snap, ref, place, false)
+          const recorded = !task && !snap.tasks.some((t) => taskRef(t) === ref) ? mentions?.filter((m) => m.ref === ref) : []
+          const t = task ? { id: task.id, title: task.name } : recorded?.length === 1 ? { id: recorded[0].task, title: recorded[0].title } : null
           return t ? `${pre}[${escMd(t.title)}](#task=${encodeURIComponent(t.id)})` : all
         })
         .replace(/(^|[\s(])#([\w.-]+)\b(?!\]\()/g, (all, pre: string, name: string) => {
@@ -127,11 +125,11 @@ export function linked(text: string, snap: Snapshot | null, mentions: Message['m
 }
 
 /** an agent's words, formatted; `mentions`: the tasks the server found named in them */
-export function Markdown({ text, mentions, plain }: { text: string; mentions?: Message['mentions']; plain?: boolean }) {
+export function Markdown({ text, mentions, plain, place }: { text: string; mentions?: Message['mentions']; plain?: boolean; place?: string }) {
   const snap = useSnap()
   const html = useMemo(
     () =>
-      toHtml(plain ? text : linked(text, snap, mentions), (a, kind, target) => {
+      toHtml(plain ? text : linked(text, snap, mentions, place), (a, kind, target) => {
         a.removeAttribute('target')
         a.removeAttribute('rel')
         a.removeAttribute('href')
@@ -140,7 +138,7 @@ export function Markdown({ text, mentions, plain }: { text: string; mentions?: M
         a.setAttribute('tabindex', '0')
         a.setAttribute(kind === 'task' ? 'data-task' : 'data-place', target)
       }),
-    [text, snap?.tasks, snap?.places, mentions, plain],
+    [text, snap?.tasks, snap?.places, snap?.machines, mentions, plain, place],
   )
   const open = (e: MouseEvent) => {
     const el = (e.target as Element).closest('[data-task], [data-place]')
@@ -156,7 +154,7 @@ export function Markdown({ text, mentions, plain }: { text: string; mentions?: M
 
 /** your own words as you typed them, with their web addresses as links (one to this app opens in it) and each space
  *  or task you picked with # or @ as a link to it */
-export const withLinks = (text: string): ReactNode[] => withMentions(text, urls)
+export const withLinks = (text: string, place?: string): ReactNode[] => withMentions(text, urls, place)
 
 function urls(text: string, pre: string): ReactNode[] {
   return text.split(/(https?:\/\/[^\s<>"]+)/).flatMap((part, i): ReactNode[] => {

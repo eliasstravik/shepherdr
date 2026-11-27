@@ -2,12 +2,12 @@
 its agent made, and the evidence from Git, GitHub and that artifact, never the agent's own words
 (only its summary)."""
 
-import hashlib
 import json
 import os
 import re
 
-from .base import Fail, HOME, git, WHERE
+from .base import Fail, git, WHERE
+from .store import folder_store_path, read_list
 from .github import BAD, CANT_READ_CHECKS, PENDING, pr_view
 
 ARTIFACTS = WHERE.path("artifacts")
@@ -21,17 +21,8 @@ MARKDOWN = re.compile(r"\.(md|markdown)$", re.I)
 
 def artifacts_of(folder):
     """This folder's artifacts, newest first (herdr-artifact's list for it; the same slug rule)."""
-    rel = os.path.relpath(folder, HOME) if folder == HOME or folder.startswith(HOME + "/") else folder
-    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", "home" if rel == "." else rel.strip("/")).strip("-") or "root"
-    for name in (slug, f"{slug}-{hashlib.sha1(folder.encode()).hexdigest()[:6]}"):
-        try:
-            with open(os.path.join(ARTIFACTS, name + ".json")) as f:
-                d = json.load(f)
-        except (OSError, ValueError):
-            continue
-        if d.get("folder") in (None, folder):
-            return d.get("artifacts") or []
-    return []
+    d = read_list(folder_store_path(folder, ARTIFACTS)[1])
+    return (d.get("artifacts") or []) if isinstance(d, dict) and d.get("folder") in (None, folder) else []
 
 
 def artifact_anywhere(ref):

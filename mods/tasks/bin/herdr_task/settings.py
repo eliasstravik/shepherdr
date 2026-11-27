@@ -306,14 +306,34 @@ def worker_pick(s, task, space=None, agent=None):
     return pick
 
 
+def require_task_cli(key, role="Agent"):
+    if not isinstance(key, str) or key not in AGENTS:
+        setting = role.lower()
+        raise Fail(f"Unknown {role} {key!r}. Choose Claude Code or Codex in Settings › Tasks, "
+                   f"or set this task with herdr-task edit <task> --set {setting}=claude (or {setting}=codex).")
+
+
+def reviewer_pick(s, t, space=None):
+    rv = dict(settings_for(s, space)["reviewer"] or {})
+    if t.get("reviewer") and t["reviewer"] != rv.get("agent"):
+        rv = {"agent": t["reviewer"]}
+    if rv.get("agent"):
+        require_task_cli(rv["agent"], "Reviewer")
+    return rv
+
+
 def worker_argv(s, task, space=None, agent=None):
     """A task's agent when nobody gave an argv: worker_pick's."""
     pick = worker_pick(s, task, space, agent)
+    if pick.get("agent"):
+        require_task_cli(pick["agent"])
     if pick.get("argv") and not any(task.get(k) for k in ("model", "effort", "speed", "perm")):
-        return argv_for(pick)
+        argv = argv_for(pick)
+        require_task_cli(agent_key(argv))
+        return argv
     pick.pop("argv", None)
     pick.setdefault("agent", "claude")
-    return argv_for(pick) or agent_argv(pick["agent"])
+    return argv_for(pick)
 
 
 def argv_model(argv):
@@ -452,6 +472,9 @@ def set_task(t, key, value, agent=None):
         t[field] = SPEED_VALUES[low]
     else:
         # Agents, models and efforts are the task's own fields (worker_pick reads them).
+        if field in ("agent", "reviewer"):
+            require_task_cli(low, field.title())
+            v = low
         if field in ("effort", "reviewer_effort") and low not in EFFORTS:
             raise Fail(f"{field.replace('_', ' ')} is one of {', '.join(sorted(EFFORTS))} (or default).")
         sets.pop(field, None)
@@ -692,9 +715,7 @@ def task_settings(s, t, space=None, argv=None, live=False):
     argv = argv or (t["agents"][-1].get("argv") if t.get("agents") else None) or worker_argv(s, t, space)
     agent = agent_key(argv)
     if on:
-        rv = dict(cfg.get("reviewer") or {})
-        if t.get("reviewer") and t["reviewer"] != rv.get("agent"):
-            rv = {"agent": t["reviewer"]}
+        rv = reviewer_pick(s, t, space)
         rv_by = "task" if any(t.get(f) for f in ("reviewer", "reviewer_model", "reviewer_effort", "reviewer_speed")) else \
             by_layer(s, space, "reviewer", None, bool(cfg.get("reviewer")), False)
         for f in ("model", "effort"):
@@ -876,7 +897,8 @@ def agent_argv(key, argv_json=None):
             raise Fail("--argv must be a JSON list")
         argv = [str(x) for x in argv]
     else:
-        argv = list(AGENTS.get(key, [key]))
+        require_task_cli(key)
+        argv = list(AGENTS[key])
     # Codex runs its commands outside hc without --no-daemon.
     if agent_key(argv) == "codex" and "--no-daemon" not in argv:
         argv.append("--no-daemon")

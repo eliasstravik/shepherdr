@@ -2,12 +2,12 @@ import { expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { Snapshot, Task } from '@shared/types.ts'
-import { expandPicked, mentionItems, takeItem, typed, withMentions, type Got, type Item } from './mentions.tsx'
+import { expandPicked, mentionItems, takeItem, taskFor, typed, withMentions, type Got, type Item } from './mentions.tsx'
 
 // GitHub #1552: # and @ in the message box open the space and task picker again, and what is picked goes to the agent
 // as the links the renderer and the templates know.
 
-const task = (id: string, name: string, place: string, status: Task['status'] = 'work', more: Partial<Task> = {}) => ({ id, name, place, status, ...more }) as Task
+const task = (id: string, name: string, place: string, status: Task['status'] = 'work', more: Partial<Task> = {}) => ({ id, name, place, status, on: id.includes(':') ? id.split(':')[0] : 'vm-a', ...more }) as Task
 const snap = {
   host: 'vm-a',
   places: [
@@ -72,6 +72,17 @@ test('a task in this chat\'s own space leaves its folder out', () => {
   takeItem('x', '@fix', '', fix)
   expect(expandPicked('x', '@SHOP-1 ')).toBe('[@Fix login](task:SHOP-1) ')
   expect(fix.kind === 'task' && fix.pick).toEqual({ ref: 'SHOP-1', route: '', folder: '', title: 'Fix login' })
+})
+
+test('task links prefer the chat space and machine, and respect a picked route', () => {
+  const other = task('vm-b:SHOP-1', 'Fix checkout', 'vm-b/sp9')
+  const collision = { ...snap, tasks: [other, ...snap.tasks] }
+  expect(taskFor(collision, 'SHOP-1', 'sp1', false)?.name).toBe('Fix login')
+  expect(taskFor(collision, 'SHOP-1', 'sp2', false)?.name).toBe('Fix login')
+  expect(taskFor(collision, 'SHOP-1', 'vm-b/sp9', false)?.name).toBe('Fix checkout')
+  expect(taskFor(collision, 'vm-b/SHOP-1', 'sp1')?.name).toBe('Fix checkout')
+  expect(taskFor(collision, 'vm-b>elsewhere/SHOP-1', 'sp1')).toBeUndefined()
+  expect(taskFor(collision, 'SHOP-1', undefined, false)).toBeUndefined()
 })
 
 test('your own message shows a picked space and task as links, not their raw form', () => {

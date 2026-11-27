@@ -122,7 +122,7 @@ function QuietRow({ icon, label, meta = [], body, startOpen = false, kind }: { i
 }
 
 /** a recap of what happened while you were away: a quiet block of its own, its words in the chat's size, labelled */
-function RecapNote({ text, at }: { text: string; at?: number }) {
+function RecapNote({ text, at, place }: { text: string; at?: number; place: string }) {
   return (
     <section className="recap" aria-label="Recap">
       <div className="rh">
@@ -130,7 +130,7 @@ function RecapNote({ text, at }: { text: string; at?: number }) {
         <span>Recap</span>
         {at ? <span className="qm">{clock(at)}</span> : null}
       </div>
-      <Markdown text={text} />
+      <Markdown text={text} place={place} />
     </section>
   )
 }
@@ -398,7 +398,7 @@ function Bubble({ msg, chat, thread, gap, pending, failed, mark, onReply }: { ms
           >
             {msg.reply?.task ? <TaskQuote id={msg.reply.task} title={msg.reply.text} /> : msg.reply && <Quote q={msg.reply} />}
             <Folded text={msg.text ?? ''}>
-              {mine ? <div className="md" style={{ whiteSpace: 'pre-wrap' }}>{withLinks(msg.text ?? '')}</div> : <Markdown text={msg.text ?? ''} mentions={msg.mentions} />}
+              {mine ? <div className="md" style={{ whiteSpace: 'pre-wrap' }}>{withLinks(msg.text ?? '', thread.place)}</div> : <Markdown text={msg.text ?? ''} mentions={msg.mentions} place={thread.place} />}
             </Folded>
           </div>
           {registry.messageEdge.map((x, i) => <x.View key={i} msg={msg} chat={chat} />)}
@@ -824,7 +824,7 @@ function Messages({ thread }: { thread: Thread }) {
     }
     // a recap of what happened (the agent's own, or its answer to Recap), and a heads-up its CLI wrote: never bubbles
     else if (m.recap === 'heads') out.push(<QuietRow key={k} kind="heads" icon="info" label={m.text ?? ''} meta={m.at ? [{ word: clock(m.at) }] : []} />)
-    else if (m.recap) out.push(<RecapNote key={k} text={m.text ?? ''} at={m.at} />)
+    else if (m.recap) out.push(<RecapNote key={k} text={m.text ?? ''} at={m.at} place={thread.place} />)
     else if (m.error) out.push(<div key={k} className="ref c-red"><I n="warn" c="s16" /><span>{m.text}</span></div>)
     else if (m.file) out.push(<FileRow key={k} msg={m} chat={stub} gap={gap} />)
     // pictures the chat can't show (another machine's, or still in its CLI's queue), and an artifact on its way

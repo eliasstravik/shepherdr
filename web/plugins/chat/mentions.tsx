@@ -201,16 +201,24 @@ export function useMentions(chatKey: string, here: string, text: string, setText
 
 /* ---------- in your own message ---------- */
 
-/** a task a link names: by its key, the one in its folder first */
-function taskFor(snap: Snapshot | null, target: string): Task | undefined {
-  const m = M.parseTask(target)
-  const all = (snap?.tasks ?? []).filter((t) => taskRef(t) === m.ref)
-  return all.find((t) => m.folder && t.taskFolder === m.folder) ?? all[0]
+/** A bare key prefers the chat's space, then its machine. A picked link carries its own route. */
+export function taskFor(snap: Snapshot | null, target: string, place?: string, picked = true): Task | undefined {
+  if (!snap) return
+  const { ref, route, folder } = M.parseTask(target)
+  const here = snap.places.find((p) => p.id === place)?.machine
+  const hop = route.split('>').at(-1)
+  const machine = hop ? snap.machines.find((m) => [m.machine, m.ownName, m.name].includes(hop))?.machine ?? hop : here
+  const all = snap.tasks.filter((t) => taskRef(t) === ref && (!folder || t.taskFolder === folder ||
+    (folder.startsWith('~/') && t.taskFolder?.endsWith(folder.slice(1)))))
+  const sameMachine = all.filter((t) => t.on === machine)
+  const sameSpace = sameMachine.filter((t) => t.place === place || t.asked === place)
+  const matches = sameSpace.length ? sameSpace : sameMachine.length || (picked && machine !== undefined) ? sameMachine : all
+  return matches.length === 1 ? matches[0] : undefined
 }
 
-function MentionLink({ kind, name, target }: { kind: 'space' | 'task'; name: string; target: string }) {
+function MentionLink({ kind, name, target, here }: { kind: 'space' | 'task'; name: string; target: string; here?: string }) {
   const snap = useSnap()
-  const task = kind === 'task' ? taskFor(snap, target) : undefined
+  const task = kind === 'task' ? taskFor(snap, target, here) : undefined
   const place = kind === 'space' && snap ? placeById(snap, bare(target)) : undefined
   const open = () => {
     if (kind === 'task') return task ? openTask(task.id) : notice('That task is not in your lists here.')
@@ -226,11 +234,11 @@ function MentionLink({ kind, name, target }: { kind: 'space' | 'task'; name: str
 }
 
 /** your words with each picked [#space](space:…) and [@task](task:…) as a link to it; `rest` draws the words between */
-export function withMentions(text: string, rest: (t: string, key: string) => ReactNode[]): ReactNode[] {
+export function withMentions(text: string, rest: (t: string, key: string) => ReactNode[], here?: string): ReactNode[] {
   if (!M.hasMention(text)) return rest(text, '')
   return (M.split(text) as ({ text: string } | { mention: { name: string; target: string } } | { task: { name?: string; ref: string; target: string } })[]).flatMap((p, i) =>
     'mention' in p ? [<MentionLink key={`m${i}`} kind="space" name={p.mention.name} target={p.mention.target} />]
-      : 'task' in p ? [<MentionLink key={`m${i}`} kind="task" name={p.task.name ?? p.task.ref} target={p.task.target} />]
+      : 'task' in p ? [<MentionLink key={`m${i}`} kind="task" name={p.task.name ?? p.task.ref} target={p.task.target} here={here} />]
         : rest(p.text, `${i}.`),
   )
 }
