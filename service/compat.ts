@@ -18,6 +18,7 @@ import { mentionedIn } from "../core/send.js";
 import * as MEc from "../core/mentions.js";
 import * as SCc from "../core/screens.js";
 import { codexChoice } from "../core/asks.js";
+import type { QueuedQuestion } from "./codex-queue.ts";
 const { SCREEN, TRUST, trustOf } = SCc as any;
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -218,6 +219,13 @@ export function codexQuestion(x: any, key: string): Question {
   return { id: `cq:${x.id}`, title: qs[0].text, kind: "Question", to: key, other: true, noNote: true, choices: choices(qs[0]) };
 }
 
+export const queuedQuestionId = (q: QueuedQuestion) => `cqa:${encodeURIComponent(q.id)}`;
+
+function queuedQuestion(q: QueuedQuestion, key: string): Question {
+  return { id: queuedQuestionId(q), title: q.text, kind: "Question", to: key, queued: true, other: true, noNote: true,
+    choices: q.choices.map((label) => codexChoice({ label })) };
+}
+
 export class Compat {
   /** another machine's key -> the name people read for it (who sent a message: core/chat-view.js fromName) */
   machineNames = new Map<string, string>();
@@ -331,6 +339,9 @@ export class Compat {
 
   /** The reader of a chat someone follows now (service/chats.ts), set by main. */
   reader: ((addr: string) => any) | null = null;
+  queued: ((addr: string) => QueuedQuestion[]) | null = null;
+  refreshQuestions: ((addr: string) => Promise<void>) | null = null;
+  questionScreen: ((addr: string) => Promise<string | null>) | null = null;
 
   /** This machine's artifacts (service/artifacts.ts), set by main: notes and answers go through it. */
   artifacts: { say(id: string, v: number, text: string, spot?: string): Promise<unknown> } | null = null;
@@ -440,11 +451,13 @@ export class Compat {
       where: { folder: r.worktree, machine: r.machine ?? null, base: r.base, start: r.start, branch: r.branch, pr: r.pr } }]));
     const tasks: Task[] = rows.filter((r) => r.section !== "done" || (r.done_at && Date.now() - r.done_at < 7 * 86400000)).map((r) => {
       const id = taskId(r);
+      const queued = r.worker ? this.queued?.(r.worker)?.length ?? 0 : 0;
       if (r.worker) chats.set(`${id}/worker`, r.worker);
       else if (r.lastLog) chats.set(`${id}/worker`, `log:${r.machine ?? ""}|${r.lastLog.kind}|${r.lastLog.path}`);
       const t: Task = {
         id, name: r.title, status: SECTION[r.section] ?? "todo", place: placeOf(r), listName: placeName(r), age: r.started ? ago(r.started, false) : "",
         state: r.section, on: r.machine ?? host, created: "", ...(r.folder ? { taskFolder: r.folder } : {}),
+        ...(queued ? { queuedQuestions: queued } : {}),
         // SHEP-325: where it works (its list: the repo's or folder's name), the space that asked for it, and the other
         // spaces whose Tasks hold it
         ...(r.folder ? { work: { name: r.list || base(r.folder) || r.folder, folder: r.folder, repo: r.kind === "repo",
@@ -492,6 +505,16 @@ export class Compat {
 
     // hook asks waiting on the person: each a Need with its card
     const keyOf = new Map([...chats].map(([k, a]) => [a, k]));
+    for (const [addr, key] of keyOf) {
+      const task = key.endsWith("/worker") ? tasks.find((x) => x.id === key.slice(0, -7)) : undefined;
+      if (task?.archived || task?.status === "done") continue;
+      const place = task?.place ?? places.find((p) => p.chat === key)?.id;
+      if (place === undefined) continue;
+      for (const q of this.queued?.(addr) ?? []) {
+        const question = queuedQuestion(q, key);
+        needs.push({ id: question.id, chat: key, place, ...(task ? { task: task.id } : {}), at: q.at, question });
+      }
+    }
     for (const a of this.asks?.open.values() ?? []) {
       const key = keyOf.get(a.terminal);
       if (!key) continue;
@@ -519,7 +542,7 @@ export class Compat {
 
     // 'attention' is an agent waiting with no card: one whose chat has a card (its question, a secret) needs you once,
     // not twice (one toast, one alert, one in the counts)
-    const carded = new Set(needs.filter((x) => x.id !== "attention").map((x) => x.chat));
+    const carded = new Set(needs.filter((x) => x.id !== "attention" && !x.question?.queued).map((x) => x.chat));
     for (let i = needs.length - 1; i >= 0; i--) if (needs[i].id === "attention" && carded.has(needs[i].chat)) needs.splice(i, 1);
 
     // the groups (shared "spaces-chat" sections)
@@ -643,6 +666,7 @@ export class Compat {
     const codexAsk = reader.kind === "codex" && t?.status?.state === "blocked"
       ? [...items].reverse().find((x: any) => x.kind === "ask") : null;
     const codexCard = codexAsk && !codexAsk.closed && codexAsk.questions?.length ? codexAsk : null;
+    const queued = new Set<string>(own && !reader.pinned ? (this.queued?.(own) ?? []).map((q) => q.id) : []);
     // an Assistant started from its chat with the person's words: what they asked (data/chat-first, as the window's)
     // the session's first message: the first user item (core/chat-view.js firstUser)
     const fi = firstUser(items);
@@ -730,6 +754,8 @@ export class Compat {
       // its own question asked now shows as its card (at the end), in place of its "Asked you" box, as the window's
       else if (x.kind === "ask" && !x.closed && (asking || x === codexCard)) continue;
       else if (x.kind === "ask" && x.text) messages.push({ id: x.id, who: "agent", text: x.text, at: x.at, asked: x.closed === "answered" ? "answered" : x.closed ? "dismissed" : "open" });
+      else if (x.kind === "async-ask") messages.push({ id: queuedQuestionId(x), who: "agent", at: x.at,
+        ...(queued.has(x.id) && !x.closed ? { question: queuedQuestion(x, key) } : { text: x.text, asked: x.closed === "answered" ? "answered" : "dismissed" }) });
       else if (x.kind === "news" && x.ref) {
         // a task's news line in its Assistant's chat (<herdr-news task=… event=…>), as it was said
         const e = inline.get(x.id);
@@ -853,7 +879,7 @@ export class Compat {
     // the window's lines over the box: what it does while it works (its log's call, else its CLI's status report:
     // core/chat-view.js, as the window's), only waiting (no spinner); asking in its terminal with no card here (Needs you)
     const report = CV.reportMsg(t);
-    const cards = messages.some((m) => (m.question && !m.question.closed) || m.secret);
+    const cards = messages.some((m) => (m.question && !m.question.closed && !m.question.queued) || m.secret);
     const under = st === "working" ? { doing: CV.doingWords(reader.conv, report) ?? "", ...(reader.conv?.waiting ? { waits: true } : {}) }
       : st === "blocked" && !cards ? { blocked: report.replace(/^answer:\s*/i, "") } : {};
     // its turn is over but work of its own still runs in the background (core/send.js atRest): a quiet note under its

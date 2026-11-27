@@ -147,6 +147,10 @@ const model = new Model(hub, live);
 live.chats = new Chats(hub);
 live.compat = compat;
 compat.reader = (a) => live.chats?.reader(a) ?? null;
+compat.queued = (a) => live.chats?.queued(a) ?? [];
+compat.refreshQuestions = async (a) => { await live.chats?.refresh(a); };
+compat.questionScreen = async (a) => (await live.chats?.screen(a)) ?? null;
+live.chats.onQuestions = () => model.rebuild();
 // the chat scrolled to its top: the page before
 (compat as any).earlier = (a: string) => live.chats?.earlier(a);
 const push = new Push(() => (me ? webOrigin(me.dns, hp) : "https://herdr.dev"));
@@ -463,6 +467,7 @@ const snapshotOf = (b: Parameters<NonNullable<typeof model.onBuild>>[0]) => live
 // open chats are told again (compat.chat reads the rows the snapshot just took)
 let newsWas: string | null = null;
 model.onBuild = (b) => {
+  live.chats?.trackCodex([...b.spaces.map((s) => s.assistant), ...b.rows.filter((r) => !r.archived).map((r) => r.worker)].filter(Boolean));
   snapshotOf(b);
   const now = newsKey(b.rows);
   if (newsWas !== null && now !== newsWas) live.chats?.refreshAll();

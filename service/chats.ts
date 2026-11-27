@@ -5,9 +5,10 @@
 // chat and on each change (it sends what it shows: compat.ts).
 import type { Hub } from "./hub.ts";
 import { sh } from "./model.ts";
-import { ChatReader } from "../core/chat-reader.js";
+import { ChatReader, kindOf } from "../core/chat-reader.js";
 import { reportMsg, subagentsOf } from "../core/chat-view.js";
 import { spawn } from "./spawn.ts";
+import { CodexQueue, type QueuedQuestion } from "./codex-queue.ts";
 
 /** A page following a chat: told the reader (and the terminal now) each time the conversation changes. */
 export type Watcher = (reader: ChatReader, terminal: any) => void;
@@ -22,7 +23,9 @@ type Followed = { reader: ChatReader; pages: Set<Watcher>; busy: boolean; idleSi
   /** its terminal's state and its CLI's (working, done, blocked, background work) when last told */
   state?: string;
   /** its subagents as last told (SHEP-54): one starting, changing state or ending is news for its chat */
-  kids?: string };
+  kids?: string;
+  codex?: CodexQueue;
+  questions?: QueuedQuestion[] };
 
 /** a screen that keeps drawing (a spinner) asks for a read at most this often */
 const NUDGE = 200;
@@ -54,6 +57,8 @@ async function withForeground(addr: string, t: any) {
 
 export class Chats {
   private followed = new Map<string, Followed>();
+  private codex = new Set<string>();
+  onQuestions: (() => void) | null = null;
 
   constructor(private hub: Hub) {
     const io = { sh: (script: string, args: string[], on: string | null) => sh(hub, script, args, on) };
@@ -63,9 +68,39 @@ export class Chats {
   }
   private io: { sh: (script: string, args: string[], on: string | null) => Promise<{ code: number; stdout: string }> };
 
-  watch(addr: string, page: Watcher) {
+  private follow(addr: string) {
     let f = this.followed.get(addr);
-    if (!f) this.followed.set(addr, (f = { reader: readerFor(this.io, addr), pages: new Set(), busy: false, idleSince: null, ready: false }));
+    if (!f) this.followed.set(addr, (f = { reader: readerFor(this.io, addr), pages: new Set(), busy: false, idleSince: Date.now(), ready: false }));
+    return f;
+  }
+
+  /** Keep live task and Assistant questions available even with their chats closed. */
+  trackCodex(addrs: string[]) {
+    const next = new Set(addrs.filter((a) => {
+      const t = this.hub.terminals.get(a);
+      return t?.state === "live" && kindOf(t) === "codex";
+    }));
+    for (const a of next) if (!this.codex.has(a)) {
+      this.follow(a);
+      void this.tick(a);
+    }
+    this.codex = next;
+  }
+
+  queued(addr: string) {
+    const t = this.hub.terminals.get(addr);
+    return t?.state === "live" && (t.status?.state === "working" || t.status?.state === "blocked") ? this.followed.get(addr)?.questions ?? [] : [];
+  }
+
+  async screen(addr: string) {
+    const r = await this.hub.call<{ text: string; how: string }>("terminal.read", { terminal: addr }, 2000).catch(() => null);
+    return r?.how === "screen" ? r.text : null;
+  }
+
+  refresh(addr: string) { return this.tick(addr); }
+
+  watch(addr: string, page: Watcher) {
+    const f = this.follow(addr);
     f.pages.add(page);
     f.idleSince = null;
     if (f.ready) page(f.reader, this.hub.terminals.get(addr));
@@ -120,7 +155,8 @@ export class Chats {
     const f = this.followed.get(addr);
     if (!f) return;
     if (f.busy) { f.again = true; return; }
-    if (!f.pages.size && f.idleSince && Date.now() - f.idleSince > 60_000) {
+    const tracked = this.codex.has(addr);
+    if (!tracked && !f.pages.size && f.idleSince && Date.now() - f.idleSince > 60_000) {
       this.followed.delete(addr);
       if (f.soon) clearTimeout(f.soon);
       f.stream?.close();
@@ -129,6 +165,8 @@ export class Chats {
     // no page on it now: its stream goes (it comes back with the next page)
     if (!f.pages.size && f.stream) { f.stream.close(); f.stream = undefined; }
     else void this.stream(addr, f);
+    const current = this.hub.terminals.get(addr);
+    if (tracked && !f.pages.size && !f.questions?.length && current?.status?.state !== "working" && current?.status?.state !== "blocked") return;
     f.busy = true;
     f.again = false;
     f.last = Date.now();
@@ -136,7 +174,23 @@ export class Chats {
       const t = await withForeground(addr, this.hub.terminals.get(addr));
       let changed = await f.reader.locate(t);
       if (await f.reader.pull()) changed = true;
-      if (await f.reader.lookJobs()) changed = true;
+      if (f.pages.size && await f.reader.lookJobs()) changed = true;
+      let questions: QueuedQuestion[] = [];
+      if (t?.state === "live" && f.reader.kind === "codex") {
+        const queue = f.codex ??= new CodexQueue();
+        questions = queue.pending(f.reader);
+        if (questions.length && ["working", "blocked"].includes(t.status?.state)) {
+          const screen = await this.screen(addr);
+          if (screen) queue.observe(questions, screen);
+          questions = queue.pending(f.reader);
+        } else {
+          queue.forgetScreen();
+          if (!["working", "blocked"].includes(t.status?.state)) questions = [];
+        }
+      }
+      const questionChange = questions.length !== (f.questions?.length ?? 0) || questions.some((q, i) => q.id !== f.questions?.[i]?.id);
+      f.questions = questions;
+      if (questionChange) { changed = true; this.onQuestions?.(); }
       // its CLI says it does something else now (a status change, no new line in its log): told too
       const said = reportMsg(t);
       if (said !== f.said) { f.said = said; changed = true; }

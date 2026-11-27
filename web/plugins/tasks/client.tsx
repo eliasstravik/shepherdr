@@ -585,7 +585,13 @@ function Now({ snap, place }: { snap: Snapshot; place: string }) {
   const repo = f.repo.length === 1 ? reposOf(snap).find((r) => r.key === f.repo[0]) : undefined
   const top = repo && <RepoHead snap={snap} r={repo} />
   const alerts = taskAlerts(snap)
-  const groups = nowGroups(filterTasks(snap, f, place), alerts).filter((g) => g.tasks.length)
+  const filtered = filterTasks(snap, f, place)
+  const byId = new Map(filtered.filter((t) => !t.archived).map((t) => [t.id, t]))
+  const queued = snap.needs.flatMap((n) => {
+    const task = n.task ? byId.get(n.task) : undefined
+    return n.question?.queued && task ? [{ task, question: n.question }] : []
+  })
+  const groups = nowGroups(filtered, alerts).filter((g) => g.tasks.length || (g.name === 'Needs you' && queued.length))
   if (!groups.length)
     return snap.tasks.length ? (
       <>
@@ -604,13 +610,16 @@ function Now({ snap, place }: { snap: Snapshot; place: string }) {
         // Done and Archived start folded; the others open
         const o = ui.open[g.name] ?? !['Done', 'Archived'].includes(g.name)
         const shown = g.name === 'Done' ? g.tasks.slice(0, ui.doneShown) : g.tasks
+        const questions = g.name === 'Needs you' ? queued : []
         return (
           <div key={g.name} style={{ display: 'contents' }}>
             <button type="button" className="grp" aria-expanded={o} onClick={() => setUI({ open: { ...ui.open, [g.name]: !o } })}>
-              {g.name} · {g.tasks.length}
+              {g.name} · {g.tasks.length + questions.length}
               <I n="down" c="s16" />
             </button>
             {o && shown.map((t) => <TaskRow key={t.id} snap={snap} t={t} tag={!repo} alert={alerts.get(t.id)} />)}
+            {o && questions.map(({ task, question }) => <Row key={question.id} icon="chat"
+              label={question.title} sub={task.name} onClick={() => { openTask(task.id); setUI({ jump: question.id }) }} />)}
             {o && shown.length < g.tasks.length && (
               <button type="button" className="grp" onClick={() => setUI({ doneShown: ui.doneShown + 20 })}>Show more</button>
             )}

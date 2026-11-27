@@ -186,6 +186,9 @@ export function doneWords(t: Task): string {
 }
 
 /** a task row's second line: what it says now (nothing for a plain task not started yet) */
+/** A report that says the agent needs a decision is only a waiting line when it actually stops. */
+export const waitingReport = (text?: string | null) => /^needs\b/i.test(text?.trim() ?? '')
+
 export function taskLine(t: Task): string {
   const s = tstate(t)
   if (s === 'done' || s === 'archived') return doneWords(t)
@@ -193,7 +196,13 @@ export function taskLine(t: Task): string {
   if (s === 'ready') return 'Ready for review'
   if (t.stopped) return t.stopped.by === 'you' ? 'Stopped by you' : `Stopped${t.stopped.why ? ` · ${t.stopped.why}` : ''}`
   if (s === 'ask') return t.report?.msg || (t.blocked === 'prompt' ? 'Waiting at a prompt' : t.blocked === 'permission' ? 'Wants to run a command' : 'Waits for your reply')
-  if (s === 'working') return t.waitsDesktop ? 'Waiting for the desktop' : t.report?.msg || (t.schedule ? 'Started by its schedule' : '')
+  if (s === 'working') {
+    if (t.waitsDesktop) return 'Waiting for the desktop'
+    if (t.queuedQuestions) return `Working · ${t.queuedQuestions} ${t.queuedQuestions === 1 ? 'question' : 'questions'} for you`
+    const report = t.report?.msg
+    if (waitingReport(report)) return 'Working'
+    return report || (t.schedule ? 'Started by its schedule' : '')
+  }
   return t.afterTitle ? afterWords(t) : t.startsAt ? `Starts ${dayTime(t.startsAt)}` : ''
 }
 
@@ -375,7 +384,8 @@ export function needsCount(snap: Snapshot, placeId?: string): number {
   const alerting = taskAlerts(snap)
   const tasks = snap.tasks.filter((t) => (all || taskInSpace(t, placeId)) && (['ask', 'ready'].includes(tstate(t)) || (alerting.has(t.id) && tstate(t) !== 'done' && tstate(t) !== 'archived'))).length
   const chats = snap.places.filter((p) => p.needs && (all || p.id === placeId)).length
-  return tasks + chats
+  const queued = (snap.needs ?? []).filter((n) => n.question?.queued && (all || (n.task ? !!snap.tasks.find((t) => t.id === n.task && taskInSpace(t, placeId)) : n.place === placeId))).length
+  return tasks + chats + queued
 }
 
 /* ---------- schedules and artifacts ---------- */

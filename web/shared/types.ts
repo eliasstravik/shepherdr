@@ -291,6 +291,8 @@ export interface Task {
   blocked?: 'permission' | 'question' | 'auth' | 'prompt'
   /** it waits for a Mac's one desktop, which another agent is using */
   waitsDesktop?: boolean
+  /** Questions the person can answer while the agent keeps working. */
+  queuedQuestions?: number
   /** done: its work was merged into the base branch */
   merged?: boolean
   /** done: a schedule's run that had nothing to do, or that only had something to say (posted in its space's chat) */
@@ -449,6 +451,8 @@ export interface Choice {
 }
 
 export interface Question {
+  /** Answer from its card while the rest of the chat carries on. */
+  queued?: boolean
   /** 3.2: a permission request: the command (or what it wants to do) in the agent's own words; choice 0 allows once */
   command?: string
   id: string

@@ -14,12 +14,13 @@ import * as SCREENS_ from "../core/screens.js";
 const SCREENS = SCREENS_ as any;
 import * as AGa from "../core/agents.js";
 import { answerCodex } from "./codex-ask.ts";
+import { answerQueued } from "./codex-queue.ts";
 import { steps as answerSteps } from "../core/asks.js";
 const { CHOICE_KEY, choiceOf, withChoice, speedOf } = AGa as any;
 import * as SP from "../core/spaces.js";
 import { iconValue } from "../core/space-icon.js";
 const { READ, assistantOf, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, withOrder, withMachineOrder, DELETED, deletedSection, withRestoredSection } = SP as any;
-import type { Compat } from "./compat.ts";
+import { queuedQuestionId, type Compat } from "./compat.ts";
 import { noteFailed, once, wentIn } from "./send-once.ts";
 import { execTemplate, ownId, withoutSpace } from "./spaces.ts";
 import * as MA from "../core/machine-add.js";
@@ -35,6 +36,21 @@ export const MAX_FILES = 50;
 const ADDR = /^([\w.-]+\/)?t[0-9a-z]+$/;
 const REF = /^[A-Z][A-Z0-9]*-\d+$/;
 const MACHINE = /^[\w.-]+$/;
+const answeringQueued = new Set<string>();
+const liveSends = new Map<string, number>();
+
+/** A regular app send must never type into a picker another page opened to answer a card. */
+async function sendFromChat(...args: Parameters<typeof sendBody>) {
+  const a = args[1];
+  if (answeringQueued.has(a)) throw new Error("Wait for the question's answer to go through, then send again.");
+  liveSends.set(a, (liveSends.get(a) ?? 0) + 1);
+  try { return await sendBody(...args); }
+  finally {
+    const left = (liveSends.get(a) ?? 1) - 1;
+    if (left) liveSends.set(a, left);
+    else liveSends.delete(a);
+  }
+}
 
 /** One page's message to its agent, its files' paths after its words. -> { ok, at } once it is in the agent's terminal
  *  (Claude Code's box clear: core/send.js settleBox), or { waiting } held for the agent's turn; else it throws. */
@@ -74,7 +90,7 @@ async function sendNow(hub: Hub, b: any, compat: Compat, again = false) {
   const at = Date.now();
   // what it was, so the chat knows it again while it waits in the CLI's queue
   if (typeof b.cid === "string") compat.noteSend?.(a, { cid: b.cid.slice(0, 80), text, files: sent, at });
-  const r: any = await sendBody(io, a, kindOf(t) ?? "", body, again);
+  const r: any = await sendFromChat(io, a, kindOf(t) ?? "", body, again);
   // (stuck: it stayed in Claude Code's box; sent again with this id it gets only its Enter: send-once.ts)
   if (r.code !== 0) throw Object.assign(new Error(refusal(r).message), { stuck: !!r.stuck });
   return { ok: true, at };
@@ -110,14 +126,14 @@ function drain() {
       for (const m of [...held]) {
         const st = (m.hub.terminals.get(m.addr) as any)?.status?.state;
         const alive = m.hub.terminals.get(m.addr)?.state === "live";
-        if (alive && !m.now && (st === "working" || st === "blocked")) continue;
+        if (alive && (answeringQueued.has(m.addr) || (!m.now && (st === "working" || st === "blocked")))) continue;
         const i = held.indexOf(m);
         if (i < 0) continue;
         held.splice(i, 1);
         // one that can't go now is told to its page (Chat.failed: Not sent, with Retry), never dropped quietly
         if (alive) m.note?.();
         const r: any = alive
-          ? await sendBody({ hc: asPerson(m.hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (m.hub.terminals.get(m.addr) as any)?.status?.state ?? null }, m.addr, m.kind, m.body).catch((e: Error) => ({ code: 1, stderr: e.message }))
+          ? await sendFromChat({ hc: asPerson(m.hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (m.hub.terminals.get(m.addr) as any)?.status?.state ?? null }, m.addr, m.kind, m.body).catch((e: Error) => ({ code: 1, stderr: e.message }))
           : { code: 1, stderr: "That agent isn't running." };
         if (r.code !== 0 && m.cid) noteFailed(m.addr, m.cid, refusal(r).message, !!r.stuck);
       }
@@ -362,6 +378,29 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const t = w?.worker && w.task ? compat.taskOf(w.task) : null;
     if (t) await task(["stop", t.ref, "--untrusted"], t.folder, t.machine).catch(() => null);
     return { ok: true };
+  }
+  if (b?.type === "answer" && typeof b.question === "string" && b.question.startsWith("cqa:")) {
+    const a = chat(b.chat);
+    if (answeringQueued.has(a)) throw new Error("Another answer is going to this chat.");
+    if (liveSends.has(a)) throw new Error("Wait for your message to go through, then answer the question.");
+    answeringQueued.add(a);
+    try {
+      await compat.refreshQuestions?.(a);
+      const pending = compat.queued?.(a) ?? [];
+      const target = pending.find((q) => queuedQuestionId(q) === b.question);
+      if (!target) throw new Error("That question is no longer in Codex's queue.");
+      if (await hub.front(a) !== "agent") throw new Error("Open Codex in the terminal to answer.");
+      const why = await answerQueued({
+        read: async () => (await compat.questionScreen?.(a)) ?? null,
+        keys: async (...keys) => (await hc(["keys", a, ...keys])).code === 0,
+        paste: async (words) => (await hub.send(a, words, true)).code === 0,
+      }, pending, target, b);
+      if (why) throw new Error(why);
+      return { ok: true };
+    } finally {
+      answeringQueued.delete(a);
+      void compat.refreshQuestions?.(a);
+    }
   }
   if (b?.type === "answer" && typeof b.question === "string" && b.question.startsWith("cq:")) {
     // Codex's own questions (compat.ts codexQuestion): answered on its screen, as a person would

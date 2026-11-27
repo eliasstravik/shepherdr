@@ -2,12 +2,13 @@
 // that ends in a reply, or its log has the turn it is on, so the sign can never stick after it stops or while only its
 // background work runs, and never while it waits on the human.
 import type { Chat } from '@shared/types.ts'
+import { waitingReport } from '@shared/view.ts'
 
 /** a question card it posted last (its own, or the CLI's menu) waits on the human, whatever the terminal says;
  *  Shepherdr's update cards don't count */
 function asks(chat: Chat) {
   const last = chat.messages.findLast((m) => !m.waiting && !m.card)
-  return !!(last?.question && last.question.sent === undefined)
+  return !!(last?.question && !last.question.queued && !last.question.closed && last.question.sent === undefined)
 }
 
 /** it works on a turn that ends in words you will see */
@@ -74,7 +75,7 @@ export function signOf(chat: Chat | undefined, said?: string): { step: string } 
   if (!live && !typing(chat)) return null
   const now = live ? chat.live?.now : undefined
   const own = said?.replace(/\s+/g, ' ').trim()
-  return { step: own || stepWords(chat.doing || now?.doing || now?.title || '') }
+  return { step: (!waitingReport(own) && own) || stepWords(chat.doing || now?.doing || now?.title || '') }
 }
 
 // SHEP-421: the step line stays for as long as the sign shows. A chat's last named step is held here until the next

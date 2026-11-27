@@ -20,7 +20,7 @@ export const editedDraft = (held: string, now: string) => (now.trim() ? `${held}
 export function ownAsk(chat?: Chat): Question | undefined {
   for (let i = (chat?.messages.length ?? 0) - 1; i >= 0; i--) {
     const q = chat!.messages[i]!.question
-    if (q && q.other && !q.by && q.sent === undefined && !q.closed) return q
+    if (q && q.other && !q.queued && !q.by && q.sent === undefined && !q.closed) return q
   }
   return undefined
 }

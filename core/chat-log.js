@@ -94,7 +94,7 @@ BEGIN { pos = base; first = base; msgs = 0 }
     # another agent came back with (delivered, held, not delivered, or its command moved to the background): read whole
     # too (delivery()).
     if (claude && length(line) <= 262144 && ((index(line, "\"answers\":{") && index(line, "\"questions\":[")) || index(line, "wrote in the chat instead: "))) print off "\tJ\t" line
-    else if (length(line) <= 65536 && (index(line, "elivered") || index(line, ": sent to ") || index(line, "moved to the background") || index(line, "\"is_error\":true") || (codex && match(line, /[Ee]xit[_ ]code[^0-9]?[^0-9]?[^0-9]?[^0-9]?[1-9]/)))) print off "\tJ\t" line
+    else if (length(line) <= 65536 && (index(line, "elivered") || index(line, ": sent to ") || index(line, "moved to the background") || index(line, "\"is_error\":true") || (codex && (index(line, "\\\"accepted\\\":true") || match(line, /[Ee]xit[_ ]code[^0-9]?[^0-9]?[^0-9]?[^0-9]?[1-9]/))))) print off "\tJ\t" line
     next
   }
   # The queue of messages typed while Claude Code works: what goes in (the words of the person)
@@ -116,6 +116,7 @@ BEGIN { pos = base; first = base; msgs = 0 }
     if (index(head, "\"type\":\"message\"") || index(head, "_call\"")) keep = 1
   } else if (index(head, "\"type\":\"event_msg\"")) {
     if (index(head, "\"task_complete\"") || index(head, "\"turn_aborted\"") || index(head, "\"token_count\"") || index(head, "\"thread_settings_applied\"")) keep = 1
+    if (index(head, "\"item_completed\"") && index(line, "\"delivery\":\"async\"") && index(line, "\"questions\":[")) keep = 1
   } else if (index(head, "\"type\":\"turn_context\"")) {
     keep = 1
   }
@@ -733,6 +734,8 @@ export class Conversation {
     // the rows each such call made (not the ones it sent again), to take back when its command went on in the background
     this.madeBy = new Map();
     this.questions = new Map();
+    this.asyncQuestions = new Map();
+    this.asyncQuestionCalls = new Map();
     // Claude Code's queue of what was typed while it works, in order: { id, raw, at, text?,
     // images? } (text only for the person's words; a job's end has a place too).
     this.queue = [];
@@ -1193,6 +1196,44 @@ export class Conversation {
     }
   }
 
+  closeAsyncQuestions(turn) {
+    for (const [id, q] of this.asyncQuestions) {
+      if (turn && q.turn && turn !== q.turn) continue;
+      q.closed = "dismissed";
+      this.asyncQuestions.delete(id);
+    }
+    this.asyncQuestionCalls.clear();
+  }
+
+  addAsyncQuestions(call, questions, turn, at) {
+    if (typeof call !== "string" || !Array.isArray(questions)) return;
+    for (const [i, q] of questions.entries()) {
+      if (typeof q?.title !== "string" || !q.title.trim()) continue;
+      const id = JSON.stringify(["request_user_input_async", call, i]);
+      if (this.asyncQuestions.has(id)) continue;
+      // The terminal shows at most 32 choices and omits labels longer than 512 bytes.
+      const choices = (Array.isArray(q.options) ? q.options.slice(0, 32) : [])
+        .filter((option) => typeof option === "string" && new TextEncoder().encode(option).length <= 512);
+      this.asyncQuestions.set(id, this.push({ kind: "async-ask", id, call, turn, text: q.title, choices, at }));
+    }
+  }
+
+  codexQuestionReplies(text) {
+    const match = /^<send_user_message_question_reply>\s*([\s\S]+?)\s*<\/send_user_message_question_reply>$/.exec(text);
+    if (!match) return null;
+    const value = parse(match[1]);
+    const replies = Array.isArray(value) ? value : [value];
+    if (!replies.length || !replies.every((r) => typeof r?.questionItemId === "string" && typeof r.question === "string" && typeof r.answer === "string")) return null;
+    return replies.map((r) => {
+      for (const [id, q] of this.asyncQuestions) {
+        if (id !== r.questionItemId && q.call !== r.questionItemId) continue;
+        q.closed = "answered";
+        this.asyncQuestions.delete(id);
+      }
+      return r.answer;
+    }).join("\n\n");
+  }
+
   codex(l, off) {
     const p = l.payload;
     if (!p || typeof p !== "object") return;
@@ -1209,7 +1250,9 @@ export class Conversation {
           if (Array.isArray(kinds) && kinds.length === items.length) return kinds[i] === "user.text" ? it.text.trim() : "";
           return CODEX_INJECTED.test(it.text) ? "" : it.text.trim();
         }).filter(Boolean).join("\n\n");
-        const u = words ? cleanUser(words) : null;
+        const replies = this.codexQuestionReplies(words);
+        if (replies === null && words) this.closeAsyncQuestions();
+        const u = replies === null ? (words ? cleanUser(words) : null) : { text: replies };
         if (u) this.user(`u${off}`, { ...u, at: time(l.timestamp) });
       } else if (p.type === "message" && p.role === "assistant") {
         const words = this.agentText((Array.isArray(p.content) ? p.content : []).filter((it) => it?.type === "output_text" && it.text?.trim()).map((it) => it.text.trim()).join("\n\n"));
@@ -1217,6 +1260,12 @@ export class Conversation {
         if (words) this.push({ kind: this.recapping ? "recap" : "agent", id: `a${off}`, text: words, at: time(l.timestamp), ...(this.recapping ? {} : sg) });
       } else if ((p.type === "function_call" || p.type === "custom_tool_call" || p.type === "local_shell_call") && p.name !== "wait" && p.name !== "sleep") {
         const cid = String(p.call_id ?? p.id ?? `c${off}`);
+        if (p.name === "request_user_input_async") {
+          // Legacy rollouts omit the completed item. The accepted function call has the same ID.
+          this.asyncQuestionCalls.set(cid, { questions: parse(p.arguments)?.questions,
+            turn: p.internal_chat_message_metadata_passthrough?.turn_id, at: time(l.timestamp) });
+          return;
+        }
         // Codex's own questions (Plan mode): answered in its terminal, shown here as asked.
         if (p.name === "request_user_input") {
           let a = p.arguments;
@@ -1236,6 +1285,12 @@ export class Conversation {
         if (ARTIFACT.test(JSON.stringify(p.arguments ?? p.input ?? p.action ?? ""))) this.push({ kind: "artifact", id: `art${off}`, at: time(l.timestamp) });
         this.sent(codexCommand(p.arguments ?? p.input ?? p.action), off, time(l.timestamp), cid);
       } else if (p.type === "function_call_output" || p.type === "custom_tool_call_output") {
+        const asked = this.asyncQuestionCalls.get(p.call_id);
+        if (asked) {
+          this.asyncQuestionCalls.delete(p.call_id);
+          if (parse(p.output)?.accepted === true) this.addAsyncQuestions(p.call_id, asked.questions, asked.turn, asked.at);
+          return;
+        }
         // what a send's call printed: whether it was delivered
         const o = p.output;
         const words = typeof o === "string" ? o : String(o?.output ?? o?.content ?? "");
@@ -1246,6 +1301,9 @@ export class Conversation {
         try { out = JSON.parse(words)?.output ?? words; } catch {}
         this.delivery(String(p.call_id ?? ""), out, code !== 0);
       }
+    } else if (l.type === "event_msg" && p.type === "item_completed" && p.item?.type === "AgentMessage" && p.item.delivery === "async") {
+      this.asyncQuestionCalls.delete(p.item.id);
+      this.addAsyncQuestions(p.item.id, p.item.questions, p.turn_id, time(l.timestamp));
     } else if (p.type === "thread_settings_applied" && p.thread_settings) {
       // its settings as applied: at start, and on a /model or /fast in place (SHEP-181)
       const t = p.thread_settings;
@@ -1258,6 +1316,7 @@ export class Conversation {
       const used = i.last_token_usage?.total_tokens;
       this.meta = { ...this.meta, used: used ?? this.meta.used, window: i.model_context_window ?? this.meta.window };
     } else if (p.type === "task_complete" || p.type === "turn_aborted") {
+      this.closeAsyncQuestions(p.turn_id);
       this.recapping = false;
       for (const h of this.helpers.values()) if (h.untilTurn) h.done = true;
       this.open.clear();

@@ -13,6 +13,7 @@ import { suggestsOfMessage, suggestionsOn } from "../web/shared/suggest.ts";
 import { GROUPS } from "../web/shared/types.ts";
 import { ALERT_FRESH_MS, MEMORY_BACK_UNDER, alertStands, needsYou, unreadChats, waitingTasks } from "../web/shared/needs-you.ts";
 import { notifyOf } from "../web/shared/alerts.ts";
+import { taskLine, waitingReport } from "../web/shared/view.ts";
 
 /** the doc's format: a change the Android app can't read as before bumps it (new fields alone don't) */
 export const GLANCE_FORMAT = 1;
@@ -167,7 +168,9 @@ export function glanceOf(snap: any, alerts: Map<string, any>, now = Date.now(), 
   const textOf = (s: unknown) => { const text = fullText(s); return text ? { text } : {}; };
   const taskRow = (t: any) => {
     const sp = spaceOf(t.place);
-    return { name: clip(t.name, 60), space: sp?.name ?? t.listName ?? "", machine: sp?.machine ?? null, line: clip(t.sub ?? t.report?.msg ?? t.summary ?? "", 80),
+    const line = t.sub ?? t.report?.msg ?? t.summary ?? "";
+    return { name: clip(t.name, 60), space: sp?.name ?? t.listName ?? "", machine: sp?.machine ?? null,
+      line: clip(t.status === "work" && (t.queuedQuestions || waitingReport(line)) ? taskLine(t) || "Working" : line, 80),
       progress: typeof t.report?.progress === "number" ? Math.max(0, Math.min(100, Math.round(t.report.progress))) : null, left: t.left ?? null };
   };
   const tasks = new Map<string, any>((snap.tasks ?? []).map((t: any) => [t.id, t]));
