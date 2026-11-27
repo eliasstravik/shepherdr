@@ -9,7 +9,8 @@ import './sign-in.css'
 
 export function SignInCard({ question, login, chat }: { question: Question; login: SignIn; chat: string }) {
   const [expanded, expand] = useState(false)
-  const [fallback, setFallback] = useState('')
+  const [picked, setPicked] = useState<number | null>(null)
+  const alternative = picked === null ? undefined : login.methods?.[picked]
   const [showTerminal, setShowTerminal] = useState(false)
   const form = useRef<HTMLFormElement>(null)
   const acts = useCardActs(question.id, login.stage)
@@ -25,10 +26,11 @@ export function SignInCard({ question, login, chat }: { question: Question; logi
   const entry = login.stage === 'key' ? 'key' : login.input
   const field = entry === 'key' ? 'OpenAI API key' : entry === 'callback' ? 'Full address from the browser' : 'Sign-in code'
   const loginHost = login.url && new URL(login.url).hostname
-  const title = login.stage === 'signed' ? (login.connector || login.cli) + ' · Signed in' : question.title
+  const title = login.apiKeySaved ? 'Codex · API key saved'
+    : login.stage === 'signed' ? (login.connector || login.cli) + ' · Signed in' : question.title
 
   return (
-    <section className="card sign-in-card" data-card={question.id} data-ask="">
+    <section className="card sign-in-card" data-card={question.id} data-ask={login.stage === 'signed' ? undefined : ''}>
       <span className="t">{title}</span>
       {login.instructions && <span>{login.instructions}</span>}
       {login.stage === 'start' && <div className="acts">
@@ -39,10 +41,13 @@ export function SignInCard({ question, login, chat }: { question: Question; logi
       </div>}
       {login.stage === 'methods' && expanded && <div className="sign-in-methods">
         {login.methods?.map((choice, i) => choice.fallback
-          ? <Btn key={i} onClick={() => setFallback(choice.fallback!)}>{choice.label}</Btn>
+          ? <Btn key={i} onClick={() => setPicked(i)}>{choice.label}</Btn>
           : <ActBtn key={i} acts={acts} id={String(i)} busy="Opening…" run={() => method(i)}>{choice.label}</ActBtn>)}
       </div>}
-      {fallback && <span>{fallback}</span>}
+      {alternative?.fallback && <span>{alternative.fallback}</span>}
+      {alternative?.sameComputer && <div className="acts">
+        <ActBtn acts={acts} id="local-browser" kind="pri" busy="Starting sign-in…" run={() => send({ choice: picked, sameComputer: true })}>I'm on that computer</ActBtn>
+      </div>}
       {login.url && <>
         {login.deviceCode ? <>
           <span>Copy this code, then enter it after signing in to ChatGPT.</span>
@@ -53,6 +58,7 @@ export function SignInCard({ question, login, chat }: { question: Question; logi
         </> : login.input === 'callback' ? <span>After signing in, copy the full address from your browser, even if the page fails to load.</span>
           : login.input === 'code' ? <span>Sign in in your browser, then paste the code here if Claude gives you one.</span> : null}
         <div className="acts">
+          <ActBtn acts={acts} id="cancel" busy="Canceling…" run={() => send({ cancel: true })}>Cancel</ActBtn>
           <a className="btn pri" href={login.url} target="_blank" rel="noopener noreferrer">Open {loginHost}</a>
         </div>
       </>}
@@ -84,7 +90,7 @@ export function SignInCard({ question, login, chat }: { question: Question; logi
       {login.stage === 'signed' && login.restart && <div className="acts">
         <ActBtn acts={acts} id="restart" kind="pri" busy="Reopening…" run={() => attempt({ type: 'agent-restart', chat: login.terminal ?? chat })}>Reopen chat</ActBtn>
       </div>}
-      {(fallback || login.stage === 'fallback' || login.instructions || acts.now?.error) && login.stage !== 'signed' && terminal && <div className="acts">{terminal}</div>}
+      {(alternative?.fallback || login.stage === 'fallback' || login.instructions || acts.now?.error) && login.stage !== 'signed' && terminal && <div className="acts">{terminal}</div>}
       <ActError acts={acts} />
       {showTerminal && login.terminal && <Term stream={login.terminal} onEnd={() => setShowTerminal(false)} />}
     </section>

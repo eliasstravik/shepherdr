@@ -117,6 +117,7 @@ BEGIN { pos = base; first = base; msgs = 0 }
   } else if (index(head, "\"type\":\"event_msg\"")) {
     if (index(head, "\"task_complete\"") || index(head, "\"turn_aborted\"") || index(head, "\"token_count\"") || index(head, "\"thread_settings_applied\"")) keep = 1
     if (index(head, "\"item_completed\"") && index(line, "\"delivery\":\"async\"") && index(line, "\"questions\":[")) keep = 1
+    if (index(head, "\"type\":\"error\"") && (index(line, "access token could not be refreshed") || index(line, "codex mcp login"))) keep = 1
   } else if (index(head, "\"type\":\"turn_context\"")) {
     keep = 1
   }
@@ -1311,6 +1312,9 @@ export class Conversation {
         ...(t.service_tier !== undefined ? { speed: t.service_tier === "ultrafast" ? "ultrafast" : ["fast", "priority"].includes(t.service_tier) ? "fast" : "standard" } : {}), at: time(l.timestamp) };
     } else if (l.type === "turn_context") {
       this.meta = { ...this.meta, model: p.model ?? this.meta.model, effort: p.effort ?? p.reasoning_effort ?? this.meta.effort, at: time(l.timestamp) };
+    } else if (l.type === "event_msg" && p.type === "error" && typeof p.message === "string" &&
+        /access token could not be refreshed|codex mcp login/i.test(p.message)) {
+      this.push({ kind: "error", id: `e${off}`, text: p.message, at: time(l.timestamp) });
     } else if (p.type === "token_count") {
       const i = p.info ?? {};
       const used = i.last_token_usage?.total_tokens;

@@ -169,7 +169,7 @@ export class Secrets {
 
   /** The masked sign-in card keeps Codex's key for its machine. No chat asks are closed or notified. */
   async keepLoginKey(level: string, value: string) {
-    const r = await run(["set", "OPENAI_API_KEY", ...scope(level).args], value);
+    const r = await run(["set", "CODEX_LOGIN_API_KEY", ...scope(level).args], value);
     if (r.code !== 0) throw new Error("The key could not be saved in Secrets.");
   }
 

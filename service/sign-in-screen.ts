@@ -1,7 +1,7 @@
 import { readScreen } from "../core/screens.js";
 import type { SignIn } from "../web/shared/types.ts";
 
-export type LoginChoice = { label: string; keys?: number; command?: "/login" | "/mcp"; mode?: "device" | "key" | "connector"; fallback?: string };
+export type LoginChoice = { label: string; keys?: number; command?: "/login" | "/mcp"; mode?: "device" | "key" | "connector" | "local-browser"; sameComputer?: boolean; fallback?: string };
 export type LoginStep = SignIn & { options?: LoginChoice[]; cursor?: number; connector?: string; closeMenu?: boolean };
 
 const CLAUDE = "Claude Code", CODEX = "Codex";
@@ -44,12 +44,12 @@ export function authNotice(cli: "claude" | "codex", text: string): LoginStep | n
   return null;
 }
 
-const CODEX_BROWSER = "The browser has to run on the same computer as Codex for this option. On a phone or another computer, choose the device code.";
+const CODEX_BROWSER = "On the computer running Codex, open its terminal and choose Sign in with ChatGPT. On a phone or another computer, choose the device code here."
 const CUSTOM = "Set up your provider’s credentials on the computer that runs the agent, then return to this chat.";
 const codexMethods = (): LoginChoice[] => [
   { label: "ChatGPT with a device code", mode: "device" },
   { label: "OpenAI API key", mode: "key" },
-  { label: "ChatGPT in a browser on the agent’s computer", fallback: CODEX_BROWSER },
+  { label: "ChatGPT in a browser on the agent’s computer", mode: "local-browser", sameComputer: true, fallback: CODEX_BROWSER },
 ];
 
 export function loginScreen(cli: "claude" | "codex", text: string, width: number, active?: LoginStep, helper = false): LoginStep | null {
@@ -71,15 +71,15 @@ export function loginScreen(cli: "claude" | "codex", text: string, width: number
     if (/Welcome to Codex|Choose how you want to use Codex/i.test(body) && options.some((o) => /sign in with ChatGPT/i.test(o.label))) {
       const methods: LoginChoice[] = options.flatMap((o): LoginChoice[] => {
         if (/device code/i.test(o.label)) return [{ ...o, label: "ChatGPT with a device code" }];
-        if (/ChatGPT/i.test(o.label)) return [{ ...o, label: "ChatGPT in a browser on the agent’s computer", fallback: CODEX_BROWSER }];
+        if (/ChatGPT/i.test(o.label)) return [{ ...o, label: "ChatGPT in a browser on the agent’s computer", sameComputer: true, fallback: CODEX_BROWSER }];
         if (/API key|sign in another way/i.test(o.label)) return [{ label: "OpenAI API key", mode: "key" }, { label: "Another provider", fallback: CUSTOM }];
         return [];
       });
       return { cli: name, stage: "methods", options: methods, cursor: menu.at };
     }
-    const browser = urlAfter(lines, /open.*(?:browser|link|url)|sign in via your browser/i, width, (u) => openAI(u) && oauth(u));
+    const browser = urlAfter(lines, /browser.*(?:open|url|https)|open.*(?:browser|link|url)|sign in via your browser/i, width, (u) => openAI(u) && oauth(u));
     if (browser && /sign.?in|log.?in/i.test(body)) return { cli: name, stage: "browser", url: browser, instructions: CODEX_BROWSER };
-    if (active?.stage === "browser" && active.deviceCode && /Do you trust the contents of this directory\?|Do you trust this directory\?|(?:^|\n)\s*[›❯] Ask Codex to do anything\b/m.test(body) && !/Welcome to Codex|Finish signing in/i.test(body)) {
+    if (active?.stage === "browser" && active.url && /Do you trust the contents of this directory\?|Do you trust this directory\?|(?:^|\n)\s*[›❯] Ask Codex to do anything\b/m.test(body) && !/Welcome to Codex|Finish signing in/i.test(body)) {
       return { cli: name, stage: "signed" };
     }
   } else {
@@ -94,7 +94,7 @@ export function loginScreen(cli: "claude" | "codex", text: string, width: number
       if (url) return { cli: name, stage: "browser", url, input: "code" };
     }
     const callback = /(?:paste|enter).*(?:callback|redirect).*url|if the redirect page.*paste the url/i.test(body);
-    if (callback) {
+    if (callback && (connector !== undefined || /(?:^|\n)\s*Authenticate with [^\n]+\n/i.test(body))) {
       const url = urlAfter(lines, /(?:authoriz|authenticate|open|browser didn.t open).*(?:browser|url|link)/i, width, oauth);
       if (url) return { cli: name, stage: "browser", connector: /(?:^|\n)\s*Authenticate with ([^\n]+)/i.exec(body)?.[1].trim() ?? connector ?? "", url, input: "callback" };
     }

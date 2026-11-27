@@ -616,7 +616,8 @@ export class Compat {
       : `${step.cli} needs you to sign in`;
     const terminal = this.addrOf(key) === card.addr ? key : `t:${card.addr}`;
     return { id: card.id, to: key, title, kind: "Question", choices: [], ...(by ? { by } : {}),
-      login: { ...step, terminal, methods: options?.map(({ label, fallback }) => ({ label, fallback })) } };
+      ...(step.stage === "signed" ? { closed: "Signed in" } : {}),
+      login: { ...step, terminal, methods: options?.map(({ label, fallback, sameComputer }) => ({ label, fallback, sameComputer })) } };
   }
 
   /** A CLI's start screen (core/screens.js card) as a card that presses a choice on a tap. A folder-trust screen

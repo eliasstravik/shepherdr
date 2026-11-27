@@ -461,8 +461,9 @@ export interface SignIn {
   input?: 'code' | 'callback'
   instructions?: string
   restart?: boolean
+  apiKeySaved?: boolean
   terminal?: string
-  methods?: { label: string; fallback?: string }[]
+  methods?: { label: string; fallback?: string; sameComputer?: boolean }[]
 }
 
 export interface Question {

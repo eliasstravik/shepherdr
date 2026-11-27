@@ -598,3 +598,12 @@ test("a ! command in Codex is a command row with its exit code's state", () => {
     ["command", "echo hi", "done", "hi"],
   ]);
 });
+
+
+test("Codex's expired account and connector messages reach the chat from its own log", async () => {
+  const error = (message) => ({ timestamp: at, type: "event_msg", payload: { type: "error", message } });
+  const expired = "Your access token could not be refreshed because your refresh token was already used.";
+  const connector = "MCP: Run codex mcp login test";
+  const chat = await read([error(expired), error("A tool failed"), error(connector)], "codex");
+  expect(chat.items.map(({ kind, text }) => [kind, text])).toEqual([["error", expired], ["error", connector]]);
+});
