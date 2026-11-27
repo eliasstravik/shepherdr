@@ -7,7 +7,7 @@ Settings is one window. Open it from the foot of the list. On a phone it is a li
 | Section | What is in it |
 |---|---|
 | General | Theme, Chat width, Motion, and "Alerts on this device": Needs me, Everything or Off. Kept in that browser |
-| Agents | What Chats, Tasks and Reviews run on. Each row opens the picker: Agent, Model, Permissions, Effort, Speed |
+| Agents | What Chats, Tasks and Reviews run on. Each row opens the picker with Agent, Model, Effort, Speed and Permissions |
 | Tasks | Review by a second agent, Merge ("When I mark it as done", "When all checks pass", "Right away"), Proof |
 | Secrets | Add or replace a secret. Agents use it by name and never see it |
 | Machines | Each machine's agents, processor, memory and disk. Add a machine. Open desktop, where a machine has one |
@@ -50,6 +50,32 @@ global file, as they do anywhere. The Instructions setting older versions had is
 there in `~/.config/shepherdr/old-instructions.md`, to move into an `AGENTS.md` yourself.
 
 The picker in a message box changes that one chat or task. What new chats and tasks start with is set in Agents.
+
+## Service tiers
+
+Open **Speed** next to **Effort** in a chat or task, when starting a task, in a schedule's Edit form, or in the
+chat, task and reviewer defaults in Settings. Task and reviewer defaults can also be set per repo. The Android
+install uses the same web picker. To pick a tier while asking a chat to add a task, name it in your request.
+In the CLI, use `--speed standard|fast|ultrafast` on task add, edit or start, `--reviewer-speed` for its review,
+or `--set speed=fast` when adding or editing a schedule.
+
+Standard is always available. Faster tiers can cost more.
+
+- **Codex** reports tiers per model for the CLI and account on that machine. In the catalog checked on
+  November 27, 2026, GPT-6.2 Sol offered Fast and Ultra-fast. GPT-6.2 Astra, GPT-6.1 Terra and Sol,
+  GPT-6 Astra, Sol and Luna, and GPT-5.6 Sol, Terra and Luna offered Fast. OpenAI also lists GPT-6.2 Astra,
+  GPT-6 Astra and GPT-6.1 Sol for Ultra-fast through its API. The picker uses the tiers Codex reports.
+  `priority` is the older name for Fast. `ultrafast` is its own tier. Use the picker in a running chat
+  to switch in place, or use Codex's `/fast` and `/ultrafast` commands.
+  [Fast mode](https://developers.openai.com/api/docs/guides/fast-mode), [Ultrafast mode](https://developers.openai.com/api/docs/guides/ultrafast-mode)
+- **Claude Code** reports Fast for supported models through its SDK model list. Anthropic lists
+  Fable 5.2 and Opus 5.5, plus Opus 5 and Opus 4.8 in preview. Opus 4.8 Fast is due to end
+  November 30, 2026. Sonnet and Haiku use Standard. Fast depends on the account and provider.
+  The picker uses Claude Code's `/fast` in a running chat.
+  [Claude Code fast mode](https://code.claude.com/docs/en/fast-mode)
+- **Other agents** launched through Herdr use their own settings. Shepherdr's model and service-tier
+  picker integrates Claude Code and Codex. OpenCode's provider variants and Pi's extensions can set
+  their own model options. [OpenCode models](https://opencode.ai/docs/models), [Pi documentation](https://pi.dev/)
 
 ## Where they are kept
 

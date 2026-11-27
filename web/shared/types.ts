@@ -347,6 +347,8 @@ export interface Task {
   plan?: string[]
   /** none until the task's agent starts */
   agent?: TaskAgent
+  /** Its saved launch choices, including any overrides on the task. */
+  plannedAgent?: AgentPick
   /** the ids of the artifacts its agent and its helpers made or updated (SHEP-60): its proof first, then newest first */
   artifacts?: string[]
   /** its proof artifact's id (herdr-task ready --proof) */
@@ -1477,6 +1479,7 @@ export interface UpdateStatus {
 export interface CatalogModel {
   id: string
   name: string
+  aliases?: string[]
   group?: string
   /** 'regular' first; also 'fast', 'ultrafast' */
   speeds?: string[]

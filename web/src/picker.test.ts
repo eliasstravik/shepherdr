@@ -35,14 +35,15 @@ test('every choice is a row, in the order Agent, Model, Effort, Speed, Permissio
     { f: 'agent', label: 'Agent', value: 'Claude Code' },
     { f: 'model', label: 'Model', value: 'Big 1' },
     { f: 'effort', label: 'Effort', value: 'Medium' },
-    { f: 'speed', label: 'Speed', value: 'Regular' },
+    { f: 'speed', label: 'Speed', value: 'Standard' },
     { f: 'mode', label: 'Permissions', value: 'Bypass' },
   ])
 })
 
-test('a row only shows when there is a choice there', () => {
-  expect(pickerRows({ ...pick, model: 'small' }, cat).map((r) => r.f)).toEqual(['agent', 'model', 'effort', 'mode'])
-  expect(pickerRows({ agent: 'plain' }, cat).map((r) => r.f)).toEqual(['agent', 'model'])
+test('Standard is always available, while only supported faster tiers appear', () => {
+  expect(pickerRows({ ...pick, model: 'small' }, cat).map((r) => r.f)).toEqual(['agent', 'model', 'effort', 'speed', 'mode'])
+  expect(pickerRows({ agent: 'plain' }, cat).map((r) => r.f)).toEqual(['agent', 'model', 'speed'])
+  expect(choiceList('speed', { ...pick, model: 'small' }, cat).items.map((x) => x.label)).toEqual(['Standard'])
 })
 
 test("the Effort row opens a list of the model's own levels, with the picked one on", () => {
@@ -54,9 +55,9 @@ test("the Effort row opens a list of the model's own levels, with the picked one
   expect(choiceList('effort', { ...pick, model: 'small', effort: 'high' }, cat).items.map((x) => x.label)).toEqual(['Low', 'High'])
 })
 
-test('the Speed row opens Regular, Fast and Ultra-fast', () => {
+test('the Speed row opens Standard, Fast and Ultra-fast', () => {
   const s = choiceList('speed', { ...pick, fast: true }, cat)
-  expect(s.items.map((x) => [x.label, x.on])).toEqual([['Regular', false], ['Fast', true], ['Ultra-fast', false]])
+  expect(s.items.map((x) => [x.label, x.on])).toEqual([['Standard', false], ['Fast', true], ['Ultra-fast', false]])
   expect(s.items[2]!.pick.fast).toBe('ultrafast')
   expect(s.items[0]!.pick.fast).toBe(false)
   expect(pickerRows({ ...pick, fast: 'ultrafast' }, cat).find((r) => r.f === 'speed')!.value).toBe('Ultra-fast')

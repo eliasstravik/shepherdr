@@ -30,7 +30,7 @@ import { webBuild } from "./webbuild.ts";
 import { Model } from "./model.ts";
 import { checkFlags } from "./flags.ts";
 import type { Snapshot } from "../web/shared/types.ts";
-import { catalogOf, configOf, enrich, offPlugins, pluginOn, plansOf, reposOf, scheduleOf, setConfig, spaceRepo } from "./next.ts";
+import { catalogOf, configOf, enrich, offPlugins, pluginOn, plansOf, reposOf, scheduleAgentArgs, scheduleOf, setConfig, spaceRepo } from "./next.ts";
 import { ensureShell, type ShellAt } from "./shells.ts";
 import { Chats } from "./chats.ts";
 import { act, findMachines, hc as hcRun } from "./actions.ts";
@@ -756,12 +756,18 @@ async function doAction(body: any): Promise<Response> {
       else if (body.op === "pause") await tool(["pause", at.id]);
       else if (body.op === "resume") await tool(["resume", at.id]);
       else if (body.op === "edit") {
+        const agentArgs = body.agent ? scheduleAgentArgs(body.agent) : [];
+        if (agentArgs.length && !body.when && !body.what && !body.to) {
+          await tool(["edit", at.id, ...agentArgs]);
+          void model.refresh();
+          return json({ ok: true });
+        }
         const sp = (model.spaces as any[]).find((x) => x.id === body.place);
         if (!sp) throw new Error("Its space isn't here any more.");
         const to = typeof body.to === "string" ? (model.spaces as any[]).find((x) => x.id === body.to) : null;
         const word = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, 2000) : "");
         const lines = [word(body.when) && `- when it runs: ${word(body.when)}`, word(body.what) && `- what to do: ${word(body.what)}`, to && `- its space: ${to.name}${to.machine ? ` on ${to.machine}` : ""} (${to.folder})`,
-          body.agent?.agent && `- the agent its tasks run on: ${[body.agent.agent, body.agent.model, body.agent.effort, body.agent.fast === "ultrafast" ? "ultrafast" : body.agent.fast ? "fast" : "", body.agent.perm].filter(Boolean).join(", ")}`].filter(Boolean);
+          agentArgs.length && `- its agent choices: include these exact arguments in the same auto edit command: ${agentArgs.map((arg) => arg.startsWith("--") ? arg : JSON.stringify(arg)).join(" ")}`].filter(Boolean);
         if (!lines.length) return json({ ok: true });
         const text = `Change the schedule “${word(body.name)}” (herdr-task auto id ${at.id}, in ${at.folder}):\n${lines.join("\n")}\nSet it with herdr-task auto edit. If you can't make sense of the words, say so here and leave the schedule as it is.`;
         return json(await act(hub, { type: "send", chat: placeKey(sp.id), text, human: true, cid: `sched-${Date.now().toString(36)}` }, compat));

@@ -96,6 +96,14 @@ function action(a: Record<string, any>): unknown {
       : { ok: true, state: 'works', from: 'here', says: 'Works: ElevenLabs accepts this key.' }
   }
   if (a.type === 'catalog') return { ok: true, catalog: catalog(a.machine) }
+  if (a.type === 'restart' && (a.kind === 'claude' || a.kind === 'codex')) {
+    const chat = (chats[a.chat] ??= { key: a.chat, messages: [], cli: a.kind, top: true })
+    const model = catalog(state.normal.host).agents.find((agent) => agent.id === a.kind)?.models.find((m) => m.id === a.model)
+    chat.cli = a.kind
+    chat.agent = { kind: a.kind, model: a.model, modelLabel: model?.name, effort: a.effort, speed: a.speed ?? 'normal', perm: a.perm }
+    pushChat(a.chat)
+    return { ok: true }
+  }
   // Settings › Personal analytics: a fictional week (web/plugins/analytics)
   if (a.type === 'analytics') {
     if (a.do === 'state') return { ok: true, on: analytics.on, noted: analytics.noted }

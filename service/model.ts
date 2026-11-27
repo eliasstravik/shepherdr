@@ -360,7 +360,8 @@ export class Model {
         worker, archived: !!task.archived, pinned: pins.has(taskKey(list, task)),
         // 3.2: the facts the app works a status out from (service/next.ts enrich), as herdr-task keeps them
         x: { mode: task.mode ?? null, merged: !!task.merged, quiet: task.quiet ?? null, told: task.told ?? null, automation: task.automation ?? null, stopped_by: task.stopped_by ?? null, stopped_why: task.stopped_why ?? null,
-          merge_failed: task.merge_failed ?? null, attention_at: task.attention_at ?? null, after: task.after ?? null, closed_unmerged: !!task.closed_unmerged },
+          merge_failed: task.merge_failed ?? null, attention_at: task.attention_at ?? null, after: task.after ?? null, closed_unmerged: !!task.closed_unmerged,
+          pick: { agent: task.agent, model: task.model, effort: task.effort, speed: task.speed, perm: task.perm } },
         scheduled_for: task.state === "scheduled" ? task.scheduled_for ?? null : null,
         started: task.started ?? null, ready_at: task.ready_at ?? null, done_at: task.done_at ?? null,
         summary: task.summary ?? null, details: task.details ?? null, pr: task.pr ?? task.pr_seen ?? null, prompt: String(task.prompt ?? "").slice(0, 500), why: p.why ?? null,
