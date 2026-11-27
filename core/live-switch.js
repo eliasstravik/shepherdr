@@ -6,9 +6,12 @@
 //   Codex: /model opens a picker (model, then its reasoning level); "s" there applies it to this session only. /fast
 //   and /ultrafast toggle (the active one again: back to Standard) and save service_tier in ~/.codex/config.toml, put
 //   back the same way.
-// Another CLI or another permission mode still needs a restart (liveOK says which).
+// Another CLI or a Claude permission preset uses Restart.
 // `io` is where it runs: { send(text), keys(...names), screen(), readFile(rel), writeFile(rel, text), sleep(ms) }, rel
 // under the agent's machine's home.
+
+import { claudeSwitch } from "./chat-log.js";
+import { rowFor, speedOf } from "./agents.js";
 
 export const CLAUDE_SETTINGS = ".claude/settings.json";
 export const CODEX_CONFIG = ".codex/config.toml";
@@ -16,10 +19,9 @@ const CLAUDE_KEYS = ["model", "effortLevel", "fastMode", "modelSettings"];
 const CODEX_KEYS = ["model", "model_reasoning_effort", "service_tier"];
 const LEVEL = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", none: "None" };
 
-/** Whether the change from what runs (`from`: { agent, model, effort, fast, perm }) to `to` can happen in place:
- *  the same CLI and the same permission mode. */
+/** Codex can select exact permission presets in its own menu. Claude's launch modes use Restart. */
 export function liveOK(from, to) {
-  return !!from && !!to && from.agent === to.agent && (!to.perm || !from.perm || to.perm === from.perm);
+  return !!from && !!to && from.agent === to.agent && (from.agent === "codex" || !to.perm || to.perm === from.perm);
 }
 
 /** What changes: { model, effort, fast } (each only when it differs; model/effort '' for the CLI's default; fast
@@ -32,14 +34,15 @@ export function liveChanges(from, to) {
   if (out.model !== undefined || effort !== (from.effort ?? "")) out.effort = effort;
   const speed = (f) => (f === "ultrafast" ? "ultrafast" : !!f);
   if (speed(to.fast) !== speed(from.fast)) { out.fast = speed(to.fast); if (from.fast === "ultrafast") out.wasFast = "ultrafast"; }
+  if (to.perm && to.perm !== from.perm) out.perm = to.perm;
   return out;
 }
 
 /** Claude Code's commands for the changes, in order: [{ text, done: RegExp, fail?: RegExp }]. */
 export function claudeCommands(ch) {
   const out = [];
-  const speed = { text: `/fast ${ch.fast ? "on" : "off"}`, done: new RegExp(`Fast mode ${ch.fast ? "ON" : "OFF"}\\b`),
-    fail: /Fast mode (?:unavailable|is not available|has been disabled|requires)[^\n]*/i };
+  const speed = { text: `/fast ${ch.fast ? "on" : "off"}`, done: /Fast mode (?:ON|OFF)\b/,
+    fail: /Fast mode (?:unavailable|is (?:not available|disabled)|has been disabled|requires)[^\n]*/i };
   // Turning Fast off before leaving a model keeps /fast on a model that supports it.
   if (ch.fast === false) out.push(speed);
   if (ch.model !== undefined) out.push({ text: `/model ${ch.model || "default"}`, done: /Set model to /, fail: /(?:Model .*not (?:found|available)|Invalid model|isn't available|not a valid model)[^\n]*/i });
@@ -48,19 +51,50 @@ export function claudeCommands(ch) {
   return out;
 }
 
-const echoed = (line, text) => line.replace(/^[\s❯>›»]+/, "").trimEnd() === text;
-/** The screen's text after the newest line that echoes `text` as typed (the command's own answer), or null. */
-export function after(screen, text) {
-  const lines = String(screen ?? "").split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) if (echoed(lines[i], text)) return lines.slice(i + 1).join("\n");
-  return null;
-}
-/** How many lines echo `text` as typed, or match `re`: what grows once a command was taken. */
-export const echoes = (screen, text) => String(screen ?? "").split("\n").filter((l) => echoed(l, text)).length;
+/** How many lines match the CLI's confirmation. */
 export const count = (screen, re) => String(screen ?? "").split("\n").filter((l) => re.test(l)).length;
 
 /** Claude Code asking whether to switch a model whose conversation is cached ("Switch model?"): its Yes is first. */
 export const claudeAsksSwitch = (screen) => /Switch model\?/.test(screen ?? "") && /❯\s*1\.\s*Yes/.test(screen ?? "");
+
+/** The latest composer line from the agent's own terminal. Preserve any draft already there. */
+function composer(kind, screen) {
+  const prompt = String(screen).split("\n").findLast((line) => kind === "codex" ? /^\s*[›»](?:\s|$)/.test(line) : /^❯(?:\s|$)/.test(line));
+  return prompt?.replace(/^\s*[›»❯]\s*/, "").trim();
+}
+
+export function emptyPrompt(kind, screen) {
+  const text = composer(kind, screen);
+  if (kind === "claude") return text === "" || /^Try ["“].+["”]$/.test(text ?? "");
+  return !codexPicker(screen) && (text === "" || text === "Ask Codex to do anything");
+}
+
+/** Model, effort and speed as rendered by a newly started interactive CLI. */
+export function restartReport(kind, screen, names) {
+  if (kind === "codex") {
+    for (const line of String(screen).split("\n").slice(-15).reverse()) {
+      if (!/^\s{2}\S/.test(line) || !line.includes(" · ")) continue;
+      const fields = line.trim().split(" · ")[0];
+      const match = /^(.+?)(?: (minimal|low|medium|high|xhigh|max|ultra|none|extra high))?(?: (fast|ultrafast))?$/i.exec(fields);
+      const model = match && Object.keys(names).find((id) => [id, names[id]].some((name) => squash(name) === squash(match[1])));
+      if (!model) continue;
+      const effort = match[2]?.toLowerCase().replace("extra high", "xhigh");
+      return { model, ...(effort ? { effort } : {}), speed: match[3]?.toLowerCase() ?? "standard" };
+    }
+    return null;
+  }
+  const lines = String(screen).split("\n");
+  const banner = lines.findLast((line) => /▝▜/.test(line));
+  const modelName = banner?.match(/▝▜[^ ]*\s+(.+?)(?: with | · |$)/)?.[1];
+  const answer = modelName && claudeSwitch("Set model to " + modelName);
+  if (!answer?.model || !emptyPrompt(kind, screen)) return null;
+  const effort = banner.match(/ with (\w+) effort/)?.[1];
+  const mode = lines.findLast((line) => /(?:plan mode|auto mode|accept edits|bypass permissions) on/.test(line));
+  const perm = mode?.includes("plan mode") ? "plan" : mode?.includes("auto mode") ? "auto" :
+    mode?.includes("accept edits") ? "acceptEdits" : mode?.includes("bypass permissions") ? "bypassPermissions" : "manual";
+  const speed = lines.some((line) => /^[─ ]+↯/.test(line)) ? "fast" : "standard";
+  return { ...answer, ...(effort ? { effort } : {}), speed, perm };
+}
 
 /** The settings file with the keys a command touched as they were before (null: nothing to put back). Only those
  *  keys: anything else written meanwhile stays. */
@@ -108,7 +142,7 @@ export function codexRestore(before, now) {
 export function codexRows(screen) {
   const lines = String(screen ?? "").split("\n");
   let start = -1;
-  for (let i = lines.length - 1; i >= 0; i--) if (/^\s*(Select Model|Select Reasoning|Advanced Reasoning)/.test(lines[i])) { start = i; break; }
+  for (let i = lines.length - 1; i >= 0; i--) if (/^\s*(Select Model|Select Reasoning|Advanced Reasoning|Update Model Permissions)/.test(lines[i])) { start = i; break; }
   if (start < 0) return [];
   const rows = [];
   for (const l of lines.slice(start + 1)) {
@@ -154,32 +188,73 @@ export function moveTo(rows, n) {
 async function waitFor(io, test, ms = 8000) {
   for (let t = 0; t < ms; t += 250) {
     const s = await io.screen();
-    if (test(s)) return s;
+    if (await test(s)) return s;
     await io.sleep(250);
   }
   return null;
 }
 
-/** Claude Code: the commands typed one by one, each waited for; its default put back. Resolves with what it ran. */
-async function claude(io, ch) {
+/** Read the effective preset from Codex's public /status display. */
+export async function codexPermission(io) {
+  const permission = /^\s*Permissions:\s+/;
+  const before = await io.screen();
+  await io.send("/status");
+  const s = await waitFor(io, (s) => freshAnswer(before, s, permission));
+  const value = freshAnswer(before, s, permission)?.replace(permission, "");
+  if (/^Read Only\b/i.test(value ?? "")) return "read-only";
+  if (/^(?:Full Access|Danger Full Access)\b/i.test(value ?? "")) return "full";
+  if (/^Workspace.*Approve for me\b/i.test(value ?? "")) return "approve";
+  if (/^Workspace\b/i.test(value ?? "")) return "auto";
+  return null;
+}
+
+const matches = (screen, re) => String(screen ?? "").split("\n").flatMap((line) => {
+  const match = re?.exec(line);
+  return match ? [line.slice(match.index).trim()] : [];
+});
+
+// Claude reports local commands in a transient footer during a turn, without echoing the command.
+function freshAnswer(before, screen, re) {
+  const old = matches(before, re), now = matches(screen, re);
+  const last = now.at(-1);
+  return last && (now.length > old.length || last !== old.at(-1)) ? last : null;
+}
+
+// Exclude model-generated text from the CLI's command echo and footer.
+function claudeFeedback(screen) {
+  const lines = String(screen).split("\n");
+  const border = lines.findLastIndex((line) => /^[─]{8,}/.test(line));
+  return lines.filter((line, i) => i > border && border >= 0 || /^\s*⎿\s/.test(line)).join("\n");
+}
+
+/** Claude Code: run one command at a time, read its answer, and restore the defaults it saved. */
+async function claude(io, ch, { confirmed, model }) {
   const before = await io.readFile(CLAUDE_SETTINGS).catch(() => null);
   try {
     for (const c of claudeCommands(ch)) {
-      // an answer counts only after this command's own echo (the same command may be on screen from before)
-      const was = echoes(await io.screen(), c.text);
+      const beforeCommand = await io.screen();
       await io.send(c.text);
-      let asked = false;
-      const s = await waitFor(io, (s) => {
-        const a = echoes(s, c.text) > was ? after(s, c.text) : null;
-        if (a !== null && (c.done.test(a) || c.fail?.test(a))) return true;
-        // a model whose conversation is cached asks first: Yes
-        if (!asked && claudeAsksSwitch(s)) { asked = true; void io.keys("enter"); }
+      let asked = false, answer, bad;
+      await waitFor(io, async (s) => {
+        bad = freshAnswer(claudeFeedback(beforeCommand), claudeFeedback(s), c.fail);
+        answer = freshAnswer(claudeFeedback(beforeCommand), claudeFeedback(s), c.done);
+        if (bad || answer) return true;
+        // A cached conversation asks before switching models.
+        if (!asked && !claudeAsksSwitch(beforeCommand) && claudeAsksSwitch(s)) { asked = true; await io.keys("enter"); }
         return false;
       });
-      const a = s ? after(s, c.text) : null;
-      if (!s || a === null) throw new Error(`Claude Code didn't answer ${c.text.split(" ")[0]}.`);
-      const bad = c.fail && !c.done.test(a) ? c.fail.exec(a) : null;
-      if (bad) throw new Error(bad[0].trim());
+      if (bad) throw new Error(bad);
+      const actual = claudeSwitch(answer);
+      if (!actual) throw new Error("Claude Code didn't answer " + c.text.split(" ")[0] + ".");
+      confirmed?.(actual);
+      const actualModel = actual.model && rowFor("claude", actual);
+      const expectedModel = c.text.startsWith("/model ") ? ch.model : actualModel && (ch.model ?? model);
+      if (expectedModel && expectedModel !== actualModel && expectedModel !== actual.model && expectedModel !== actual.alias)
+        throw new Error("Claude Code switched to a different model.");
+      if (c.text.startsWith("/effort ") && ch.effort && actual.effort !== ch.effort)
+        throw new Error("Claude Code selected a different effort.");
+      if (c.text.startsWith("/fast ") && speedOf(actual.speed) !== ch.fast)
+        throw new Error("Claude Code selected a different speed.");
     }
   } finally {
     if (before !== null) {
@@ -201,6 +276,7 @@ async function codex(io, ch, labels) {
   };
   try {
     const CHANGED = /^\s*•\s*Model changed to /, TIER = /^\s*•\s*Service tier set to /;
+    let fast = labels.fromFast;
     if (ch.model !== undefined || ch.effort !== undefined) {
       const was = count(await io.screen(), CHANGED);
       await io.send("/model");
@@ -231,23 +307,59 @@ async function codex(io, ch, labels) {
         s = await waitFor(io, (s) => count(s, CHANGED) > was);
         if (!s) throw new Error("Codex didn't confirm the change.");
       }
-    }
-    if (ch.fast !== undefined) {
-      // each a toggle of its own tier: Ultrafast's to go to or leave Ultrafast, else Fast's (SHEP-258)
-      const cmd = ch.fast === "ultrafast" || (!ch.fast && ch.wasFast === "ultrafast") ? "/ultrafast" : "/fast";
-      const name = cmd === "/ultrafast" ? "Ultrafast" : "Fast";
-      const was = count(await io.screen(), TIER);
-      await io.send(cmd);
-      const s = await waitFor(io, (s) => count(s, TIER) > was);
-      if (!s) throw new Error(`Codex didn't confirm ${name}.`);
-      const said = String(s).split("\n").filter((l) => TIER.test(l)).pop();
-      const now = /set to ultrafast/i.test(said) ? "ultrafast" : /set to (fast|priority)/i.test(said);
-      // a toggle: once more if it went the other way
-      if (now !== ch.fast) {
-        await io.sleep(300);
-        await io.send(cmd);
-        await io.sleep(1000);
+      const line = matches(s, CHANGED).at(-1);
+      const applied = /Model changed to ([\w.-]+)(?:\s+(minimal|low|medium|high|xhigh|max|ultra|none)\b)?/.exec(line ?? "");
+      if (!applied) throw new Error("Codex didn't confirm its model and effort.");
+      const [, model, effort] = applied;
+      labels.confirmed?.({ model, ...(effort ? { effort } : {}) });
+      const report = restartReport("codex", s, { [model]: model, ...labels.names });
+      if (report?.model === model) {
+        fast = speedOf(report.speed);
+        labels.confirmed?.({ speed: report.speed });
       }
+      if ((want && model !== want) || (labels.effort && effort !== labels.effort))
+        throw new Error("Codex selected a different model or effort.");
+    }
+    if (fast !== labels.toFast && (ch.fast !== undefined || ch.model !== undefined)) {
+      // A toggle can land on Standard first when the active tier was changed outside Shepherdr.
+      const cmd = labels.toFast === "ultrafast" || (!labels.toFast && fast === "ultrafast") ? "/ultrafast" : "/fast";
+      const setTier = async () => {
+        const beforeCommand = await io.screen();
+        await io.send(cmd);
+        const refused = /^\s*•\s*(?:Unrecognized command|.*(?:unavailable|not supported))/i;
+        const screen = await waitFor(io, (s) => freshAnswer(beforeCommand, s, TIER) || freshAnswer(beforeCommand, s, refused));
+        if (screen && freshAnswer(beforeCommand, screen, refused)) {
+          if (composer("codex", screen) === cmd) await io.keys("ctrl+u");
+          throw new Error("Codex didn't offer that speed for this model.");
+        }
+        const word = /set to (\w+)/i.exec(freshAnswer(beforeCommand, screen, TIER) ?? "")?.[1]?.toLowerCase();
+        if (!["default", "standard", "fast", "priority", "ultrafast"].includes(word))
+          throw new Error("Codex didn't confirm its speed.");
+        const actual = speedOf(word);
+        labels.confirmed?.({ speed: actual === "ultrafast" ? "ultrafast" : actual ? "fast" : "standard" });
+        return actual;
+      };
+      if (await setTier() !== labels.toFast && await setTier() !== labels.toFast)
+        throw new Error("Codex selected a different speed.");
+    }
+    if (ch.perm) {
+      const name = { auto: "Ask for approval", approve: "Approve for me", full: "Full Access", "read-only": "Read Only" }[ch.perm];
+      if (!name) throw new Error("Codex doesn't offer that permission mode.");
+      await io.send("/permissions");
+      const rows = codexRows(await waitFor(io, (s) => /Update Model Permissions[^]*enter select · esc back/.test(s)));
+      const row = rows.find((r) => r.label === name);
+      if (!row) throw new Error("Codex didn't open that permission mode.");
+      await pick(rows, row.n);
+      await io.keys("enter");
+      if (ch.perm === "full" && !row.current) {
+        const warning = await waitFor(io, (s) => /Enable full access\?[^]*›\s*1\. Yes, continue anyway/.test(s));
+        if (!warning) throw new Error("Codex didn't ask to confirm full access.");
+        await io.keys("enter");
+      }
+      if (!await waitFor(io, (s) => emptyPrompt("codex", s))) throw new Error("Codex didn't finish changing permissions.");
+      const perm = await codexPermission(io);
+      if (perm) labels.confirmed?.({ perm });
+      if (perm !== ch.perm) throw new Error("Codex didn't confirm the new permissions.");
     }
   } finally {
     if (before !== null) {
@@ -266,8 +378,8 @@ export async function switchLive(io, kind, from, to, labels = {}) {
   if (!Object.keys(ch).length) return ch;
   if (kind === "claude") {
     // A model switch can reset Fast (for example switching to Fable), even when the selected tier stays the same.
-    await claude(io, ch.model !== undefined && to.fast ? { ...ch, fast: true } : ch);
+    await claude(io, ch.model !== undefined && to.fast ? { ...ch, fast: true } : ch, { ...labels, model: from.model });
   }
-  else await codex(io, ch, { ...labels, model: from.model, effort: to.effort });
+  else await codex(io, ch, { ...labels, model: from.model, effort: to.effort, fromFast: from.fast ?? false, toFast: to.fast ?? false });
   return ch;
 }

@@ -938,6 +938,8 @@ export interface TaskBrief {
 
 export interface Chat {
   key: string
+  /** A change to a running chat's settings, while the agent applies it. */
+  settingsUpdate?: string
   /** the agent's and yours, and Shepherdr's update cards among them */
   messages: Message[]
   /** herdr says the agent works: the CLI takes what you send at its next step */
