@@ -305,6 +305,7 @@ function AgentPicker({ title, machine, start, typed, onChange, close, live }: { 
           </button>
         ))}
         {dirty && p.agent !== current.agent && !applying && <p className="muted">Changing the agent starts a new session here. Earlier messages stay.</p>}
+        {dirty && p.agent === current.agent && !applying && <p className="muted">This chat restarts with your changes.</p>}
         {error && <p className="c-red" role="alert">{error}</p>}
         <div className="acts" style={{ marginTop: 8 }}>
           <Btn kind="pri" onClick={() => void submit()} disabled={applying || !!phase}>

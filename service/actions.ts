@@ -505,12 +505,13 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (!["claude", "codex"].includes(b.kind)) throw new Error("Pick Claude Code or Codex.");
     const opt = (v: unknown) => (typeof v === "string" && /^[\w.\[\]-]{1,60}$/.test(v) ? v : undefined);
     const pick = { kind: b.kind, model: opt(b.model), effort: opt(b.effort), speed: opt(b.speed), perm: opt(b.perm) };
-    // the model menu (live): in place when only the model, level or Fast changes; the restart sheet restarts
+    const worker = b.chat.endsWith("/worker") ? compat.taskOf(b.chat.split("/")[0]) : null;
+    // The running chat picker reports the settings applied by the restarted session.
     if (b.live === true) {
-      const result = await (compat.agents as any).change(a, reader, pick, b.chat);
+      const result = await (compat.agents as any).change(a, reader, pick, b.chat, worker);
       return { ok: !result.error, ...result };
     }
-    const next = await compat.agents.restart(a, reader, pick);
+    const next = await compat.agents.restart(a, reader, pick, worker);
     return { ok: true, terminal: next };
   }
   if (b?.type === "agent-update" && typeof b.chat === "string" && compat.updates) {

@@ -1666,6 +1666,9 @@ def cmd_switch(args):
         live = [k for k in map(detail, live_agents(s.key(t))) if agent_running(k)]
         refresh_sessions(s, t, live)
         old = live[-1] if live else None
+        when_idle = getattr(args, "when_idle", False)
+        if when_idle and ((old or {}).get("status") or {}).get("state") in ("working", "blocked"):
+            raise Fail("Wait for this turn to finish, then update.")
         labels = (old or {}).get("labels") or {}
         # A given --space wins: the task moves there (#837); else the old agent's own space.
         space = ((bare(args.space) if args.space else None) or labels.get("herdr.task.space") or labels.get("herdr.space")
@@ -1686,7 +1689,8 @@ def cmd_switch(args):
             end_agent(s, t, old["address"])
             ended.append(old["address"])
         try:
-            a, resumed = start_again(s, t, space, args.agent, args.argv, parent=args.parent, nudge=SWITCH_NUDGE)
+            a, resumed = start_again(s, t, space, args.agent, args.argv, parent=args.parent,
+                                     nudge=None if when_idle else SWITCH_NUDGE)
         except Fail as e:
             if ended:
                 raise Fail(f"{e} The old agent {ended[0]} already ended: its work is kept, `herdr-task resume "

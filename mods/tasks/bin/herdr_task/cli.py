@@ -537,6 +537,7 @@ def main():
     c.add_argument("--space")
     c.add_argument("--parent")
     c.add_argument("--keep", action="store_true", help="add the agent beside the old one")
+    c.add_argument("--when-idle", action="store_true", help="leave an active turn alone and resume without a new message")
     c = sub.add_parser("_allow")  # Codex's PermissionRequest hook (own_argv)
     c.add_argument("--command", required=True)
     c.add_argument("--sandboxed", action="store_true")  # Codex's: its proof and commits run escalated (#866)

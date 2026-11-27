@@ -1,8 +1,4 @@
-// The model menu and restart from the web (2.1's restart sheet): what an agent runs on now and what its CLIs offer
-// (core/agents.js, as the window's model menu); and a pick applied by restarting the agent with the CLI's documented
-// flags, resuming the same conversation: herdr-task switch for a task's agent, the Assistant's restart.sh for an
-// Assistant, parked behind its chat. Nothing is switched in place by typing into the agent's own menus, and a turn is
-// never interrupted for it (Nothing that risks a ban).
+// The chat picker applies choices with the CLI’s documented session launch flags.
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
@@ -15,6 +11,7 @@ import { chatLabel } from "../core/spaces.js";
 import type { AgentPick, Message } from "../web/shared/types.ts";
 import { kindOf } from "../core/chat-reader.js";
 import { inFront } from "../core/send.js";
+import { settle } from "../core/pending.js";
 import * as SC from "../core/settings.js";
 import { spawn } from "./spawn.ts";
 
@@ -33,7 +30,8 @@ async function run(cmd: string[]) {
 type SettingsPick = { kind: string; model?: string; effort?: string; speed?: string; perm?: string };
 type AgentReport = { model?: string; alias?: string; effort?: string; speed?: string; perm?: string };
 type SettingsEvent = Message & { at: number };
-type Phase = "Applying…" | "Pausing to apply…" | "Restarting…";
+type Phase = "Applying…" | "Restarting…";
+type TaskRoute = { ref: string; folder: string; machine: string | null };
 
 const pickOf = (kind: string, c: any): AgentPick => ({
   agent: kind, model: rowFor(kind, c), effort: c.effort ?? null, fast: fastOf(c.fast), perm: c.perm ?? null,
@@ -58,7 +56,7 @@ export class Agents {
 
   onSettings: (() => void) | null = null;
   private updating = new Map<string, Phase>();
-  private applying = new Set<string>();
+  private restarting = new Set<string>();
   private reports = new Map<string, { terminalAt: number; at: number; report: AgentReport }>();
   private events = new Map<string, SettingsEvent[]>();
 
@@ -259,20 +257,23 @@ export class Agents {
     return { role: t.labels?.["herdr.task"] ? "task" : "coordinator", on, onKnown: true, onWords: line(c), want: on, clis, working: t.status?.state === "working" };
   }
 
-  /** Apply a pick by restarting the agent with its documented flags on the same conversation, one at a time per chat. */
-  async change(addr: string, reader: any, pick: SettingsPick, chat = addr) {
-    if (this.updating.has(chat)) throw new Error("This chat is already updating.");
-    this.progress(chat, "Restarting…");
-    try { return await this.apply(addr, reader, pick, chat); }
-    finally {
+  /** Apply a choice to this chat with the CLI's session launch flags. */
+  async change(addr: string, reader: any, pick: SettingsPick, chat = addr, route?: TaskRoute | null) {
+    if (this.updating.has(chat) || this.restarting.has(addr)) throw new Error("This chat is already updating.");
+    this.restarting.add(addr);
+    try {
+      this.progress(chat, "Applying…");
+      return await this.apply(addr, reader, pick, chat, route);
+    } finally {
+      this.restarting.delete(addr);
       this.updating.delete(chat);
       this.onSettings?.();
     }
   }
 
-  private async apply(addr: string, reader: any, pick: SettingsPick, chat: string) {
+  private async apply(addr: string, reader: any, pick: SettingsPick, chat: string, route?: TaskRoute | null) {
     const t: any = this.hub.terminals.get(addr);
-    if (!t || t.state !== "live") throw new Error("That agent isn't running.");
+    if (!t || t.state !== "live" || ["shell", "other"].includes(inFront(t) ?? "")) throw new Error("That agent isn't running.");
     if (t.status?.state === "working") throw new Error("It's busy with a turn. Switch once it's done, or stop it first.");
     if (t.status?.state === "blocked") throw new Error("Answer the agent's open question, then update.");
     const machine = addr.includes("/") ? addr.split("/")[0] : null;
@@ -280,8 +281,9 @@ export class Agents {
     const dflt = await this.defaults(kind, machine);
     let meta = this.meta(addr, t, reader?.conv?.meta) ?? {};
     if (t.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
-    const from = pickOf(kind, current(kind, argvOf(t), meta, dflt));
-    const to: AgentPick = { agent: pick.kind, model: pick.kind === kind && pick.model === from.model ? from.model : pick.model ?? null,
+    const prev = current(kind, argvOf(t), meta, dflt);
+    const from = pickOf(kind, prev);
+    const to: AgentPick = { agent: pick.kind, model: pick.kind === kind && pick.model === prev.model ? from.model : pick.model ?? null,
       effort: pick.effort ?? null, fast: speedOf(pick.speed), perm: pick.perm ?? from.perm };
     const same = (a: AgentPick, b: AgentPick) => a.agent === b.agent && (a.model ?? "") === (b.model ?? "") && (a.effort ?? "") === (b.effort ?? "")
       && (a.fast ?? false) === (b.fast ?? false) && (a.perm ?? "") === (b.perm ?? "");
@@ -289,7 +291,10 @@ export class Agents {
     const nextDefault = pick.kind === kind ? dflt : await this.defaults(pick.kind, machine);
     const names = Object.fromEntries([...menuFor(kind, dflt, from.model).models, ...menuFor(pick.kind, nextDefault, to.model).models].map((m: any) => [m.id, m.name]));
     let terminal: string | undefined, error: string | undefined;
-    try { terminal = await this.restart(addr, reader, pick); }
+    try {
+      this.progress(chat, "Restarting…");
+      terminal = await this.restart(addr, reader, pick, route, true);
+    }
     catch (e) { error = (e as Error).message; }
     // what it was started with: the CLI's own flags say so (its log confirms it on its next turn)
     const actual = error ? from : to;
@@ -300,7 +305,7 @@ export class Agents {
   }
 
   /** Restarts it on the picked CLI, model, effort and speed; resolves with the new agent's address. */
-  async restart(addr: string, reader: any, pick: { kind: string; model?: string; effort?: string; speed?: string; perm?: string }) {
+  async restart(addr: string, reader: any, pick: SettingsPick, route?: TaskRoute | null, whenIdle = false) {
     const t: any = this.hub.terminals.get(addr);
     if (!t) throw new Error("That agent isn't here any more.");
     // a restart mid-turn would cut it off: the pick waits until the turn is done (it used to switch in place then)
@@ -314,16 +319,26 @@ export class Agents {
     const pane = t.labels?.["herdr.chat"] ?? "";
     const task = t.labels?.["herdr.task"];
     if (task) {
-      const r = await run(["herdr-task", "switch", task, "--folder", fg?.cwd ?? t.cwd, "--argv", JSON.stringify(built.base), "--json"]);
+      const role = t.labels?.["herdr.role"];
+      if (role === "helper" || role === "reviewer") throw new Error("This agent runs with its own launch settings.");
+      const owner = route ? route.machine : addr.includes("/") ? addr.split("/")[0] : null;
+      const taskRun = async (args: string[]) => {
+        const { code, out, err } = await run(["herdr-task", ...args]);
+        return { code, stdout: out, stderr: err };
+      };
+      const r = await settle(taskRun, await taskRun([...(owner ? ["--on", owner] : []), "switch", route?.ref ?? task,
+        "--folder", route?.folder ?? fg?.cwd ?? t.cwd, "--argv", JSON.stringify(built.base), "--json",
+        ...(whenIdle ? ["--when-idle"] : [])]));
       let out: any = {};
-      try { out = JSON.parse(r.out || "{}"); } catch {}
-      if (r.code !== 0 || !out.terminal) throw new Error((r.err || r.out).trim() || "herdr-task switch failed");
+      try { out = JSON.parse(r.stdout || "{}"); } catch {}
+      if (r.code !== 0 || !out.terminal) throw new Error((r.stderr || r.stdout).trim() || "herdr-task switch failed");
       if (pane) await run([process.env.SHEPHERDR_HC || "hc", "label", out.terminal, `herdr.chat=${chatLabel(pane)}`, `herdr.chat.origin=${t.labels?.["herdr.chat.origin"] || addr}`]);
       this.used(pick);
       return out.terminal as string;
     }
     const p = spawn(["bash", RESTART, addr, JSON.stringify(built.argv)], { stdout: "pipe", stderr: "pipe", stdin: "ignore",
-      env: { ...process.env, HERDR_RESTART_CHAT: pane, ...(built.resume ? { HERDR_RESTART_RESUME: "1" } : {}) } });
+      env: { ...process.env, HERDR_RESTART_CHAT: pane, ...(built.resume ? { HERDR_RESTART_RESUME: "1" } : {}),
+        ...(whenIdle ? { HERDR_RESTART_WHEN_IDLE: "1" } : {}) } });
     const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text()]);
     const next = out.trim().split("\n").pop();
     if ((await p.exited) !== 0 || !next) throw new Error(err.trim() || "The agent didn't restart.");
