@@ -607,3 +607,12 @@ test("Codex's expired account and connector messages reach the chat from its own
   const chat = await read([error(expired), error("A tool failed"), error(connector)], "codex");
   expect(chat.items.map(({ kind, text }) => [kind, text])).toEqual([["error", expired], ["error", connector]]);
 });
+
+test("a call to an MCP tool leaves a place for its view (MCP Apps), with its server, tool and input", async () => {
+  const mcp = { type: "tool_use", id: "toolu_9", name: "mcp__flowbound__execute", input: { code: "return 1" }, caller: { type: "direct" } };
+  const c = await read([person, reply("m1", [mcp], { apiBlockIndex: 0 }), reply("m2", [call], { apiBlockIndex: 0 })]);
+  const apps = c.items.filter((x) => x.kind === "app");
+  expect(apps.length).toBe(1);
+  expect(apps[0]).toMatchObject({ server: "flowbound", tool: "execute", input: { code: "return 1" } });
+  expect(apps[0].id).toStartWith("mcp");
+});

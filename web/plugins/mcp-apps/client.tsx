@@ -25,6 +25,16 @@ type Call = {
 
 type Ask = { tool: string; args: unknown; answer: (ok: 'once' | 'always' | null) => void }
 
+/** the asks waiting, first shown: Always or No answers every one for that tool, Allow once only the first */
+export function answerAsks(asks: Ask[], ok: 'once' | 'always' | null): Ask[] {
+  const [first, ...rest] = asks
+  if (!first) return asks
+  first.answer(ok)
+  if (ok === 'once') return rest
+  for (const a of rest) if (a.tool === first.tool) a.answer(ok)
+  return rest.filter((a) => a.tool !== first.tool)
+}
+
 const INLINE_MAX = 640
 
 async function getJson(url: string) {
@@ -51,8 +61,13 @@ function AppView({ msg, chat }: { msg: Message; chat: Chat }) {
   const [fail, setFail] = useState<string | null>(null)
   const [near, setNear] = useState(false)
   const [height, setHeight] = useState(180)
+  // a view still 0 high a while after its call ended has nothing to show for it (its own choice, as Flowbound's
+  // execute with no run, table or workflow): the card folds away. Not at once: a view is 0 high while it loads.
+  const [folded, setFolded] = useState(false)
   const [mode, setMode] = useState<DisplayMode>('inline')
-  const [ask, setAsk] = useState<Ask | null>(null)
+  const [asks, setAsks] = useState<Ask[]>([])
+  const ask = asks[0] ?? null
+  const answer = (ok: 'once' | 'always' | null) => setAsks((l) => answerAsks(l, ok))
   const [link, setLink] = useState<string | null>(null)
   const box = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLIFrameElement>(null)
@@ -134,8 +149,7 @@ function AppView({ msg, chat }: { msg: Message; chat: Chat }) {
             const r = await fetch(`api/mcp-apps/${id}/call`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify({ method, params, ok }) })
             const j = await r.json().catch(() => ({}))
             if (j.ask) {
-              const answer = await new Promise<'once' | 'always' | null>((answer) => setAsk({ tool: String(params?.name ?? ''), args: params?.arguments, answer }))
-              setAsk(null)
+              const answer = await new Promise<'once' | 'always' | null>((answer) => setAsks((l) => [...l, { tool: String(params?.name ?? ''), args: params?.arguments, answer }]))
               if (!answer) throw { code: -32000, message: 'The person said no.' }
               ok = answer
               continue
@@ -156,8 +170,9 @@ function AppView({ msg, chat }: { msg: Message; chat: Chat }) {
           modeRef.current = m
           return m
         },
+        // a view that says 0 high has nothing to show for this call (its own choice): the card folds away
         resize(h) {
-          if (h && h > 0) setHeight(Math.ceil(h))
+          if (h !== undefined && h >= 0) setHeight(Math.ceil(h))
         },
         context,
         close: () => setMode('inline'),
@@ -192,6 +207,14 @@ function AppView({ msg, chat }: { msg: Message; chat: Chat }) {
     if (call) bridge.current?.update({ state: call.state, result: call.result, error: call.error })
   }, [call?.state, call?.result, call?.error])
 
+  const done = call?.state !== undefined && call.state !== 'running'
+  useEffect(() => {
+    setFolded(false)
+    if (height !== 0 || !done || html === null) return
+    const t = setTimeout(() => setFolded(true), 1500)
+    return () => clearTimeout(t)
+  }, [height, done, html])
+
   useEffect(() => {
     if (mode !== 'fullscreen') return
     const key = (e: KeyboardEvent) => {
@@ -208,6 +231,7 @@ function AppView({ msg, chat }: { msg: Message; chat: Chat }) {
   const name = `${msg.app.server} · ${msg.app.tool}`
   const err = fail ?? call?.view?.error ?? null
   const full = mode === 'fullscreen'
+  const empty = folded && !full && !err && height === 0 && !asks.length && !link
   const toggle = () => {
     const m: DisplayMode = full ? 'inline' : 'fullscreen'
     setMode(m)
@@ -216,7 +240,7 @@ function AppView({ msg, chat }: { msg: Message; chat: Chat }) {
     bridge.current?.contextChanged({ displayMode: m })
   }
   return (
-    <div ref={box} className={cx('mcpv', full && 'full', call?.view?.meta?.prefersBorder === false && 'bare')} data-state={call?.state}>
+    <div ref={box} className={cx('mcpv', full && 'full', empty && 'mcpv-none', call?.view?.meta?.prefersBorder === false && 'bare')} aria-hidden={empty || undefined} data-state={call?.state}>
       <div className="mcpv-h">
         <I n="plug" c="s16" />
         <span className="mcpv-n">{name}</span>
@@ -227,7 +251,7 @@ function AppView({ msg, chat }: { msg: Message; chat: Chat }) {
       {err ? (
         <div className="mcpv-e">The view couldn't be shown: {err}</div>
       ) : (
-        <div className="mcpv-b" style={full ? undefined : { height: Math.min(Math.max(height, 60), INLINE_MAX) }}>
+        <div className="mcpv-b" style={full ? undefined : { height: empty ? 1 : Math.min(Math.max(height, 60), INLINE_MAX) }}>
           {near && html !== null && <iframe ref={frame} title={name} src={`api/mcp-apps/${id}/sandbox`} referrerPolicy="no-referrer" />}
           {(!near || html === null) && <div className="mcpv-l">Loading the view…</div>}
         </div>
@@ -239,9 +263,9 @@ function AppView({ msg, chat }: { msg: Message; chat: Chat }) {
             <code>{brief(ask.args)}</code>
           </div>
           <div className="acts">
-            <Btn small onClick={() => ask.answer(null)}>No</Btn>
-            <Btn small onClick={() => ask.answer('always')}>Always</Btn>
-            <Btn small kind="pri" onClick={() => ask.answer('once')}>Allow once</Btn>
+            <Btn small onClick={() => answer(null)}>No</Btn>
+            <Btn small onClick={() => answer('always')}>Always</Btn>
+            <Btn small kind="pri" onClick={() => answer('once')}>Allow once</Btn>
           </div>
         </div>
       )}

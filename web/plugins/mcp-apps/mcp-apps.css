@@ -13,7 +13,11 @@
 .mcpv-q{font-size:14px;line-height:20px;color:var(--fg);overflow-wrap:anywhere}
 .mcpv-q code{display:block;margin-top:4px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:18px;color:var(--sub);max-height:72px;overflow:auto}
 .mcpv-ask .acts{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
-.mcpv.full{position:fixed;inset:0;z-index:60;max-width:none;margin:0;border:0;border-radius:0;grid-template-rows:auto 1fr auto;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+.mcpv.full{position:fixed;inset:0;z-index:61;max-width:none;margin:0;border:0;border-radius:0;grid-template-rows:auto 1fr auto;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
 .mcpv.full .mcpv-b{height:auto;min-height:0}
 @media (prefers-reduced-motion:reduce){.mcpv-b{transition:none}}
 :root[data-motion=reduced] .mcpv-b{transition:none}
+/* the chat column's fade mask clips everything inside it, a fixed layer too: off while a view is full screen */
+.scroll:has(.mcpv.full){mask:none!important;-webkit-mask:none!important}
+.mcpv.mcpv-none{margin:0;border:0;opacity:0;pointer-events:none}
+.mcpv.mcpv-none .mcpv-h{display:none}
