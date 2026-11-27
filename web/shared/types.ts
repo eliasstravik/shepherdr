@@ -895,6 +895,10 @@ export interface Need {
   at: number
   question?: Question
   secret?: SecretAsk
+  /** An inferred task wait the space's Assistant handles first. It stays visible in the app. */
+  assistantFirst?: true
+  /** A step the person needs to take in the agent's browser or desktop. */
+  hands?: true
   /** no card: what the agent last said, or why it waits, answered with a reply */
   text?: string
   /** no card: the message that text is, for the reply to quote */

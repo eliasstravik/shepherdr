@@ -340,6 +340,7 @@ export function enrich(snap: Snapshot, f: Facts): Snapshot {
     const open = all.filter((x: any) => x.section !== "done");
     return open.length ? open : all.slice(0, 1);
   };
+  let needs = snap.needs;
   const tasks: Task[] = snap.tasks.map((t0) => {
     let t = t0;
     const r = rowOf.get(t.id);
@@ -350,9 +351,16 @@ export function enrich(snap: Snapshot, f: Facts): Snapshot {
     const card = f.asked(chat);
     const rep = f.reportOf(r.worker);
     // stuck on a step only a person can do, asked through its browser or desktop tools: Needs you · Needs your hands
-    const hands = !!f.screens?.[`task:${t.id}`]?.hands && !f.screens[`task:${t.id}`]!.hands!.settled && t.status === "work";
-    if (hands) t = { ...t, status: "need" };
-    const blocked = t.status !== "need" ? undefined : hands ? "auth" : card ?? (rep?.kind === "auth" ? "auth" : rep?.kind === "permission" || rep?.kind === "question" ? rep.kind : rep?.state === "blocked" ? "prompt" : undefined);
+    const hands = f.screens?.[`task:${t.id}`]?.hands;
+    const handsOpen = hands && !hands.settled && !t.archived && (t.status === "work" || t.status === "need");
+    if (handsOpen) {
+      t = { ...t, status: "need" };
+      if (!needs.some((n) => n.task === t.id && !n.assistantFirst && !n.question?.queued)) {
+        needs = [...needs.filter((n) => n.task !== t.id || !n.assistantFirst),
+          { id: "hands", hands: true, chat, task: t.id, place: t.place, at: t.needsAt ?? t.at ?? 0, text: hands.what }];
+      }
+    }
+    const blocked = t.status !== "need" ? undefined : handsOpen ? "auth" : card ?? (rep?.kind === "auth" ? "auth" : rep?.kind === "permission" || rep?.kind === "question" ? rep.kind : rep?.state === "blocked" ? "prompt" : undefined);
     const stopped = x.stopped_by && t.status !== "done" && t.status !== "work" ? { by: x.stopped_by as "you" | "error" | "limit", ...(x.stopped_why ? { why: String(x.stopped_why).slice(0, 200) } : {}) } : undefined;
     const waits = waitsFor(r, x.after);
     const after = waits[0]?.title as string | undefined;
@@ -381,7 +389,7 @@ export function enrich(snap: Snapshot, f: Facts): Snapshot {
   const plans = f.config.plans;
   // a machine is named by its own name, this one too (never "This computer": the app is opened from other devices)
   const machines = snap.machines.map((m) => (m.here && (m.name === "This computer" || !m.name) ? { ...m, name: f.hostName || m.machine } : m));
-  return { ...snap, machines, places, tasks, automations, ...(f.screens && Object.keys(f.screens).length ? { screens: f.screens } : {}), ...(everything ? { everything } : {}), config: f.config, warnings: warningsOf(snap, plans), off: offPlugins() };
+  return { ...snap, machines, places, tasks, needs, automations, ...(f.screens && Object.keys(f.screens).length ? { screens: f.screens } : {}), ...(everything ? { everything } : {}), config: f.config, warnings: warningsOf(snap, plans), off: offPlugins() };
 }
 
 /* ---------- schedules ---------- */

@@ -9,7 +9,7 @@ import { alertsOf } from "./push.ts";
 const card = { id: "scr-t7-1", addr: "t7", cli: "Claude Code", state: "open", opened: 1000, words: "Quick safety check",
   all: "/home/me/dev/shop\n\nQuick safety check: Is this a project you created or one you trust?\n\n   1. Yes, I trust this folder\n   2. No, exit",
   choices: [{ label: "Yes, I trust this folder" }, { label: "No, exit" }], at: 0 };
-const snapOf = (terms: any[] = [], cards = [card], section = "needs") => {
+const snapOf = (terms: any[] = [], cards = [card], section = "needs", needs = "asks") => {
   const c = new Compat() as any;
   c.terminalsOf = (a: string) => terms.find((k) => k.address === a) ?? null;
   c.terminalsAll = () => terms;
@@ -17,10 +17,21 @@ const snapOf = (terms: any[] = [], cards = [card], section = "needs") => {
   c.assistantPick = () => null;
   c.watch = { openCards: () => cards, openCard: () => null, cardsOf: () => [] };
   const spaces = [{ id: "sp1", name: "shop", folder: "/home/me/dev/shop", machine: null, assistant: null }];
-  const rows = [{ ref: "SHOP-1", slug: "dev-shop", id: 1, title: "Fix the cart", section, sub: "Asks to trust this folder", machine: null,
+  const rows = [{ ref: "SHOP-1", slug: "dev-shop", id: 1, title: "Fix the cart", section, needs, sub: "Asks to trust this folder", machine: null,
     folder: "/home/me/dev/shop", list: "shop", kind: "repo", space: "sp1", worker: "t7", started: 500 }];
   return { c, snap: c.snapshot({ host: "mini", user: "me", machines: [], spaces, sections: [], rows }) };
 };
+
+test("an inferred wait stays visible while a handoff alerts for that task", () => {
+  const { snap } = snapOf([], [], "needs", "reply");
+  expect(snap.needs).toMatchObject([{ task: "SHOP-1", assistantFirst: true }]);
+  expect(alertsOf(snap).size).toBe(0);
+  expect(glanceOf(snap, alertsOf(snap), 2000).items).toMatchObject([{ task: "SHOP-1", alert: false }]);
+  snap.alerts = [{ id: "handoff", task: "SHOP-1", at: 1900, place: "sp1", title: "Approve the cost?", body: "The store asks for payment.", notify: true }];
+  const alerts = alertsOf(snap);
+  expect(alerts.get("alert:handoff")?.url).toBe("./?place=sp1&task=SHOP-1");
+  expect(glanceOf(snap, alerts, 2000).items).toMatchObject([{ task: "SHOP-1", title: "Approve the cost?", alert: true }]);
+});
 
 test("its worker's trust screen has one Needs you card with the original choices", () => {
   const { snap } = snapOf();

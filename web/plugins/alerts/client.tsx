@@ -20,7 +20,7 @@ export function showCount(n: number) {
 /** close the alerts about what no longer waits on you, or is on screen now */
 async function tidy(keep: string[]) {
   const reg = await navigator.serviceWorker?.getRegistration()
-  for (const n of (await reg?.getNotifications()) ?? []) if (n.data?.waits && !keep.includes(n.tag)) n.close()
+  for (const n of (await reg?.getNotifications()) ?? []) if (n.data?.resolved || (n.data?.waits && !keep.includes(n.tag))) n.close()
 }
 
 function Keeper() {

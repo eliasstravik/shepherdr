@@ -87,18 +87,23 @@ export function needsYou(snap: NeedsSnap, now = Date.now()): Waiting[] {
   const add = (w: Waiting) => { if (taken.has(w.task)) return; taken.add(w.task); out.push(w) }
   // A task's oldest blocking card stands for it. Queued questions are individual items alongside its Working row.
   const needs = [...snap.needs].sort((a, b) => a.at - b.at)
+  const forAssistant: Waiting[] = []
   for (const n of needs) {
     if (!n.task || !open(n.task)) continue
     const item: Waiting = { key: `need:${n.chat}:${n.id}`, type: 'need', at: n.at, place: n.place, task: n.task, need: n }
-    if (n.question?.queued) out.push(item)
+    if (n.assistantFirst) forAssistant.push(item)
+    else if (n.question?.queued) out.push(item)
     else add(item)
   }
-  for (const t of snap.tasks) if (t.status === 'need' && !t.archived) add({ key: `task:${t.id}`, type: 'task', at: t.at ?? 0, place: t.place, task: t.id })
+  const inferred = new Set(forAssistant.map((w) => w.task))
+  for (const t of snap.tasks) if (t.status === 'need' && !t.archived && !inferred.has(t.id)) add({ key: `task:${t.id}`, type: 'task', at: t.at ?? 0, place: t.place, task: t.id })
   for (const a of snap.alerts ?? []) {
     const t = taskOfAlert(snap, a)
     if (!t || !alertStands(a, snap, now)) continue
     add({ key: `alert:${a.id}`, type: 'alert', at: Number(a.at) || 0, place: t.place, task: t.id, alert: a })
   }
+  // An explicit handoff can stand for a task whose inferred wait is still in the list.
+  for (const w of forAssistant) add(w)
   return out.sort((a, b) => a.at - b.at || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
 }
 

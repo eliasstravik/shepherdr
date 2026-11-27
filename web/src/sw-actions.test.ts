@@ -58,6 +58,17 @@ function worker(answer: (body: any) => { status: number; body: unknown }, opts: 
 
 const ready = { title: 'Fix login · Ready for review', body: 'Tap to look at it.', tag: 'HERD-4', waits: true, url: './?place=sp1&task=HERD-4', actions: [{ action: 'accept', title: 'Mark as done' }], accept: { task: 'HERD-4' } }
 
+test('a cleared wait replaces its notification quietly and has no answer button', async () => {
+  const w = worker(() => ({ status: 200, body: { ok: true } }))
+  await w.push({ title: 'Fix login · Needs you', tag: 'HERD-4', waits: true, actions: [{ action: '0', title: 'Yes' }] })
+  await w.push({ title: 'No longer waiting', body: 'Fix login', tag: 'HERD-4', waits: true, resolved: true, open: [], badge: 0 })
+  expect(w.closed).toContain('Fix login · Needs you')
+  expect(w.shown.at(-1)).toMatchObject({ title: 'No longer waiting', options: { tag: 'HERD-4', silent: true, renotify: false } })
+  expect(w.shown.at(-1)!.options.actions).toBeUndefined()
+  await w.push({ ...ready, open: ['HERD-4'] })
+  expect(w.closed).toContain('No longer waiting')
+})
+
 test("Accept on a ready task's alert accepts it as the Tasks panel does, and says so", async () => {
   const w = worker(() => ({ status: 200, body: { ok: true } }))
   await w.push(ready)

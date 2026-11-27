@@ -505,7 +505,10 @@ export class Compat {
     });
 
     const needs: Need[] = [
-      ...rows.filter((r) => r.section === "needs" && !r.archived).map((r) => ({ id: "attention", chat: `${taskId(r)}/worker`, place: placeOf(r), task: taskId(r), at: r.started ?? Date.now(), text: r.sub ?? "" })),
+      ...rows.filter((r) => r.section === "needs" && !r.archived).map((r) => ({
+        id: "attention", chat: `${taskId(r)}/worker`, place: placeOf(r), task: taskId(r), at: r.started ?? Date.now(), text: r.sub ?? "",
+        ...(r.needs !== "asks" ? { assistantFirst: true as const } : {}),
+      })),
       ...spaces.filter((s) => ["blocked", "stopped"].includes(s.assistantStatus)).map((s) => ({ id: "attention", chat: placeKey(s.id), place: s.id, at: Date.now(), text: s.assistantStatus === "stopped" ? "Stopped" : "Waits for you" })),
     ];
 
