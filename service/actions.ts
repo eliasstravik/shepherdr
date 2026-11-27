@@ -555,7 +555,10 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     const opt = (v: unknown) => (typeof v === "string" && /^[\w.\[\]-]{1,60}$/.test(v) ? v : undefined);
     const pick = { kind: b.kind, model: opt(b.model), effort: opt(b.effort), speed: opt(b.speed), perm: opt(b.perm) };
     // the model menu (live): in place when only the model, level or Fast changes; the restart sheet restarts
-    if (b.live === true) return { ok: true, ...(await (compat.agents as any).change(a, reader, pick)) };
+    if (b.live === true) {
+      const result = await (compat.agents as any).change(a, reader, pick, b.chat);
+      return { ok: !result.error, ...result };
+    }
     const next = await compat.agents.restart(a, reader, pick);
     return { ok: true, terminal: next };
   }

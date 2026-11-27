@@ -3,16 +3,18 @@
 // the CLI's own commands, the same conversation); and a restart for what can't change in place (another CLI or
 // permission mode): herdr-task switch for a task's agent, the Assistant's restart.sh for an Assistant, parked behind
 // its chat.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { createHash } from "node:crypto";
 import type { Hub } from "./hub.ts";
 import { where, writable } from "./paths.ts";
 import { exec, sh } from "./model.ts";
-import { RESTART } from "./paths.ts";
+import { DATA, RESTART } from "./paths.ts";
 import * as AG from "../core/agents.js";
 import { chatLabel } from "../core/spaces.js";
+import type { AgentPick, Message } from "../web/shared/types.ts";
 import { kindOf } from "../core/chat-reader.js";
-import { inFront } from "../core/send.js";
+import { inFront, restRecord } from "../core/send.js";
 import * as LS from "../core/live-switch.js";
 import * as SC from "../core/settings.js";
 import { spawn } from "./spawn.ts";
@@ -30,8 +32,80 @@ async function run(cmd: string[]) {
   return { code: await p.exited, out, err };
 }
 
+type SettingsPick = { kind: string; model?: string; effort?: string; speed?: string; perm?: string };
+type AgentReport = { model?: string; alias?: string; effort?: string; speed?: string; perm?: string };
+type SettingsEvent = Message & { at: number };
+type Phase = "Applying…" | "Pausing to apply…" | "Restarting…";
+
+const pickOf = (kind: string, c: any): AgentPick => ({
+  agent: kind, model: rowFor(kind, c), effort: c.effort ?? null, fast: fastOf(c.fast), perm: c.perm ?? null,
+});
+
+function changesOf(before: AgentPick, after: AgentPick, names: Record<string, string>) {
+  const words: string[] = [];
+  if (before.agent !== after.agent) words.push("Agent: " + NAMES[after.agent]);
+  if (after.model && (before.agent !== after.agent || before.model !== after.model))
+    words.push("Model: " + (names[after.model] || AG.modelName(after.model)));
+  if (after.effort && before.effort !== after.effort) words.push("Effort: " + AG.levelName(after.effort));
+  if (after.perm && before.perm !== after.perm) words.push("Permissions: " + (AG.menuFor(after.agent, {}).perms.find((p: any) => p.id === after.perm)?.label ?? after.perm));
+  if (before.fast !== after.fast) {
+    const speed = after.fast === "ultrafast" ? "Ultra-fast" : after.fast ? "Fast" : "Standard";
+    words.push(words.length ? "Speed: " + speed : "Switched to " + speed);
+  }
+  return words.join(" · ");
+}
+
 export class Agents {
-  constructor(private hub: Hub) {}
+  constructor(private hub: Hub, private settingsDir = join(DATA, "chat-settings")) {}
+
+  onSettings: (() => void) | null = null;
+  private updating = new Map<string, Phase>();
+  private applying = new Set<string>();
+  private reports = new Map<string, { terminalAt: number; at: number; report: AgentReport }>();
+  private events = new Map<string, SettingsEvent[]>();
+
+  phase(chat: string) { return this.updating.get(chat); }
+
+  meta(addr: string, t: any, log: any) {
+    const record = this.reports.get(addr);
+    if (!record || record.terminalAt !== t?.created_ms || (log?.settingsAt ?? 0) > record.at) return log;
+    return { ...log, ...record.report, at: Math.max(log?.at ?? 0, record.at) };
+  }
+
+  private eventFile(chat: string) {
+    return join(this.settingsDir, createHash("sha256").update(chat).digest("hex") + ".jsonl");
+  }
+
+  settingsEvents(chat: string) {
+    let events = this.events.get(chat);
+    if (!events) {
+      try { events = readFileSync(this.eventFile(chat), "utf8").trim().split("\n").map((line) => JSON.parse(line)); }
+      catch { events = []; }
+      this.events.set(chat, events!);
+    }
+    return events!;
+  }
+
+  private recordEvent(chat: string, text: string) {
+    const event: SettingsEvent = { id: "settings:" + crypto.randomUUID(), who: "agent", at: Date.now(), text, recap: "heads" };
+    this.settingsEvents(chat).push(event);
+    try {
+      mkdirSync(writable(this.settingsDir), { recursive: true, mode: 0o700 });
+      appendFileSync(writable(this.eventFile(chat)), JSON.stringify(event) + "\n", { mode: 0o600 });
+    } catch (e) { console.error("Could not keep chat settings event:", (e as Error).message); }
+  }
+
+  private progress(chat: string, phase: Phase) {
+    this.updating.set(chat, phase);
+    this.onSettings?.();
+  }
+
+  private remember(addr: string, t: any, report: AgentReport) {
+    const old = this.reports.get(addr);
+    this.reports.set(addr, { terminalAt: t?.created_ms, at: Date.now(), report: {
+      ...(old && old.terminalAt === t?.created_ms ? old.report : {}), ...report,
+    } });
+  }
 
   /** The person's pinned and recent models (core/agents.js PICKS_FILE), as the window's model menu keeps them here */
   private picksPath = where()["model-picks"];
@@ -138,7 +212,7 @@ export class Agents {
     const kind = kindOf(t) ?? reader?.kind ?? "claude";
     const [claude, codex, have] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine), this.have(machine)]);
     const dflts: any = { claude, codex };
-    let meta = reader?.conv?.meta ?? {};
+    let meta = this.meta(addr, t, reader?.conv?.meta) ?? {};
     // a resumed conversation's log names the model it ran on before: until this process writes, its arguments say
     if (t.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
     const c = current(kind, argvOf(t), meta, dflts[kind]);
@@ -191,7 +265,7 @@ export class Agents {
     const kind = kindOf(t) ?? "claude";
     const [claude, codex] = await Promise.all([this.defaults("claude", machine), this.defaults("codex", machine)]);
     const dflt: any = { claude, codex };
-    const c = current(kind, t.foreground?.argv ?? t.argv ?? [], reader?.conv?.meta ?? {}, dflt[kind]);
+    const c = current(kind, argvOf(t), this.meta(addr, t, reader?.conv?.meta), dflt[kind]);
     const clis = ["claude", "codex"].map((k) => {
       const m = menuFor(k, dflt[k], k === kind ? c.model : null);
       return { kind: k, name: NAMES[k], models: m.models.map((x: any) => ({ id: x.id, label: x.name, efforts: x.efforts, ...(x.defaultEffort ? { defaultEffort: x.defaultEffort } : {}), ...(x.fast ? { fast: true } : {}), ...(x.ultrafast ? { ultrafast: true } : {}) })),
@@ -201,51 +275,132 @@ export class Agents {
     return { role: t.labels?.["herdr.task"] ? "task" : "coordinator", on, onKnown: true, onWords: line(c), want: on, clis, working: t.status?.state === "working" };
   }
 
-  /** The model menu's pick: in place when only the model, level or Fast changes (the same agent, its conversation
-   *  on), else a restart. Resolves with { live } or { terminal } (the restarted agent's address). */
-  async change(addr: string, reader: any, pick: { kind: string; model?: string; effort?: string; speed?: string; perm?: string }) {
+  /** Apply through the CLI's own controls, with one writer per chat and per agent config. */
+  async change(addr: string, reader: any, pick: SettingsPick, chat = addr) {
+    if (this.updating.has(chat)) throw new Error("This chat is already updating.");
+    this.progress(chat, "Applying…");
+    try { return await this.apply(addr, reader, pick, chat); }
+    finally {
+      this.updating.delete(chat);
+      this.onSettings?.();
+    }
+  }
+
+  private async apply(addr: string, reader: any, pick: SettingsPick, chat: string) {
     const t: any = this.hub.terminals.get(addr);
     if (!t || t.state !== "live") throw new Error("That agent isn't running.");
     const machine = addr.includes("/") ? addr.split("/")[0] : null;
     const kind = kindOf(t) ?? reader?.kind ?? "claude";
     const dflt = await this.defaults(kind, machine);
-    let meta = reader?.conv?.meta ?? {};
-    if (t.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
-    const c = current(kind, argvOf(t), meta, dflt);
-    const from = { agent: kind, model: rowFor(kind, c) ?? "", effort: c.effort ?? "", fast: fastOf(c.fast), perm: c.perm ?? "" };
-    // A running Claude reports a full model id, while /model uses its picker row (including the 1M variant).
-    const model = pick.kind === kind && pick.model === c.model ? from.model : pick.model ?? "";
-    const to = { agent: pick.kind, model, effort: pick.effort ?? "", fast: speedOf(pick.speed), perm: pick.perm ?? "" };
-    if (!LS.liveOK(from, to)) return { terminal: await this.restart(addr, reader, pick) };
-    const state = t.status?.state;
-    if (state === "working") throw new Error("It's busy with a turn. Switch once it's done, or stop it first.");
-    if (state === "blocked") throw new Error("It's waiting on a question. Answer it, then switch.");
-    const hc = (args: string[]) => run([process.env.SHEPHERDR_HC || "hc", ...args]);
-    // a send returns once a turn starts or ~5 s pass, and a command starts none: its answer on screen is what counts,
-    // so each is waited for only as long as a refusal takes (it comes at once), not for the rest
-    const io = {
-      send: async (text: string) => {
-        const p = this.hub.send(addr, text);
-        const r = await Promise.race([p, Bun.sleep(800).then(() => null)]);
-        if (r && r.code !== 0) throw new Error("It couldn't be reached to switch.");
-      },
-      keys: async (...keys: string[]) => { await hc(["keys", addr, ...keys]); },
-      screen: async () => (await hc(["read", addr, "--lines", "2000"])).out,
-      readFile: async (rel: string) => {
-        const r = await sh(this.hub, 'cat "$HOME/$1"', ["read", rel], machine);
-        if (r.code !== 0) throw new Error("no file");
-        return r.stdout;
-      },
-      writeFile: async (rel: string, text: string) => {
-        await sh(this.hub, 'printf %s "$2" > "$HOME/$1"', ["write", rel, text], machine);
-      },
-      sleep: (ms: number) => Bun.sleep(ms),
+    const running = () => {
+      let meta = this.meta(addr, t, reader?.conv?.meta) ?? {};
+      if (t.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
+      return current(kind, argvOf(t), meta, dflt);
     };
-    const names = Object.fromEntries(menuFor(kind, dflt, from.model || null).models.map((m: any) => [m.id, m.name]));
-    await LS.switchLive(io, kind, from, to, { names });
-    this.known.delete(`${machine ?? ""}|${kind}`);
-    this.used(pick);
-    return { live: true };
+    const prev = running(), from = pickOf(kind, prev);
+    const to: AgentPick = { agent: pick.kind, model: pick.kind === kind && pick.model === prev.model ? from.model : pick.model ?? null,
+      effort: pick.effort ?? null, fast: speedOf(pick.speed), perm: pick.perm ?? from.perm };
+    const inPlace = LS.liveOK(from, to);
+    if (inPlace && !Object.keys(LS.liveChanges(from, to)).length) return { current: from };
+    let names = Object.fromEntries(menuFor(kind, dflt, from.model).models.map((m: any) => [m.id, m.name]));
+    const lock = [machine ?? "", kind].join("|");
+    if (this.applying.has(lock)) throw new Error("Another chat is updating these agent settings. Try again in a moment.");
+    this.applying.add(lock);
+    let paused = false;
+    let actual = from;
+    let terminal: string | undefined, error: string | undefined;
+    let reportKnown = true;
+    const hc = async (args: string[]) => {
+      const r = await run([process.env.SHEPHERDR_HC || "hc", ...args]);
+      if (r.code !== 0) throw new Error("The agent couldn't be reached.");
+      return r.out;
+    };
+    try {
+      const get = async (where: string) => restRecord(JSON.parse(await hc(["get", where, "--json"])));
+      const screen = (where: string) => hc(["read", where, "--lines", "300"]);
+      const status = await get(addr);
+      if (status.state !== "live" || inFront(status) !== "agent") throw new Error("That agent isn't running.");
+      if (status.status?.state === "blocked") throw new Error("Answer the agent's open question, then update.");
+      const ioFor = (where: string, agent: string) => {
+        const keys = async (...keys: string[]) => { await hc(["keys", where, ...keys]); };
+        return {
+          send: async (text: string) => {
+            // Local keyboard input runs slash commands during a turn. Message delivery can steer or queue.
+            if (!LS.emptyPrompt(agent, await screen(where))) throw new Error("Clear the draft or close the open menu in the agent's terminal, then update.");
+            await keys(...[...text].map((key) => key === " " ? "space" : key));
+            await keys("enter");
+          },
+          keys,
+          screen: () => screen(where),
+          sleep: (ms: number) => Bun.sleep(ms),
+        };
+      };
+      // Model, effort and speed work during turns. Restart only when the CLI or a Claude launch preset changes.
+      if (!inPlace) {
+        if (!LS.emptyPrompt(kind, await screen(addr))) throw new Error("Clear the draft or close the open menu in the agent's terminal, then update.");
+        if (status.status?.state === "working") {
+          this.progress(chat, "Pausing to apply…");
+          const result = JSON.parse(await hc(["interrupt", addr, "--json", "--timeout", "10"]));
+          paused = result.outcome === "stopped";
+          const still = await get(addr);
+          if (still.status?.state === "working" || still.status?.state === "blocked")
+            throw new Error("The agent couldn't pause. Try again when its turn ends.");
+        }
+        this.progress(chat, "Restarting…");
+        terminal = await this.restart(addr, reader, pick);
+        reportKnown = false;
+        const nextDefault = pick.kind === kind ? dflt : await this.defaults(pick.kind, machine);
+        names = Object.fromEntries(menuFor(pick.kind, nextDefault, to.model).models.map((m: any) => [m.id, m.name]));
+        for (let i = 0; i < 40; i++) {
+          const next = await get(terminal);
+          if (next.state !== "live") throw new Error("The agent stopped during restart.");
+          const report = LS.restartReport(pick.kind, await screen(terminal), names);
+          if (report?.model) {
+            if (pick.kind === "codex") report.perm = await LS.codexPermission(ioFor(terminal, "codex"));
+            this.remember(terminal, next, report);
+            actual = pickOf(pick.kind, current(pick.kind, argvOf(next), report, nextDefault));
+            reportKnown = true;
+            if (!report.perm) error = "The agent restarted, but its permissions couldn't be confirmed.";
+            else if ((to.model && actual.model !== to.model) || (to.effort && actual.effort !== to.effort) || actual.fast !== to.fast || (pick.perm && actual.perm !== pick.perm))
+              error = "The agent restarted with different settings.";
+            break;
+          }
+          await Bun.sleep(250);
+        }
+        if (!reportKnown) throw new Error("The agent restarted, but its settings couldn't be read yet.");
+      } else {
+        const configEnv = kind === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
+        const own = status.foreground?.pid ? await sh(this.hub,
+          'if [ -r "/proc/$1/environ" ]; then tr "\\000" "\\n" < "/proc/$1/environ"; elif [ ! -d /proc/self ]; then ps -wwE -o command= -p "$1" | tr " " "\\n"; fi | sed -n "s/^$2=//p" | head -n 1',
+          ["config-dir", String(status.foreground.pid), configEnv], machine).catch(() => null) : null;
+        const dir = own?.stdout.trim();
+        const configPath = (rel: string) => dir?.startsWith("/") ? dir + "/" + rel.split("/").at(-1) : rel;
+        const io = {
+          ...ioFor(addr, kind),
+          readFile: async (rel: string) => {
+            const r = await sh(this.hub, 'case "$1" in /*) f=$1;; *) f=$HOME/$1;; esac; if [ -e "$f" ]; then cat "$f"; fi', ["read", configPath(rel)], machine);
+            if (r.code !== 0) throw new Error("No file");
+            return r.stdout;
+          },
+          writeFile: async (rel: string, text: string) => {
+            const r = await sh(this.hub, 'case "$1" in /*) f=$1;; *) f=$HOME/$1;; esac; printf %s "$2" > "$f"', ["write", configPath(rel), text], machine);
+            if (r.code !== 0) throw new Error("The agent's default settings couldn't be restored.");
+          },
+        };
+        await LS.switchLive(io, kind, from, to, { names, confirmed: (report: AgentReport) => this.remember(addr, t, report) });
+        this.known.delete(lock);
+        this.used(pick);
+      }
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      this.applying.delete(lock);
+    }
+    if (inPlace) actual = pickOf(kind, running());
+    const changed = reportKnown ? changesOf(from, actual, names) : "";
+    if (changed) this.recordEvent(chat, changed);
+    if (error) this.recordEvent(chat, (changed ? "Update partly applied. " : "Couldn't update settings. ") + error);
+    return { ...(reportKnown ? { current: actual } : {}), ...(error ? { error } : {}), ...(paused ? { paused } : {}), ...(terminal ? { terminal } : {}) };
   }
 
   /** Restarts it on the picked CLI, model, effort and speed; resolves with the new agent's address. */
@@ -294,7 +449,7 @@ export class Agents {
     const kind = kindOf(t) ?? known(reader?.kind) ?? known(rec?.kind) ?? known(named) ?? "claude";
     const path = reader?.kind === kind && reader?.path ? reader.path : known(rec?.kind) === kind && typeof rec?.log === "string" && rec.log.startsWith("/") ? rec.log : null;
     const machine = addr.includes("/") ? addr.split("/")[0] : null;
-    const c = current(kind, argv, reader?.conv?.meta ?? {}, await this.defaults(kind, machine).catch(() => null));
+    const c = current(kind, argv, this.meta(addr, t, reader?.conv?.meta) ?? {}, await this.defaults(kind, machine).catch(() => null));
     const pick = { kind, model: rowFor(kind, c) ?? undefined, effort: c.effort ?? undefined, speed: speedWordOf(c.fast), perm: c.perm ?? undefined };
     return this.restart(addr, { kind, path, argv }, pick);
   }

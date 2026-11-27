@@ -98,9 +98,16 @@ function action(a: Record<string, any>): unknown {
   if (a.type === 'catalog') return { ok: true, catalog: catalog(a.machine) }
   if (a.type === 'restart' && (a.kind === 'claude' || a.kind === 'codex')) {
     const chat = (chats[a.chat] ??= { key: a.chat, messages: [], cli: a.kind, top: true })
+    const previous = chat.agent
     const model = catalog(state.normal.host).agents.find((agent) => agent.id === a.kind)?.models.find((m) => m.id === a.model)
     chat.cli = a.kind
     chat.agent = { kind: a.kind, model: a.model, modelLabel: model?.name, effort: a.effort, speed: a.speed ?? 'normal', perm: a.perm }
+    if (a.live && previous) {
+      const speed = a.speed === 'ultrafast' ? 'Ultra-fast' : a.speed === 'fast' ? 'Fast' : 'Standard'
+      const text = (previous.speed ?? 'normal') !== chat.agent.speed ? 'Switched to ' + speed :
+        previous.model !== a.model ? 'Model: ' + (model?.name ?? a.model) : 'Updated chat settings'
+      say(a.chat, { recap: 'heads', text })
+    }
     pushChat(a.chat)
     return { ok: true }
   }

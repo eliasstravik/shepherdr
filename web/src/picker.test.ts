@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { Catalog } from '@shared/types.ts'
-import { choiceList, pickerRows, type Pick } from './picker.tsx'
+import { choiceList, pickerRows, samePick, type Pick } from './picker.tsx'
 
 // SHEP-333: the agent picker's rows are all one kind: a label, what is picked and a chevron, each opening its own list.
 // Effort and Speed used to be segmented switches beside them.
@@ -29,6 +29,14 @@ const cat: Catalog = {
 }
 
 const pick: Pick = { agent: 'claude', model: 'big', effort: 'medium', fast: false, perm: 'bypass' }
+
+test('Update appears only when the effective choice differs', () => {
+  const now = { ...pick, perm: null }
+  expect(samePick(now, { ...now, fast: undefined, perm: 'default' }, cat)).toBe(true)
+  expect(samePick(now, { ...now, model: 'big-version', label: 'Big 1' }, cat)).toBe(true)
+  for (const changed of [{ fast: 'ultrafast' as const }, { effort: 'high' }, { model: 'small' }, { perm: 'bypass' }, { agent: 'plain' }])
+    expect(samePick(now, { ...now, ...changed }, cat)).toBe(false)
+})
 
 test('every choice is a row, in the order Agent, Model, Effort, Speed, Permissions', () => {
   expect(pickerRows(pick, cat)).toEqual([

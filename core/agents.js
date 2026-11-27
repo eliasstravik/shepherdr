@@ -127,7 +127,7 @@ export function current(kind, argv, meta, dflt) {
     const big = /\[1m\]/.test(alias ?? "") || (meta.used ?? 0) > 200000;
     // Claude keeps an effort per model (modelSettings), known once the log names the model.
     const per = meta.model ? dflt.per?.[meta.model] ?? dflt.per?.[meta.model.replace(/-\d+$/, "")] : null;
-    const perm = argv.includes("--dangerously-skip-permissions") ? "bypassPermissions" : flag(argv, "--permission-mode") ?? dflt.mode ?? "manual";
+    const perm = meta.perm ?? (argv.includes("--dangerously-skip-permissions") ? "bypassPermissions" : flag(argv, "--permission-mode") ?? dflt.mode ?? "manual");
     return { agent: "claude", model: meta.model ?? alias, alias, effort: meta.effort ?? flag(argv, "--effort") ?? per ?? dflt.effort,
       fast: Boolean(fast), perm: perm === "default" ? "manual" : perm, used: meta.used ?? null, window: meta.window ?? (big ? 1000000 : 200000) };
   }
@@ -137,7 +137,7 @@ export function current(kind, argv, meta, dflt) {
   const sandbox = flag(argv, "-s", "--sandbox") ?? o.sandbox_mode ?? dflt.sandbox;
   const perm = argv.includes("--dangerously-bypass-approvals-and-sandbox") || sandbox === "danger-full-access" ? "full"
     : argv.includes("--approve-for-me") || argv.includes("--not-so-yolo") ? "approve" : sandbox === "read-only" ? "read-only" : "auto";
-  return { agent: "codex", model, label: dflt.models?.find((m) => m.id === model)?.label ?? null, perm,
+  return { agent: "codex", model, label: dflt.models?.find((m) => m.id === model)?.label ?? null, perm: meta.perm ?? perm,
     effort: meta.effort ?? o.model_reasoning_effort ?? dflt.effort,
     fast: meta.speed ? speedOf(meta.speed) : tier ? speedOf(tier) : dflt.fast === "ultrafast" ? "ultrafast" : Boolean(dflt.fast), used: meta.used ?? null, window: meta.window ?? null };
 }

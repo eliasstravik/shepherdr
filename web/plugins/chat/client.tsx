@@ -967,6 +967,7 @@ export function WorkingSign({ chat, thread }: { chat: Chat | undefined; thread?:
  *  last message, "1 background command running". No dots, no Stop: nobody is writing. Once that work wakes it, the
  *  working sign takes over as usual. */
 export function BackgroundNote({ chat }: { chat: Chat | undefined }) {
+  if (chat?.settingsUpdate) return <p className="bgnote" role="status">{chat.settingsUpdate}</p>
   if (!chat?.bgNote || chat.working || signOf(chat)) return null
   return <p className="bgnote" role="status">{chat.bgNote}</p>
 }
@@ -1117,8 +1118,17 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   // a line starting with `!` runs as a command in the agent's own shell (Claude Code, Codex); another agent has none,
   // so its words don't go and the box offers your own terminal
   const mode = commandMode(text, pick.agent)
-  const openAgent = (typed?: string) =>
-    openPicker({ title: thread.task ? 'This task runs on' : 'This chat runs on', machine, pick, typed, onChange: () => undefined, onClose: (now) => applyPick(key, pick, now, { agent: pickWords(now).agent }) })
+  const openAgent = (typed?: string) => {
+    const live = chat && !chat.fresh && !chat.finished && !!chat.agent
+    openPicker({ title: thread.task ? 'This task runs on' : 'This chat runs on', machine, pick, typed, onChange: () => undefined,
+      ...(live ? { live: {
+        chat: key,
+        update: (now: Pick) => act({ type: 'restart', chat: key, kind: now.agent, model: now.model ?? undefined,
+          effort: now.effort ?? undefined, speed: speedForAction(now), perm: now.perm ?? undefined, live: true }),
+        carryOn: () => send(key, key, 'Continue where you left off.'),
+      } } : { onClose: (now: Pick) => applyPick(key, pick, now, { agent: pickWords(now).agent }) }),
+    })
+  }
   const go = (wait = false) => {
     if (getState().ui.call && !TEXT_IN_CALL) return
     // a long paste folded into a chip goes as text, exactly as pasted, after what was typed

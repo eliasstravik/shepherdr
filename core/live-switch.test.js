@@ -1,16 +1,17 @@
 import { expect, test } from "bun:test";
-import { claudeCommands, claudeRestore, codexEffortRow, codexModelRow, codexPicker, codexRestore, codexRows, liveChanges, liveOK, moveTo, switchLive } from "./live-switch.js";
+import { claudeCommands, claudeRestore, codexEffortRow, codexModelRow, codexPicker, codexRestore, codexRows, emptyPrompt, liveChanges, liveOK, moveTo, restartReport, switchLive } from "./live-switch.js";
 import { claudeSwitch, Conversation, LOG, records } from "./chat-log.js";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { current, rowFor } from "./agents.js";
 
-test("only another CLI or permission mode needs a restart", () => {
+test("another CLI or a Claude launch preset needs a restart", () => {
   const from = { agent: "claude", model: "opus", effort: "high", fast: false, perm: "bypassPermissions" };
   expect(liveOK(from, { ...from, model: "sonnet", effort: "low", fast: true })).toBe(true);
   expect(liveOK(from, { ...from, agent: "codex" })).toBe(false);
   expect(liveOK(from, { ...from, perm: "plan" })).toBe(false);
+  expect(liveOK({ agent: "codex", perm: "auto" }, { agent: "codex", perm: "read-only" })).toBe(true);
 });
 
 test("a new model says its level again; nothing else that stays", () => {
@@ -117,6 +118,24 @@ test("Claude Code: the same command again waits for its own answer, not the last
   await expect(switchLive(t.io, "claude", { model: "opus", effort: "high" }, { model: "opus", effort: "low" })).rejects.toThrow("didn't answer");
 });
 
+test("Claude Code reads settings confirmations from the mid-turn footer", async () => {
+  const term = fakeTerm({ send: (text) => text === "/fast on"
+    ? "────────────\n❯\n────────────\n  esc to interrupt                    ↯ Fast mode ON · model set to Opus 5.5 · $8/$40 per Mtok\n"
+    : "" }, {});
+  const confirmed = [];
+  await switchLive(term.io, "claude", { model: "opus", fast: false }, { model: "opus", fast: true }, { confirmed: (r) => confirmed.push(r) });
+  expect(confirmed).toEqual([{ speed: "fast", model: "claude-opus-5-5", alias: "claude-opus-5-5" }]);
+});
+
+test("the CLI's composer and startup report distinguish drafts and the applied tier", () => {
+  expect(emptyPrompt("claude", '❯ Try "create a file…"\n────────────\n')).toBe(true);
+  expect(emptyPrompt("codex", "› This is my draft\n  GPT-6.2-Sol low · /project")).toBe(false);
+  expect(restartReport("codex", "› Ask Codex to do anything\n\n  GPT-6.2-Sol high ultrafast · /project\n", { "gpt-6.2-sol": "GPT-6.2 Sol" }))
+    .toEqual({ model: "gpt-6.2-sol", effort: "high", speed: "ultrafast" });
+  expect(restartReport("claude", "▝▜██████▀  Opus 5.5 with low effort · Claude Ultra\n────────────\n❯\n────────────\n  ⏸ plan mode on", {}))
+    .toEqual({ model: "claude-opus-5-5", alias: "claude-opus-5-5", effort: "low", speed: "standard", perm: "plan" });
+});
+
 test("Claude Code: switching from one Fast model to another reasserts Fast on the new model", async () => {
   const t = fakeTerm({ send: (text) => `❯ ${text}\n  ⎿  ${text === "/fast on" ? "Fast mode ON" : text.startsWith("/model") ? "Set model to Fable 5.2" : "Set effort level to high"}\n` }, {});
   await switchLive(t.io, "claude", { model: "opus", effort: "high", fast: true }, { model: "claude-fable-5-2", effort: "high", fast: true });
@@ -144,6 +163,19 @@ test("Codex: Fast toggled, and its saved tier put back", async () => {
   await switchLive(t.io, "codex", { model: "gpt-6-sol", effort: "high", fast: true }, { model: "gpt-6-sol", effort: "high", fast: false });
   expect(t.sent).toEqual(["/fast"]);
   expect(t.files[".codex/config.toml"]).toBe('service_tier = "fast"\n');
+});
+
+test("Codex reads applied permissions after choosing a preset", async () => {
+  const term = fakeTerm({
+    send: (text) => text === "/permissions"
+      ? "  Update Model Permissions\n› 1. Ask for approval (current)  Description\n  2. Read Only  Description\n  enter select · esc back\n"
+      : "  Permissions:         Read Only (Ask for approval)\n› Ask Codex to do anything\n",
+    keys: (names) => names.includes("enter") ? "› Ask Codex to do anything\n" : "",
+  }, {});
+  const confirmed = [];
+  await switchLive(term.io, "codex", { perm: "auto" }, { perm: "read-only" }, { confirmed: (r) => confirmed.push(r) });
+  expect(confirmed).toEqual([{ perm: "read-only" }]);
+  expect(term.sent).toEqual(["/permissions", "/status"]);
 });
 
 test("the log says what it runs on as soon as the switch is made", () => {
@@ -218,6 +250,15 @@ test("Codex: Ultrafast on, off and from Fast, each through /ultrafast or /fast",
   const twice = fakeTerm({ send: (text, f) => `• Service tier set to ${++n === 1 ? "default" : "ultrafast"}\n` }, {});
   await switchLive(twice.io, "codex", { model: "gpt-6.2-sol", fast: false }, { model: "gpt-6.2-sol", fast: "ultrafast" });
   expect(twice.sent).toEqual(["/ultrafast", "/ultrafast"]);
+});
+
+test("Codex reports an unconfirmed toggle as a failure and keeps the actual tier", async () => {
+  let sends = 0;
+  const confirmed = [];
+  const term = fakeTerm({ send: () => ++sends === 1 ? "• Service tier set to default\n" : "" }, {});
+  await expect(switchLive(term.io, "codex", { fast: true }, { fast: "ultrafast" }, { confirmed: (r) => confirmed.push(r) }))
+    .rejects.toThrow("didn't confirm its speed");
+  expect(confirmed).toEqual([{ speed: "standard" }]);
 });
 
 test("Codex's log saying ultrafast reads as Ultrafast", () => {

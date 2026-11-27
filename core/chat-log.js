@@ -668,8 +668,11 @@ export function claudeSwitch(text) {
   }
   m = /^(?:Set effort level to|Effort level set to) (\w+)/.exec(t);
   if (m) return { effort: m[1] };
-  m = /^Fast mode (ON|OFF)\b/.exec(t);
-  if (m) return { speed: m[1] === "ON" ? "fast" : "standard" };
+  m = /^(?:↯\s*)?Fast mode (ON|OFF)\b/.exec(t);
+  if (m) {
+    const model = /model set to (.+?)(?:\s+·|$)/i.exec(t)?.[1];
+    return { speed: m[1] === "ON" ? "fast" : "standard", ...(model ? claudeSwitch("Set model to " + model) : {}) };
+  }
   return null;
 }
 
@@ -1095,7 +1098,7 @@ export class Conversation {
     const local = l.type === "user" && typeof l.message?.content === "string" ? l.message.content : l.type === "system" && l.subtype === "local_command" && typeof l.content === "string" ? l.content : null;
     if (local?.startsWith("<local-command-stdout>")) {
       const meta = claudeSwitch(local);
-      if (meta) this.meta = { ...this.meta, ...meta, at: time(l.timestamp) };
+      if (meta) this.meta = { ...this.meta, ...meta, at: time(l.timestamp), settingsAt: time(l.timestamp) };
     }
     if (l.type === "queue-operation") { this.queueOp(l, off); return; }
     if (l.type === "system") {
@@ -1308,8 +1311,12 @@ export class Conversation {
     } else if (p.type === "thread_settings_applied" && p.thread_settings) {
       // its settings as applied: at start, and on a /model or /fast in place (SHEP-181)
       const t = p.thread_settings;
+      const profile = t.active_permission_profile?.id;
+      const perm = profile === ":read-only" ? "read-only" : t.permission_profile?.type === "disabled" ? "full" :
+        profile === ":workspace" ? (t.approvals_reviewer === "auto_review" ? "approve" : "auto") : null;
       this.meta = { ...this.meta, model: t.model ?? this.meta.model, effort: t.reasoning_effort ?? this.meta.effort,
-        ...(t.service_tier !== undefined ? { speed: t.service_tier === "ultrafast" ? "ultrafast" : ["fast", "priority"].includes(t.service_tier) ? "fast" : "standard" } : {}), at: time(l.timestamp) };
+        ...(perm ? { perm } : {}),
+        ...(t.service_tier !== undefined ? { speed: t.service_tier === "ultrafast" ? "ultrafast" : ["fast", "priority"].includes(t.service_tier) ? "fast" : "standard" } : {}), at: time(l.timestamp), settingsAt: time(l.timestamp) };
     } else if (l.type === "turn_context") {
       this.meta = { ...this.meta, model: p.model ?? this.meta.model, effort: p.effort ?? p.reasoning_effort ?? this.meta.effort, at: time(l.timestamp) };
     } else if (l.type === "event_msg" && p.type === "error" && typeof p.message === "string" &&

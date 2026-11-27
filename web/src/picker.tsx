@@ -6,7 +6,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { AgentPick, Catalog, CatalogAgent, CatalogModel, Snapshot } from '@shared/types.ts'
 import { everything, isEverything, machineLabel, machineOf, spaceName, spacesOf, unreachable } from '@shared/view.ts'
-import { act, getState } from './kernel.ts'
+import { act, getState, useChat } from './kernel.ts'
 import { openDialog } from './overlay.tsx'
 import { Btn, I, IB, Logo, Row } from './ui.tsx'
 import { SpaceIcon } from './space-icon.tsx'
@@ -220,15 +220,52 @@ export function choiceList(f: 'effort' | 'speed' | 'mode', p: Pick, cat?: Catalo
   }
 }
 
-function AgentPicker({ title, machine, start, typed, onChange, close }: { title: string; machine: string; start: Pick; typed?: string; onChange: (p: Pick) => void; close: () => void }) {
+export function samePick(a: Pick, b: Pick, cat?: Catalog) {
+  const agent = agentOf(cat, a.agent)
+  const key = (p: Pick) => modelOf(agent, p)?.id ?? p.model ?? null
+  return a.agent === b.agent && key(a) === key(b) && pickWords(a, cat).effort === pickWords(b, cat).effort &&
+    speedOf(a) === speedOf(b) && (a.perm ?? agent?.permDefault) === (b.perm ?? agent?.permDefault)
+}
+
+type LivePick = {
+  chat: string
+  update: (p: Pick) => Promise<{ current?: Pick; error?: string; paused?: boolean }>
+  carryOn: () => void
+}
+
+function AgentPicker({ title, machine, start, typed, onChange, close, live }: { title: string; machine: string; start: Pick; typed?: string; onChange: (p: Pick) => void; close: () => void; live?: LivePick }) {
   const snap = getState().snap
   const cat = useCatalog(machine)
   const [p, setP] = useState<Pick>(start)
+  const [current, setCurrent] = useState(start)
+  const [applying, setApplying] = useState(false)
+  const [error, setError] = useState('')
+  const [paused, setPaused] = useState(false)
+  const phase = useChat(live?.chat ?? '')?.settingsUpdate
   const [field, setField] = useState<'' | Field>('')
   const [q, setQ] = useState('')
   const set = (next: Pick) => {
     setP(next)
+    setError('')
     onChange(next)
+  }
+  const dirty = !!live && !samePick(current, p, cat)
+  const submit = async () => {
+    if (!live || !dirty) return close()
+    setError('')
+    setApplying(true)
+    try {
+      const r = await live.update(p)
+      if (r.current) {
+        setCurrent(r.current)
+        setP(r.current)
+      }
+      if (r.paused) setPaused(true)
+      if (r.error) setError(r.error)
+      else if (!r.paused) close()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'The update could not be confirmed.')
+    } finally { setApplying(false) }
   }
   // "/model sonnet" in a chat: once the models are read, the one it names is picked; a name no model has opens the
   // Model list searching for it
@@ -261,7 +298,7 @@ function AgentPicker({ title, machine, start, typed, onChange, close }: { title:
       <div className="pk">
         <PickerHead title={title} close={close} />
         {pickerRows(p, cat).map((r) => (
-          <button key={r.f} type="button" className="row row2" aria-label={`${r.label}: ${r.value}. Change`} onClick={() => open(r.f)}>
+          <button key={r.f} type="button" className="row row2" aria-label={`${r.label}: ${r.value}. Change`} onClick={() => open(r.f)} disabled={applying || paused}>
             {r.f === 'agent' ? <Logo agent={p.agent} name={w.agent} /> : <span className="pk-gap" />}
             <span className="n">
               <span className="l2">{r.label}</span>
@@ -270,8 +307,16 @@ function AgentPicker({ title, machine, start, typed, onChange, close }: { title:
             <I n="right" c="s16" />
           </button>
         ))}
+        {dirty && p.agent !== current.agent && !applying && <p className="muted">Changing the agent starts a new session here. Earlier messages stay.</p>}
+        {error && <p className="c-red" role="alert">{error}</p>}
+        {paused && <p role="status">The agent is paused. You can ask it to carry on.</p>}
         <div className="acts" style={{ marginTop: 8 }}>
-          <Btn kind="pri" onClick={close}>Done</Btn>
+          {paused ? <>
+            <Btn onClick={close}>Close</Btn>
+            <Btn kind="pri" onClick={() => { live?.carryOn(); close() }}>Carry on</Btn>
+          </> : <Btn kind="pri" onClick={() => void submit()} disabled={applying || !!phase}>
+            {applying || phase ? <span role="status">{phase ?? 'Applying…'}</span> : dirty ? 'Update' : 'Done'}
+          </Btn>}
         </div>
       </div>
     )
@@ -408,10 +453,10 @@ export function findModel(cat: Catalog, agent: string, name: string): { agent: s
 
 /** Open the agent picker. `title` says what it sets: "This chat runs on", "Tasks run on", "The new space runs on".
  *  `typed`: the model a /model named, picked once the models are read */
-export function openPicker(o: { title: string; machine: string; pick: Pick; typed?: string; onChange: (p: Pick) => void; onClose?: (p: Pick) => void }) {
+export function openPicker(o: { title: string; machine: string; pick: Pick; typed?: string; onChange: (p: Pick) => void; onClose?: (p: Pick) => void; live?: LivePick }) {
   if (o.machine) loadCatalog(o.machine)
   let last = o.pick
-  openDialog((close) => <AgentPicker title={o.title} machine={o.machine} start={o.pick} typed={o.typed} onChange={(p) => { last = p; o.onChange(p) }} close={close} />, { wide: true, bare: true, label: o.title, onClose: () => o.onClose?.(last) })
+  openDialog((close) => <AgentPicker title={o.title} machine={o.machine} start={o.pick} typed={o.typed} live={o.live} onChange={(p) => { last = p; o.onChange(p) }} close={close} />, { wide: true, bare: true, label: o.title, onClose: () => o.onClose?.(last) })
 }
 
 /* ---------- machines and spaces ---------- */

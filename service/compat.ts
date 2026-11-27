@@ -305,8 +305,9 @@ export class Compat {
   }
   /** What an agent's terminal t runs on now (core/agents.js liveAgent): its arguments, its log's meta, its CLI's own
    *  settings on its machine for the rest. */
-  agentNow(kind: string, t: any, meta: any, machine: string | null) {
-    return liveAgent(kind, t, meta ?? {}, (this.agents as any)?.cached?.(kind, machine) ?? {});
+  agentNow(kind: string, t: any, meta: any, machine: string | null, addr?: string | null) {
+    const agents = this.agents as any;
+    return liveAgent(kind, t, (addr ? agents?.meta?.(addr, t, meta) : meta) ?? {}, agents?.cached?.(kind, machine) ?? {});
   }
   /** What a space's Assistant runs on, for its place (SHEP-298: the chat's model button said Settings' Assistant until
    *  the chat itself came): the Assistant's own (live, else the one that ended, whose chat it reads), else what its
@@ -318,7 +319,7 @@ export class Compat {
         let kind: string | null = kindOfTerm(t);
         if (!kind) { try { kind = JSON.parse(t?.labels?.["herdr.resume"] || "{}").kind ?? null; } catch {} }
         if (!t || (kind !== "claude" && kind !== "codex")) return null;
-        const { flags: _, ...a } = this.agentNow(kind, t, this.reader?.(s.assistant)?.conv?.meta, s.machine ?? null);
+        const { flags: _, ...a } = this.agentNow(kind, t, this.reader?.(s.assistant)?.conv?.meta, s.machine ?? null, s.assistant);
         return a;
       }
       return this.freshChat(key)?.agent ?? null;
@@ -877,7 +878,8 @@ export class Compat {
       signIn(r.worker, by);
     }
     // a card never sticks to the end (SHEP-419): newer messages come under it
-    const placed = placeByTime(messages.slice(0, cardsFrom), messages.slice(cardsFrom));
+    const updates = !reader.pinned ? (this.agents as any)?.settingsEvents?.(key) ?? [] : [];
+    const placed = placeByTime(messages.slice(0, cardsFrom), [...messages.slice(cardsFrom), ...updates]);
     messages.splice(0, messages.length, ...placed);
     const st = t?.status?.state ?? null;
     // the CLI's own subagents still at work, then its background shells and watchers, above the box (3.0: the helpers
@@ -895,7 +897,7 @@ export class Compat {
     try {
       // as the window's chat: the CLI's own settings fill what its arguments and log don't say (core/agents.js liveAgent)
       const kind = reader.kind ?? "claude";
-      agent = this.agentNow(kind, t, reader.conv?.meta, machine);
+      agent = this.agentNow(kind, t, reader.conv?.meta, machine, addr);
       if (agent.model) agent = { ...agent, runtime: { model: agent.model, modelLabel: agent.modelLabel, ...(agent.effort ? { effort: agent.effort } : {}), speed: agent.speed, source: "session", at: Date.now() } };
       // a newer version of its CLI (Update <agent>: service/agent-update.ts)
       const up = this.updates?.available(kind, t, reader.conv?.meta, machine);
@@ -921,6 +923,7 @@ export class Compat {
       : reader.state === "none" || reader.state === "missing" ? ((t && t.state !== "live") || !t ? "ended" : kind ? "none" : "unsupported")
       : !reader.pinned && (!t || t.state !== "live") && !items.length ? "ended" : null;
     const failed = failedOf(addr);
-    return { key, messages, ...(failed.length ? { failed } : {}), ...head, ...under, ...(note ? { note } : {}), ...(bgNote && !notice ? { bgNote } : {}), ...(notice ? { notice } : {}), ...(agent ? { agent } : {}), ...(jobs.length ? { jobs } : {}), working: st === "working", cli: reader.kind === "codex" ? "codex" : "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
+    const settingsUpdate = (this.agents as any)?.phase?.(key);
+    return { key, messages, ...(settingsUpdate ? { settingsUpdate } : {}), ...(failed.length ? { failed } : {}), ...head, ...under, ...(note ? { note } : {}), ...(bgNote && !notice ? { bgNote } : {}), ...(notice ? { notice } : {}), ...(agent ? { agent } : {}), ...(jobs.length ? { jobs } : {}), working: st === "working", cli: reader.kind === "codex" ? "codex" : "claude", ...(reader.pinned || (t && t.state !== "live") ? { finished: true } : {}) };
   }
 }
