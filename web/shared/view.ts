@@ -416,9 +416,8 @@ export function scheduleLine(a: Automation): string {
 /** the artifacts a view lists: things made to keep (a task's proof stays on its task), newest first */
 export function artifactsIn(snap: Snapshot, placeId: string): Artifact[] {
   const all = isEverything(snap, placeId)
-  const proofs = new Set(snap.tasks.map((t) => t.proof).filter(Boolean))
   // the main machine's ~ space: its home folder's too, which Everything keeps (as it keeps its tasks)
   const p = placeOf(snap, placeId)
   const home = !!p && p.machine === snap.host && isHomeSpace(snap, p) ? snap.everything : null
-  return snap.artifacts.filter((a) => !proofs.has(a.id) && !a.proof && (all || a.place === placeId || (!!home && a.place === home))).sort((a, b) => b.at - a.at)
+  return snap.artifacts.filter((a) => !a.proof && (all || a.place === placeId || (!!home && a.place === home))).sort((a, b) => b.at - a.at)
 }

@@ -1376,7 +1376,7 @@ export default definePlugin({
     reg.views.messages = Messages
     reg.views.box = Box
     reg.chatTail.push({ order: 15, View: StoppedChat }, { order: 95, View: WorkingSign }, { order: 96, View: BackgroundNote })
-    reg.aboveBox.push({ order: 5, View: ToEnd })
+    reg.aboveBox.push({ order: 5, inPane: true, View: ToEnd })
     // Update <agent> (update.tsx): a row in the space's header menu and in a task's ⋯, while a newer version is out
     reg.spaceMenu.push({ order: 7, rows: (p, head) => (head ? updateRows(p.chat) : []) })
     reg.taskMenu.push({ order: 7, rows: (t, where) => (where === 'thread' ? updateRows(taskChat(t)) : []) })

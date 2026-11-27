@@ -43,3 +43,23 @@ test("a task with none has no list", () => {
   const row = { section: "working", ref: "SHOP-9", machine: null, folder: "/srv/shop", slug: "shop", id: 9, title: "Empty", agents: [], logs: [] };
   expect(c.snapshot({ host: "mini", user: "me", machines: [], spaces: [], sections: [], rows: [row], artifacts: [art("x-0001", { task: "SHOP-4" })] }).tasks[0].artifacts).toBeUndefined();
 });
+
+test("artifacts follow their task's space even when several spaces share a folder", () => {
+  const c = new Compat();
+  const spaces = [
+    { id: "shop", folder: "/srv/shop" },
+    { id: "archive", folder: "/srv/shop" },
+    { id: "client", folder: "/srv/client" },
+    { id: "vm/shop", folder: "/srv/shop", machine: "vm" },
+    { id: "vm/archive", folder: "/srv/shop", machine: "vm" },
+  ];
+  const row = { section: "done", done_at: 1, ref: "SHOP-4", folder: "/srv/shop", slug: "shop", id: 4, title: "Old task" };
+  const rows = [{ ...row, space: "client" }, { ...row, machine: "vm", space: "vm/archive" },
+    { ...row, id: 5, ref: "SHOP-5", space: "removed" }, { ...row, id: 6, ref: "SHOP-6", folder: "/elsewhere", space: "archive" }];
+  const artifacts = [
+    art("local", { task: "SHOP-4" }), art("remote", { task: "SHOP-4", machine: "vm" }),
+    art("removed-space", { task: "SHOP-5" }), art("other-folder", { task: "SHOP-6" }), art("no-task"),
+  ];
+  const snap = c.snapshot({ host: "mini", user: "me", machines: [], spaces, sections: [], rows, artifacts });
+  expect(snap.artifacts.map((a) => a.place)).toEqual(["client", "vm/archive", "shop", "shop", "shop"]);
+});

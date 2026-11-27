@@ -174,13 +174,15 @@ export function unreadMarks(spaces: Space[], keyOf: (id: string) => string) {
   return { last, read };
 }
 
-export function artifactOf(a: any, spaces: Space[], program: (addr: string) => string | null = () => null): Artifact {
-  // its store is a folder: the space it is kept for (its own folder first, then a worktree of its repo), else none
-  // (it shows with All)
-  // (it shows with All). Another machine's (service/artifacts.ts reads them there) belongs to that machine's spaces.
+const artifactTaskKey = (machine: string | null, folder: string, ref: string) =>
+  JSON.stringify([machine, folder, String(ref).toUpperCase()]);
+
+export function artifactOf(a: any, spaces: Space[], program: (addr: string) => string | null = () => null, taskSpace?: string): Artifact {
+  // A task's own space can differ from its store. Otherwise use the store's folder, preferring it to its worktrees.
+  // An artifact with no matching space still shows in Everything.
   const m = a.machine ?? null;
-  const mine = spaces.filter((s) => (s.machine ?? null) === m && artifactStore(s as any).folder === a.folder);
-  const place = (mine.find((s) => s.folder === a.folder) ?? mine[0])?.id ?? "";
+  const mine = taskSpace ? [] : spaces.filter((s) => (s.machine ?? null) === m && artifactStore(s).folder === a.folder);
+  const place = taskSpace ?? (mine.find((s) => s.folder === a.folder) ?? mine[0])?.id ?? "";
   // its row: "v3 · Claude Code · 2h ago": the program of the agent that published it while it runs, else nothing;
   // a note on it goes to that agent ("the agent" when it isn't known)
   const by = (a.publisher && program(m ? `${m}/${a.publisher}` : a.publisher)) || "";
@@ -428,7 +430,15 @@ export class Compat {
     const tildeId = SPc.tildeOf(spaces, HOME)?.id;
     const inFolder = (r: Row) => spaces.find((s) => s.id !== tildeId && (s.machine ?? null) === (r.machine ?? null) && s.folder === r.folder);
     const placeName = (r: Row) => places.find((p) => p.id === inFolder(r)?.id)?.name ?? r.list ?? "";
-    const placeOf = (r: Row) => (r.space && spaces.some((s) => s.id === r.space) ? r.space : inFolder(r)?.id ?? "");
+    const spaceIds = new Set(spaces.map((s) => s.id));
+    const placeOf = (r: Row) => (spaceIds.has(r.space) ? r.space : inFolder(r)?.id ?? "");
+    // Old completed tasks may be off the screen while their artifacts are still kept.
+    const artifactTaskSpaces = new Map<string, string>();
+    for (const r of rows) {
+      if (r.ref && r.folder && spaceIds.has(r.space)) {
+        artifactTaskSpaces.set(artifactTaskKey(r.machine ?? null, r.folder, r.ref), r.space);
+      }
+    }
     // SHEP-325: the spaces working in its folder on its machine: their Tasks list it too (the window's rule, core inSpace)
     const folderSpaces = (r: Row) => (r.folder ? spaces.filter((s) => (s.machine ?? null) === (r.machine ?? null) && s.folder === r.folder).map((s) => s.id) : []);
 
@@ -468,7 +478,7 @@ export class Compat {
         // spaces whose Tasks hold it
         ...(r.folder ? { work: { name: r.list || base(r.folder) || r.folder, folder: r.folder, repo: r.kind === "repo",
           short: r.machine ? SPc.tilde(r.folder) : r.folder === HOME ? "~" : r.folder.startsWith(HOME + "/") ? `~${r.folder.slice(HOME.length)}` : r.folder } } : {}),
-        ...(r.space && spaces.some((s) => s.id === r.space) ? { asked: r.space } : {}),
+        ...(spaceIds.has(r.space) ? { asked: r.space } : {}),
         ...((also) => (also.length ? { also } : {}))(folderSpaces(r).filter((id) => id !== placeOf(r))),
         // its latest news (ms), as Jump orders tasks newest first
         at: Math.max(0, ...[r.done_at, r.ready_at, r.started].filter((x: unknown): x is number => typeof x === "number")),
@@ -585,7 +595,13 @@ export class Compat {
     this.chats = chats;
     this.last = {
       terminalTransport: "core", name: "Shepherdr", host, user: input.user, places, machines, tasks, automations: automationsBySpace(input.automations ?? [], spaces, (s) => places.find((p) => p.id === s.id)?.name ?? s.name), asks: {}, needs, settings: input.settings ?? [],
-      artifacts: (input.artifacts ?? []).map((a) => artifactOf(a, spaces, (addr) => { const k = kindOfTerm((this as any).terminalsOf?.(addr)); return k ? CLI_NAMES[k] ?? k : null; })),
+      artifacts: this.rawArts.map((a) => {
+        const taskSpace = a.task ? artifactTaskSpaces.get(artifactTaskKey(a.machine ?? null, a.folder, a.task)) : undefined;
+        return artifactOf(a, spaces, (addr) => {
+          const k = kindOfTerm((this as any).terminalsOf?.(addr));
+          return k ? CLI_NAMES[k] ?? k : null;
+        }, taskSpace);
+      }),
       sections, last, read, off: input.offPlugins ?? [],
     };
     return this.last;

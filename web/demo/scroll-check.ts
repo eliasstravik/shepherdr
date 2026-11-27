@@ -221,6 +221,10 @@ async function runChecks() {
         }), 'the linked message is shown even when it comes in a later page')
         open({ place: shop, task })
         await bottom(page, 'task reopened', taskChat)
+        const taskScroll = page.locator(`.pane [data-scroll="${taskChat}"]`)
+        await taskScroll.evaluate((el) => { el.scrollTop -= 1200 })
+        await page.locator('.pane .toend').click()
+        await bottom(page, 'jump to the newest from the task pane', taskChat)
 
         await page.getByRole('button', { name: 'View as terminal', exact: true }).last().click()
         await checkTerminal(taskChat)
