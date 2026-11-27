@@ -18,7 +18,7 @@ test("a new model says its level again; nothing else that stays", () => {
   expect(liveChanges(from, { model: "opus", effort: "medium", fast: false })).toEqual({ effort: "medium" });
   expect(liveChanges(from, { model: "sonnet", effort: "high", fast: false })).toEqual({ model: "sonnet", effort: "high" });
   expect(liveChanges(from, { model: "opus", effort: "high", fast: true })).toEqual({ fast: true });
-  expect(claudeCommands({ model: "", effort: "", fast: false }).map((c) => c.text)).toEqual(["/model default", "/effort auto", "/fast off"]);
+  expect(claudeCommands({ model: "", effort: "", fast: false }).map((c) => c.text)).toEqual(["/fast off", "/model default", "/effort auto"]);
 });
 
 test("Claude Code's saved defaults go back, only the keys it touched", () => {
@@ -115,6 +115,12 @@ test("Claude Code: the same command again waits for its own answer, not the last
   const t = fakeTerm({ send: (text) => (++n === 1 ? `❯ ${text}\n  ⎿  Effort level set to low\n` : `❯ ${text}\n`) }, {});
   await switchLive(t.io, "claude", { model: "opus", effort: "high" }, { model: "opus", effort: "low" });
   await expect(switchLive(t.io, "claude", { model: "opus", effort: "high" }, { model: "opus", effort: "low" })).rejects.toThrow("didn't answer");
+});
+
+test("Claude Code: switching from one Fast model to another reasserts Fast on the new model", async () => {
+  const t = fakeTerm({ send: (text) => `❯ ${text}\n  ⎿  ${text === "/fast on" ? "Fast mode ON" : text.startsWith("/model") ? "Set model to Fable 5.2" : "Set effort level to high"}\n` }, {});
+  await switchLive(t.io, "claude", { model: "opus", effort: "high", fast: true }, { model: "claude-fable-5-2", effort: "high", fast: true });
+  expect(t.sent).toEqual(["/model claude-fable-5-2", "/effort high", "/fast on"]);
 });
 
 test("Codex: its model picked, then its level for this session only (s, never Enter)", async () => {
