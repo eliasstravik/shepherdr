@@ -13,7 +13,7 @@ it, and say so in your summary.
   own key (ElevenLabs). For Claude Code and Codex the app says where to look (`/usage`, `/status`).
 - Never use an agent's stored sign-in, tokens or auth files, its private endpoints or Codex's App Server. Only run the
   official CLI with its documented commands and flags.
-- Never drive an agent's own interface: no typing slash commands or keys it didn't come from the person, no
+- Never drive an agent's own interface: no typing slash commands or keys that didn't come from the person, no
   stepping through its menus from screen reads, no auto-answering its trust, permission or sign-in prompts, no
   interrupting its turns on your own. Change model, effort, speed or permissions by restarting with documented flags.
 - Never edit an agent's own config or settings files (`~/.claude`, `~/.claude.json`, `~/.codex`).
