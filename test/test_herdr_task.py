@@ -5891,10 +5891,12 @@ class CodexAsksOnTheCard(unittest.TestCase):
         from herdr_task import launch, settings, flags
         argv = launch.own_argv(settings.argv_for({"agent": "codex", "perm": "approve"}))
         hook = next(a for a in argv if a.startswith("hooks.PermissionRequest="))
-        self.assertIn(" --auto-review", hook)
         self.assertIn("--approve-for-me", argv)
         self.assertNotIn("workspace-write", argv)
-        self.assertNotIn("--auto-review", next(a for a in launch.own_argv(["codex", "-s", "workspace-write"]) if a.startswith("hooks.PermissionRequest=")))
+        standard = launch.own_argv(["codex", "-s", "workspace-write"])
+        self.assertEqual(hook, next(a for a in standard if a.startswith("hooks.PermissionRequest=")))
+        self.assertTrue(launch.codex_auto_review(argv))
+        self.assertFalse(launch.codex_auto_review(standard))
         # read back, and carried across: Claude's nearest is its auto mode
         self.assertEqual(settings.argv_perm(argv), "approve")
         self.assertEqual(settings.perm_across("approve", "claude"), "auto")
@@ -5905,9 +5907,9 @@ class CodexAsksOnTheCard(unittest.TestCase):
                 flags.parse("codex", bad)
             self.assertIn("Approve for me", str(e.exception))
         # the command Codex runs, as written: no decision, no card
-        env = {**os.environ, "SHEPHERDR_SHARE": tempfile.mkdtemp(), "HOME": tempfile.mkdtemp()}
+        env = {**os.environ, "SHEPHERDR_SHARE": tempfile.mkdtemp(), "HOME": tempfile.mkdtemp(), "HERDR_TASK_CODEX_AUTO_REVIEW": "1"}
         import shlex
-        r = subprocess.run(shlex.split(launch.ask_command("/x/herdr-task", sandboxed=True, auto_review=True)),
+        r = subprocess.run(shlex.split(launch.codex_ask_command()),
                            input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "curl x"}}), capture_output=True, text=True, env=env)
         self.assertEqual((r.returncode, r.stdout), (0, ""), r.stderr)
 
@@ -6932,16 +6934,27 @@ class TaskFlow(unittest.TestCase):
         from herdr_task import agents, base
         screen = "Accessing workspace:\\n\\n Quick safety check: Is this a project you created or one you trust?\\n ❯ No, exit\\n   Yes, I trust this folder\\n"
         shown = [screen]
-        self.patch(agents, "_trust_seen", {})
+        self.patch(agents, "_startup_seen", {})
         self.patch(base, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, shown[0], ""))
         self.task.update(started=base.now() - 10000, agents=[{"address": "t1", "at": base.now() - 10000}])
         live = [{"address": "t1", "status": None, "turn": 0}]
         self.assertEqual(agents.task_status(self.task, live), ("needs", "asks", agents.REASONS["trust"]))
-        agents._trust_seen.clear()
+        agents._startup_seen.clear()
         shown[0] = "❯ "
         self.assertEqual(agents.task_status(self.task, live)[0], "working")  # just started, no dialog
         live[0]["status"] = "working"
         shown[0] = screen  # never read once it reports
+        self.assertEqual(agents.task_status(self.task, live)[0], "working")
+
+    def test_codex_hooks_wait_for_the_person_before_the_first_turn(self):
+        from herdr_task import agents, base
+        screen = "  Hooks need review\n  1 hook is new or changed.\n\n› 1. Review hooks\n  2. Trust all and continue"
+        self.patch(agents, "_startup_seen", {})
+        self.patch(base, "run", lambda argv, **k: subprocess.CompletedProcess(argv, 0, screen, ""))
+        self.task.update(started=base.now() - 10000)
+        live = [{"address": "t2", "status": None, "turn": 0, "labels": {"herdr.agent": "codex"}}]
+        self.assertEqual(agents.task_status(self.task, live), ("needs", "asks", "Hooks need review"))
+        live[0]["status"] = "working"
         self.assertEqual(agents.task_status(self.task, live)[0], "working")
 
     def test_low_priority_says_nothing_without_proc(self):
@@ -9685,7 +9698,7 @@ class Next32(unittest.TestCase):
             out = json.dumps({"key": "esc", "outcome": "stopped"}) if args[:2] == ["hc", "interrupt"] else ""
             return subprocess.CompletedProcess(args, 0, out, "")
         for mod, name, value in ((self.commands, "live_agents", lambda key: list(self.live)), (self.commands, "detail", lambda k: k),
-                                 (self.commands, "run", run), (agents, "held_ask", lambda a: None), (agents, "trust_asked", lambda live: None),
+                                 (self.commands, "run", run), (agents, "held_ask", lambda a: None), (agents, "startup_asked", lambda live: None),
                                  (output, "subagents", lambda key: []), (self.commands, "refresh_sessions", lambda *a, **k: None),
                                  (self.commands, "task_tabs", lambda s, t: []), (agents, "own_work", lambda *a, **k: False)):
             p = mock.patch.object(mod, name, value)

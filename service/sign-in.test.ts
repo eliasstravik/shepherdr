@@ -33,6 +33,10 @@ test("the watch only reads: a card while the screen or log says so, gone after, 
   const watch = new SignInWatch(hub, () => {}, () => log);
   expect(await watch.tick(addr, terminal)).toBe(true);
   const id = watch.card(addr)!.id;
+  expect(watch.card(addr)?.choices).toEqual([
+    { label: "Claude account with subscription" },
+    { label: "Anthropic Console account" },
+  ]);
   await watch.tick(addr, terminal);
   expect(watch.card(addr)?.id).toBe(id);
   state.screen = " ❯ ";
@@ -44,5 +48,6 @@ test("the watch only reads: a card while the screen or log says so, gone after, 
   log.push({ id: "two", kind: "error", text: "Not logged in · Please run /login" });
   expect(await watch.tick(addr, terminal)).toBe(false);
   expect(watch.card(addr)?.need).toEqual({ cli: "Claude Code" });
+  expect(watch.card(addr)?.choices).toBeUndefined();
   expect(state.calls.every((m) => m === "terminal.read")).toBe(true);
 });

@@ -1,10 +1,10 @@
-import { authNotice, signInScreen, type SignInNeed } from "./sign-in-screen.ts";
-import { cliOf } from "../core/screens.js";
+import { authNotice, signInMenu, type SignInNeed } from "./sign-in-screen.ts";
+import { cliOf, readScreen } from "../core/screens.js";
 import type { Hub } from "./hub.ts";
 import type { CoreTerminal } from "./hc/protocol.ts";
 
 type LogItem = { id: string; kind: string; text?: string };
-export type SignInCard = { id: string; addr: string; opened: number; need: SignInNeed };
+export type SignInCard = { id: string; addr: string; opened: number; need: SignInNeed; choices?: { label: string; description?: string }[] };
 const same = (a: SignInNeed, b: SignInNeed) => a.cli === b.cli && a.connector === b.connector;
 
 /** Which agents need signing in, read from their screen and log. It only reads: the card it makes tells the person
@@ -35,12 +35,15 @@ export class SignInWatch {
     if (!cli) { this.drop(addr); return false; }
     const read = await this.hub.call<{ text: string }>("terminal.read", { terminal: addr, lines: 0 }, 5000).catch(() => null);
     if (!read || typeof read.text !== "string") return false;
-    const onScreen = signInScreen(cli, read.text);
+    const menu = signInMenu(cli, read.text);
+    const onScreen = menu ?? authNotice(cli, read.text);
     const need = onScreen ?? this.lastNotice(addr, cli);
     if (!need) { this.drop(addr); return false; }
     const was = this.cards.get(addr);
-    if (!was || !same(was.need, need)) {
-      this.cards.set(addr, { id: `login-${crypto.randomUUID()}`, addr, opened: Date.now(), need });
+    const choices = menu ? readScreen(read.text, terminal?.cols).choices : undefined;
+    if (!was || !same(was.need, need) || JSON.stringify(was.choices) !== JSON.stringify(choices)) {
+      const identity = was && same(was.need, need) ? was : { id: `login-${crypto.randomUUID()}`, addr, opened: Date.now() };
+      this.cards.set(addr, { ...identity, need, choices });
       this.changed();
     }
     return !!onScreen;

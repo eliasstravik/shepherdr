@@ -477,7 +477,9 @@ export interface Question {
   screen?: string
   login?: SignIn
   terminal?: boolean
-  /** A CLI's own menu: a tap presses that choice at once. */
+  /** The helper's terminal when its menu is shown in another agent's chat. */
+  terminalChat?: string
+  /** A CLI's own menu, answered in the terminal. */
   press?: boolean
   /** #1441: a CLI's folder-trust screen, as its own card: choice 0 trusts the folder and starts, 1 says no. cli: who
    *  asks; folder: the folder it names; waits and allows: its two plain lines */
