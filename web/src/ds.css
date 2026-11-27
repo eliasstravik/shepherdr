@@ -177,6 +177,7 @@ button.b{cursor:pointer}
 .quote.qtask{display:flex;align-items:center;gap:6px;max-width:100%;border:0;border-left:2px solid var(--line2);background:none;font:inherit;font-size:14px;line-height:20px;text-align:start;cursor:pointer}
 .quote.qtask>.qt1{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--sub)}.quote.qtask>.qt2{flex:0 4 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.quote.qtask>.qt2::before{content:"· "}
 .quote.qtask>.tring{flex:none}.quote.qtask>.tring>.i{width:16px;height:16px}
+.app.tap button.quote{min-width:var(--hit);min-height:var(--hit)}
 .rpl{position:absolute;inset-block:0;left:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;overflow:hidden;border-radius:18px;background:var(--control2);color:var(--fg);font-size:var(--sec);line-height:var(--secl);font-weight:600;white-space:nowrap;pointer-events:none}
 .rpl.on{background:var(--fg);color:var(--canvas)}
 .qb{position:absolute;z-index:3;display:flex;align-items:center;gap:8px;transform:translateY(-50%)}
@@ -194,22 +195,23 @@ button.b{cursor:pointer}
    flow, it reserves no space below; a bubble with one gets a little room above so the chip clears the message there.
    Where the bubble fills the column, the chip moves in to stay inside it (--rx-dx, set by the plugin's fit()).
    Its states are rx- classes only: 3.2.4's just-added chip carried "pop", the menu's own class, and drew as a 200px
-   floating bar until a reload. .rxs>.rxc pins the size against any other class or container, in every state. */
+   floating bar until a reload. The pill stays small inside a full-size button on touch screens. */
 .bw:has(>.bmv>.rxs){margin-top:14px}
+.app.tap .bw:has(>.bmv>.rxs){margin-top:calc(var(--hit) / 2)}
 .rxs{position:absolute;z-index:1;top:0;left:calc(100% - 18px);right:auto;display:flex;gap:4px;width:max-content;margin:0;transform:translate(var(--rx-dx,0px),-50%)}
 .bw.mine .rxs{left:auto;right:calc(100% - 18px);flex-direction:row-reverse}
-.rxc{position:relative;flex:none;display:inline-flex;align-items:center;justify-content:center;gap:3px;width:auto;min-width:34px;height:28px;padding:0 8px;border-radius:999px;background:var(--rx);box-shadow:inset 0 0 0 1px var(--line2);color:var(--sub);font-size:12px;line-height:16px;font-weight:600;font-variant-numeric:tabular-nums}
-.rxs>.rxc{position:relative;inset:auto;flex:none;align-self:center;justify-self:start;width:fit-content;min-width:34px;max-width:none;height:28px;min-height:0;max-height:none;margin:0;padding:0 8px;transform:none}
-/* the finger pad: 28 + 8 + 8 = 44 px tall */
-.rxc::after{content:"";position:absolute;inset:-8px -5px}
-.rxc .e{font-size:15px;line-height:1}
-.rxc:hover{background:color-mix(in srgb,var(--fg) 6%,var(--rx))}
-.rxc[aria-pressed="true"]{background:color-mix(in srgb,var(--blue) 18%,var(--rx));color:var(--fg)}
-.rxc[aria-pressed="true"]:hover{background:color-mix(in srgb,var(--blue) 26%,var(--rx))}
+.rxc{display:inline-grid;place-items:center;flex:none;border-radius:8px}
+.app.tap .rxc{min-width:var(--hit);min-height:var(--hit)}
+.rxc::before{content:none}
+.rx-pill{display:inline-flex;align-items:center;justify-content:center;gap:3px;min-width:34px;height:28px;padding:0 8px;border-radius:999px;background:var(--rx);box-shadow:inset 0 0 0 1px var(--line2);color:var(--sub);font-size:12px;line-height:16px;font-weight:600;font-variant-numeric:tabular-nums}
+.rx-pill .e{font-size:15px;line-height:1}
+.rxc:hover>.rx-pill{background:color-mix(in srgb,var(--fg) 6%,var(--rx))}
+.rxc[aria-pressed="true"]>.rx-pill{background:color-mix(in srgb,var(--blue) 18%,var(--rx))}
+.rxc[aria-pressed="true"]:hover>.rx-pill{background:color-mix(in srgb,var(--blue) 26%,var(--rx))}
 .rxc.rx-pending{opacity:.6}
-.rxs>.rxc.rx-new{animation:rxpop 280ms cubic-bezier(.25,1.12,.4,1)}
+.rxc.rx-new>.rx-pill{animation:rxpop 280ms cubic-bezier(.25,1.12,.4,1)}
 @keyframes rxpop{0%{transform:scale(.3);opacity:0}60%{transform:scale(1.12);opacity:1}100%{transform:scale(1)}}
-@media(prefers-reduced-motion:reduce){.rxs>.rxc.rx-new{animation:none}.settle{transition:none!important}}
+@media(prefers-reduced-motion:reduce){.rxc.rx-new>.rx-pill{animation:none}.settle{transition:none!important}}
 /* a finger's long press opens the menu, not the system's word selection (Select text turns it back on) */
 @media(pointer:coarse){.b[data-menu]:not(.sel){-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}}
 .b[data-menu]{touch-action:pan-y pinch-zoom}
