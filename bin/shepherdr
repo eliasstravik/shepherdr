@@ -812,18 +812,33 @@ def our_port(root):
 
 
 def service_answers(root):
-    """Shepherdr's own service answers here (its health says the id it wrote in service.json, not another app on its
-    port): (True, port), or (False, why)."""
+    """Check local health against the id in service.json: (True, port) if verified, (None, why) if sign-in is
+    refused, or (False, why) if the expected service doesn't answer."""
     try:
         f = json_file(service_file(root, "service.json"))
         port, sid = int(f["port"]), f["id"]
     except (ValueError, KeyError, TypeError):
         return False, f"the Shepherdr service hasn't started here (no {service_file(root, 'service.json')})"
-    import urllib.request
+    from contextlib import closing
+    from http.client import HTTPConnection, HTTPException
+
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=3) as res:
-            h = json.load(res)
+        with open(service_file(root, "token"), encoding="utf-8") as f:
+            token = f.read().strip()
     except (OSError, ValueError):
+        token = ""
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        # Send the token directly to the local port, without proxies or redirects.
+        with closing(HTTPConnection("127.0.0.1", port, timeout=3)) as conn:
+            conn.request("GET", "/api/health", headers=headers)
+            with conn.getresponse() as res:
+                if res.status == 401:
+                    return None, f"the service is up, but Doctor couldn't sign in on port {port}"
+                if res.status != 200:
+                    return False, f"the Shepherdr service isn't answering on port {port}"
+                h = json.load(res)
+    except (OSError, ValueError, HTTPException):
         return False, f"the Shepherdr service isn't answering on port {port}"
     if not isinstance(h, dict) or h.get("id") != sid:
         return False, f"another app answers on port {port}, not the Shepherdr service: install again with --port <a free one>"
@@ -1038,7 +1053,7 @@ def install_service(r, rec, home):
     port = rec.get("port") or DEFAULT_PORT
     # only an answer from another app says it holds the port; no answer yet may be a slow start (GitHub #1048)
     r.notes.append("the Shepherdr service is running" if ok else
-                   f"{why}; `shepherdr doctor` says more" if str(why).startswith("another app") else
+                   f"{why}; `shepherdr doctor` says more" if ok is None or str(why).startswith("another app") else
                    f"the Shepherdr service isn't answering on port {port} yet: it may still be starting, or another app "
                    "may hold the port (install again with --port <a free one>); `shepherdr doctor` says more")
 
@@ -2348,7 +2363,10 @@ def cmd_doctor(a):
         # installed but not answering (a busy port crash-loops it, GitHub #635): not whole
         if has_unit(root):
             up, why = service_answers(root)
-            bad += [] if up else [why]
+            if up is None:
+                warn.append(why)
+            elif not up:
+                bad.append(why)
         else:
             bad.append("the Shepherdr service isn't set up to run here (it needs bun, https://bun.sh): run the install again")
         t_notes += s_notes
