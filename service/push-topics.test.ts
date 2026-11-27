@@ -3,13 +3,12 @@
 // to the devices that chose its topic and don't mute its space, never to one whose app is on screen; a device turned
 // off gets nothing more; a test goes to that one device only.
 import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
+import { Push, alertsOf, wants } from "./push.ts";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const dir = mkdtempSync(join(tmpdir(), "push-topics-"));
-process.env.SHEPHERDR_DATA = dir;
-const { Push, alertsOf, wants } = await import("./push.ts");
 
 // a real P-256 key per fake device, so each alert really encrypts
 async function fakeSub(n: number) {
