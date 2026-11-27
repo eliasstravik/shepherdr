@@ -170,29 +170,3 @@ export const codexChoice = (c) => {
   return { label: c.label.replace(/\s*\(recommended\)\s*$/i, ""), ...(c.description ? { description: c.description } : {}), ...(rec ? { recommended: true } : {}) };
 };
 
-/** Whether Codex's screen shows these questions' picker at its first question, none answered yet. */
-export function codexOnScreen(screen, questions) {
-  const s = String(screen ?? "").replace(/\s+/g, " ");
-  const q = questions?.[0];
-  if (!q) return false;
-  const n = questions.length;
-  const one = (w) => s.includes(String(w).replace(/\s+/g, " ").trim());
-  return new RegExp(`Question 1/${n} \\(${n} unanswered\\)`).test(s) && one(q.text) && q.choices.every((c) => one(c.label));
-}
-
-/** The steps that answer them: [{ keys: [...] } | { paste: words }], one answer per question, each its choice's label
- *  or the person's own words. null when an answer is missing. */
-export function codexSteps(questions, answers) {
-  if (!Array.isArray(answers) || answers.length !== questions.length) return null;
-  const steps = [];
-  for (const [i, q] of questions.entries()) {
-    const said = String(answers[i] ?? "").trim();
-    if (!said) return null;
-    const k = q.choices.findIndex((c) => c.label === said || codexChoice(c).label === said);
-    if (k >= 0 && k < 9) steps.push({ keys: [String(k + 1)] });
-    else if (k >= 0) steps.push({ keys: [...Array(k).fill("down"), "enter"] });
-    // "None of the above", its notes: the words pasted, then Enter (Codex hears "None of the above" and the note)
-    else steps.push({ keys: [...Array(q.choices.length).fill("down"), "tab"] }, { paste: said });
-  }
-  return steps;
-}

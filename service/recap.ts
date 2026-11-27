@@ -1,8 +1,8 @@
 // Recaps (the recaps plugin): a short recap of what happened in a chat, for any agent. Claude Code writes its own
-// when you come back after a while (core/chat-log.js reads it as a recap item); for the rest, and on the Recap
-// action, Shepherdr asks the chat's agent once with a <herdr-recap> message. The ask never shows in the chat, and the
-// agent's answer shows as a recap, not a message. Only an idle agent is asked (never one at work: that would steer
-// it), only when something happened since the last recap, and never twice in a row.
+// when you come back after a while (core/chat-log.js reads it as a recap item). On the person's own Recap action
+// (never by itself), Shepherdr asks the chat's agent once with a <herdr-recap> message. The ask never shows in the
+// chat, and the agent's answer shows as a recap, not a message. Only an idle agent is asked (never one at work: that
+// would steer it), only when something happened since the last recap, and never twice in a row.
 import type { Hub } from "./hub.ts";
 
 export const RECAP_ASK = `<herdr-recap>The person is back and wants a quick recap of this chat. In two or three short, plain sentences: what was done since they last looked, what you are waiting for, and anything they need to decide. Only the recap: no tools, no headings, no suggested replies, and start no new work.</herdr-recap>`;
@@ -26,12 +26,10 @@ export function newSinceRecap(items: { kind: string }[]): boolean {
   return items.slice(last + 1).some((x) => x.kind === "agent" || x.kind === "tools");
 }
 
-/** ask the agent at `addr` for a recap, or say why not: { ok, asked?, why? } (auto: the page's own on your return,
- *  which never errs) */
-export async function askRecap(hub: Hub, addr: string, items: { kind: string }[], { auto = false, now = Date.now() } = {}) {
+/** ask the agent at `addr` for a recap (the person's Recap), or throw why not -> { ok, asked } */
+export async function askRecap(hub: Hub, addr: string, items: { kind: string }[], { now = Date.now() } = {}) {
   const t: any = hub.terminals.get(addr);
-  const no = (why: string) => {
-    if (auto) return { ok: true, asked: false, why };
+  const no = (why: string): never => {
     throw new Error(why);
   };
   if (!t || t.state !== "live") return no(RECAP_WORDS.gone);

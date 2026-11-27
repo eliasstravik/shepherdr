@@ -1,4 +1,5 @@
-import type { SignInWatch } from "./sign-in.ts";
+import type { SignInCard, SignInWatch } from "./sign-in.ts";
+import { signInWords } from "./sign-in-screen.ts";
 // The web app is Shepherdr 2.1's screen (its design, phone layout and motion, kept as they were), fed with
 // Shepherdr 3's data: this turns what the service builds with the shared core (spaces, tasks, chats) into the
 // shapes 2.1's screen reads (web/shared/types.ts: Snapshot, Chat), and its chat keys back into terminals.
@@ -610,15 +611,12 @@ export class Compat {
 
   loginWatch(): SignInWatch | undefined { return (this as any).watch?.login; }
 
-  private loginQuestion(card: NonNullable<ReturnType<SignInWatch["card"]>>, key: string, by?: Question["by"]): Question {
-    const { options, cursor: _cursor, closeMenu: _close, ...step } = card.step;
-    const title = step.connector !== undefined
-      ? `${step.connector || "A connector"} needs you to sign in`
-      : `${step.cli} needs you to sign in`;
+  /** An agent that needs signing in, as a card that says what to run in its own terminal (no taps sign in). */
+  private loginQuestion(card: SignInCard, key: string, by?: Question["by"]): Question {
+    const { title, how } = signInWords(card.need);
     const terminal = this.addrOf(key) === card.addr ? key : `t:${card.addr}`;
     return { id: card.id, to: key, title, kind: "Question", choices: [], ...(by ? { by } : {}),
-      ...(step.stage === "signed" ? { closed: "Signed in" } : {}),
-      login: { ...step, terminal, methods: options?.map(({ label, fallback, sameComputer }) => ({ label, fallback, sameComputer })) } };
+      login: { ...card.need, how, terminal } };
   }
 
   /** A CLI's start screen (core/screens.js card) as a card that presses a choice on a tap. A folder-trust screen

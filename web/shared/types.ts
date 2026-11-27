@@ -452,18 +452,12 @@ export interface Choice {
   preview?: string
 }
 
+/** An agent needs signing in: the person runs `how` in its own terminal (Shepherdr never signs in for them). */
 export interface SignIn {
   cli: string
-  stage: 'start' | 'methods' | 'key' | 'browser' | 'waiting' | 'continue' | 'retry' | 'fallback' | 'signed'
   connector?: string
-  signInUrl?: string
-  deviceCode?: string
-  input?: 'code' | 'callback'
-  instructions?: string
-  restart?: boolean
-  apiKeySaved?: boolean
+  how: string
   terminal?: string
-  methods?: { label: string; fallback?: string; sameComputer?: boolean }[]
 }
 
 export interface Question {
@@ -1392,7 +1386,7 @@ export type Action =
   | { type: 'effort'; chat: string; effort: string }
   | { type: 'keys'; chat: string; keys: string[] }
   /** ask the chat's agent for a recap (auto: the page's own, when you come back to it; never an error) */
-  | { type: 'recap'; chat: string; auto?: boolean }
+  | { type: 'recap'; chat: string }
   | { type: 'text'; chat: string; text: string }
   | { type: 'call'; chat: string; on: boolean }
   /** place: the level it is set at, as a place id (all when none); a machine's or project's goes to that machine */
@@ -1405,8 +1399,6 @@ export type Action =
   | { type: 'pause'; chat: string }
   /** its agent goes and the task is To do; its work stays */
   | { type: 'stop'; chat: string }
-  /** Send now on a message in its CLI's own queue (waitsFor 'queue'): Claude Code takes it at once, mid-turn */
-  | { type: 'steer'; chat: string }
   /** Stop on a background shell or watcher over the box (Job.id) */
   | { type: 'stop-job'; chat: string; job: string }
   /** what the restart sheet shows for a coordinator (chat: its place id) or a task's agent (ID/Agent): RestartInfo */
@@ -1580,8 +1572,6 @@ export interface Config {
   /** Settings › Shortcuts: the shortcuts the person changed (a command's id to its keys; empty: none), and whether
    *  single-letter keys work; the same on every device */
   shortcuts?: { keys: Record<string, string[]>; letters: boolean }
-  /** Settings › Recaps: whether a chat recaps by itself when you come back to it after a while */
-  recaps?: { auto: boolean }
 }
 
 /* ---------- 3.2: screens, an agent's browser and desktop ---------- */

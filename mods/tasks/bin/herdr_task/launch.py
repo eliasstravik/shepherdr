@@ -217,7 +217,7 @@ def tool_name(word, path):
 # and only its own helpers (<task>-review, -helper) to wait on, read or end.
 REVIEWERS = {"codex": (["codex", "--no-daemon", "--sandbox", "read-only", "--ask-for-approval", "never"],
                        {"--disable": re.compile(r"hooks"), "-m": re.compile(r"[\w.:-]+"),
-                        "-c": re.compile(r'projects=\{.*\}|model_reasoning_effort="?\w+"?', re.S)}),
+                        "-c": re.compile(r'model_reasoning_effort="?\w+"?')}),
              "claude": (["claude", "--permission-mode", "dontAsk", "--tools=" + REVIEW_TOOLS, "--strict-mcp-config"],
                         {"--model": re.compile(r"[\w.:\[\]-]+"), "--effort": re.compile(r"\w+"),
                          # #1458: its templates folder, one word (a brief from before it has none)
@@ -226,12 +226,10 @@ HELPER = re.compile(r"[\w.-]+-(?:review|helper)(?:-[\w.-]+)?")
 
 
 def helper_hc(words):
-    """Whether `hc ...` is a worker's own reviewer: run as the brief says, or waited on, read, looked up (#1136), ended."""
+    """Whether `hc ...` is a worker's own reviewer: run as the brief says, or waited on, read, looked up (#1136), ended.
+    Never `hc keys` on it: its trust or sign-in screen is the person's to answer (AGENTS.md "Nothing that risks a ban")."""
     if len(words) >= 3 and words[1] in ("wait", "read", "kill", "get"):
         return bool(HELPER.fullmatch(words[2])) and all(w.startswith("--") or re.fullmatch(r"\d+", w) for w in words[3:])
-    if len(words) >= 4 and words[1] == "keys":
-        # #1191: answering its startup dialog (enter, down enter, 1): plain key names only, never typed text
-        return bool(HELPER.fullmatch(words[2])) and all(re.fullmatch(r"[a-z0-9]{1,9}", w) for w in words[3:])
     if len(words) < 4 or words[1] != "run" or "--" not in words:
         return False
     i = words.index("--")

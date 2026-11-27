@@ -14,7 +14,7 @@ describe("rows", () => {
     expect(clock(0)).toBe("");
   });
   test("the band's actions: rewind on yours (not a /command), fork on the agent's", () => {
-    expect(bandActs("user", "hi")).toEqual(["reply", "copy", "rewind"]);
+    expect(bandActs("user", "hi")).toEqual(["reply", "copy"]);
     expect(bandActs("user", "/compact")).toEqual(["reply", "copy"]);
     expect(bandActs("agent", "done")).toEqual(["reply", "copy", "fork"]);
     expect(bandActs("agent", "done", { fork: false })).toEqual(["reply", "copy"]);

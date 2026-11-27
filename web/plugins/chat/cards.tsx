@@ -4,7 +4,8 @@
 import { useState } from 'react'
 import { copyText } from '@client/copy.ts'
 import { focusBox } from '@client/commands.ts'
-import { attempt, notice, openTask, useSnap } from '@client/kernel.ts'
+import { attempt, has, notice, openTask, useSnap } from '@client/kernel.ts'
+import { switchView } from '../terminal/menu.ts'
 import { press, waiting } from '@client/pending.ts'
 import { ActBtn, ActError, Btn, I, IB, Seg, useCardActs } from '@client/ui.tsx'
 import type { Question, SecretAsk, Snapshot } from '@shared/types.ts'
@@ -40,6 +41,30 @@ function downLine(snap: Snapshot | null, place: string | undefined) {
   return m ? <DoneRow icon="warn">Can't reach {m.name}: this waits until the link is back</DoneRow> : null
 }
 
+/** A question only the agent's own screen can take: Codex's questions, a CLI's start or folder-trust screen. Shepherdr
+ *  never presses keys in an agent's menus (Nothing that risks a ban, docs/agents-and-terms.md): the card says what it
+ *  asks and opens the terminal for you to answer there. Hook asks (Claude Code's documented hooks) keep their buttons. */
+export const inTerminalOnly = (q: Question) => /^(scr-|cq:|cqa:)/.test(q.id) || !!q.trust || !!q.press
+
+function TerminalCard({ q, chat }: { q: Question; chat: string }) {
+  return (
+    <div className="card" data-card={q.id} data-ask="">
+      <span className="t">{q.title || 'It asks you something'}</span>
+      {q.trust ? <span>{q.trust.waits}</span> : q.parts?.length ? q.parts.map((p) => <span key={p.title}>{p.title}</span>) : null}
+      {q.choices.length > 0 && <span className="s">{q.choices.map((c) => c.label).join(' · ')}</span>}
+      <span className="s">Answer it in its terminal.</span>
+      {has('terminal') && (
+        <div className="acts">
+          <Btn kind="pri" onClick={() => {
+            if (q.by) openTask(q.by.chat.slice(0, -7))
+            switchView(q.by?.chat ?? chat, true)
+          }}>Open terminal</Btn>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** A question, a permission or a plan from an agent. `place`: the space its task is in (for "On vm, in garden-app"). */
 export function QuestionCard({ q, chat, place }: { q: Question; chat: string; place?: string }) {
   const snap = useSnap()
@@ -52,12 +77,14 @@ export function QuestionCard({ q, chat, place }: { q: Question; chat: string; pl
   // "Other…" opened: a box on the card for your own answer
   const [other, setOther] = useState<string | null>(null)
   const down = downLine(snap, place)
-  if (q.login) return down || <SignInCard key={q.id} question={q} login={q.login} chat={chat} />
+  if (q.login) return down || <SignInCard key={q.id} question={q} login={q.login} />
   if (q.sent !== undefined && q.command !== undefined) return <DoneRow>{q.sent === 0 ? 'You allowed this' : 'You declined this'}</DoneRow>
   // an answered question: the answer shows as your message (the agent's reply follows it in the chat)
   if (q.sent !== undefined) return <p className="b mine gap">{q.said || q.choices[q.sent]?.label || 'Answered'}</p>
   if (q.closed) return <DoneRow>{q.closed}</DoneRow>
   if (down) return down
+  if (inTerminalOnly(q)) return <TerminalCard q={q} chat={chat} />
+
   /** a button of this card that sends its answer */
   const say = (id: string, body: Record<string, unknown>, label: React.ReactNode, o: { kind?: 'pri'; chip?: boolean; off?: boolean; busy?: string; then?: () => void } = {}) => (
     <ActBtn key={id} acts={acts} id={id} kind={o.kind} chip={o.chip} disabled={o.off} busy={o.busy ?? 'Sending…'} run={async () => { const why = await answer(chat, q, body); if (!why) o.then?.(); return why }}>{label}</ActBtn>

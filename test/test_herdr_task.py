@@ -3082,11 +3082,12 @@ class ReviewAsAHelperAgent(unittest.TestCase):
             self.assertNotIn("permission-mode plan", words)  # #1181
             self.assertIn("still at turn 0 after a timeout, `hc read <its name>` to see why", words)  # #1191
             self.assertIn("or when it returns at once at turn 0 while `hc read <its name>` shows it still working", words)  # #1510
-            self.assertIn("ask the person to answer in the reviewer terminal", words)
+            self.assertIn('"Your reviewer is waiting on a startup screen; answer it in its terminal"', words)
             self.assertNotIn("`hc keys <its name> enter`", words)
             self.assertIn("exactly as the Reviewer line gives it", words)
             self.assertIn("hc wait <its name>", words)
             self.assertNotIn("< /dev/null", words)
+        self.assertIn(templates.WORKER_MD_BEFORE_STARTUP, templates.OLD_WORKERS)
         self.assertIn(templates.WORKER_MD_BEFORE_SUBAGENTS, templates.OLD_WORKERS)
         self.assertIn(templates.WORKER_MD_BEFORE_COMMAND, templates.OLD_WORKERS)
         self.assertIn(templates.WORKER_MD_BEFORE_WAIT, templates.OLD_WORKERS)
@@ -6075,8 +6076,7 @@ class CodexAsksOnTheCard(unittest.TestCase):
                    f"--label herdr.agent=codex -- {rv} 'Review it: \"ok\" & $x'",
                    "hc run --bg --name demo-1-review -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --strict-mcp-config --model opus 'review'",
                    f"hc run --bg --name demo-1-review -- {reviewer_command('claude', 'opus', 'high')} 'review'",
-                   "hc wait demo-1-review --timeout 600", "hc read demo-1-review --lines 400", "hc kill demo-1-review",
-                   "hc keys demo-1-review enter", "hc keys demo-1-review down enter"]
+                   "hc wait demo-1-review --timeout 600", "hc read demo-1-review --lines 400", "hc kill demo-1-review"]
             no = ["hc run --bg --name demo-1-review -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --dangerously-skip-permissions x",
                   "hc run --bg --name demo-1-review -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash,Edit x",
                   "hc run --bg --name demo-1-review -- claude --permission-mode plan x",
@@ -6085,6 +6085,8 @@ class CodexAsksOnTheCard(unittest.TestCase):
                   "-c sandbox_mode=\"danger-full-access\" x",
                   "hc run --bg --name demo-1-review -- sh -c 'rm -rf /'", "hc run --bg --name x -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash x",
                   "hc kill t15q", "hc send demo-1-review hi", "hc keys t15q enter", "hc keys demo-1-review --text 'rm -rf /'",
+                  # its trust or sign-in screen is the person's to answer (AGENTS.md "Nothing that risks a ban")
+                  "hc keys demo-1-review enter", "hc keys demo-1-review down enter",
                   # #1458: only its own templates folder, never another
                   "hc run --bg --name demo-1-review -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --strict-mcp-config --add-dir=/ x",
                   "hc run --bg --name demo-1-review -- claude --permission-mode dontAsk --tools=Read,Grep,Glob,Bash --strict-mcp-config --add-dir= x",
@@ -8798,7 +8800,7 @@ class CodexBatch278(unittest.TestCase):
 
     CODEX = {"state": "live", "labels": {"herdr.agent": "codex"}, "status": {"app": "codex", "state": "working"}}
 
-    # ---- SHEP-306: Claude Code mid-turn steers (Ctrl+Enter) only on its queued sign, only while it works ----------------
+    # ---- AGENTS.md "Nothing that risks a ban": no key of Shepherdr's own, news only to an idle agent ----------------
     CLAUDE = {"state": "live", "labels": {"herdr.agent": "claude"}, "status": {"app": "claude-code", "state": "working"}}
     # Claude Code 2.1.330's real screen right after a message went in mid-turn (45 columns)
     QUEUED_2_1_330 = ("❯ what number now?\n  ⎿  Queued · ctrl+enter to send now\n✻ Skedaddling… (19s · ↓ 162 tokens)\n"
@@ -8806,19 +8808,19 @@ class CodexBatch278(unittest.TestCase):
                       "─────────────────────────────────────────────\n  ⏵⏵ bypass permissions on · esc to interrupt")
     WORKING = "✻ Skedaddling… (19s)\n──────\n❯ \n──────\n  ⏵⏵ bypass permissions on · esc to interrupt"
 
-    def test_claude_mid_turn_steers_on_its_queued_sign(self):
+    def test_news_waits_for_a_working_claude_to_be_idle(self):
         sent = self.fake_hc(self.CLAUDE, [self.QUEUED_2_1_330])
-        self.assertTrue(self.news.news_send("t9", "Change of plan: stop"))
-        self.assertIn(["keys", "t9", "ctrl+enter"], sent)
-        # a sign that shows late (a slow machine) still gets its Ctrl+Enter
-        sent = self.fake_hc(self.CLAUDE, [self.WORKING] * 6 + ["❯ Press up to edit queued messages"])
-        self.assertTrue(self.news.news_send("t9", "Change of plan: stop"))
-        self.assertEqual(sent.count(["keys", "t9", "ctrl+enter"]), 1)
-
-    def test_claude_without_a_queued_message_gets_no_ctrl_enter(self):
-        sent = self.fake_hc(self.CLAUDE, [self.WORKING])
-        self.assertTrue(self.news.news_send("t9", "Change of plan: stop"))
-        self.assertFalse(any(a[0] == "keys" for a in sent))
+        self.assertFalse(self.news.news_send("t9", "SHEP-1 is ready"))
+        self.assertEqual(sent, [])
+        held = []
+        self.patch(self.news, "hold", lambda *a: held.append(a))
+        self.assertEqual(self.news.send_or_hold("t9", "SHEP-1 is ready", how="news"), "held")
+        self.assertEqual(held, [("t9", "SHEP-1 is ready", "news")])
+        # idle: herdr-core's send alone, no key after it
+        sent = self.fake_hc(dict(self.CLAUDE, status={"app": "claude-code", "state": "idle"}), [self.QUEUED_2_1_330])
+        self.assertTrue(self.news.news_send("t9", "SHEP-1 is ready"))
+        self.assertIn(["send", "t9", "SHEP-1 is ready"], sent)
+        self.assertFalse([a for a in sent if a[0] != "send"])
 
     def test_nothing_is_pasted_into_a_working_codex(self):
         sent = self.fake_hc(self.CODEX, [""])
@@ -8829,39 +8831,19 @@ class CodexBatch278(unittest.TestCase):
         self.assertEqual(sent, [])
         self.assertEqual(held, [("t9", "Change of plan: stop", "send")])
 
-    def test_a_draft_left_for_the_queue_is_queued(self):
-        sent = self.fake_hc(dict(self.CODEX, status={"app": "codex", "state": "idle"}),
-                            ["• Ran tests\n\n› hange of plan: stop\n  tab to queue message"])
-        self.assertTrue(self.news.news_send("t9", "Change of plan: stop"))
-        self.assertIn(["keys", "t9", "tab"], sent)
+    def test_a_send_to_codex_presses_nothing_after_it(self):
+        # a draft it left ("tab to queue") or one still in its box: no Tab or Enter of ours
+        for screen in ["• Ran tests\n\n› hange of plan: stop\n  tab to queue message", "› hange of plan: stop\n  ? for shortcuts"]:
+            sent = self.fake_hc(dict(self.CODEX, status={"app": "codex", "state": "idle"}), [screen])
+            self.assertTrue(self.news.news_send("t9", "Change of plan: stop"))
+            self.assertTrue(self.news.plain_send("t9", "Change of plan: stop"))
+            self.assertFalse([a for a in sent if a[0] == "keys"])
 
-    def test_a_draft_still_in_the_box_is_sent_and_an_empty_box_left(self):
-        sent = self.fake_hc(dict(self.CODEX, status={"app": "codex", "state": "idle"}), ["› hange of plan: stop the build\n  ? for shortcuts"])
-        self.assertTrue(self.news.news_send("t9", "Change of plan: stop the build"))
-        self.assertIn(["keys", "t9", "enter"], sent)
-        sent = self.fake_hc(dict(self.CODEX, status={"app": "codex", "state": "idle"}),
-                            ["› Change of plan: stop the build\n\n• Stopping it.\n\n› Ask Codex to do anything"])
-        self.assertTrue(self.news.news_send("t9", "Change of plan: stop the build"))
-        self.assertFalse([a for a in sent if a[0] == "keys"])
-
-    # ---- SHEP-329: the person's reply is in within seconds, always -----------------------------------------------
-    AFTER_ESC = ("  ⎿  Interrupted · What should Claude do instead?\n❯ Change of plan: stop\n✽ Cultivating… (1s)\n"
-                 "──────\n❯ \n──────\n  ⏵⏵ bypass permissions on · esc to interrupt")
-
-    def test_the_persons_reply_steers_and_falls_back_to_esc(self):
-        # still queued after Ctrl+Enter's grace (5 s, 20 looks): Esc, once
-        sent = self.fake_hc(self.CLAUDE, [self.QUEUED_2_1_330] * 21 + [self.AFTER_ESC])
-        self.assertEqual(self.news.person_send("t9", "Change of plan: stop"), "sent")
-        self.assertEqual([a for a in sent if a[0] == "keys"], [["keys", "t9", "ctrl+enter"], ["keys", "t9", "esc"]])
-        # in by Ctrl+Enter: no Esc
-        sent = self.fake_hc(self.CLAUDE, [self.QUEUED_2_1_330, self.WORKING])
-        self.assertEqual(self.news.person_send("t9", "Change of plan: stop"), "sent")
-        self.assertEqual([a for a in sent if a[0] == "keys"], [["keys", "t9", "ctrl+enter"]])
-
-    def test_news_never_presses_esc(self):
+    # ---- SHEP-329: the person's reply goes now, herdr-core's send alone ------------------------------------------
+    def test_the_persons_reply_to_a_working_claude_presses_no_key(self):
         sent = self.fake_hc(self.CLAUDE, [self.QUEUED_2_1_330])
-        self.assertTrue(self.news.news_send("t9", "SHEP-1 is ready"))
-        self.assertEqual([a for a in sent if a[0] == "keys"], [["keys", "t9", "ctrl+enter"]])
+        self.assertEqual(self.news.person_send("t9", "Change of plan: stop"), "sent")
+        self.assertEqual(sent, [["send", "t9", "Change of plan: stop"]])
 
     def test_the_persons_reply_goes_to_a_working_codex_now(self):
         held = []
@@ -8869,10 +8851,7 @@ class CodexBatch278(unittest.TestCase):
         sent = self.fake_hc(self.CODEX, ["› hange of plan: stop\n  tab to queue message"])
         self.assertEqual(self.news.person_send("t9", "Change of plan: stop"), "sent")
         self.assertEqual(held, [])
-        self.assertIn(["send", "t9", "Change of plan: stop"], sent)
-        # its "tab to queue" draft goes in now (Enter), never to the queue
-        self.assertIn(["keys", "t9", "enter"], sent)
-        self.assertNotIn(["keys", "t9", "tab"], sent)
+        self.assertEqual(sent, [["send", "t9", "Change of plan: stop"]])
 
     def test_the_persons_reply_waits_only_while_they_write_in_its_box(self):
         held = []

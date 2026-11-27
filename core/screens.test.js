@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { readScreen, ScreenWatch, starting, pressKeys, SCREEN, screenText, trustOf, TRUST as TRUST_WORDS } from "./screens.js";
+import { readScreen, ScreenWatch, starting, SCREEN, screenText, trustOf, TRUST as TRUST_WORDS } from "./screens.js";
 
 const TRUST = [
   "Do you trust the files in this folder?",
@@ -15,13 +15,12 @@ const TRUST = [
 describe("a CLI's start screen, read the same by the window and the service", () => {
   test("its words and choices, the cursor's one", () => {
     expect(readScreen(TRUST)).toEqual({ words: "Do you trust the files in this folder?", choices: [{ label: "Yes, proceed" }, { label: "No, exit" }], at: 0 });
-    expect(pressKeys(0, 1)).toEqual(["down", "enter"]);
   });
   test("starting: live, no status, no turn, a CLI", () => {
     expect(starting({ state: "live", foreground: { name: "claude" } })).toBe(true);
     expect(starting({ state: "live", status: { state: "working" }, foreground: { name: "claude" } })).toBe(false);
   });
-  test("two matching reads put a card up; a press on it presses the choice", async () => {
+  test("two matching reads put a card up, and nothing is ever pressed", async () => {
     const store = new Map();
     const sent = [];
     const io = { hc: async (a) => (a[0] === "read" ? { code: 0, stdout: TRUST } : (sent.push(a), { code: 0, stdout: "" })), cards: (x) => store.get(x) ?? [], save: (x, l) => store.set(x, l) };
@@ -32,9 +31,8 @@ describe("a CLI's start screen, read the same by the window and the service", ()
     await w.tick("t1", k, 102000);
     const card = store.get("t1")[0];
     expect(card).toMatchObject({ cli: "Claude Code", state: "open", choices: [{ label: "Yes, proceed" }, { label: "No, exit" }] });
-    expect(await w.press(card, 0)).toBe(null);
-    expect(sent).toEqual([["keys", "t1", "enter"]]);
-    expect(store.get("t1")[0]).toMatchObject({ state: "answered", how: SCREEN.answered("Yes, proceed") });
+    expect(w.press).toBeUndefined();
+    expect(sent).toEqual([]);
   });
 });
 

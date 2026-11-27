@@ -40,8 +40,6 @@ def beside_store(kind, name):
 LEGACY = os.path.join(HOME, ".config", "herdr-app", "data", "tasks")
 SHELLS = {"bash", "zsh", "fish", "sh", "dash", "ksh", "tcsh", "csh", "nu", "xonsh", "pwsh", "powershell", "elvish"}
 RANK = {"blocked": 4, "done": 3, "working": 2, "idle": 1}
-# Claude Code's sign that a message waits in its own queue (core/send.js QUEUED): its Ctrl+Enter then sends it now
-QUEUED = re.compile(r"ctrl\+enter to send now|press up to edit queued messages|^\s*⎿\s+Queued\b", re.I | re.M)
 GH = os.environ.get("HERDR_TASK_GH") or "gh"
 # How often tick asks GitHub about a pull request (ms).
 PR_EVERY = 60000

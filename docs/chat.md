@@ -4,18 +4,13 @@ What you can type in a chat's box besides a message, and the keys that help.
 
 ## Sign in
 
-When Claude Code, Codex or a connector asks you to sign in, open its chat and tap **Sign in**. A waiting task also
-appears under **Needs you**. The sign-in link opens in the browser on the phone or computer you are using.
+When Claude Code, Codex or a connector needs you to sign in, its chat shows a card that says what to run, and a
+waiting task also appears under **Needs you**. Tap **Open terminal** and sign in there yourself: Shepherdr never
+types a sign-in command, pastes a code or keeps a key for you.
 
-- Claude Code offers a Claude subscription or Anthropic Console billing. If Claude gives you a code, paste it into
-  the card. Bedrock, Microsoft Foundry and Vertex AI use credentials set up on the agent’s machine.
-- For Codex on another machine, choose the ChatGPT device code. Device sign-in has to be enabled for your account
-  or allowed by your workspace. An OpenAI API key goes through the masked Secrets box for the agent’s machine.
-  Tap **Reopen chat** when Codex needs to reload its sign-in. Choose the standard ChatGPT browser option only
-  on the computer running Codex.
-- For a connector, pick it in the card when prompted. The card may ask for the complete address from the
-  browser’s address bar, even when that final page could not open. Use **Open terminal** when your provider
-  needs machine setup or your Codex version does not offer a paste-back connector login.
+- Claude Code: run `/login` (a connector: `/mcp`).
+- Codex: run `codex login`, or `codex login --device-auth` on a machine without a browser (a connector:
+  `codex mcp login <name>`).
 
 [Claude Code authentication](https://code.claude.com/docs/en/authentication) ·
 [Claude Code connectors](https://code.claude.com/docs/en/mcp) ·

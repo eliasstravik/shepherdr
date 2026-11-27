@@ -36,6 +36,9 @@ The bar: anything not explicitly allowed by the provider's own terms or docs, or
 - Codex plan usage and limits (App Server `account/read` and `account/rateLimits/read`). Usage warnings and the phone, watch and voice usage lines now only show ElevenLabs, read with the person's own API key.
 - Codex's model list from the App Server (`model/list`), and the reviewer-model check that used it. The menu shows OpenAI's published models; Codex itself refuses one the account can't use.
 - Switching a running agent's model, level or speed in place by typing its slash commands, driving its pickers from screen reads and rewriting `~/.claude/settings.json` or `~/.codex/config.toml` afterwards. A pick now restarts the agent on the same conversation with documented flags, and waits while a turn runs.
+- Keys pressed into an agent on Shepherdr's own: Ctrl+Enter ("send now") and then Esc on a message sent mid-turn, Esc to close the agent's own question before typing a message, Enter/Tab after a send to Codex, and Ctrl+Enter on Shepherdr's own news and cross-machine messages. A send is now herdr-core's `send` alone; Claude Code queues a mid-turn message itself, Shepherdr's news waits until the agent is idle, and a message to an agent on its own question is refused ("answer that in its terminal first"). The unused Send now on a queued message went too.
+- A worker pressing keys on its reviewer's trust or sign-in screen (`hc keys` in a worker's reviewer allowlist). The worker now tells the person to answer it in the reviewer's terminal.
+- Automatic recaps (a `<herdr-recap>` prompt sent when the person came back to a chat) and their Settings › Recaps switch. Recap in a chat's menu, the person's own ask, stays.
 
 **Kept, and why**
 

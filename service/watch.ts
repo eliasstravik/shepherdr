@@ -11,7 +11,7 @@ import * as SC from "../core/screens.js";
 import * as CV from "../core/chat-view.js";
 import * as AG from "../core/agents.js";
 
-const { ScreenWatch, starting, cliOf, readScreen, screenText, pressKeys, SCREEN, trustOf } = SC as any;
+const { ScreenWatch, starting, cliOf, readScreen, screenText, SCREEN, trustOf } = SC as any;
 const { LOST } = CV as any;
 const { freshArgv } = AG as any;
 type Run = (args: string[]) => Promise<{ code: number; stdout: string; stderr?: string }>;
@@ -30,9 +30,8 @@ export class AgentWatch {
   private busy = false;
 
   constructor(private hub: Hub, private hc: Run, private o: { watched: () => Watched[]; changed: () => void;
-    loginWatches?: () => string[]; log?: (addr: string) => { id: string; kind: string; text?: string }[];
-    storeKey?: (machine: string, key: string) => Promise<void> }) {
-    this.login = new SignInWatch(hub, hc, o.changed, o.log, o.storeKey);
+    loginWatches?: () => string[]; log?: (addr: string) => { id: string; kind: string; text?: string }[]; }) {
+    this.login = new SignInWatch(hub, o.changed, o.log);
     this.screens = new ScreenWatch({ hc: (a: string[]) => this.hc(a), cards: (a: string) => this.own.get(a) ?? [], save: (a: string, list: any[]) => { this.own.set(a, list); this.o.changed(); } }, () => this.o.changed());
   }
 
@@ -55,7 +54,6 @@ export class AgentWatch {
       const addrs = [...inspecting];
       for (let i = 0; i < addrs.length; i += 8) {
         await Promise.all(addrs.slice(i, i + 8).map(async (addr) => {
-          if (this.login.helper(addr)) { login.add(addr); return; }
           const k = now.has(addr) ? this.hub.terminals.get(addr) : undefined;
           if (await this.login.tick(addr, k).catch(() => false)) {
             login.add(addr);
@@ -77,20 +75,6 @@ export class AgentWatch {
         await this.screens.tick(addr, k).catch(() => undefined);
       }
     } finally { this.busy = false; }
-  }
-
-  /** A press on a start screen's choice, through the shared watch (only on the screen its card was drawn from). */
-  async press(id: string, choice: number): Promise<string | null> {
-    const addr = [...this.own.keys()].find((a) => this.cardsOf(a).some((c) => c.id === id));
-    const card = addr ? this.cardsOf(addr).find((c) => c.id === id) : null;
-    if (!card || card.state !== "open") return SCREEN.gone;
-    // a folder-trust card shows two buttons of its own (0: trust, 1: no): each presses the screen's own choice
-    const t = trustOf(card);
-    if (t) {
-      if (choice !== 0 && choice !== 1) return SCREEN.gone;
-      return this.screens.press(card, choice === 0 ? t.yes : t.no);
-    }
-    return this.screens.press(card, choice);
   }
 
   /** The open folder-trust card of each agent waiting on one: [{ card, trust }]. */
