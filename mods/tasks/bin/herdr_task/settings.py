@@ -182,6 +182,16 @@ def worktrees_on(s, space=None):
     return s.loc["kind"] == "repo" and settings_for(s, space)["tasks"].get("worktrees") is not False
 
 
+def tier_args(agent, fast):
+    if agent == "claude":
+        # Older settings can carry the Codex tier across. Claude treats it as Fast.
+        return ["--settings", json.dumps({"fastMode": bool(fast)})]
+    if agent == "codex":
+        tier = "ultrafast" if fast == "ultrafast" else "fast" if fast else "default"
+        return ["-c", f'service_tier="{tier}"']
+    return []
+
+
 def argv_for(pick):
     """How to start an agent from a role's settings {agent, model, effort, fast, perm} (or its own
     argv), as the chat's agent picker builds it (mods/chat/agent.js argvFor). None: no setting."""
@@ -199,7 +209,7 @@ def argv_for(pick):
             a += ["--model", pick["model"]]
         if pick.get("effort"):
             a += ["--effort", pick["effort"]]
-        a += ["--settings", json.dumps({"fastMode": bool(pick.get("fast"))})]
+        a += tier_args(agent, pick.get("fast"))
         perm = PERM_ACROSS["claude"].get(pick.get("perm"), pick.get("perm"))
         if perm == "bypassPermissions":
             a.append("--dangerously-skip-permissions")
@@ -214,7 +224,7 @@ def argv_for(pick):
             a += ["-c", f'model_reasoning_effort="{pick["effort"]}"']
         # always said, so Fast off wins over a service_tier in config.toml (default: the standard tier)
         # Ultrafast: Codex's fastest tier (SHEP-258), on models whose catalog offers it
-        a += ["-c", 'service_tier="%s"' % ("ultrafast" if pick.get("fast") == "ultrafast" else "fast" if pick.get("fast") else "default")]
+        a += tier_args(agent, pick.get("fast"))
         perm = PERM_ACROSS["codex"].get(pick.get("perm"), pick.get("perm"))
         if perm == "full":
             a.append("--dangerously-bypass-approvals-and-sandbox")
@@ -320,6 +330,26 @@ def argv_model(argv):
     return model, effort
 
 
+def argv_speed(agent, argv):
+    """The explicit tier a start command asks for, in the task CLI's words."""
+    speed = None
+    for i, arg in enumerate(argv):
+        name, eq, value = arg.partition("=")
+        if not eq:
+            value = argv[i + 1] if i + 1 < len(argv) else ""
+        if agent == "codex" and name in ("-c", "--config") and value.startswith("service_tier="):
+            tier = value.split("=", 1)[1].strip("\"'")
+            speed = "fast" if tier == "priority" else SPEED_VALUES.get(tier, "regular")
+        elif agent == "claude" and name == "--settings" and value.startswith("{"):
+            try:
+                fast = json.loads(value).get("fastMode")
+                if isinstance(fast, bool):
+                    speed = "fast" if fast else "regular"
+            except ValueError:
+                pass
+    return speed
+
+
 # ---- the Settings block: the settings that shape a task's work, as words in its brief ---------
 # As in Shepherdr: settings only change what goes into an agent's starting prompt. Every brief
 # ends with this block, one line per setting; a line that differs from Herdr's default says who
@@ -344,6 +374,7 @@ SET_KEYS = {"review": "review", "brief.review": "review", "merge": "merge", "bri
             "reviewer": "reviewer", "reviewer.agent": "reviewer", "reviewer.model": "reviewer_model", "reviewer.effort": "reviewer_effort",
             "reviewer_model": "reviewer_model", "reviewer-model": "reviewer_model",
             "reviewer_effort": "reviewer_effort", "reviewer-effort": "reviewer_effort",
+            "reviewer.speed": "reviewer_speed", "reviewer_speed": "reviewer_speed", "reviewer-speed": "reviewer_speed",
             "proof": "proof", "brief.proof": "proof",
             "speed": "speed", "task.speed": "speed", "fast": "speed", "permission": "perm", "permissions": "perm", "perm": "perm",
             "task.permission": "perm",
@@ -360,6 +391,7 @@ MUST_VALUES = {"blocker": "blocker", "blockers": "blocker", "critical": "blocker
                "minor": "minor", "trivial": "minor", "everything": "minor"}
 # A task's speed (the model's service tier) as argv_for's "fast", and every permission mode a CLI has.
 SPEEDS = {"regular": False, "fast": True, "ultrafast": "ultrafast"}
+SPEED_NAMES = {"regular": "Standard", "fast": "Fast", "ultrafast": "Ultra-fast"}
 SPEED_VALUES = {"regular": "regular", "standard": "regular", "normal": "regular", "off": "regular", "fast": "fast", "on": "fast",
                 "ultrafast": "ultrafast", "ultra-fast": "ultrafast", "ultra fast": "ultrafast"}
 PERM_VALUES = {"default": "manual", "ask": "manual", "accept edits": "acceptEdits", "accept-edits": "acceptEdits", "bypass": "bypassPermissions",
@@ -414,10 +446,10 @@ def set_task(t, key, value, agent=None):
         if low not in MERGE_VALUES:
             raise Fail('merge is "on its own", "after checks" or "ask me first".')
         sets[field] = MERGE_VALUES[low]
-    elif field == "speed":
+    elif field in ("speed", "reviewer_speed"):
         if low not in SPEED_VALUES:
             raise Fail("speed is regular, fast or ultrafast.")
-        t["speed"] = SPEED_VALUES[low]
+        t[field] = SPEED_VALUES[low]
     else:
         # Agents, models and efforts are the task's own fields (worker_pick reads them).
         if field in ("effort", "reviewer_effort") and low not in EFFORTS:
@@ -449,7 +481,7 @@ def set_opts(t, args, s=None, space=None):
     checked against the CLI it will run (its own --agent, else its space's Task agent)."""
     def cli():
         return (worker_pick(s, t, space or t.get("space")).get("agent") if s else None) or t.get("agent") or "claude"
-    for flag in ("agent", "model", "effort", "speed", "permission", "flags", "reviewer", "reviewer_model", "reviewer_effort"):
+    for flag in ("agent", "model", "effort", "speed", "permission", "flags", "reviewer", "reviewer_model", "reviewer_effort", "reviewer_speed"):
         v = getattr(args, flag, None)
         if v is not None:
             set_task(t, flag, v, cli() if flag == "flags" else None)
@@ -644,7 +676,7 @@ def trust_roots(folder):
     return out
 
 
-def reviewer_command(who, model=None, effort=None, folder=None):
+def reviewer_command(who, model=None, effort=None, folder=None, fast=None):
     """The command a worker starts its reviewer with (the brief's Reviewer line): read-only, and for
     Codex on its own app server (--no-daemon, as task agents run: a shared one can keep a sign-in
     since replaced, and every turn then fails, #745). Codex would first stop on its own screens,
@@ -660,6 +692,8 @@ def reviewer_command(who, model=None, effort=None, folder=None):
             a += ["-c", "projects={" + ",".join(f'{json.dumps(r)}={{trust_level="trusted"}}' for r in roots) + "}"]
         a += ["-m", model] if model else []
         a += ["-c", f'model_reasoning_effort="{effort}"'] if effort else []
+        if fast is not None:
+            a += tier_args(who, fast)
     elif who == "claude":
         # #1181: never plan mode (it wrote its report into a plan to approve): don't-ask mode with only the reading tools,
         # so a write or a command that isn't read-only is refused, never asked. --tools=… as one word: its list would
@@ -671,6 +705,8 @@ def reviewer_command(who, model=None, effort=None, folder=None):
         a += ["--add-dir=" + TEMPLATES]
         a += ["--model", model] if model else []
         a += ["--effort", effort] if effort else []
+        if fast is not None:
+            a += tier_args(who, fast)
         # #1131: hc run gives it hc's environment, not the worker's: the worker's own Claude profile, when it has one
         return (cli_env(who) or "env ") + CLAUDE_PROFILE + shlex.join(a)
     else:
@@ -717,11 +753,13 @@ def task_settings(s, t, space=None, argv=None, live=False):
         rv = dict(cfg.get("reviewer") or {})
         if t.get("reviewer") and t["reviewer"] != rv.get("agent"):
             rv = {"agent": t["reviewer"]}
-        rv_by = "task" if any(t.get(f) for f in ("reviewer", "reviewer_model", "reviewer_effort")) else \
+        rv_by = "task" if any(t.get(f) for f in ("reviewer", "reviewer_model", "reviewer_effort", "reviewer_speed")) else \
             by_layer(s, space, "reviewer", None, bool(cfg.get("reviewer")), False)
         for f in ("model", "effort"):
             if t.get(f"reviewer_{f}"):
                 rv[f] = t[f"reviewer_{f}"]
+        if t.get("reviewer_speed") in SPEEDS:
+            rv["fast"] = SPEEDS[t["reviewer_speed"]]
         other = {"claude": "codex", "codex": "claude"}.get(agent)
         want = rv.get("agent") or (other if other and shutil.which(other) else agent)
         who, said = want, ""
@@ -742,7 +780,8 @@ def task_settings(s, t, space=None, argv=None, live=False):
         lacks = codex_lacks(rv.get("model")) if who == "codex" else None
         dropped = rv.get("model")
         if lacks:
-            rv = {k: v for k, v in rv.items() if k != "model"}
+            rv = {k: v for k, v in rv.items() if k not in ("model", "fast")}
+        speed = next((k for k, v in SPEEDS.items() if v == rv.get("fast")), None)
         text = who + (f", model {rv['model']}" if rv.get("model") else "") + (f", effort {rv['effort']}" if rv.get("effort") else "")
         if lacks:
             text += (f" (Codex's own default model: Codex here doesn't offer {dropped} "
@@ -757,10 +796,13 @@ def task_settings(s, t, space=None, argv=None, live=False):
         elif not rv.get("agent"):
             text += " (the other CLI)" if who != agent else " (your own CLI: no other is installed)"
         folder = t.get("worktree") or getattr(s, "loc", {}).get("folder")
-        cmd = reviewer_command(who, rv.get("model"), rv.get("effort"), folder)
+        if speed:
+            text += f", {SPEED_NAMES[speed]}"
+        cmd = reviewer_command(who, rv.get("model"), rv.get("effort"), folder, rv.get("fast"))
         if cmd:
             text += f"; start it as `{cmd}`"
-        add("Reviewer", text, {"agent": who, "model": rv.get("model"), "effort": rv.get("effort"), "command": cmd}, rv_by)
+        add("Reviewer", text, {"agent": who, "model": rv.get("model"), "effort": rv.get("effort"), "command": cmd,
+                              **({"speed": speed} if speed else {})}, rv_by)
         must = sets.get("must_fix") or (k.get("must_fix") if k.get("must_fix") in LEVELS else "major")
         add("Must fix", MUST_WORDS[must], must, "task" if "must_fix" in sets else by_layer(s, space, "tasks", "must_fix", must, "major"))
         rounds = sets.get("review_rounds") or (kept or {}).get("rounds") or (rounds_cfg if rounds_cfg > 0 else 3)
@@ -781,14 +823,19 @@ def task_settings(s, t, space=None, argv=None, live=False):
     add("Proof", PROOF_WORDS["on" if proof else "off"], proof,
         "task" if "proof" in sets else by_layer(s, space, "tasks", "proof", proof, True))
     model, effort = argv_model(argv)
+    speed = argv_speed(agent, argv)
+    # The launch command always spells out Standard. Say it in the brief when it was chosen in the task or Settings.
+    named_speed = speed and (speed != "regular" or t.get("speed") in SPEEDS or (cfg.get("worker") or {}).get("fast") is False)
     extra = FLAGS.extra(agent, argv)
     text = agent + (f", model {model}" if model else "") + (f", effort {effort}" if effort else "") + \
+        (f", {SPEED_NAMES[speed]}" if named_speed else "") + \
         (f", extra flags {FLAGS.words(extra)}" if extra else "")
     own_flags = agent in (t.get("flags") or {}) if isinstance(t.get("flags"), dict) else False
-    a_by = "task" if any(t.get(f) for f in ("agent", "model", "effort")) or own_flags else \
+    a_by = "task" if any(t.get(f) for f in ("agent", "model", "effort", "speed")) or own_flags else \
         by_layer(s, space, "worker", None, bool(cfg.get("worker")), False) or \
         (by_layer(s, space, "tasks", f"{agent}_flags", extra, []) if extra else None)
-    add("Agent", text, {"agent": agent, "model": model, "effort": effort, "flags": extra}, a_by)
+    add("Agent", text, {"agent": agent, "model": model, "effort": effort, "flags": extra,
+                       **({"speed": speed} if speed else {})}, a_by)
     # Suggested replies (SHEP-186): the reply ends with one to three replies the person would likely send next (templates/worker.md)
     sug = (cfg.get("agents") or {}).get("suggestions") is not False
     add("Suggested replies", "on (your reply ends with one to three replies the person would likely send next, or one per option, up to five, when it asks a question with options; each at most 30 characters; shown as bubbles to tap)" if sug

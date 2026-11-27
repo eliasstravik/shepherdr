@@ -234,6 +234,7 @@ def main():
         c.add_argument("--reviewer", help="the CLI its agent's review uses (default: Settings' Reviewer, else the other CLI)")
         c.add_argument("--reviewer-model", help="the reviewer's model")
         c.add_argument("--reviewer-effort", help="the reviewer's effort")
+        c.add_argument("--reviewer-speed", help="the reviewer's service tier: standard, fast or ultrafast, where supported")
         c.add_argument("--set", action="append", metavar="KEY=VALUE",
                        help="one task's setting, a line of its brief's Settings block: review=on|off, review.rounds=1..10, "
                             "review.mustFix=blocker|major|minor, proof=on|off, flags=\"--advisor opus\", merge=\"on its own\"|\"after checks\"|\"ask me first\" (\"\": Settings' again)")
@@ -247,7 +248,7 @@ def main():
                                 "instead of a new one, and ready pushes to its branch (\"\" lets go)")
 
     def pick_opts(c):
-        c.add_argument("--speed", help="its agent's speed, where its model has more than one: regular, fast, ultrafast (default: Settings')")
+        c.add_argument("--speed", help="its agent's service tier: standard, fast or ultrafast, where supported (default: Settings')")
         c.add_argument("--permission", help="its agent's permission mode, in its CLI's words: Claude Code's default, acceptEdits, plan, "
                                             "auto, bypassPermissions; Codex's read-only, auto, approve (Approve for me), full (\"\": Settings' again)")
 

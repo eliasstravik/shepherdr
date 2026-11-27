@@ -40,11 +40,11 @@ test('a tap on yours takes it back; another emoji changes yours; the agent\'s al
 test('sizes: a pill that hugs its emoji with a 44 px tap area, on the top corner, a pop only with motion (measured in a real layout by test/test_reaction_chip.py)', () => {
   const css = readFileSync(new URL('../../src/ds.css', import.meta.url), 'utf8')
   const rule = (sel: string) => css.match(new RegExp(`(?:^|\\n|\\})${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\{([^}]*)\\}`))?.[1] ?? ''
-  expect(rule('.rxc')).toContain('height:28px')
+  expect(rule('.rx-pill')).toContain('height:28px')
   expect(rule('.rxc')).toContain('flex:none')
   expect(rule('.rxs')).toContain('width:max-content')
-  expect(rule('.rxc::after')).toContain('inset:-8px -5px') // 8 + 28 + 8 = 44
-  expect(css).toMatch(/prefers-reduced-motion:reduce\)\{\.rxs>\.rxc\.rx-new\{animation:none\}/)
+  expect(rule('.app.tap .rxc')).toBe('min-width:var(--hit);min-height:var(--hit)')
+  expect(css).toMatch(/prefers-reduced-motion:reduce\)\{\.rxc\.rx-new>\.rx-pill\{animation:none\}/)
 })
 
 test('the chip\'s state classes are its own: none is a class the rest of the app styles (3.2.4: "pop", the menu\'s)', () => {

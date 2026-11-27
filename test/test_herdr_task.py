@@ -3166,6 +3166,19 @@ class ReviewerLine(unittest.TestCase):
     def test_an_unknown_check_keeps_codex(self):
         self.assertEqual(self.line(None)["value"]["agent"], "codex")
 
+    def test_reviewer_service_tier_reaches_its_command(self):
+        import shlex
+        self.line("ready")
+        task = {"id": 1, "title": "Check service tiers", "mode": "worktree"}
+        self.settings.set_task(task, "reviewer.speed", "ultra-fast")
+        self.settings.set_task(task, "speed", "standard")
+        lines = {x["label"]: x for x in self.settings.task_settings(Store([task]), task)}
+        self.assertEqual(lines["Agent"]["value"]["speed"], "regular")
+        self.assertEqual(lines["Reviewer"]["value"]["speed"], "ultrafast")
+        self.assertIn('service_tier="ultrafast"', shlex.split(lines["Reviewer"]["value"]["command"]))
+        self.assertEqual(self.settings.tier_args("claude", True), ["--settings", '{"fastMode": true}'])
+        self.assertIn('service_tier="default"', shlex.split(self.settings.reviewer_command("codex", fast=False)))
+
     def test_codex_asked_now_for_a_brief(self):
         """#947: an unreadable Codex auth file answers `codex login status` with an error, which the periodic check
         can't read (unknown), and the reviewer sat on Codex's sign-in screen. A brief asks Codex now: not signed in,
@@ -10368,6 +10381,16 @@ class Schedules32(unittest.TestCase):
         self.assertEqual(shown["last_task"], "APP-1")
         listed = self.auto("list", all=False)
         self.assertEqual([(x["id"], x["name"], x["active"]) for x in listed], [(1, "Look for stuck work", True)])
+
+    def test_edited_speed_reaches_the_next_run(self):
+        from herdr_task.settings import worker_argv
+        self.auto("add", title="Check service tiers", prompt="Check the setup.", when="every 30 minutes",
+                  space="sp1", set=["agent=codex", "model=gpt-6.2-sol", "speed=ultrafast"])
+        self.auto("edit", id="1", set=["speed=regular"])
+        with self.mock.patch.object(self.au, "worker_argv", worker_argv):
+            self.auto("run-now", id="1")
+        self.assertEqual(self.task(1)["speed"], "regular")
+        self.assertIn('service_tier="default"', self.started[-1][1])
 
     def test_the_schedules_plugin_off_starts_no_run(self):
         """Settings › Plugins: Schedules off (Everywhere's plugins_off), the scheduler starts no schedule's run; on again, it does."""

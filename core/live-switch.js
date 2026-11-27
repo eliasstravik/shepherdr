@@ -38,9 +38,13 @@ export function liveChanges(from, to) {
 /** Claude Code's commands for the changes, in order: [{ text, done: RegExp, fail?: RegExp }]. */
 export function claudeCommands(ch) {
   const out = [];
+  const speed = { text: `/fast ${ch.fast ? "on" : "off"}`, done: new RegExp(`Fast mode ${ch.fast ? "ON" : "OFF"}\\b`),
+    fail: /Fast mode (?:unavailable|is not available|has been disabled|requires)[^\n]*/i };
+  // Turning Fast off before leaving a model keeps /fast on a model that supports it.
+  if (ch.fast === false) out.push(speed);
   if (ch.model !== undefined) out.push({ text: `/model ${ch.model || "default"}`, done: /Set model to /, fail: /(?:Model .*not (?:found|available)|Invalid model|isn't available|not a valid model)[^\n]*/i });
   if (ch.effort !== undefined) out.push({ text: `/effort ${ch.effort || "auto"}`, done: /Set effort level to |Effort level set to /, fail: /Invalid (?:effort|argument)[^\n]*/i });
-  if (ch.fast !== undefined) out.push({ text: `/fast ${ch.fast ? "on" : "off"}`, done: /Fast mode (?:ON|OFF)\b/, fail: /Fast mode unavailable:?[^\n]*/ });
+  if (ch.fast) out.push(speed);
   return out;
 }
 
@@ -260,7 +264,10 @@ async function codex(io, ch, labels) {
 export async function switchLive(io, kind, from, to, labels = {}) {
   const ch = liveChanges(from, to);
   if (!Object.keys(ch).length) return ch;
-  if (kind === "claude") await claude(io, ch);
+  if (kind === "claude") {
+    // A model switch can reset Fast (for example switching to Fable), even when the selected tier stays the same.
+    await claude(io, ch.model !== undefined && to.fast ? { ...ch, fast: true } : ch);
+  }
   else await codex(io, ch, { ...labels, model: from.model, effort: to.effort });
   return ch;
 }

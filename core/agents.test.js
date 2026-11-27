@@ -59,7 +59,7 @@ test("every agent with a fast mode shows the Fast switch, and turning it off sti
   expect(codexMenu.models.find((m) => m.id === "gpt-x").fast).toBe(true);
   expect(codexMenu.models.find((m) => m.id === "gpt-slow").fast).toBe(false);
   expect(codexMenu.fastLocked).toBeUndefined();
-  expect(menuFor("claude", {}).models.find((m) => m.id === "opus").fast).toBe(true);
+  expect(menuFor("claude", {}).models.find((m) => m.id === "opus").fast).toBe(false);
   // off: said on the command line, so config.toml's fast loses, and the label reads it back
   const off = argvFor({ agent: "codex", model: "gpt-x", effort: "high", fast: false }, { agent: "codex", argv: ["codex", "-c", 'service_tier="fast"'] }).argv;
   expect(off.filter((a) => a.startsWith("service_tier"))).toEqual(['service_tier="default"']);
@@ -69,6 +69,28 @@ test("every agent with a fast mode shows the Fast switch, and turning it off sti
   expect(current("codex", on, {}, dflt).fast).toBe(true);
   const claudeOff = argvFor({ agent: "claude", model: "opus", fast: false }, { agent: "claude", argv: ["claude"] }).argv;
   expect(current("claude", claudeOff, {}, { fast: true }).fast).toBe(false);
+});
+
+test("the model catalog is the source for each faster tier", () => {
+  const models = [
+    { value: "default", resolvedModel: "claude-opus-5-5", displayName: "Default (recommended)", supportsFastMode: true },
+    { value: "opus", resolvedModel: "claude-opus-5-5", displayName: "Opus 5.5", supportsFastMode: true },
+    { value: "fable", resolvedModel: "claude-fable-5-2", displayName: "Fable 5.2", supportsFastMode: true },
+    { value: "sonnet", displayName: "Sonnet 5.5" },
+    { value: "claude-opus-5", displayName: "Opus 5", supportsFastMode: true },
+  ];
+  const claude = menuFor("claude", parseDefaults("claude", `claudeModels\t${JSON.stringify(models)}`));
+  expect(claude.models.filter((m) => m.fast).map((m) => m.id)).toEqual(["opus", "opus[1m]", "claude-fable-5-2", "claude-opus-5"]);
+  expect(claude.models[0].name).toBe("Opus 5.5");
+  const codex = menuFor("codex", parseDefaults("codex", `models\t${JSON.stringify({ models: [
+    { slug: "only-ultra", service_tiers: [{ id: "ultrafast" }] },
+    { slug: "unknown", service_tiers: [{ id: "other" }] },
+  ] })}`));
+  expect(codex.models[0]).toMatchObject({ fast: false, ultrafast: true });
+  expect(codex.models[1]).toMatchObject({ fast: false });
+  const stale = 'models\t{"models":[{"slug":"live","service_tiers":[]}]}';
+  const fresh = '{"models":[{"slug":"live","service_tiers":[{"id":"fast"},{"id":"ultrafast"}]}]}';
+  expect(parseDefaults("codex", stale, fresh).models[0]).toMatchObject({ fast: true, ultrafast: true });
 });
 
 // A terminal's own argv as herdr-task runs a worker: nice, sh -c, env and the person's `bash -ic` before the agent.

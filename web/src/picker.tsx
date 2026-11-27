@@ -16,19 +16,20 @@ export type Pick = AgentPick & { label?: string | null }
 
 /* ---------- each machine's catalog: its agents and their own models, read once and kept ---------- */
 
-const catalogs = new Map<string, Catalog | 'loading'>()
+const catalogs = new Map<string, { data?: Catalog; readAt: number }>()
 const catListeners = new Set<() => void>()
 let catTick = 0
 
 function loadCatalog(machine: string) {
-  if (catalogs.has(machine)) return
-  catalogs.set(machine, 'loading')
+  const old = catalogs.get(machine)
+  if (old && Date.now() - old.readAt < 60_000) return
+  const pending = { data: old?.data, readAt: Date.now() }
+  catalogs.set(machine, pending)
   act<{ ok?: boolean; catalog?: Catalog }>({ type: 'catalog', machine })
     .then((r) => {
-      if (r.catalog) catalogs.set(machine, r.catalog)
-      else catalogs.delete(machine)
+      if (catalogs.get(machine) === pending && r.catalog) pending.data = r.catalog
     })
-    .catch(() => void catalogs.delete(machine))
+    .catch(() => undefined)
     .finally(() => {
       catTick++
       catListeners.forEach((l) => l())
@@ -47,8 +48,7 @@ export function useCatalog(machine: string | undefined): Catalog | undefined {
   useEffect(() => {
     if (machine) loadCatalog(machine)
   }, [machine])
-  const c = machine ? catalogs.get(machine) : undefined
-  return c && c !== 'loading' ? c : undefined
+  return machine ? catalogs.get(machine)?.data : undefined
 }
 
 /** a new Shepherdr may know more agents: the lists are read again */
@@ -62,10 +62,14 @@ const agentOf = (cat: Catalog | undefined, id: string): CatalogAgent | undefined
 /** the model a pick names: by its id, else by the name the agent itself reports for it (a running agent says
  *  "claude-opus-5-5" where its menu says "opus"), else the agent's first */
 const modelOf = (a: CatalogAgent | undefined, p: Pick & { label?: string | null }): CatalogModel | undefined =>
-  a?.models.find((m) => m.id === p.model) ?? (p.label ? a?.models.find((m) => m.name === p.label) : undefined) ?? (p.model ? undefined : (a?.models.find((m) => m.id === a.defaultModel) ?? a?.models[0]))
+  a?.models.find((m) => m.id === p.model)
+  ?? (p.label ? a?.models.find((m) => m.name === p.label) : undefined)
+  ?? (p.model ? a?.models.find((m) => m.aliases?.includes(p.model!)) : undefined)
+  ?? (p.model ? undefined : (a?.models.find((m) => m.id === a.defaultModel) ?? a?.models[0]))
 
-const SPEEDS: Record<string, string> = { regular: 'Regular', fast: 'Fast', ultrafast: 'Ultra-fast' }
-const speedOf = (p: Pick) => (p.fast === 'ultrafast' ? 'ultrafast' : p.fast ? 'fast' : 'regular')
+const SPEEDS = { regular: 'Standard', fast: 'Fast', ultrafast: 'Ultra-fast' }
+const speedOf = (p: Pick): keyof typeof SPEEDS => p.fast === 'ultrafast' ? 'ultrafast' : p.fast ? 'fast' : 'regular'
+const tiersOf = (m?: CatalogModel) => ['regular', ...(['fast', 'ultrafast'] as const).filter((tier) => m?.speeds?.includes(tier))] as const
 const cap = (s: string) => (s === 'xhigh' ? 'Extra high' : s.charAt(0).toUpperCase() + s.slice(1))
 const NAMES: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi' }
 
@@ -81,7 +85,7 @@ export function pickWords(p: Pick, cat?: Catalog) {
 /** "Claude Code · Sonnet 5.5 · medium effort · fast · plan" */
 export function sayPick(p: Pick, cat?: Catalog): string {
   const w = pickWords(p, cat)
-  return [w.agent, w.model, w.effort && `${w.effort.toLowerCase()} effort`, w.speed !== 'regular' && SPEEDS[w.speed].toLowerCase(), w.perm.toLowerCase()].filter(Boolean).join(' · ')
+  return [w.agent, w.model, w.effort && `${w.effort.toLowerCase()} effort`, SPEEDS[w.speed], w.perm.toLowerCase()].filter(Boolean).join(' · ')
 }
 
 export type Role = 'Chats' | 'Tasks' | 'Reviews'
@@ -90,7 +94,9 @@ export type Role = 'Chats' | 'Tasks' | 'Reviews'
 export function pickFor(snap: Snapshot, level: string, role: Role): Pick {
   const c = snap.config
   // a repo's (SHEP-335: "repo:<key>"), a space's own, else Everywhere's
-  const own = level.startsWith('repo:') ? c?.repos?.find((r) => r.key === level.slice(5)) : level !== 'all' ? c?.spaces[level] : undefined
+  const own = level.startsWith('repo:') ? c?.repos?.find((r) => r.key === level.slice(5)) : level !== 'all'
+    ? (role === 'Chats' ? c?.spaces[level] : c?.repos?.find((r) => r.spaces.includes(level)) ?? c?.spaces[level])
+    : undefined
   return own?.agents[role] || c?.all.agents[role] || { agent: 'claude' }
 }
 
@@ -123,6 +129,7 @@ export function AgentLine({ pick, machine, onClick }: { pick: Pick; machine: str
       <span className="m">{w.model || w.agent}</span>
       {w.effort && <span className="e">{w.effort.toLowerCase()}</span>}
       <Bolts speed={w.speed} />
+      <span className="e tier">{SPEEDS[w.speed]}</span>
       {w.perm && <span className="e pm">· {w.perm.toLowerCase()}</span>}
       <I n="down" c="s16" />
     </button>
@@ -130,9 +137,8 @@ export function AgentLine({ pick, machine, onClick }: { pick: Pick; machine: str
 }
 
 /** what goes from the message box's agent line when it is short of room (SHEP-356), in this order, so the model and
- *  its effort stay whole: the logo (the model's name says whose it is), the chevron (the whole line is the button), the
- *  permission mode. Only past all three does the effort get cut. */
-export const AGENT_DROPS = ['logo', 'chev', 'perm'] as const
+ *  its effort stay whole: logo, chevron, permission mode, then the speed word (the bolts still show faster tiers). */
+export const AGENT_DROPS = ['logo', 'chev', 'perm', 'tier'] as const
 
 /** sets the agent line's data-drop to the fewest drops that let its words fit */
 export function fitAgentLine(el: HTMLElement) {
@@ -154,7 +160,7 @@ export function AgentField({ title, machine, pick, onChange }: { title: string; 
       <button type="button" className="fake" aria-label={`Agent: ${sayPick(pick, cat).replace(/ · /g, ', ')}. Change`} onClick={() => openPicker({ title, machine, pick, onChange })}>
         <Logo agent={pick.agent} name={w.agent} />
         <span className="n">
-          <b>{w.agent}</b> <span>{[w.model, w.effort.toLowerCase(), w.speed !== 'regular' && SPEEDS[w.speed].toLowerCase(), w.perm.toLowerCase()].filter(Boolean).join(' · ')}</span>
+          <b>{w.agent}</b> <span>{[w.model, w.effort.toLowerCase(), SPEEDS[w.speed], w.perm.toLowerCase()].filter(Boolean).join(' · ')}</span>
         </span>
         <I n="right" c="s16" />
       </button>
@@ -182,13 +188,13 @@ export function pickerRows(p: Pick, cat?: Catalog): { f: Field; label: string; v
   const a = agentOf(cat, p.agent)
   const m = modelOf(a, p)
   const w = pickWords(p, cat)
-  const efforts = m?.efforts?.length ? m.efforts : (a?.efforts ?? [])
+  const efforts = m?.efforts ?? a?.efforts ?? []
   const rows: { f: Field; label: string; value: string }[] = [
     { f: 'agent', label: 'Agent', value: w.agent },
     { f: 'model', label: 'Model', value: w.model + (w.group ? ` · ${w.group}` : '') },
   ]
   if (efforts.length) rows.push({ f: 'effort', label: 'Effort', value: w.effort })
-  if ((m?.speeds?.length ?? 0) > 1) rows.push({ f: 'speed', label: 'Speed', value: SPEEDS[w.speed] ?? cap(w.speed) })
+  rows.push({ f: 'speed', label: 'Speed', value: SPEEDS[w.speed] })
   if (a?.perms.length) rows.push({ f: 'mode', label: 'Permissions', value: a.perms.find((x) => x.id === (p.perm ?? a.permDefault))?.label ?? '' })
   return rows
 }
@@ -200,13 +206,13 @@ export function choiceList(f: 'effort' | 'speed' | 'mode', p: Pick, cat?: Catalo
   const m = modelOf(a, p)
   const w = pickWords(p, cat)
   if (f === 'effort') {
-    const efforts = m?.efforts?.length ? m.efforts : (a?.efforts ?? [])
+    const efforts = m?.efforts ?? a?.efforts ?? []
     return { title: `Effort · ${w.model || w.agent}`, items: efforts.map((e) => ({ id: e, label: cap(e), on: cap(e) === w.effort, pick: { ...p, effort: e } })) }
   }
   if (f === 'speed')
     return {
       title: `Speed · ${w.model || w.agent}`,
-      items: (m?.speeds ?? ['regular']).map((s) => ({ id: s, label: SPEEDS[s] ?? cap(s), on: s === w.speed, pick: { ...p, fast: s === 'ultrafast' ? 'ultrafast' : s === 'fast' } })),
+      items: tiersOf(m).map((s) => ({ id: s, label: SPEEDS[s], on: s === w.speed, pick: { ...p, fast: s === 'ultrafast' ? 'ultrafast' : s === 'fast' } })),
     }
   return {
     title: `Permissions · ${w.agent}`,
@@ -295,6 +301,7 @@ function AgentPicker({ title, machine, start, typed, onChange, close }: { title:
             />
           ))}
         </div>
+        {field === 'speed' && c.items.length > 1 && <p className="hint">Faster tiers can cost more.</p>}
       </div>
     )
   }
@@ -320,7 +327,7 @@ function AgentPicker({ title, machine, start, typed, onChange, close }: { title:
                 // another agent starts on its own first model; picking it moves straight on to its models
                 if (x.id !== p.agent) {
                   const first = x.models.find((y) => y.id === x.defaultModel) ?? x.models[0]
-                  const eff = first?.efforts?.length ? first.efforts : x.efforts
+                  const eff = first?.efforts ?? x.efforts
                   set({ agent: x.id, model: first?.id ?? null, effort: p.effort && eff.includes(p.effort) ? p.effort : (first?.defaultEffort ?? x.defaultEffort ?? eff[Math.min(2, eff.length - 1)] ?? null), fast: false, perm: null })
                 }
                 open('model')
@@ -383,8 +390,8 @@ function AgentPicker({ title, machine, start, typed, onChange, close }: { title:
 
 /** a pick with another model: its effort and speed kept where the model has them */
 function withModel(p: Pick, a: CatalogAgent | undefined, x: CatalogModel): Pick {
-  const eff = x.efforts?.length ? x.efforts : (a?.efforts ?? [])
-  return { ...p, model: x.id, effort: p.effort && eff.includes(p.effort) ? p.effort : (x.defaultEffort ?? p.effort ?? null), fast: (x.speeds ?? ['regular']).includes(speedOf(p)) ? p.fast : false }
+  const eff = x.efforts ?? a?.efforts ?? []
+  return { ...p, label: null, model: x.id, effort: p.effort && eff.includes(p.effort) ? p.effort : (x.defaultEffort ?? null), fast: tiersOf(x).includes(speedOf(p)) ? p.fast : false }
 }
 
 /** the model a typed name means ("sonnet", "gpt-5.5", "Opus 5.5"): by id or name, then by their start; the agent's
@@ -394,7 +401,7 @@ export function findModel(cat: Catalog, agent: string, name: string): { agent: s
   const q = n(name)
   if (!q) return null
   const agents = [...cat.agents.filter((a) => a.id === agent), ...cat.agents.filter((a) => a.id !== agent && a.installed)]
-  const rows = agents.flatMap((a) => a.models.map((m) => ({ agent: a.id, model: m.id, keys: [n(m.id), n(m.name)] })))
+  const rows = agents.flatMap((a) => a.models.map((m) => ({ agent: a.id, model: m.id, keys: [m.id, m.name, ...(m.aliases ?? [])].map(n) })))
   const hit = rows.find((r) => r.keys.includes(q)) ?? rows.find((r) => r.keys.some((k) => k.startsWith(q)))
   return hit ? { agent: hit.agent, model: hit.model } : null
 }
@@ -402,6 +409,7 @@ export function findModel(cat: Catalog, agent: string, name: string): { agent: s
 /** Open the agent picker. `title` says what it sets: "This chat runs on", "Tasks run on", "The new space runs on".
  *  `typed`: the model a /model named, picked once the models are read */
 export function openPicker(o: { title: string; machine: string; pick: Pick; typed?: string; onChange: (p: Pick) => void; onClose?: (p: Pick) => void }) {
+  if (o.machine) loadCatalog(o.machine)
   let last = o.pick
   openDialog((close) => <AgentPicker title={o.title} machine={o.machine} start={o.pick} typed={o.typed} onChange={(p) => { last = p; o.onChange(p) }} close={close} />, { wide: true, bare: true, label: o.title, onClose: () => o.onClose?.(last) })
 }

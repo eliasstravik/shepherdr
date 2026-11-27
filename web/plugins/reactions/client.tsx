@@ -55,8 +55,10 @@ export function Chips({ msg, chat }: { msg: Message; chat: Chat }) {
             react(chat.key, msg, c.emoji)
           }}
         >
-          <span className="e">{c.emoji}</span>
-          {c.count > 1 && <span className="n">{c.count}</span>}
+          <span className="rx-pill">
+            <span className="e">{c.emoji}</span>
+            {c.count > 1 && <span className="n">{c.count}</span>}
+          </span>
         </button>
       ))}
     </div>

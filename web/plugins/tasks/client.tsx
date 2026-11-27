@@ -219,13 +219,14 @@ function startDialog(t: Task) {
       const snap = getState().snap!
       const every = isEverything(snap, t.place)
       const machine = snap.places.find((p) => p.id === t.place)?.machine ?? t.on
-      const [pick, setPick] = useState<Pick>(pickFor(snap, every ? 'all' : t.place, 'Tasks'))
+      const initial = t.plannedAgent ?? pickFor(snap, every ? 'all' : t.place, 'Tasks')
+      const [pick, setPick] = useState<Pick>(initial)
       const [busy, setBusy] = useState(false)
       const start = async () => {
         if (busy) return
         setBusy(true)
         // Start task starts it and opens its thread
-        if (await tryAct({ type: 'task-start', chat: taskChat(t), agent: pick })) {
+        if (await tryAct({ type: 'task-start', chat: taskChat(t), ...(pick === initial ? {} : { agent: pick }) })) {
           close()
           openTask(t.id)
         } else setBusy(false)

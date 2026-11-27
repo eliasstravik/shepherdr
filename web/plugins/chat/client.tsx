@@ -937,7 +937,7 @@ function StoppedChat({ chat, thread }: { chat: Chat | undefined; thread: Thread 
       <span className="t c-red">Stopped</span>
       <span>{chat.note || 'Its agent is no longer running.'}</span>
       <div className="acts">
-        <ActBtn acts={acts} id="restart" kind="pri" busy="Restarting…" run={() => attempt({ type: 'restart', chat: chat.key, kind: pick.agent, model: pick.model ?? undefined, effort: pick.effort ?? undefined })}>Restart</ActBtn>
+        <ActBtn acts={acts} id="restart" kind="pri" busy="Restarting…" run={() => attempt({ type: 'restart', chat: chat.key, kind: pick.agent, model: pick.model ?? undefined, effort: pick.effort ?? undefined, speed: speedForAction(pick) })}>Restart</ActBtn>
       </div>
       <ActError acts={acts} />
     </div>
@@ -1006,15 +1006,17 @@ function Reply({ text, onSend, onEdit }: { text: string; onSend: (t: string) => 
 export function pickOf(snap: Snapshot, chat: Chat | undefined, thread: Thread): Pick {
   const a = chat?.agent ?? (!thread.task ? snap.places.find((p) => p.id === thread.place && p.chat === thread.chat)?.agent : undefined)
   if (a?.kind) return { agent: a.kind, label: a.modelLabel ?? a.planned?.modelLabel ?? null, model: a.model ?? a.planned?.model ?? null, effort: a.effort ?? a.planned?.effort ?? null, fast: a.speed === 'ultrafast' ? 'ultrafast' : a.speed === 'fast', perm: a.perm ?? null }
-  return pickFor(snap, isEverything(snap, thread.place) ? 'all' : thread.place, thread.task ? 'Tasks' : 'Chats')
+  return thread.task?.plannedAgent ?? pickFor(snap, isEverything(snap, thread.place) ? 'all' : thread.place, thread.task ? 'Tasks' : 'Chats')
 }
+
+const speedForAction = (pick: Pick) => pick.fast === 'ultrafast' ? 'ultrafast' : pick.fast ? 'fast' : 'normal'
 
 /** A new model, effort or permission mode applies from your next message. A different agent restarts that chat, after
  *  you confirm; earlier messages stay. */
 export function applyPick(chat: string, was: Pick, now: Pick, names: { agent: string }) {
   const same = (a: Pick, b: Pick) => a.agent === b.agent && (a.model ?? null) === (b.model ?? null) && (a.effort ?? null) === (b.effort ?? null) && (a.fast ?? false) === (b.fast ?? false) && (a.perm ?? null) === (b.perm ?? null)
   if (same(was, now)) return
-  const run = (live: boolean) => void tryAct({ type: 'restart', chat, kind: now.agent, model: now.model ?? undefined, effort: now.effort ?? undefined, speed: now.fast === 'ultrafast' ? 'ultrafast' : now.fast ? 'fast' : 'normal', perm: now.perm ?? undefined, live })
+  const run = (live: boolean) => void tryAct({ type: 'restart', chat, kind: now.agent, model: now.model ?? undefined, effort: now.effort ?? undefined, speed: speedForAction(now), perm: now.perm ?? undefined, live })
   if (was.agent === now.agent) return run(true)
   confirm({ title: `Switch to ${names.agent}?`, body: 'This chat starts again on the new agent. Earlier messages stay, above a "New session" line.', ok: 'Switch', run: () => run(false) })
 }
@@ -1307,7 +1309,7 @@ export default definePlugin({
     reg.commands.push(
       { id: 'chat.reply', title: 'Write in the chat', area: 'Chat', icon: 'reply', keys: ['R'], words: 'reply message box type focus compose', when: () => !!focusChat(), run: () => void focusBox() },
       { id: 'chat.end', title: 'Go to the newest message', area: 'Chat', icon: 'toend', keys: ['End'], words: 'jump bottom latest scroll down end', when: () => isOffEnd(focusChat()), run: () => void toEnd(focusChat()) },
-      { id: 'chat.model', title: 'Change model or effort', area: 'Chat', icon: 'agent', keys: ['Mod+Shift+M'], words: 'agent picker claude codex fast', when: () => !!boxPart('button.agent'), run: () => boxPart('button.agent')?.click() },
+      { id: 'chat.model', title: 'Change model, effort or speed', area: 'Chat', icon: 'agent', keys: ['Mod+Shift+M'], words: 'agent picker claude codex fast ultra-fast tier', when: () => !!boxPart('button.agent'), run: () => boxPart('button.agent')?.click() },
     )
     // Share into Shepherdr (SHEP-345): a share lands in the chat open last
     watchLastChat()

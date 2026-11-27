@@ -35,8 +35,8 @@ def row(mine, text, chips, img=False):
     btns = ""
     for i, c in enumerate(chips):
         e, n, cls, pressed = (*c, VARIANTS[i % len(VARIANTS)], i % 2 == 0)[:4] if len(c) == 2 else c
-        btns += (f'<button type="button" class="rxc {cls}" aria-pressed="{str(pressed).lower()}"><span class="e">{e}</span>'
-                 f'{f"<span class=n>{n}</span>" if n > 1 else ""}</button>')
+        btns += (f'<button type="button" class="rxc {cls}" aria-pressed="{str(pressed).lower()}"><span class="rx-pill"><span class="e">{e}</span>'
+                 f'{f"<span class=n>{n}</span>" if n > 1 else ""}</span></button>')
     return (f'<div class="bw prev{side}"><div class="bmv"><div class="b{side}" data-menu><div class="md">above</div></div></div></div>'
             f'<div class="bw rx{side}"><div class="bmv"><div class="b{side}" data-menu>{pic}<div class="md">{text}</div></div>'
             f'<div class="rxs">{btns}</div></div></div>')
@@ -63,12 +63,14 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><style>{css}</style><
 <pre id="out"></pre>
 <script>{place}</script>
 <script>
-const col = document.getElementById('col'), bad = [], seen = []
+const col = document.getElementById('col'), bad = [], seen = [], touch = col.closest('.app').classList.contains('tap')
 // during the pop: a just-added chip's laid-out size (its scale aside) is already a small pill, never a bar
 for (const x of col.querySelectorAll('.rxc')) {{
+  const pill = x.querySelector('.rx-pill')
   const s = getComputedStyle(x), tag = 'popping ' + x.className + ': '
-  if (x.offsetWidth >= (x.children.length > 1 ? 72 : 56)) bad.push(tag + 'chip ' + x.offsetWidth + ' wide')
-  if (x.offsetHeight !== 28) bad.push(tag + 'chip height ' + x.offsetHeight)
+  if (pill.offsetWidth >= (pill.children.length > 1 ? 72 : 56)) bad.push(tag + 'chip ' + pill.offsetWidth + ' wide')
+  if (pill.offsetHeight !== 28) bad.push(tag + 'chip height ' + pill.offsetHeight)
+  if (touch && Math.min(x.offsetWidth, x.offsetHeight) < 44) bad.push(tag + 'target too small')
   if (s.position !== 'relative') bad.push(tag + 'chip is ' + s.position)
 }}
 document.getAnimations().forEach((a) => a.finish())
@@ -78,7 +80,8 @@ const lo = mr.left + parseFloat(ms.paddingLeft), hi = mr.right - parseFloat(ms.p
 for (const bw of col.querySelectorAll('.bw.prev')) if (parseFloat(getComputedStyle(bw).marginTop) !== 0) bad.push('a bubble without a reaction got extra room')
 for (const bw of col.querySelectorAll('.bw.rx')) {{
   const mine = bw.classList.contains('mine'), b = bw.querySelector('.b').getBoundingClientRect()
-  const chips = [...bw.querySelectorAll('.rxc')], rs = chips.map((x) => x.getBoundingClientRect())
+  const buttons = [...bw.querySelectorAll('.rxc')], targets = buttons.map((x) => x.getBoundingClientRect())
+  const chips = buttons.map((x) => x.querySelector('.rx-pill')), rs = chips.map((x) => x.getBoundingClientRect())
   const above = bw.previousElementSibling.querySelector('.b').getBoundingClientRect(), tag = (mine ? 'mine ' : 'agent ') + Math.round(b.width) + ': '
   chips.forEach((x, i) => {{
     const r = rs[i], s = getComputedStyle(x)
@@ -89,22 +92,22 @@ for (const bw of col.querySelectorAll('.bw.rx')) {{
     if (r.width > Math.max(inner, 34) + 1) bad.push(tag + 'chip ' + r.width + ' wider than its content ' + inner)
     if (Math.abs(r.height - 28) > 0.5) bad.push(tag + 'chip height ' + r.height)
     if (r.width >= (x.children.length > 1 ? 72 : 56)) bad.push(tag + x.className + ' chip ' + r.width + ' wide')
-    if (s.position !== 'relative') bad.push(tag + x.className + ' chip is ' + s.position)
     // straddles the top edge: its middle on it
     if (Math.abs((r.top + r.bottom) / 2 - b.top) > 1) bad.push(tag + 'chip middle ' + (r.top + r.bottom) / 2 + ' off the top edge ' + b.top)
-    if (r.left < lo - 0.5 || r.right > hi + 0.5) bad.push(tag + 'outside the column')
+    if (targets[i].left < lo - 0.5 || targets[i].right > hi + 0.5) bad.push(tag + 'target outside the column')
+    if (touch && targets[i].top < above.bottom + 1) bad.push(tag + 'target overlaps the previous message')
     if (r.top < above.bottom + 2) bad.push(tag + 'touches the message above')
     if (Math.abs(r.top - rs[0].top) > 0.5) bad.push(tag + 'chips not in one row')
   }})
   // the first chip sits on the corner facing the middle: the agent's top right, yours top left, half past the side
   const r = rs[0], edge = mine ? b.left : b.right, past = mine ? edge - r.left : r.right - edge
   // where the column ends, the row moves in just enough: then its far chip touches the column's edge
-  const clamped = mine ? Math.min(...rs.map((x) => x.left)) <= lo + 0.5 : Math.max(...rs.map((x) => x.right)) >= hi - 0.5
+  const clamped = mine ? Math.min(...targets.map((x) => x.left)) <= lo + 0.5 : Math.max(...targets.map((x) => x.right)) >= hi - 0.5
   if (!clamped && !(r.left < edge && edge < r.right)) bad.push(tag + 'not on the ' + (mine ? 'left' : 'right') + ' corner')
   if (!clamped && Math.abs(past - r.width / 2) > 1) bad.push(tag + 'hangs ' + past + ' past the side, not half of ' + r.width)
   if (mine ? r.right > b.right : r.left < b.left) bad.push(tag + 'off the bubble')
   // more grow toward the middle
-  for (let i = 1; i < rs.length; i++) if (mine ? rs[i].right > rs[i - 1].left + 0.5 : rs[i].left < rs[i - 1].right - 0.5) bad.push(tag + 'chip ' + i + ' not toward the middle')
+  for (let i = 1; i < targets.length; i++) if (mine ? targets[i].right > targets[i - 1].left + 0.5 : targets[i].left < targets[i - 1].right - 0.5) bad.push(tag + 'target ' + i + ' overlaps or is not toward the middle')
 }}
 if (col.scrollWidth > col.clientWidth) bad.push('scrolls sideways')
 document.getElementById('out').textContent = 'RESULT' + JSON.stringify({{ bad, seen }}) + 'END'

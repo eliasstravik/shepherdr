@@ -7,7 +7,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Hub } from "./hub.ts";
 import { where, writable } from "./paths.ts";
-import { sh } from "./model.ts";
+import { exec, sh } from "./model.ts";
 import { RESTART } from "./paths.ts";
 import * as AG from "../core/agents.js";
 import { chatLabel } from "../core/spaces.js";
@@ -17,7 +17,7 @@ import * as LS from "../core/live-switch.js";
 import * as SC from "../core/settings.js";
 import { spawn } from "./spawn.ts";
 
-const { DEFAULTS, parseDefaults, current, menuFor, rowFor, argvFor, sessionOf, NAMES, line, PICKS_FILE, parsePicks, pickKey, withPin, withRecent, speedOf, speedWordOf } = AG as any;
+const { DEFAULTS, CLAUDE_CATALOG, CODEX_CATALOG, parseDefaults, current, menuFor, rowFor, argvOf, argvFor, sessionOf, NAMES, line, PICKS_FILE, parsePicks, pickKey, withPin, withRecent, speedOf, speedWordOf } = AG as any;
 /** a chat's speed as kept: false, true (Fast) or "ultrafast" */
 const fastOf = (f: unknown) => (f === "ultrafast" ? "ultrafast" : !!f);
 /** the speeds a CLI's models offer: normal, then fast and ultrafast where one has them (SHEP-258) */
@@ -49,8 +49,22 @@ export class Agents {
   }
 
   private async defaults(kind: string, machine: string | null) {
-    const r = await sh(this.hub, DEFAULTS, ["defaults", kind], machine).catch(() => null);
-    return parseDefaults(kind, r?.stdout ?? "");
+    const [r, models] = await Promise.all([
+      exec(this.hub, ["sh", "-c", DEFAULTS, "defaults", kind], machine, 10).catch(() => null),
+      this.modelCatalog(kind, machine),
+    ]);
+    return parseDefaults(kind, r?.stdout ?? "", models);
+  }
+
+  private catalogs = new Map<string, { at: number; models: Promise<string> }>();
+  private modelCatalog(kind: string, machine: string | null) {
+    const key = `${machine ?? ""}|${kind}`;
+    const old = this.catalogs.get(key);
+    if (old && Date.now() - old.at < 60_000) return old.models;
+    const models = exec(this.hub, ["sh", "-c", kind === "claude" ? CLAUDE_CATALOG : CODEX_CATALOG], machine, 8)
+      .then((r) => r.code === 0 ? r.stdout.trim() : "", () => "");
+    this.catalogs.set(key, { at: Date.now(), models });
+    return models;
   }
 
   /** A CLI's own settings on a machine as last read (the chat's model button reads them on every change, as the
@@ -126,7 +140,7 @@ export class Agents {
     let meta = reader?.conv?.meta ?? {};
     // a resumed conversation's log names the model it ran on before: until this process writes, its arguments say
     if (t.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
-    const c = current(kind, t.foreground?.argv ?? t.argv ?? [], meta, dflts[kind]);
+    const c = current(kind, argvOf(t), meta, dflts[kind]);
     const row = rowFor(kind, c);
     const menus = Object.fromEntries(["claude", "codex"].filter((k) => k === kind || !have || have.has(k)).map((k) => [k, menuFor(k, dflts[k], k === kind ? row : null)]));
     return { current: { agent: kind, model: row, effort: c.effort ?? null, fast: fastOf(c.fast), perm: c.perm ?? null }, menus,
@@ -162,7 +176,8 @@ export class Agents {
     return ["claude", "codex"].map((k) => {
       const m = menuFor(k, dflt[k], null);
       // its permission modes, and the one a new agent gets unless picked (the CLI's own: Claude Code's settings mode)
-      return { kind: k, name: NAMES[k], models: m.models.map((x: any) => ({ id: x.id, label: x.name, efforts: x.efforts, ...(x.defaultEffort ? { defaultEffort: x.defaultEffort } : {}), ...(x.fast ? { fast: true } : {}), ...(x.ultrafast ? { ultrafast: true } : {}) })),
+      const defaultModel = rowFor(k, current(k, [], {}, dflt[k])) ?? m.models[0]?.id;
+      return { kind: k, name: NAMES[k], defaultModel, models: m.models.map((x: any) => ({ ...x, label: x.name })),
         speeds: speedsOf(m.models), perms: m.perms ?? [], permDefault: k === "claude" ? dflt.claude?.mode ?? "manual" : "auto" };
     });
   }
@@ -195,9 +210,11 @@ export class Agents {
     const dflt = await this.defaults(kind, machine);
     let meta = reader?.conv?.meta ?? {};
     if (t.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
-    const c = current(kind, t.foreground?.argv ?? t.argv ?? [], meta, dflt);
+    const c = current(kind, argvOf(t), meta, dflt);
     const from = { agent: kind, model: rowFor(kind, c) ?? "", effort: c.effort ?? "", fast: fastOf(c.fast), perm: c.perm ?? "" };
-    const to = { agent: pick.kind, model: pick.model ?? "", effort: pick.effort ?? "", fast: speedOf(pick.speed), perm: pick.perm ?? "" };
+    // A running Claude reports a full model id, while /model uses its picker row (including the 1M variant).
+    const model = pick.kind === kind && pick.model === c.model ? from.model : pick.model ?? "";
+    const to = { agent: pick.kind, model, effort: pick.effort ?? "", fast: speedOf(pick.speed), perm: pick.perm ?? "" };
     if (!LS.liveOK(from, to)) return { terminal: await this.restart(addr, reader, pick) };
     const state = t.status?.state;
     if (state === "working") throw new Error("It's busy with a turn. Switch once it's done, or stop it first.");

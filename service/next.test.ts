@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { lastWords, nextWords, scheduleId, scheduleOf, schedulesOf, warningsOf, whenWords, catalogOf } from "./next.ts";
+import { lastWords, nextWords, scheduleAgentArgs, scheduleId, scheduleOf, schedulesOf, warningsOf, whenWords, catalogOf } from "./next.ts";
 
 test("a schedule says when it runs in words", () => {
   expect(whenWords({ every: { kind: "every", text: "mondays 9:00" } })).toBe("Mondays 9:00");
@@ -38,6 +38,14 @@ test("schedules sit under the space they were made for, else the one in their fo
   expect(out.sp1!.map((a) => [a.name, a.on, a.when])).toEqual([["Dependency check", true, "Mondays 9:00"]]);
   expect(out.home!.map((a) => [a.name, a.on])).toEqual([["Morning brief", false], ["Lost", true]]);
   expect(out["vm/sp2"]![0]!.once).toBe(true);
+});
+
+test("a schedule's tier is read from the settings its runs inherit, and Standard clears a faster tier", () => {
+  const [schedule] = schedulesOf([
+    { id: 1, folder: "/repo", agent: "claude", set: { agent: "codex", model: "gpt-6.2-sol", effort: "high", speed: "ultrafast" } },
+  ], [], "home", () => undefined).home!;
+  expect(schedule!.agent).toMatchObject({ agent: "codex", model: "gpt-6.2-sol", effort: "high", fast: "ultrafast" });
+  expect(scheduleAgentArgs({ ...schedule!.agent, fast: false })).toContain("speed=regular");
 });
 
 test("the warnings line: a plan past 75%, a disk nearly full, a machine out of reach", () => {
@@ -85,12 +93,14 @@ test("Up next: it waits for the tasks not done yet, the first by title and the r
   const row = (id: number, title: string, section: string, x: any = {}) => ({ ref: `APP-${id}`, id, title, folder: "/srv/app", machine: null, section, x });
   const snapTask = (id: number) => ({ id: `APP-${id}`, name: "", place: "sp1", status: "queued", state: "queued", on: "mini", created: "", age: "" });
   const rows = [row(1, "Old one", "done"), row(2, "Desktop tab: starts by itself", "working"), row(3, "Tasks filter menu", "working"), row(4, "Swap control", "queued"),
-    row(9, "Release", "queued", { after: [1, 2, 3, 4] }), row(10, "Docs", "queued", { after: [2] }), row(11, "After a done one", "queued", { after: [1] })];
+    row(9, "Release", "queued", { after: [1, 2, 3, 4], pick: { speed: "regular" } }), row(10, "Docs", "queued", { after: [2] }), row(11, "After a done one", "queued", { after: [1] })];
   const snap: any = { places: [{ id: "sp1", chat: "p:sp1", name: "app", machine: "mini" }], tasks: [9, 10, 11].map(snapTask), machines: [] };
-  const f: any = { spaces, rows, archived: [], asked: () => null, reportOf: () => null, config: { plans: [] } };
+  const f: any = { spaces, rows, archived: [], asked: () => null, reportOf: () => null, config: { plans: [], all: { agents: { Tasks: { agent: "codex", model: "gpt-6.2-sol", fast: "ultrafast" } } } } };
   const out: any = enrich(snap, f);
   const by = (id: string) => out.tasks.find((t: any) => t.id === id);
   expect(by("APP-9")).toMatchObject({ afterTitle: "Desktop tab: starts by itself", afterMore: 2 });
+  expect(by("APP-9").plannedAgent).toMatchObject({ agent: "codex", model: "gpt-6.2-sol", fast: false });
+  expect(by("APP-10").plannedAgent.fast).toBe("ultrafast");
   expect(by("APP-10").afterTitle).toBe("Desktop tab: starts by itself");
   expect(by("APP-10").afterMore).toBeUndefined();
   // everything it waited for is done: its title still says which, nothing counted
