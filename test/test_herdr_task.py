@@ -3202,6 +3202,106 @@ class ReviewerLine(unittest.TestCase):
             self.assertEqual(ok, want, out)
             self.assertEqual(said, "" if want else out)
 
+    def test_codex_login_now_counts_an_api_key(self):
+        """#1608: a key in auth.json answers `API key configured - sk-…`, which is signed in, not an error —
+        the brief used to read it as signed out and review with the worker's own CLI."""
+        from unittest import mock
+        d = tempfile.mkdtemp()
+        codex = os.path.join(d, "codex")
+        with open(codex, "w") as f:
+            f.write("#!/bin/sh\necho 'API key configured - sk-dummy***00000'\n")
+        os.chmod(codex, 0o755)
+        with mock.patch.dict(os.environ, {"PATH": d + ":" + os.environ["PATH"]}), \
+                mock.patch.object(self.settings.shutil, "which", lambda name: codex):
+            ok, said = self.settings.codex_login_now()
+        self.assertTrue(ok)
+        self.assertEqual(said, "")
+
+    def login_now_with(self, status, config=None, env=None):
+        """codex_login_now against a fake `codex login status` and a throwaway CODEX_HOME config."""
+        from unittest import mock
+        d = tempfile.mkdtemp()
+        codex = os.path.join(d, "codex")
+        with open(codex, "w") as f:
+            f.write(f"#!/bin/sh\necho '{status}' >&2\nexit 1\n")
+        os.chmod(codex, 0o755)
+        home = os.path.join(d, "codexhome")
+        os.makedirs(home)
+        if config is not None:
+            with open(os.path.join(home, "config.toml"), "w") as f:
+                f.write(config)
+        e = {"PATH": d + ":" + os.environ["PATH"], "CODEX_HOME": home, "OPENAI_API_KEY": "", "PROBE_KEY": ""}
+        e.update(env or {})
+        with mock.patch.dict(os.environ, e), \
+                mock.patch.object(self.settings.shutil, "which", lambda name: codex):
+            return self.settings.codex_login_now()
+
+    def test_codex_login_now_counts_a_provider_key(self):
+        """#1608: `Not logged in` with a provider on its own env key runs Codex, so it is signed in for the
+        review; the key variable missing is the hard stop (#1038); a provider with no env_key runs keyless."""
+        prov = 'model_provider = "custom"\n[model_providers.custom]\nenv_key = "PROBE_KEY"\n'
+        self.assertTrue(self.login_now_with("Not logged in", prov, {"PROBE_KEY": "sk-dummy"})[0])
+        ok, said = self.login_now_with("Not logged in", prov, {"PROBE_KEY": ""})
+        self.assertFalse(ok)
+        self.assertEqual(said, "Not logged in")
+        keyless = 'model_provider = "local"\n[model_providers.local]\nbase_url = "http://127.0.0.1:9"\n'
+        self.assertTrue(self.login_now_with("Not logged in", keyless)[0])
+        self.assertTrue(self.login_now_with("Not logged in", 'model_provider = "ollama"\n')[0])
+        # a built-in cloud provider with no section to read stays signed out (its credentials aren't ours to check)
+        self.assertFalse(self.login_now_with("Not logged in", 'model_provider = "gcp"\n')[0])
+
+    def test_codex_login_now_keeps_a_real_sign_out(self):
+        """#745 still holds: Codex's own openai provider with no login and no key is signed out; an
+        OPENAI_API_KEY in the environment runs it without a login."""
+        ok, said = self.login_now_with("Not logged in", "")
+        self.assertFalse(ok)
+        self.assertEqual(said, "Not logged in")
+        self.assertTrue(self.login_now_with("Not logged in", "", {"OPENAI_API_KEY": "sk-dummy"})[0])
+
+    def test_codex_active_provider_reads_the_active_one(self):
+        """Only the top-level model_provider and its own section's env_key — not another provider's, not a
+        commented or quoted-away value; and whether that section is defined at all."""
+        f = self.settings.codex_active_provider
+        self.assertEqual(f('model_provider = "custom"\n[model_providers.custom]\nenv_key = "K"\n'), ("custom", "K", True))
+        self.assertEqual(f('model_provider = "p" # active\n[model_providers.p]\nenv_key = \'K\' # key\n'
+                           '[model_providers.q]\nenv_key = "WRONG"\n'), ("p", "K", True))
+        self.assertEqual(f('[model_providers.x]\nenv_key = "K"\n'), (None, None, False))
+        self.assertEqual(f('model_provider = "openai"\n'), ("openai", None, False))
+        self.assertEqual(f('model_provider = "local"\n[model_providers.local]\nbase_url = "http://x"\n'), ("local", None, True))
+        self.assertEqual(f('model_provider = "gcp"\n'), ("gcp", None, False))
+
+    def test_cli_state_counts_an_api_key_and_defers_a_provider(self):
+        """#1608: an API key is ready; a configured provider is unknown here (the brief asks Codex now);
+        a plain `Not logged in` is still signed out."""
+        from herdr_task import takeover
+        self.assertEqual(takeover.cli_state("API key configured - sk-***"), "ready")
+        self.assertIsNone(takeover.cli_state("provider"))
+        self.assertEqual(takeover.cli_state("Not logged in"), "signed-out")
+        self.assertEqual(takeover.cli_state("Logged in using ChatGPT"), "ready")
+
+    def test_a_provider_key_keeps_codex_in_the_brief(self):
+        """#1608 end to end: the periodic check defers a configured provider (unknown), the brief asks Codex
+        now, finds its env key, and the reviewer stays Codex — not silently the worker's own CLI."""
+        from unittest import mock
+        d = tempfile.mkdtemp()
+        codex = os.path.join(d, "codex")
+        with open(codex, "w") as f:
+            f.write("#!/bin/sh\necho 'Not logged in' >&2\nexit 1\n")
+        os.chmod(codex, 0o755)
+        home = os.path.join(d, "home")
+        os.makedirs(home)
+        with open(os.path.join(home, "config.toml"), "w") as f:
+            f.write('model_provider = "custom"\n[model_providers.custom]\nenv_key = "PROBE_KEY"\n')
+        with open(self.checks, "w") as f:
+            json.dump({"machines": {"": {"claude": "ready", "codex": None}}}, f)
+        t = {"id": 1, "title": "x", "mode": "worktree"}
+        env = {"PATH": d + ":" + os.environ["PATH"], "CODEX_HOME": home, "PROBE_KEY": "sk-dummy", "OPENAI_API_KEY": ""}
+        with mock.patch.dict(os.environ, env), \
+                mock.patch.object(self.settings.shutil, "which", lambda name: codex if name == "codex" else f"/usr/bin/{name}"):
+            r = next(x for x in self.settings.task_settings(Store([t]), t, argv=["claude"], live=True) if x["label"] == "Reviewer")
+        self.assertEqual(r["value"]["agent"], "codex")
+        self.assertIn("codex --no-daemon", r["value"]["command"])
+
     def models_cache(self, *ids):
         from unittest import mock
         d = tempfile.mkdtemp()

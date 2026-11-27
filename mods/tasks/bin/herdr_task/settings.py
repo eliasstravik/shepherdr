@@ -614,7 +614,10 @@ def check_reviewer_model(t):
 
 def codex_login_now():
     """Codex's own word on its sign-in here, asked now (#947): (True, "") signed in, (False, what it said) when not
-    (an unreadable auth file says an error, and Codex then opens its sign-in screen), (None, "") when unknown."""
+    (an unreadable auth file says an error, and Codex then opens its sign-in screen), (None, "") when unknown.
+    An API key counts as signed in, and so does a provider that runs without a login (#1608): `codex login status`
+    says `API key configured` for a key in auth.json, and `Not logged in` for a provider on its own env key or no
+    key at all, though `codex exec` runs in all three."""
     if not shutil.which("codex"):
         return None, ""
     try:
@@ -624,8 +627,77 @@ def codex_login_now():
     out = f"{r.stdout}\n{r.stderr}"
     if re.search(r"^\s*logged in", out, re.I | re.M):
         return True, ""
+    if re.search(r"^\s*api key configured", out, re.I | re.M):
+        return True, ""
+    if re.search(r"^\s*not logged in", out, re.I | re.M) and codex_runs_without_login():
+        return True, ""
     said = next((ln.strip() for ln in out.splitlines() if ln.strip()), "")
     return False, said[:160]
+
+
+def codex_runs_without_login():
+    """Whether Codex runs here with no login (#1608), read from its config.toml the way codex_models reads
+    models_cache.json. A configured provider carries its own key (env_key, which must be set here — a missing
+    one is the hard stop, #1038) or needs none (a local server); Codex's own openai provider needs a login or
+    OPENAI_API_KEY. False when there is no config to read or the provider needs a login it doesn't have."""
+    home = os.environ.get("CODEX_HOME") or os.path.join(os.path.expanduser("~"), ".codex")
+    try:
+        with open(os.path.join(home, "config.toml"), encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return False
+    provider, env_key, defined = codex_active_provider(text)
+    if provider is None or provider == "openai":
+        return bool(os.environ.get("OPENAI_API_KEY", "").strip())
+    if provider in ("ollama", "lmstudio"):  # Codex's keyless local providers, no section to read
+        return True
+    if not defined:  # a built-in cloud provider (gcp, bedrock) whose credentials we can't read here
+        return False
+    if env_key:
+        return bool(os.environ.get(env_key, "").strip())
+    return True  # a provider of the person's own, with no env_key: it runs keyless or on its own token
+
+
+def codex_active_provider(text):
+    """(active provider id, its env_key, whether its section is defined) from config.toml: the top-level
+    model_provider and that provider's [model_providers.<id>] env_key. (None, None, False) when no provider is
+    configured (Codex's own openai). Only the fields the sign-in check needs — a full TOML parse would need
+    tomllib, which is Python 3.11+, and Shepherdr runs on 3.8+; quoted values and comments are handled."""
+    provider = None
+    for raw in text.splitlines():  # top-level keys end at the first table header
+        line = raw.strip()
+        if line.startswith("["):
+            break
+        if line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        if key.strip() == "model_provider":
+            provider = _toml_scalar(val.strip())
+            break
+    if not provider or provider == "openai":
+        return (provider or None), None, False
+    want, env_key, inside, defined = "model_providers.%s" % provider, None, False, False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("["):
+            inside = line[1:].split("]")[0].strip() == want
+            defined = defined or inside
+            continue
+        if not inside or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        if key.strip() == "env_key":
+            env_key = _toml_scalar(val.strip())
+            break
+    return provider, env_key, defined
+
+
+def _toml_scalar(val):
+    """A config.toml value as its text: a quoted string unquoted, else the bare token before any comment."""
+    if val[:1] in ("\"", "'"):
+        end = val.find(val[0], 1)
+        return val[1:end] if end > 0 else val[1:]
+    return val.split("#", 1)[0].strip()
 
 
 def trust_roots(folder):
