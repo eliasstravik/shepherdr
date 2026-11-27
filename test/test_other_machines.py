@@ -1081,7 +1081,8 @@ class ReplyBack(unittest.TestCase):
     def test_a_reachable_or_unknown_target_is_never_left(self):
         graph = {"core": {"name": "vm-kil", "id": "v1"}, "assistants": []}
         with self.mock.patch.object(machines, "directory", lambda refresh=False: ({"graph": graph}, [])), \
-                self.mock.patch.object(machines, "nodes", lambda g: [{"route": [{"to": "laptop"}], "node": {"core": {"name": "laptop"}}}]), \
+                self.mock.patch.object(machines, "nodes", lambda g: [{"route": [{"to": "laptop", "how": "herdr-core"}], "node": {"core": {"name": "laptop"}}}]), \
+                self.mock.patch.object(machines.subprocess, "run", return_value=subprocess.CompletedProcess([], 1, "", "")), \
                 self.mock.patch.object(machines, "route_text", lambda r: "laptop" if r else ""):
             for target in ("laptop/t4", "Everything", "vm-kil/t9"):
                 with self.assertRaises(machines.Fail):
@@ -1111,6 +1112,7 @@ class ReplyBack(unittest.TestCase):
             return subprocess.CompletedProcess(argv, 0, out + "\n", "")
         report = {}
         with self.mock.patch.object(machines.subprocess, "run", run), self.mock.patch.object(machines, "guard", lambda a: None), \
+                self.mock.patch.object(machines, "hc_json", return_value={"state": "live", "labels": {"herdr.role": "coordinator"}}), \
                 self.mock.patch.object(machines, "send_or_hold", lambda a, t, how: given.append((a, t, how)) or "sent"):
             self.run_on(self.mac, lambda: machines.replies_pass(report))
             self.run_on(self.mac, lambda: machines.replies_pass(report))  # again at once: not asked again so soon

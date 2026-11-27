@@ -325,6 +325,7 @@ export function ReviewCard({ t, ctx }: { t: Task; ctx: 'chat' | 'thread' }) {
       <span className="s">{ctx === 'chat' && t.work && <><WorkTag snap={snap} t={t} /> · </>}{where}</span>
       {ctx === 'chat' && <TaskAgentSummary t={t} className="s" />}
       <span>{said.summary || 'Ready for you to look at.'}</span>
+      {t.reviewerNotice && <span className="s">{t.reviewerNotice}</span>}
       {said.details && (
         <button type="button" className="fold" aria-expanded={more} onClick={() => setMore(!more)}>
           <I n={more ? 'down' : 'right'} c="s16" />

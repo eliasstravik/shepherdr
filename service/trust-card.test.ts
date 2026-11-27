@@ -60,3 +60,11 @@ test("a startup prompt replaces Working until the terminal moves on", () => {
   expect(snap.tasks[0]).toMatchObject({ status: "need", sub: "Hooks need review", needsAt: hooks.opened, agent: { status: "need" } });
   expect(snapOf([], [], "working").snap.tasks[0].status).toBe("work");
 });
+
+test("an in-session dialog makes its own terminal-only Needs you card", () => {
+  const dialog = { ...card, dialog: true, all: "", words: "Claude Code can't parse this command safely.",
+    choices: [{ label: "Yes" }, { label: "No" }] };
+  const { snap } = snapOf([], [dialog], "working");
+  expect(snap.tasks[0]).toMatchObject({ status: "need", sub: "Claude Code is waiting for an answer" });
+  expect(snap.needs[0].question).toMatchObject({ press: true, screen: dialog.words, choices: dialog.choices });
+});

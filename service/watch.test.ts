@@ -33,8 +33,8 @@ const agentWatch = (screen = FLIPPED, cli = "claude") => {
   const terminal = { address: "t7", state: "live", foreground: { name: cli }, created_ms: 0 };
   const hub: any = { terminals: new Map([["t7", terminal]]) };
   const hc = async (args: string[]) => (args[0] === "read" ? { code: 0, stdout: screen } : (sent.push(args), { code: 0, stdout: "" }));
-  const watch = new AgentWatch(hub, hc, { watched: () => [], changed: () => {} });
-  return { watch, sent, hub };
+  const watch = new AgentWatch(hub, hc, { watched: () => [], loginWatches: () => ["t7"], changed: () => {} });
+  return { watch, sent, hub, show: (text: string) => { screen = text; } };
 };
 const settle = async (watch: any) => { await watch.tick(); await watch.tick(); };
 
@@ -73,5 +73,37 @@ test("Codex's hook review goes up without an open chat and clears when its termi
   expect(sent).toEqual([]);
   hub.terminals.delete("t7");
   await (watch as any).tick();
+  expect(watch.openCards()).toEqual([]);
+});
+
+test("a running Claude waiting at its own permission menu gets a terminal-only card", async () => {
+  const { watch, sent, hub, show } = agentWatch([
+    "Claude Code can't parse this command safely. Do you want to proceed?",
+    "",
+    " ❯ 1. Yes",
+    "   2. No",
+    "",
+    " Esc to cancel",
+  ].join("\n"));
+  const terminal = hub.terminals.get("t7");
+  Object.assign(terminal, { turn: 3, status: { state: "working" } });
+  await settle(watch);
+  expect(watch.openCards()).toMatchObject([{ addr: "t7", dialog: true, choices: [{ label: "Yes" }, { label: "No" }] }]);
+  show("Work continues.\n\n❯ ");
+  await (watch as any).tick();
+  expect(watch.openCards()).toEqual([]);
+  expect(sent).toEqual([]);
+});
+
+test("Codex's in-session confirmation shows once and gives way to an existing card", async () => {
+  const { watch, hub, show } = agentWatch("Review required\nPress Enter to continue", "codex");
+  const terminal = hub.terminals.get("t7");
+  Object.assign(terminal, { turn: 2, status: { state: "working" } });
+  await settle(watch);
+  expect(watch.openCards()).toMatchObject([{ dialog: true, choices: [{ label: "Continue" }] }]);
+  await watch.screens.tick("t7", terminal, Date.now(), true);
+  expect(watch.openCards()).toEqual([]);
+  show("Output from previous command:\nPress Enter to continue\n\n› ");
+  await settle(watch);
   expect(watch.openCards()).toEqual([]);
 });

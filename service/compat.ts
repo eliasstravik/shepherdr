@@ -499,6 +499,7 @@ export class Compat {
           r.machine ? [] : (r.logs ?? []).flatMap((p: string) => this.taskLogs?.ids(p) ?? []))),
         ...(r.proof ? { proof: r.proof } : {}),
         ...(r.review ? { review: r.review } : {}),
+        ...(r.reviewerNotice ? { reviewerNotice: r.reviewerNotice } : {}),
         // the task's browser (agent-browser), relayed for this machine's tasks
         ...(r.machine ? { browser: { ready: false, hint: `This task runs on ${r.machine}. Its browser can be watched only on that machine for now.` } } : { browser: { ready: true } }),
         ...(r.pinned ? { pinned: 1 } : {}),
@@ -664,7 +665,7 @@ export class Compat {
         trust: { cli: c.cli, ...(trust.folder ? { folder: trust.folder } : {}), waits: TRUST.waits(c.cli, trust.folder), allows: TRUST.allows } };
     }
     const hooks = c.cli === "Codex" && /^\s*Hooks need review\s*$/m.test(c.all);
-    return { ...common, title: hooks ? "Hooks need review" : SCREEN.title(c.cli), ...(c.words ? { screen: c.words } : {}) };
+    return { ...common, title: hooks ? "Hooks need review" : c.dialog ? SCREEN.dialog(c.cli) : SCREEN.title(c.cli), ...(c.words ? { screen: c.words } : {}) };
   }
 
   /** A followed conversation (core/chat-reader.js) as 2.1's Chat. A run of tool calls (3.0's tools row) is 2.1's turn
@@ -882,7 +883,7 @@ export class Compat {
     const screens = (who: string, ref: string | null, by?: { ref: string; title: string; chat: string }) => {
       for (const c of watch?.cardsOf?.(who) ?? []) {
         if (c.state === "open") messages.push({ id: `card:${c.id}`, who: "agent", at: c.opened, question: this.screenQuestion(c, key, by) });
-        else messages.push(quiet(`se:${c.id}`, c.opened, `${ref ? `${ref} · ` : ""}${SCREEN.ended(c.cli, c.how)}`));
+        else messages.push(quiet(`se:${c.id}`, c.opened, `${ref ? `${ref} · ` : ""}${SCREEN.ended(c.cli, c.how, c.dialog)}`));
       }
     };
     const signIn = (who: string, by?: Question["by"]) => {

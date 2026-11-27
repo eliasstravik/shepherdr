@@ -614,8 +614,7 @@ def codex_update_words(old):
 
 
 def codex_login_now():
-    """Codex's own word on its sign-in here, asked now (#947): (True, "") signed in, (False, what it said) when not
-    (an unreadable auth file says an error, and Codex then opens its sign-in screen), (None, "") when unknown."""
+    """Codex's own word on its sign-in here (#947). Return an outcome and an optional safe explanation."""
     if not shutil.which("codex"):
         return None, ""
     try:
@@ -623,10 +622,10 @@ def codex_login_now():
     except (OSError, subprocess.SubprocessError):
         return None, ""
     out = f"{r.stdout}\n{r.stderr}"
-    if re.search(r"^\s*logged in", out, re.I | re.M):
+    if re.search(r"^\s*(?:logged in|API key configured)(?:\s|$)", out, re.I | re.M):
         return True, ""
-    said = next((ln.strip() for ln in out.splitlines() if ln.strip()), "")
-    return False, said[:160]
+    # Status output may contain account details or a key fragment. Only report the outcome.
+    return False, "" if re.search(r"^\s*not logged in\b", out, re.I | re.M) else "Sign-in status could not be confirmed."
 
 
 def reviewer_command(who, model=None, effort=None, folder=None, fast=None):
@@ -706,18 +705,19 @@ def task_settings(s, t, space=None, argv=None, live=False):
         other = {"claude": "codex", "codex": "claude"}.get(agent)
         want = rv.get("agent") or (other if other and shutil.which(other) else agent)
         who, said = want, ""
-        if want != agent and cli_here(want) == "signed-out":
-            # Signed out here, it would sit at its sign-in screen and never review (#745): the task's own CLI does.
-            who, rv = agent, {}
-        elif want == "codex" and want != agent and live:
+        if want == "codex" and want != agent and live:
             # #947: the periodic check can't read every answer (an unreadable auth file says an error, not "Not logged
             # in"), so a brief asks Codex now; anything but signed in would leave the reviewer on its sign-in screen
             ok, said = codex_login_now()
-            if ok is False:
+            if ok is False or (ok is None and cli_here(want) == "signed-out"):
                 who, rv = agent, {}
+        elif want != agent and cli_here(want) == "signed-out":
+            who, rv = agent, {}
         # #1190: a Codex without --no-daemon exits at once: the worker's own CLI reviews, and the line says to update
         old = codex_too_old() if who == "codex" and agent != "codex" else None
+        notice = ""
         if old:
+            notice = f"Review uses {CLI_NAMES.get(agent, agent)} because Codex needs an update."
             who, rv = agent, {}
         speed = next((k for k, v in SPEEDS.items() if v == rv.get("fast")), None)
         text = who + (f", model {rv['model']}" if rv.get("model") else "") + (f", effort {rv['effort']}" if rv.get("effort") else "")
@@ -725,8 +725,10 @@ def task_settings(s, t, space=None, argv=None, live=False):
             text += (f" (your own CLI: Codex here is too old for Shepherdr, {old} has no --no-daemon; the person updates "
                      f"it ({UPDATE_CODEX}), then asks for the review again)")
         elif who != want:
-            text += (f" (your own CLI: {CLI_NAMES.get(want, want)} isn't signed in here"
-                     + (f", `{LOGIN.get(want, want + ' login')} status` says \"{said}\"" if said and not re.match(r"not logged in", said, re.I) else "")
+            notice = (f"Review uses {CLI_NAMES.get(who, who)} because Shepherdr couldn't confirm "
+                      f"{CLI_NAMES.get(want, want)} sign-in.")
+            reason = f"{CLI_NAMES.get(want, want)} sign-in could not be confirmed" if said else f"{CLI_NAMES.get(want, want)} isn't signed in here"
+            text += (f" (your own CLI: {reason}"
                      + f"; the person runs `{LOGIN.get(want, want + ' login')}` on this machine, then asks for the review again)")
         elif not rv.get("agent"):
             text += " (the other CLI)" if who != agent else " (your own CLI: no other is installed)"
@@ -738,6 +740,10 @@ def task_settings(s, t, space=None, argv=None, live=False):
             text += f"; start it as `{cmd}`"
         add("Reviewer", text, {"agent": who, "model": rv.get("model"), "effort": rv.get("effort"), "command": cmd,
                               **({"speed": speed} if speed else {})}, rv_by)
+        if notice:
+            lines[-1]["notice"] = notice
+        if not live and t.get("brief_reviewer_fallback"):
+            lines[-1] = t["brief_reviewer_fallback"]
         must = sets.get("must_fix") or (k.get("must_fix") if k.get("must_fix") in LEVELS else "major")
         add("Must fix", MUST_WORDS[must], must, "task" if "must_fix" in sets else by_layer(s, space, "tasks", "must_fix", must, "major"))
         rounds = sets.get("review_rounds") or (kept or {}).get("rounds") or (rounds_cfg if rounds_cfg > 0 else 3)
@@ -781,6 +787,12 @@ def task_settings(s, t, space=None, argv=None, live=False):
 def settings_block(s, t, space=None, argv=None, live=False, sources=False):
     """The Settings block a brief ends with. sources: every line says where it comes from, its default too (show)."""
     lines = task_settings(s, t, space, argv, live)
+    if live:
+        reviewer = next((x for x in lines if x["label"] == "Reviewer" and x.get("notice")), None)
+        if reviewer:
+            t["brief_reviewer_fallback"] = reviewer
+        else:
+            t.pop("brief_reviewer_fallback", None)
     rows = [f"- {x['label']}: {x['text']}" + (f" ({SET_BY[x['by']]})" if x["by"] else " (Herdr's default)" if sources else "")
             for x in lines]
     # Codex's sandbox can't start here (SHEP-227, #998): the worker hears it in its brief and tells the person.

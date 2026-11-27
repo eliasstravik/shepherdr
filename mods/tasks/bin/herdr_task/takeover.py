@@ -20,7 +20,7 @@ CHECK_EVERY = 15 * 60000
 CHECK = r"""
 limit=; if command -v timeout >/dev/null 2>&1; then limit='timeout 10'; fi
 if command -v claude >/dev/null 2>&1; then echo "claude=$($limit claude auth status </dev/null 2>/dev/null | grep -o '"loggedIn": *[a-z]*' | head -n 1)"; else echo claude=missing; fi
-if command -v codex >/dev/null 2>&1; then echo "codex=$($limit codex login status </dev/null 2>&1 | grep -iE '^(not )?logged in' | head -n 1)"; else echo codex=missing; fi
+if command -v codex >/dev/null 2>&1; then echo "codex=$($limit codex login status </dev/null 2>&1 | grep -oiE '^[[:space:]]*((not )?logged in|API key configured)([[:space:]]|$)' | head -n 1)"; else echo codex=missing; fi
 """
 # In the login shell agents start in, so its PATH has what mise, nvm or a profile put there.
 LOGIN = 'if command -v bash >/dev/null 2>&1; then exec bash -lc "$1"; else exec sh -lc "$1"; fi'
@@ -30,7 +30,7 @@ NAMES = {"claude": "Claude Code", "codex": "Codex"}
 def cli_state(word):
     if word == "missing":
         return "missing"
-    if re.search(r'"loggedIn": *true|^logged in', word or "", re.I):
+    if re.search(r'"loggedIn": *true|^(?:logged in|API key configured)\b', word or "", re.I):
         return "ready"
     if re.search(r'"loggedIn": *false|^not logged in', word or "", re.I):
         return "signed-out"
