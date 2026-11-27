@@ -6645,33 +6645,6 @@ class TaskFlow(unittest.TestCase):
         # An older title that starts with its key keeps only the rest.
         self.assertEqual(github.pr_title(self.store, {**self.task, "title": f"{ref} Flow"}), "Flow")
 
-    def test_ready_keeps_the_pull_request_the_task_continues(self):
-        """#828: the work pushed to an open pull request's own branch: ready takes that one, never a second."""
-        import herdr_task.github as github
-        wt, remote = self.task["worktree"], os.path.join(self.root, "remote.git")
-        self.git(self.root, "init", "-q", "--bare", remote)
-        self.git(self.main, "remote", "add", "origin", remote)
-        tip = self.commit(wt, "finish it", "a.txt")
-        self.git(wt, "push", "-q", "origin", "task/1:refs/heads/feature")  # by the agent
-        asked = []
-
-        def gh(*a, **k):
-            asked.append(a)
-            if a[:2] == ("pr", "list") and "--search" in a:
-                return True, json.dumps([{"number": 2918, "url": "https://github.com/o/r/pull/2918", "isCrossRepository": False,
-                                          "baseRefName": "main", "headRefName": "feature", "headRefOid": tip}]), ""
-            if a[:2] == ("pr", "view"):
-                return True, "OPEN", ""
-            return (False, "", "no") if a[:2] == ("pr", "create") else (True, "[]", "")
-        self.patch(github, "gh", gh)
-        self.assertEqual(github.pr_open(self.store, self.task, "o/r", "Done")["number"], 2918)
-        self.assertNotIn("create", [a[1] for a in asked])
-        self.assertEqual(self.git(self.root, "--git-dir", remote, "branch", "--list", "task/1"), "")  # no branch of its own
-        # A later commit goes to that pull request's branch.
-        tip = self.commit(wt, "a fix", "a.txt")
-        self.assertEqual(github.pr_open(self.store, self.task, "o/r")["number"], 2918)
-        self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "feature"), tip)
-
     def test_ready_takes_its_pull_request_out_of_the_merge_queue_to_push(self):
         """#1215: GitHub locks a branch while its pull request sits in the merge queue (here: the remote refuses pushes
         while it is queued). Ready takes it out first, pushes, and it goes back in once its checks pass."""
@@ -6801,7 +6774,7 @@ class TaskFlow(unittest.TestCase):
         self.task["pr"] = {"number": 30, "url": "https://github.com/o/r/pull/30", "repo": "o/r"}  # the closed one
         self.commands.take_pr(self.store, self.task, "#31")
         self.assertEqual(self.task["pr"], {"number": 31, "url": "https://github.com/o/r/pull/31", "repo": "o/r", "taken": True,
-                                           "branch": "fix/thing"})
+                                           "branch": "fix/thing", "lease": tip})
         self.assertEqual(github.pr_open(self.store, self.task, "o/r", "Fixed")["number"], 31)
         self.assertNotIn(("pr", "create"), [a[:2] for a in asked])
         self.assertNotIn(("pr", "edit"), [a[:2] for a in asked])  # its description is its author's
@@ -7419,7 +7392,7 @@ class ReadyMergeGit(unittest.TestCase):
         self.patch(self.commands, "review_limits", lambda s, t: (True, rounds + int(t.get("review_rounds_added") or 0)))
         self.patch(self.commands, "caller_labels", lambda: {})
         self.patch(self.commands, "workers", lambda s, t: [])
-        for name in ("base_pr", "pr_words", "refresh_sessions", "watch_main", "update_main"):
+        for name in ("pr_words", "refresh_sessions", "watch_main", "update_main"):
             self.patch(self.commands, name, lambda *a, **k: None)
         self.patch(self.commands, "finalize", lambda s, t: (t.update(state="ready"), setattr(s, "dirty", True), "ready")[2])
         self.patch(self.commands, "already_merged", lambda s, t: None)
@@ -7689,7 +7662,6 @@ class ReadyMergeGit(unittest.TestCase):
         t["base"] = self.git(self.main, "rev-parse", "HEAD")
         self.patch(github, "gh", lambda *a, cwd=None: (True, "[]", ""))
         self.patch(github, "pr_push", lambda s, task, repo: None)
-        self.patch(github, "pr_at_tip", lambda task, repo: None)
         self.patch(github, "pr_merged", lambda task, repo: None)
         with self.assertRaises(github.Fail) as e:
             github.pr_open(self.store, t, "o/r")
@@ -9304,6 +9276,7 @@ class ReadyAndPrFlow(unittest.TestCase):
     repo and store; hc and gh are never run."""
     setUp, patch, git, commit, args = TaskFlow.setUp, TaskFlow.patch, TaskFlow.git, TaskFlow.commit, TaskFlow.args
     patch_new, remote = ReadyMergeGit.patch_new, ReadyMergeGit.remote
+    taking = TaskFlow.taking
 
     # ---- #1207: an agent's own suggested next message in its input is nobody typing ----------------------------
     def typing_with(self, screen, lines):
@@ -9449,51 +9422,44 @@ class ReadyAndPrFlow(unittest.TestCase):
         with self.assertRaises(Fail):
             self.commands.on_branch(self.task, wt)
 
-    # ---- #1204: a task started on an open pull request's branch goes on that pull request --------------------
-    def base_pr_with(self, prs, **task):
-        self.task.update(task)
-        self.patch(self.commands, "github", lambda s: "o/r")
-        self.patch(self.commands, "gh", lambda *a, **k: (True, json.dumps(prs), "") if a[:2] == ("pr", "list") else (True, "", ""))
-        self.commands.base_pr(self.store, self.task)
-        return self.task.get("pr")
-
-    PR = {"number": 41, "url": "https://github.com/o/r/pull/41", "isCrossRepository": False, "headRefName": "feature",
-          "baseRefName": "main", "headRefOid": "abc", "state": "OPEN"}
-
-    def test_ready_takes_the_pull_request_open_from_its_base_branch(self):
-        pr = self.base_pr_with([self.PR], base="feature", base_set=True)
-        self.assertEqual((pr["number"], pr["branch"], pr["taken"], pr["from_base"]), (41, "feature", True, True))
-
-    def test_a_space_base_branch_or_a_task_with_a_pull_request_takes_none(self):
-        self.assertIsNone(self.base_pr_with([self.PR], base="feature", base_set=True, base_by="space"))
-        self.task.pop("base_by")
-        mine = {"number": 5, "url": "u", "repo": "o/r"}
-        self.assertEqual(self.base_pr_with([self.PR], base="feature", base_set=True, pr=mine), mine)
-        self.task.pop("pr")
-        self.assertIsNone(self.base_pr_with([dict(self.PR, isCrossRepository=True)], base="feature", base_set=True))
-        self.assertIsNone(self.base_pr_with([self.PR], base="main"))  # no base of its own
-
-    def test_on_its_base_branchs_pull_request_it_is_never_nothing_to_merge(self):
-        """#1204: its work already pushed to the pull request's branch (its base): ready keeps it on that pull request,
-        never Ready with nothing to merge, nor done because its base holds it."""
-        import argparse
+    def test_ready_keeps_a_stacked_task_off_its_base_pull_request(self):
         wt = self.task["worktree"]
         self.git(self.main, "branch", "feature", "main")
-        self.task.update(base="feature", base_set=True, start=self.git(wt, "rev-parse", "HEAD"))
-        self.patch(self.commands, "github", lambda s: "o/r")
-        self.patch(self.commands, "gh", lambda *a, **k: (True, json.dumps([self.PR]), "") if a[:2] == ("pr", "list") else (True, "", ""))
-        for name in ("review_refusal", "find_proof", "own_work"):
+        base = self.git(self.main, "rev-parse", "feature")
+        tip = self.commit(wt, "stacked change", "stack.txt")
+        remote, _ = self.taking({})
+        self.git(self.main, "push", "-q", "origin", "feature")
+        self.task.update(base="feature", base_set=True)
+        self.patch(self.commands, "gh", lambda *a, **k: (True, json.dumps([
+            {"number": 41, "headRefName": "feature", "baseRefName": "main", "headRefOid": base}
+        ]), ""))
+        for name in ("review_refusal", "find_proof", "already_merged"):
             self.patch(self.commands, name, lambda *a, **k: None)
-        self.patch(self.commands, "ready_turns", lambda live: {})
-        self.patch(self.commands, "task_settings", lambda s, t: [])
-        finalized = []
-        self.patch(self.commands, "finalize", lambda s, t: (finalized.append(dict(t)), "ready")[1])
-        self.patch(self.commands, "already_merged", lambda s, t: self.fail("asked whether it merged"))
-        self.commands.cmd_ready(argparse.Namespace(id="SHEP-1", json=True, folder=None, summary="Done.", details=None,
-                                                   proof=None, agents_md=None, pr=None, pr_title=None, pr_body=None,
-                                                   draft=False))
-        self.assertEqual(finalized[0]["pr"]["number"], 41)
-        self.assertNotIn("nothing_to_merge", finalized[0])
+        self.patch(self.commands, "task_settings", lambda *a: [])
+        self.patch(self.commands, "merge_policy", lambda *a: "ask")
+        self.commands.cmd_ready(self.args(summary="Done.", details=None, agents_md=None))
+        self.assertEqual(self.task["pr"]["number"], 99)
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "feature"), base)
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "task/1"), tip)
+
+    def test_ready_pushes_a_rebased_taken_branch(self):
+        from herdr_task import github, launch
+        wt = self.task["worktree"]
+        original = self.commit(wt, "original change", "taken.txt")
+        remote, _ = self.taking({12: {"state": "OPEN", "headRefName": "taken", "headRefOid": original}})
+        self.git(wt, "push", "-q", "origin", "task/1:refs/heads/taken")
+        t = {"id": 2, "title": "Continue the branch", "mode": "worktree", "agents": []}
+        self.store.data["tasks"].append(t)
+        self.patch(launch, "WORKTREES", os.path.join(self.root, "trees"))
+        self.patch(launch, "settings_for", lambda *a: {"tasks": {}})
+        self.commands.take_pr(self.store, t, "12")
+        taken = launch.folder_for(self.store, t)
+        self.commit(self.main, "main moved", "main.txt")
+        self.git(taken, "rebase", "main")
+        rebased = self.git(taken, "rev-parse", "HEAD")
+        self.assertNotEqual(original, rebased)
+        self.assertEqual(github.pr_open(self.store, t, "o/r")["number"], 12)
+        self.assertEqual(self.git(self.root, "--git-dir", remote, "rev-parse", "taken"), rebased)
 
     # ---- #1116: a later round reviews what changed since the last one -------------------------------------------
     def test_the_refusal_names_what_changed_since_the_last_reviewed_commit(self):
@@ -10622,7 +10588,7 @@ class ParallelCollisions(unittest.TestCase):
     def test_ready_refuses_a_branch_that_conflicts_with_its_base(self):
         a, b, c = self.task(1, "A"), self.task(2, "B"), self.task(3, "C", name="other.txt")
         self.merge_first(a)
-        for name in ("take_pr", "base_pr", "pr_words"):
+        for name in ("take_pr", "pr_words"):
             self.patch(self.commands, name, lambda *x, **k: None)
         self.patch(self.commands, "review_refusal", lambda s, t, wt: None)
         self.patch(self.commands, "finalize", lambda s, t: f"{s.ref(t)} is ready.")
