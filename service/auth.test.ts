@@ -155,8 +155,14 @@ describe("macOS 27, no netstat table: lsof and ps (GitHub #777)", () => {
   const ours = "p87948\nu501\nf7\nn127.0.0.1:7788->127.0.0.1:56078\n";
   const mine = "p3083\nu501\nf12\nn127.0.0.1:56078->127.0.0.1:7788\n";
   const ps = (...uids: number[]) => uids.map((u) => `  ${u}`).join("\n") + "\n";
-  const runner = (lsof: string[], psOut: string) => (argv: string[]) => (argv[0].endsWith("ps") ? psOut : lsof.shift() ?? "");
-  const peer = async (lsof: string[], psOut: string) => (await import("./peer.ts")).lsofPeer(56078, 7788, runner(lsof, psOut), 501, 87948);
+  const runner = (lsof: string[], psOut: string, named: boolean) => (argv: string[]) => {
+    if (!argv[0].endsWith("ps")) return lsof.shift() ?? "";
+    expect(argv.slice(1)).toEqual(named ? ["-axo", "uid=", "-o", "user="] : ["-axo", "uid="]);
+    return psOut;
+  };
+  const peer = async (lsof: string[], psOut: string, ignored?: readonly string[]) =>
+    (await import("./peer.ts")).lsofPeer(56078, 7788, runner(lsof, psOut, !!ignored?.length), 501, 87948, ignored);
+  const serviceAccount = "  0 root\n  501 owner\n  503 mfe\n";
 
   test("reads lsof -F: pid, uid and each socket", async () => {
     const { lsofSockets } = await import("./peer.ts");
@@ -170,6 +176,17 @@ describe("macOS 27, no netstat table: lsof and ps (GitHub #777)", () => {
   test("hidden, but another person has processes on this Mac: refused", async () => {
     expect(await peer([ours, ours], ps(0, 501, 502))).toBe(null);
   });
+  test("a service account with a login UID blocks a hidden caller by default", async () =>
+    expect(await peer([ours, ours], ps(0, 501, 503))).toBe(null));
+  test("the owner's named service account no longer blocks a hidden caller", async () =>
+    expect(await peer([ours, ours], serviceAccount, ["mfe"])).toBe("system"));
+  test("an unlisted account, missing name, or similar name still blocks a hidden caller", async () => {
+    expect(await peer([ours, ours], serviceAccount + "  504 someone\n", ["mfe"])).toBe(null);
+    expect(await peer([ours, ours], "  501 owner\n  503\n", ["mfe"])).toBe(null);
+    expect(await peer([ours, ours], serviceAccount, ["mf"])).toBe(null);
+  });
+  test("the list applies only when lsof can't see the caller", async () =>
+    expect(await peer([ours + mine.replace("u501", "u503")], serviceAccount, ["mfe"])).toBe(null));
   test("lsof can't see the service's own side: refused", async () => expect(await peer(["", ""], ps(0, 501))).toBe(null));
   test("ps lists nobody (not even us): refused", async () => expect(await peer([ours, ours], "")).toBe(null));
   test("the connection went away while ps looked: refused", async () => expect(await peer([ours, ""], ps(0, 501))).toBe(null));
@@ -183,10 +200,6 @@ describe("macOS 27, no netstat table: lsof and ps (GitHub #777)", () => {
     } });
     try { await (await fetch(`http://127.0.0.1:${srv.port}/`)).text(); } finally { srv.stop(true); }
     expect(seen).toBe("owner");
-  });
-  test("another person: a login account other than the owner", async () => {
-    const { otherPeople } = await import("./peer.ts");
-    expect(otherPeople(ps(0, 88, 501, 502, 4294967294), 501)).toEqual([502]);
   });
 });
 

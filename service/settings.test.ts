@@ -10,6 +10,28 @@ process.env.HERDR_TASK_SETTINGS = file;
 const { Settings } = await import("./settings.ts");
 const CORE: any = await import("../core/settings.js");
 
+test("macOS web peer exceptions come from the owner's settings file and default to empty", () => {
+  const before = readFileSync(file, "utf8");
+  const s = new Settings();
+  const set = (ignore_accounts: unknown) =>
+    writeFileSync(file, JSON.stringify({ everywhere: { web: { ignore_accounts } } }));
+  try {
+    expect(s.webIgnoreAccounts()).toEqual([]);
+    set(["mfe", "_another_service"]);
+    expect(s.webIgnoreAccounts()).toEqual(["mfe", "_another_service"]);
+    set("mfe");
+    expect(s.webIgnoreAccounts()).toEqual([]);
+    set(["mfe", 503]);
+    expect(s.webIgnoreAccounts()).toEqual([]);
+    set(["503"]);
+    expect(s.webIgnoreAccounts()).toEqual([]);
+    set([]);
+    expect(s.webIgnoreAccounts()).toEqual([]);
+  } finally {
+    writeFileSync(file, before);
+  }
+});
+
 test("the Tasks rows say the window's words, and a change keeps the rest of the file", () => {
   const s = new Settings();
   s.start();
