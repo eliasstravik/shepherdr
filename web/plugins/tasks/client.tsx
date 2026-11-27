@@ -5,9 +5,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { PaneFrame, placeholderOf, showList } from '@client/App.tsx'
 import { newSpaceDialog, renameDialog } from '@client/list.tsx'
-import { definePlugin, getState, go, has, type Command, maximize, sideHidden, minimize, notice, openTask, registry, setUI, togglePane, tryAct, act, attempt, useSnap, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
+import { definePlugin, getState, go, has, type Command, maximize, sideHidden, minimize, notice, openTask, registry, setUI, togglePane, tryAct, act, attempt, useSnap, useStore, useUI, type MenuRow, type Thread } from '@client/kernel.ts'
 import { confirm, openDialog, openForm, openMenu } from '@client/overlay.tsx'
-import { AgentField, pickFor, type Pick } from '@client/picker.tsx'
+import { AgentField, pickFor, PickSummary, reportedPick, useCatalog, type Pick } from '@client/picker.tsx'
 import { edge } from '@client/resize.ts'
 import { ActBtn, ActError, Btn, Cnt, cx, Empty, Hd, I, IB, MenuGroup, Row, useCardActs } from '@client/ui.tsx'
 import { waiting } from '@client/pending.ts'
@@ -213,6 +213,14 @@ export function taskRows(t: Task, where: 'row' | 'thread'): MenuRow[] | null {
 
 /* ---------- a task not started yet ---------- */
 
+function TaskAgentSummary({ t, className }: { t: Task; className?: string }) {
+  const agent = useStore((s) => s.chats[taskChat(t)]?.agent)
+  const cat = useCatalog(t.on)
+  const pick = reportedPick(agent ?? t.agent?.settings) ?? t.plannedAgent
+  if (!pick) return null
+  return <span className={className}><PickSummary pick={pick} cat={cat} /></span>
+}
+
 function startDialog(t: Task) {
   openForm(
     function Form({ close }) {
@@ -315,6 +323,7 @@ export function ReviewCard({ t, ctx }: { t: Task; ctx: 'chat' | 'thread' }) {
     <div className="card" data-card={`review:${t.id}`}>
       {ctx === 'chat' && <span className="t tw"><StatusIcon t={t} time="none" />{t.name}</span>}
       <span className="s">{ctx === 'chat' && t.work && <><WorkTag snap={snap} t={t} /> · </>}{where}</span>
+      {ctx === 'chat' && <TaskAgentSummary t={t} className="s" />}
       <span>{said.summary || 'Ready for you to look at.'}</span>
       {said.details && (
         <button type="button" className="fold" aria-expanded={more} onClick={() => setMore(!more)}>
@@ -370,6 +379,7 @@ export function StoppedCard({ t }: { t: Task }) {
   return (
     <div className="card" data-card={`stopped:${t.id}`}>
       <span className="t c-red">Stopped</span>
+      <TaskAgentSummary t={t} className="s" />
       <span>{t.stopped.why || (t.stopped.by === 'limit' ? "It hit its plan's limit." : 'Its agent is no longer running.')}</span>
       <div className="acts">
         <ActBtn acts={acts} id="restart" kind="pri" busy="Restarting…" run={() => attempt({ type: 'task-resume', chat: taskChat(t) })}>Restart</ActBtn>
@@ -447,6 +457,7 @@ function TaskHead({ task: t, where, scrolled }: { task: Task; where: 'chat' | 'p
         <span className="hline">
           <StatusIcon t={live} time="none" />
           <span>{big && snap ? `${line} · in ${spaceLabel(snap, t.place)}` : line}</span>
+          <TaskAgentSummary t={live} className="head-agent" />
         </span>
       }
       scrolled={scrolled}
@@ -548,6 +559,7 @@ function TaskRow({ snap, t, tag, alert }: { snap: Snapshot; t: Task; tag: boolea
               {alert.body && <span className="l2">{alert.body}</span>}
             </>
           ) : sub && <span className="l2">{sub}</span>}
+          <TaskAgentSummary t={t} className="l2" />
           {tag && t.work && <RepoLine snap={snap} t={t} />}
         </span>
         {when && <span className="v">{when}</span>}

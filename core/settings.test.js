@@ -28,7 +28,7 @@ test("the service reads Settings' words from core/settings.js, never its own cop
 test("the model button says what the window's does", () => {
   const { menus, defaults } = S.choicesFrom({ claude: { model: "opus[1m]", effort: "high", per: {} }, codex: { models: [{ id: "gpt-5", label: "GPT-5", efforts: ["low", "high"] }] } });
   expect(S.modelLabel(menus, defaults)).toBe("Opus 5.5 · 1M · High");
-  expect(S.modelLabel(menus, { agent: "claude", model: "opus", effort: "xhigh", fast: true })).toBe("Opus 5.5 · Extra high · Fast");
+  expect(S.modelLabel(menus, { agent: "claude", model: "opus", effort: "xhigh", fast: true })).toBe("Opus 5.5 · Xhigh · Fast");
   expect(S.roleSel("reviewer", null, { menus, defaults, permDefault: { codex: "auto" } }, "claude")).toMatchObject({ unset: true, sel: { agent: "codex", model: "gpt-5" } });
   expect(S.otherCliWords(S.otherCli("claude"))).toBe("Other CLI (Codex)");
   // another CLI's model: its own permission modes, full access staying full access

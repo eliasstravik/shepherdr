@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import type { Catalog } from '@shared/types.ts'
-import { choiceList, pickerRows, samePick, type Pick } from './picker.tsx'
+import { AgentLine, choiceList, pickerRows, PickSummary, samePick, type Pick } from './picker.tsx'
 
 // SHEP-333: the agent picker's rows are all one kind: a label, what is picked and a chevron, each opening its own list.
 // Effort and Speed used to be segmented switches beside them.
@@ -57,7 +59,7 @@ test('Standard is always available, while only supported faster tiers appear', (
 test("the Effort row opens a list of the model's own levels, with the picked one on", () => {
   const all = choiceList('effort', pick, cat)
   expect(all.title).toBe('Effort · Big 1')
-  expect(all.items.map((x) => x.label)).toEqual(['Low', 'Medium', 'High', 'Extra high', 'Max'])
+  expect(all.items.map((x) => x.label)).toEqual(['Low', 'Medium', 'High', 'Xhigh', 'Max'])
   expect(all.items.filter((x) => x.on).map((x) => x.id)).toEqual(['medium'])
   expect(all.items.find((x) => x.id === 'xhigh')!.pick).toEqual({ ...pick, effort: 'xhigh' })
   expect(choiceList('effort', { ...pick, model: 'small', effort: 'high' }, cat).items.map((x) => x.label)).toEqual(['Low', 'High'])
@@ -69,6 +71,28 @@ test('the Speed row opens Standard, Fast and Ultra-fast', () => {
   expect(s.items[2]!.pick.fast).toBe('ultrafast')
   expect(s.items[0]!.pick.fast).toBe(false)
   expect(pickerRows({ ...pick, fast: 'ultrafast' }, cat).find((r) => r.f === 'speed')!.value).toBe('Ultra-fast')
+})
+
+test('summaries and the message box capitalize effort and show one bolt per faster tier', () => {
+  for (const [fast, name, count] of [[false, '', 0], [true, 'Fast', 1], ['ultrafast', 'Ultra-fast', 2]] as const) {
+    const chosen = { ...pick, effort: 'xhigh', fast }
+    const summary = renderToStaticMarkup(createElement(PickSummary, { pick: chosen, cat }))
+    const composer = renderToStaticMarkup(createElement(AgentLine, { pick: chosen, machine: cat.machine, onClick: () => {} }))
+    expect(summary).toContain('>Big 1</span>')
+    expect(summary).toContain('> · Xhigh</span>')
+    expect(composer).toContain('>Xhigh</span>')
+    expect(summary.match(/class="i s16"/g) ?? []).toHaveLength(count)
+    expect(composer.match(/class="i s16"/g) ?? []).toHaveLength(count + 1) // includes the chevron
+    expect(summary).not.toContain('>Standard<')
+    expect(composer).not.toMatch(/>\s*(?:Standard|Fast|Ultra-fast)\s*</)
+    if (name) {
+      expect(summary).toContain(`role="img" aria-label="${name}"`)
+      expect(composer).toContain(`, ${name}. Change`)
+    } else {
+      expect(summary).not.toContain('speed-bolts')
+      expect(composer).not.toContain('Standard')
+    }
+  }
 })
 
 test('the Permissions row opens the same kind of list, each mode with its line', () => {

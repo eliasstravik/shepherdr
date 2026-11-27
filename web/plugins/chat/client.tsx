@@ -10,7 +10,7 @@ import { act, attempt, definePlugin, getDraft, getState, has, notice, openTask, 
 import { endComposition, isEcho, type Sent } from './echo.ts'
 import { partsOf, placeOutgoing, placesOf, keyOf, readNow, showsAs, type Outgoing } from '@client/outbox.ts'
 import { confirm, openMenu } from '@client/overlay.tsx'
-import { AgentLine, openPicker, pickFor, pickWords, type Pick } from '@client/picker.tsx'
+import { AgentLine, openPicker, pickFor, pickWords, reportedPick, type Pick } from '@client/picker.tsx'
 import { attach, detach, dropOut, retry, reupload, send } from '@client/send.ts'
 import { still } from '@client/motion.ts'
 import { ActBtn, ActError, Btn, cx, Empty, I, IB, useCardActs, useGrow } from '@client/ui.tsx'
@@ -1054,9 +1054,9 @@ function Reply({ text, onSend, onEdit }: { text: string; onSend: (t: string) => 
 /** what a chat runs on now: its agent's own report; before its chat came, its space's (an Assistant's chat: what its
  *  Assistant runs, else what its first message starts it on, SHEP-298); else what is set for its kind */
 export function pickOf(snap: Snapshot, chat: Chat | undefined, thread: Thread): Pick {
-  const a = chat?.agent ?? (!thread.task ? snap.places.find((p) => p.id === thread.place && p.chat === thread.chat)?.agent : undefined)
-  if (a?.kind) return { agent: a.kind, label: a.modelLabel ?? a.planned?.modelLabel ?? null, model: a.model ?? a.planned?.model ?? null, effort: a.effort ?? a.planned?.effort ?? null, fast: a.speed === 'ultrafast' ? 'ultrafast' : a.speed === 'fast', perm: a.perm ?? null }
-  return thread.task?.plannedAgent ?? pickFor(snap, isEverything(snap, thread.place) ? 'all' : thread.place, thread.task ? 'Tasks' : 'Chats')
+  const a = thread.task ? thread.task.agent?.settings : snap.places.find((p) => p.id === thread.place && p.chat === thread.chat)?.agent
+  return reportedPick(chat?.agent ?? a) ?? thread.task?.plannedAgent
+    ?? pickFor(snap, isEverything(snap, thread.place) ? 'all' : thread.place, thread.task ? 'Tasks' : 'Chats')
 }
 
 const speedForAction = (pick: Pick) => pick.fast === 'ultrafast' ? 'ultrafast' : pick.fast ? 'fast' : 'normal'

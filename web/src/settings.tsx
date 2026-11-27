@@ -10,7 +10,7 @@ import { copyText } from './copy.ts'
 import type { IconName } from './icons.ts'
 import { newerServed, notice, openSettings, registry, setUI, tryAct, updateNow, useStore, useUI } from './kernel.ts'
 import { confirm, openDialog, openForm } from './overlay.tsx'
-import { openPicker, PickerHead, pickFor, sayPick, useCatalog, type Role } from './picker.tsx'
+import { openPicker, PickerHead, pickFor, PickSummary, useCatalog, type Role } from './picker.tsx'
 import { MOTIONS, setPref, THEMES, usePrefs, WIDTHS } from './prefs.ts'
 import { canKeepAwake, setAwake, useAwake } from './awake.ts'
 import { setChatSide, useSides, type Layout, type Side } from './sides.ts'
@@ -207,7 +207,7 @@ function Agents({ snap, place, only }: { snap: Snapshot; place: string; only?: R
     // the small print under the name, as Review, Merge and Proof have it (beside the value it ran into the value)
     return (
       <SRow key={role} label={<>{name(role)}<Own place={place} own={own(`agents.${role}`)} k={`agents.${role}`} /></>} wrap>
-        <span className="val">{sayPick(pick, cat)}</span>
+        <span className="val"><PickSummary pick={pick} cat={cat} full /></span>
         <Btn small onClick={() => openPicker({ title, machine, pick, onChange: () => undefined, onClose: (now) => JSON.stringify(now) !== JSON.stringify(pick) && void set(place, `agents.${role}`, now) })}>Change</Btn>
       </SRow>
     )

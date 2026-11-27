@@ -117,6 +117,8 @@ button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"])
 .hd{display:flex;align-items:center;gap:4px;height:var(--hd);padding:0 12px;flex:none;min-width:0}
 .hd{border-bottom:1px solid transparent}.hd.sc{border-bottom-color:var(--line)}
 .ttl{flex:1;min-width:0;padding:0 4px}
+.chat-heading{flex:1;min-width:0}
+.chat-heading>.t2{padding-inline:4px}
 /* where the chat is, beside its name (SHEP-360): dim secondary text, no pill; it gives way before the name, from its
    start, and a finger gets a taller hit area than it shows */
 .ttl:has(>.hpath){display:flex;align-items:center;gap:0}.ttl>.tbtn{flex:none;max-width:100%}.ttl>.tbtn:has(+.hpath){max-width:calc(100% - 44px)}
@@ -128,8 +130,10 @@ button.row:hover,.row[aria-current="true"],.rowx:has(>.row[aria-current="true"])
 .t1{font-weight:600}.t1,.t2{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .t2{color:var(--muted);font-size:var(--sec);line-height:var(--secl)}
 /* an open task's status line under its title (#1473): its ring, small, then its words, one line cut with … */
-.t2>.hline{display:flex;align-items:center;gap:6px;min-width:0}.hline>.tring{width:14px}.hline>.tring>.i{width:14px;height:14px}.hline>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.t2>.hline{display:flex;align-items:center;gap:6px;min-width:0}.hline>.tring{width:14px}.hline>.tring>.i{width:14px;height:14px}.hline>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.hline>.head-agent{flex:none;max-width:65%;padding-left:6px;border-left:1px solid var(--line)}
 .tbtn{display:inline-flex;align-items:center;gap:4px;max-width:100%;height:var(--btn);padding:0 8px;margin-left:-4px;border-radius:8px;font-weight:600;min-width:0}
+.chat-heading .tbtn{height:var(--uil)}
 .tbtn:hover,.tbtn[aria-expanded="true"]{background:var(--control)}.tbtn span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* SHEP-326: the call's mark, no words: a live wave of whoever talks, still dots that breathe while it connects */
 /* the call's wave fills the box's row up to the mic, as dictation's does (one wave, wave.tsx) */
@@ -241,16 +245,29 @@ button.b{cursor:pointer}
 .banner .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .banner>button.n{text-align:left;align-self:stretch;margin-block:-4px}
 .app.tap .banner{padding-right:0}.app.tap .banner>.ib{width:var(--hit);height:100%;border-radius:0 12px 12px 0}
-.cbox{display:grid;border-radius:16px;background:var(--well);box-shadow:inset 0 0 0 1px var(--line2)}
+.cbox{display:grid;container-type:inline-size;border-radius:16px;background:var(--well);box-shadow:inset 0 0 0 1px var(--line2)}
 .cbox:focus-within{box-shadow:inset 0 0 0 1px var(--muted)}
 .cin{width:100%;height:max(44px,var(--row));padding:0 16px;border:0;background:none;font-size:16px;line-height:24px}
 .cbar{display:flex;align-items:center;gap:4px;min-width:0;padding:0 6px 6px}.sp{flex:1}
 .agent{display:inline-flex;align-items:center;gap:6px;min-width:0;height:var(--btns);padding:0 6px;border-radius:8px;font-size:14px;line-height:20px}
-.agent:hover{background:var(--control)}.agent .m{font-weight:500;white-space:nowrap}
+.agent:hover{background:var(--control)}.agent .m{min-width:0;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .agent .e{min-width:0;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent .e:not(.pm){flex:none}
 /* short of room, the line drops its logo, then its chevron, then its permission mode before the effort is cut (picker.tsx) */
-.agent[data-drop~="logo"]>.logo,.agent[data-drop~="chev"]>.i:last-child,.agent[data-drop~="perm"]>.pm,.agent[data-drop~="tier"]>.tier{display:none}
-.agent .i{color:var(--muted)}.agent .bolt{color:var(--fg);margin-left:-4px}.agent .bolt+.bolt{margin-left:-10px}
+.agent[data-drop~="logo"]>.logo,.agent[data-drop~="chev"]>.i:last-child,.agent[data-drop~="perm"]>.pm{display:none}
+.agent>.i{color:var(--muted)}
+.pick-summary{display:inline-flex;align-items:center;max-width:100%;vertical-align:top}
+.pick-summary>.pick-model,.pick-summary>.pick-mode{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pick-summary>.pick-effort{flex:none;white-space:nowrap}
+.pick-summary>.pick-effort,.pick-summary>.pick-mode{margin-inline-start:4px}
+.speed-bolts{display:inline-flex;align-items:center;flex:none;vertical-align:middle;margin-inline-start:3px}
+.speed-bolts>.i+.i{margin-inline-start:-6px}
+.agent>.speed-bolts,.pk-v>.speed-bolts{margin-inline-start:0}
+@container (max-width:336px){
+  .cbar:has(>.agent){flex-wrap:wrap}
+  .cbar>.agent{flex-basis:calc(100% - var(--ib) - 4px);justify-content:flex-start}
+  .app.tap .cbar>.agent{min-height:var(--hit)}
+}
 /* Update <agent> (plugins/chat/update.tsx): a quiet button beside the agent line, a small blue dot on it */
 .agent-upd{position:relative}.agent-upd::after{content:"";position:absolute;top:calc(50% - 9px);right:calc(50% - 9px);width:6px;height:6px;border-radius:50%;background:var(--blue)}
 .send{display:grid;place-items:center;width:var(--send);height:var(--send);border-radius:50%;background:var(--fg);color:var(--canvas);flex:none}

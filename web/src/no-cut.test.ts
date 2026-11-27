@@ -62,8 +62,8 @@ function line(need: number, room: number, free: Record<string, number> = { logo:
   return el as unknown as HTMLElement
 }
 
-test("the message box's agent line keeps the model and effort whole: logo, chevron, mode, then speed text go first", () => {
-  expect((Pk as any).AGENT_DROPS).toEqual(['logo', 'chev', 'perm', 'tier'])
+test("the message box's agent line keeps the model and effort whole: logo, chevron and mode go first", () => {
+  expect((Pk as any).AGENT_DROPS).toEqual(['logo', 'chev', 'perm'])
   const roomy = line(200, 240)
   expect(fitAgentLine(roomy)).toBe(0)
   expect(roomy.dataset.drop).toBe('')
@@ -73,8 +73,8 @@ test("the message box's agent line keeps the model and effort whole: logo, chevr
   expect(phone.dataset.drop).toBe('logo')
   expect(fitAgentLine(line(200, 160))).toBe(2)
   expect(fitAgentLine(line(200, 120))).toBe(3)
-  // the effort is cut only once all four are gone
+  // the effort is cut only once all three are gone
   const tiny = line(200, 60)
-  expect(fitAgentLine(tiny)).toBe(4)
-  expect(tiny.dataset.drop).toBe('logo chev perm tier')
+  expect(fitAgentLine(tiny)).toBe(3)
+  expect(tiny.dataset.drop).toBe('logo chev perm')
 })

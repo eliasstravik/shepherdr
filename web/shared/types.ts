@@ -273,6 +273,8 @@ export const GROUPS: [TaskStatus, string][] = [
 export interface TaskAgent {
   /** chat key */
   chat: string
+  /** What the worker runs on, available before its chat is opened. */
+  settings?: ChatAgent
   role: string
   cli: string
   /** Task status, or off when core cannot confirm the agent's machine; workflow remains separate. */

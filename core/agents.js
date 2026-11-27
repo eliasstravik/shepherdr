@@ -178,8 +178,8 @@ export function withChoice(all, space, sel, now = Date.now()) {
   return Object.fromEntries((c ? [[space, { ...c, at: now }], ...rest] : rest).sort((a, b) => (b[1]?.at ?? 0) - (a[1]?.at ?? 0)).slice(0, 40));
 }
 
-// An effort level as the person reads it: "xhigh" -> "Extra high". The CLIs still get the raw value.
-const LEVELS = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra", none: "None" };
+// An effort level as the person reads it. The CLIs still get the raw value.
+const LEVELS = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Xhigh", max: "Max", ultra: "Ultra", none: "None" };
 export function levelName(e) {
   return e ? LEVELS[e] ?? e[0].toUpperCase() + e.slice(1) : null;
 }
