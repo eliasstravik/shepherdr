@@ -7,11 +7,13 @@
 // serve's own 127.0.0.1 port ("peer not found", checked on 1.104).
 import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "./spawn.ts";
+import { readSettings } from "./settings.ts";
 
 const ME = process.getuid?.() ?? -1;
 const NETSTAT = ["/usr/sbin/netstat", "/usr/bin/netstat"].find((p) => existsSync(p)) ?? "netstat";
 const PS = ["/bin/ps", "/usr/bin/ps"].find((p) => existsSync(p)) ?? "ps";
 const LSOF = ["/usr/sbin/lsof", "/usr/bin/lsof", "/bin/lsof"].find((p) => existsSync(p)) ?? "lsof";
+const ID = ["/usr/bin/id", "/bin/id"].find((p) => existsSync(p)) ?? "id";
 const LOOP4 = "0100007F";                              // 127.0.0.1 as /proc/net/tcp writes it
 const LOOP6 = "0000000000000000FFFF00000100007F";      // ::ffff:127.0.0.1 in tcp6
 const hex = (n: number) => n.toString(16).toUpperCase().padStart(4, "0");
@@ -101,8 +103,15 @@ export const trustedPeer = (port: number | undefined, service: number) => {
   return process.platform === "darwin" && peerProblem !== null && lsofPeer(port, service, run) !== null;
 };
 
+/** id's output, or "" when it was stopped by its timeout or failed (a directory lookup that hangs must not hold the
+ *  service, and a cut-short answer must not count). */
+export const outputOf = (r: { stdout?: { toString(): string } | null; exitCode?: number | null; exitedDueToTimeout?: boolean }) =>
+  r.exitedDueToTimeout || r.exitCode !== 0 ? "" : r.stdout?.toString() ?? "";
 const run = (argv: string[]) => {
-  try { return spawnSync(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore" }).stdout.toString(); } catch { return ""; }
+  try {
+    if (argv[0] === ID) return outputOf(spawnSync(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore", timeout: 5000 }));
+    return spawnSync(argv, { stdin: "ignore", stdout: "pipe", stderr: "ignore" }).stdout.toString();
+  } catch { return ""; }
 };
 
 /** lsof -F's sockets: [pid, uid, "local->remote"] for each socket line. */
@@ -117,9 +126,33 @@ export function lsofSockets(text: string): [number, number, string][] {
   return out;
 }
 
-/** The uids of processes run by another person: a login account (macOS: 501 and up) other than the owner. */
-export const otherPeople = (ps: string, me = ME) =>
-  [...new Set(ps.split("\n").map((x) => x.trim()).filter((x) => /^\d+$/.test(x)).map(Number))].filter((u) => u >= 501 && u < 2 ** 31 && u !== me);
+/** The account name a uid's passwd line (`id -P <uid>`, macOS: 10 fields) gives, or null. Only an exact single line
+ *  whose uid field is the uid asked counts, so a name that looks like a number can't answer for another uid. */
+export function accountOf(passwd: string, uid: number): string | null {
+  const lines = passwd.split("\n").filter((l) => l.trim());
+  if (lines.length !== 1) return null;
+  const f = lines[0].trim().split(":");
+  return f.length === 10 && f[2] === String(uid) && ACCOUNT.test(f[0]) ? f[0] : null;
+}
+const ACCOUNT = /^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/;
+
+/** Accounts the owner says are services, not people (settings: everywhere.web.ignore_accounts), e.g. McAfee Agent's
+ *  "mfe". Their processes don't stop Tailscale being believed on macOS 27 (lsofPeer). The owner names them: nothing
+ *  is guessed from a shell or a flag, which another account could set or which wouldn't stop it logging in over SSH.
+ *  A listed account's own code is trusted as Tailscale is: list only services you trust. Empty: as before. */
+export function ignoredAccounts(): string[] {
+  try {
+    const v = readSettings()?.everywhere?.web?.ignore_accounts;
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string" && ACCOUNT.test(x)) : [];
+  } catch { return []; }
+}
+
+/** The uids of processes run by another person: a login account (macOS: 501 and up) other than the owner. ignored(uid):
+ *  true for an account the owner listed as a service. */
+export const otherPeople = (ps: string, me = ME, ignored: (uid: number) => boolean = () => false) =>
+  [...new Set(ps.split("\n").map((x) => x.trim()).filter((x) => /^\d+$/.test(x)).map(Number))]
+    .filter((u) => u >= 501 && u < 2 ** 31 && u !== me)
+    .filter((u) => !ignored(u));
 
 /** macOS without a netstat table (GitHub #777): who holds the caller's side, by lsof. lsof sees every socket of this
  *  user and none of another's (root's, another person's), and always this service's own side of the connection:
@@ -128,7 +161,7 @@ export const otherPeople = (ps: string, me = ME) =>
  *    other person has a process on this Mac (ps lists everyone's) and the connection is still up after ps looked,
  *    so the holder was alive while ps listed it ("system").
  *  lsof not seeing the service's own side means it can't look here: null, as for anything else. */
-export function lsofPeer(port: number, service: number, exec: (argv: string[]) => string, me = ME, self = process.pid): "owner" | "system" | null {
+export function lsofPeer(port: number, service: number, exec: (argv: string[]) => string, me = ME, self = process.pid, ignore?: string[]): "owner" | "system" | null {
   const look = () => {
     const socks = lsofSockets(exec([LSOF, "-nP", `-iTCP@127.0.0.1:${port}`, "-sTCP:ESTABLISHED", "-Fpun"]));
     const ours = socks.some(([pid, , n]) => pid === self && n === `127.0.0.1:${service}->127.0.0.1:${port}`);
@@ -141,7 +174,9 @@ export function lsofPeer(port: number, service: number, exec: (argv: string[]) =
   if (first.callers.length) return first.callers.every((u) => u === me) ? ((lsofProblem = null), "owner") : say("another user opened it");
   const ps = exec([PS, "-axo", "uid="]);
   if (!ps.split("\n").some((x) => x.trim() === String(me))) return say("ps gave no process list"); // ps must list us too
-  if (otherPeople(ps, me).length) return say("another person has processes on this Mac, so a hidden caller could be theirs");
+  const listed = ignore ?? ignoredAccounts(); // read only here: a hidden caller with others on this Mac
+  const ignored = (u: number) => listed.length > 0 && listed.includes(accountOf(exec([ID, "-P", String(u)]), u) ?? "");
+  if (otherPeople(ps, me, ignored).length) return say("another person has processes on this Mac, so a hidden caller could be theirs (a service account can be named in settings: web.ignore_accounts)");
   const again = look();
   if (!again.ours || again.callers.length) return say("the connection changed while looking");
   lsofProblem = null;
