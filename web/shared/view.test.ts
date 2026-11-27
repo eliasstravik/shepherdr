@@ -194,3 +194,20 @@ test("an open task's header line: its row's words, else its state, and the time 
   expect(headLine(task({ status: 'need', report: { msg: 'Needs a go for a screenshot' } }))).toBe('Needs a go for a screenshot')
   expect(headLine(task({ status: 'ready' }))).toBe('Ready for review')
 })
+
+test('a kept proof appears in Artifacts while a current proof stays on its task', () => {
+  const s = snap({
+    everything: 'home',
+    places: [place('home', 'mini')],
+    tasks: [task({ proof: 'kept' }), task({ proof: 'current' })],
+    artifacts: [
+      { id: 'kept', place: 'shop', at: 2, proof: false },
+      { id: 'current', place: 'shop', at: 3, proof: true },
+      { id: 'unrecorded', place: 'shop', at: 4, proof: true },
+      { id: 'page', place: 'shop', at: 1 },
+    ] as Snapshot['artifacts'],
+  })
+  for (const place of ['shop', 'home']) {
+    expect(artifactsIn(s, place).map((a) => a.id)).toEqual(['kept', 'page'])
+  }
+})

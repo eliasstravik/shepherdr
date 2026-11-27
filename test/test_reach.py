@@ -22,12 +22,28 @@ from herdr_task import base, machines  # noqa: E402
 FAKE_HC = r"""#!/bin/sh
 echo "hc $*" >> "$FAKE_LOG"
 case "$1 $2" in
-  "server status") echo '{"core": {"id": "c-here", "name": "here"}}'; exit 0 ;;
+  "server status")
+    if [ "$FAKE_VM" = remote ]; then
+      echo '{"core": {"id": "c-vm1", "name": "vm1"}}'; exit 0
+    fi
+    echo '{"core": {"id": "c-here", "name": "here"}}'; exit 0 ;;
   "machine ls") echo '{"machines": [{"name": "vm1", "id": "c-vm1", "target": "me@vm1", "state": "connected"}]}'; exit 0 ;;
 esac
 case "$1" in
-  ls) echo '{"terminals": []}'; exit 0 ;;
-  exec) while [ "$1" != "--" ]; do shift; done; shift; exec "$@" ;;
+  ls)
+    if [ "$FAKE_ASSISTANTS" = yes ]; then
+      echo '{"terminals": [{"address": "t1", "state": "live"}, {"address": "t2", "state": "live"}]}'
+    else
+      echo '{"terminals": []}'
+    fi
+    exit 0 ;;
+  get)
+    if [ "$FAKE_VM" = remote ]; then space=foreign; elif [ "$2" = t1 ]; then space=home; else space=work; fi
+    echo '{"state": "live", "labels": {"herdr.role": "coordinator", "herdr.space": "'"$space"'"}}'
+    exit 0 ;;
+  exec)
+    if [ "$FAKE_VM" = yes ]; then export FAKE_VM=remote XDG_STATE_HOME="$HOME/vm-state"; fi
+    while [ "$1" != "--" ]; do shift; done; shift; exec "$@" ;;
 esac
 exit 1
 """
@@ -58,7 +74,7 @@ class Reach(unittest.TestCase):
         store = os.path.join(self.tmp, "store")
         os.makedirs(store)
         python = os.path.dirname(sys.executable)
-        env = {"HOME": home, "PATH": f"{fake}:{python}:/usr/bin:/bin", "FAKE_LOG": self.log}
+        env = {"HOME": home, "PATH": f"{fake}:{python}:/usr/bin:/bin", "FAKE_LOG": self.log, "XDG_STATE_HOME": os.path.join(home, ".local/state")}
         for p in (mock.patch.dict(os.environ, env), mock.patch.object(machines, "STORE", store),
                   mock.patch.object(machines, "REACH", os.path.join(store, ".reach.json")),
                   mock.patch.object(machines, "FOUND", os.path.join(store, ".found.json"), create=True)):
@@ -79,6 +95,55 @@ class Reach(unittest.TestCase):
         links = d["graph"]["links"]
         self.assertEqual([(l["how"], l["to"], l["ok"]) for l in links], [("herdr-core", "vm1", True)])
         self.assertIn("links", links[0]["next"])
+
+    def test_everything_uses_the_current_spaces_even_without_a_tilde_space(self):
+        self.write_spaces()
+        with mock.patch.dict(os.environ, {"FAKE_ASSISTANTS": "yes"}):
+            graph = machines.probe(depth=0)["graph"]
+        self.assertEqual([(s["id"], s["name"]) for s in graph["spaces"]],
+                         [("home", "Everything"), ("work", "Named project")])
+        root, project = graph["assistants"]
+        self.assertEqual((root["space_name"], root["role"]), ("Everything", "everything"))
+        self.assertEqual(project["space_name"], "Named project")
+        remote = {**root, "route": "mini", "target": "mini/t1"}
+        for name in ("Everything", "eVeRyThInG", "Everywhere", "#Everything", "[#Everything](space:mini/home)"):
+            with self.subTest(name=name):
+                self.assertEqual(machines._find([remote], name), [remote])
+        local = {**root, "route": None, "target": "t1"}
+        other_home = {**remote, "role": "home"}
+        self.assertEqual(machines._find([local, other_home], "[#Everything](space:home)"), [local])
+
+    def test_the_serving_machine_names_reached_remote_spaces(self):
+        self.write_spaces()
+        with mock.patch.dict(os.environ, {"FAKE_VM": "yes", "FAKE_ASSISTANTS": "yes"}):
+            graph = machines.probe(depth=1)["graph"]
+        remote = graph["links"][0]["next"]
+        self.assertEqual([(s["id"], s["name"]) for s in remote["spaces"]],
+                         [("foreign", "Other machine")])
+        self.assertEqual(remote["assistants"][0]["space_name"], "Other machine")
+        self.assertNotIn("everything", remote)
+        self.assertNotIn("_remote_spaces", graph)
+
+    def test_everything_without_an_assistant_says_how_to_start_it(self):
+        self.write_spaces()
+        result = machines.probe(depth=0)
+        with mock.patch.object(machines, "directory", return_value=(result, [])):
+            with self.assertRaisesRegex(base.Fail, "Open Everything and send a message"):
+                machines.tell("Everything", "hello")
+
+    def write_spaces(self):
+        home = os.environ["HOME"]
+        path = os.path.join(home, ".local/state/herdr-core", os.environ.get("HC_SESSION") or "shepherdr")
+        os.makedirs(path)
+        with open(os.path.join(path, "docs.json"), "w") as f:
+            json.dump({
+                "shepherdr": {"value": {"spaces": [
+                    {"id": "home", "name": "Home", "folder": home},
+                    {"id": "work", "name": "Named project", "folder": home + "/repo"},
+                    {"id": "foreign", "name": "Other machine", "machine": "vm1", "folder": home},
+                ]}},
+                "herdr-app": {"value": {"spaces": [{"id": "home"}]}},
+            }, f)
 
     def test_find_says_what_it_will_contact_first(self):
         r = machines.find(go=False)

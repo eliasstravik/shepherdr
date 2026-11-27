@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { getState, go, maximize, minimize, openTask, setUI, togglePane } from './kernel.ts'
+import { backFromArtifact, getState, go, maximize, minimize, openArtifact, openTask, setUI, togglePane } from './kernel.ts'
 import { middleThread } from './App.tsx'
 
 // A task's chat maximized into the middle stays there (SHEP-435): the pane is free for anything else, and only its own
@@ -37,4 +37,28 @@ test('Minimize puts it back in the pane and the space chat in the middle; anothe
   setUI({ max: 'vm:SHOP-2', task: null, pane: null })
   go('garden')
   expect(getState().ui).toMatchObject({ at: 'garden', max: null })
+})
+
+
+test('artifact Back restores the pane or chat that opened it', () => {
+  setUI({ at: 'shop' })
+  for (const origin of [{ pane: null, task: null }, { pane: 'tasks', task: null }, { pane: 'tasks', task: 'vm:SHOP-2' }, { pane: 'artifacts', task: null }]) {
+    setUI(origin)
+    openArtifact('proof')
+    expect(getState().ui).toMatchObject({ pane: 'artifacts', task: null, art: 'proof' })
+    backFromArtifact()
+    expect(getState().ui).toMatchObject({ ...origin, art: null })
+  }
+})
+
+test('artifact Back returns to the list for a direct link or after switching spaces', () => {
+  setUI({ at: 'shop', pane: 'artifacts', art: 'linked' })
+  backFromArtifact()
+  expect(getState().ui).toMatchObject({ pane: 'artifacts', art: null })
+
+  openTask('vm:SHOP-2')
+  openArtifact('proof')
+  go('garden')
+  backFromArtifact()
+  expect(getState().ui).toMatchObject({ at: 'garden', pane: 'artifacts', art: null, task: null })
 })

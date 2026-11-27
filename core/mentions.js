@@ -37,7 +37,7 @@ export function nodes(graph) {
 // sidebar's list): a machine whose herdr-core document the map read as empty still lists its spaces. A space with no
 // name of its own is named as Herdr names it (SHEP-185): "Home" in its machine's home folder, else its folder's name.
 export function reachable(graph, known = []) {
-  const out = [], seen = new Set();
+  const out = [], roots = [], seen = new Set();
   for (const { node, route } of nodes(graph)) {
     const r = route.join(">");
     const name = node.core?.name || route[route.length - 1] || node.host || "";
@@ -45,15 +45,19 @@ export function reachable(graph, known = []) {
     const own = (node.spaces ?? []).filter((s) => s?.id && !s.machine);
     const called = [name, route[route.length - 1]].filter(Boolean);  // the machine's core name, or the name its link gave
     const mine = known.filter((k) => k?.id && (route.length ? called.includes(k.machine) : !k.machine || called.includes(k.machine)));
+    const every = node.everything ?? mine.find((s) => s.everything)?.id;
     for (const s of [...own, ...mine]) {
-      if (!s?.id || seen.has(s.id)) continue;
-      seen.add(s.id);
+      if (!s?.id) continue;
+      const root = s.id === every;
+      const target = targetOf(r, s.id);
+      if (root ? roots.some((x) => x.target === target) : seen.has(s.id)) continue;
+      if (!root) seen.add(s.id);
       const emoji = s.icon || s.emoji;
-      out.push({ id: s.id, name: spaceName(s, node.home), route: r, machine: name, target: targetOf(r, s.id),
+      (root ? roots : out).push({ id: s.id, name: root ? "Everything" : spaceName(s, node.home), route: r, machine: name, target,
         ...(emoji ? { emoji } : {}), assistant: live.has(s.id) || !!s.assistant });
     }
   }
-  return out;
+  return [...roots, ...out];
 }
 
 // A space's name as the window shows it: its own, else Herdr's name for an unnamed one (its folder's, "Home" at home).

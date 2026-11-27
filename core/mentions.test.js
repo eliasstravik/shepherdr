@@ -61,6 +61,24 @@ test("a machine whose document lists no spaces still lists the spaces the servic
   expect(reachable(map, [{ id: "sp8c0069b90399cae8fb2944eccc07150a", name: "Plu home", folder: "/base/gamma", machine: "vm-b" }]).length).toBe(1);
 });
 
+test("Everything is offered on # even from a machine with many own spaces and a separate Home", () => {
+  const graph = {
+    core: { id: "vm", name: "vm" },
+    spaces: [{ id: "home", name: "Home" }, ...Array.from({ length: 12 }, (_, n) => ({ id: `sp${n}`, name: `Space ${n}` }))],
+    links: [{ how: "herdr-core", to: "mini", next: {
+      core: { id: "mini", name: "mini" }, everything: "home",
+      spaces: [{ id: "home", name: "Home" }], assistants: [{ space: "home" }], links: [],
+    } }],
+  };
+  const list = reachable(graph);
+  const root = { id: "home", name: "Everything", route: "mini", machine: "mini", target: "mini/home", assistant: true };
+  expect(match(list, "", 8)[0]).toEqual(root);
+  expect(match(list, "every")).toEqual([root]);
+  expect(list.find((s) => s.target === "home")?.name).toBe("Home");
+  delete graph.links[0].next.everything; // the service knows it even when the cached probe did not name it yet
+  expect(reachable(graph, [{ ...root, everything: true }])[0]).toEqual(root);
+});
+
 test("what is typed after #, and the spaces that match it", () => {
   expect(typing("tell #sh")).toBe("sh");
   expect(typing("#")).toBe("");

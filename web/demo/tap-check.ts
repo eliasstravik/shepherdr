@@ -65,7 +65,8 @@ async function measure(page: Page, allow: string[]) {
       // cut off by the edge of what scrolls it: a scroll away from whole, not measured
       let sc = el.parentElement
       while (sc && !/(auto|scroll)/.test(getComputedStyle(sc).overflowY)) sc = sc.parentElement
-      if (sc) { const v = sc.getBoundingClientRect(); if (r.top < v.top - 0.5 || r.bottom > v.bottom + 0.5) continue }
+      const clip = sc?.getBoundingClientRect()
+      if (clip && (r.top < clip.top - 0.5 || r.bottom > clip.bottom + 0.5)) continue
       // partly under a surface (scrolled behind the message box or a header): a scroll away from whole, not measured
       const target = (t: Element | null) => !!t && !!t.closest(SEL)
       const qx = r.width / 4, qy = r.height / 4 // a quarter in: inside a round button's circle too
@@ -80,7 +81,7 @@ async function measure(page: Page, allow: string[]) {
         return Math.min(o.right, r.right) - Math.max(o.left, r.left) > 2 && Math.min(o.bottom, r.bottom) - Math.max(o.top, r.top) > 2
       })) continue
       // what a finger really hits: from the middle, how far each way the page still answers with this element (its
-      // ::before pad included, a neighbour's pad or a clipping parent taken off); the screen's edge counts as open
+      // ::before pad included, a neighbour's pad taken off). The screen and scroll area's edges count as open.
       const mine = (x: number, y: number) => {
         const t = document.elementFromPoint(x, y)
         return !!t && (t === el || el.contains(t))
@@ -90,6 +91,7 @@ async function measure(page: Page, allow: string[]) {
         for (; n < 40; n++) {
           const x = cx + dx * (n + 1), y = cy + dy * (n + 1)
           if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return 40
+          if (dy && clip && (y < clip.top || y >= clip.bottom)) return 40
           if (!mine(x, y)) break
         }
         return n

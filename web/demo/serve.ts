@@ -297,7 +297,7 @@ Bun.serve<Sock['data'], never>({
     // the # list's spaces (service/main.ts reachOf): every space but Everything, this machine's and the others'
     // the / list's commands (service/main.ts, core/slash.js): Claude Code's, and one of the person's own
     if (path === '/api/commands') return Response.json({ commands: commandList('claude', [{ name: 'ship', about: 'Commit, push and open a pull request' }]) })
-    if (path === '/api/reach') return Response.json({ from: state.normal.host, checked: Date.now(), spaces: state.normal.places.filter((p) => p.id !== EV).map((p) => { const id = p.id.split('/').pop()!, far = p.machine && p.machine !== state.normal.host; return { id, name: p.name, route: far ? p.machine : '', machine: p.machine ?? state.normal.host, target: far ? `${p.machine}/${id}` : id } }) })
+    if (path === '/api/reach') return Response.json({ from: state.normal.host, checked: Date.now(), spaces: state.normal.places.map((p) => { const id = p.id.split('/').pop()!, far = p.machine && p.machine !== state.normal.host; return { id, name: p.id === EV ? "Everything" : p.name, route: far ? p.machine : '', machine: p.machine ?? state.normal.host, target: far ? `${p.machine}/${id}` : id } }) })
     // the Diff viewer's Changes pane: a task's changes against main, or a space's folder's not committed yet
     if (path === '/api/worktree') {
       const task = url.searchParams.get('task'), what = url.searchParams.get('what'), file = url.searchParams.get('path') ?? ''
