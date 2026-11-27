@@ -685,7 +685,7 @@ function Messages({ thread }: { thread: Thread }) {
       }
     }
     sc.addEventListener('scroll', on, { passive: true })
-    const stopKeeping = keepAtEnd(sc, box, () => stuck.current)
+    const stopKeeping = keepAtEnd(sc, box, () => stuck.current, () => { edge.current = sc.scrollHeight - sc.clientHeight })
     const stopReturning = onPageReturn(reopen)
     const off = onEnd(thread.chat, reopen)
     const offAsk = onAsk(thread.chat, () => {

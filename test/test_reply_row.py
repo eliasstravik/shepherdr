@@ -102,7 +102,7 @@ class ReplyRow(unittest.TestCase):
         self.assertRegex(css, r"\.foot>\.cbox\):not[^{]*\{[^}]*mask:linear-gradient\(#000,#000\) right/var\(--sbw,0px\) 100% no-repeat,linear-gradient\(to bottom,#000 calc\(100% - 16px\),transparent\)")
         self.assertNotIn(":is(.chat,.pane)>.foot:has(>.cbox)::before{", css)
         client = open(os.path.join(ROOT, "web", "plugins", "chat", "client.tsx"), encoding="utf-8").read()
-        self.assertIn("keepAtEnd(sc, box, () => stuck.current)", client)
+        self.assertIn("keepAtEnd(sc, box, () => stuck.current,", client)
         self.assertIn("rowEdges(row.current)", client)
 
     def test_row_has_its_own_space(self):
