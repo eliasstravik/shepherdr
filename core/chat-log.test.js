@@ -5,18 +5,37 @@ import { join } from "node:path";
 import { LOG, Conversation, records, sendsOf } from "./chat-log.js";
 
 // A Claude Code log as LOG reads it, fed to a Conversation.
-async function read(lines) {
+async function read(lines, kind = "claude") {
   const dir = mkdtempSync(join(tmpdir(), "chat-log-"));
   const f = join(dir, "log.jsonl");
   writeFileSync(f, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
   const p = Bun.spawn(["sh", "-c", LOG, "log", "tail", f, "0"], { stdout: "pipe", stderr: "ignore" });
   const out = await new Response(p.stdout).text();
   rmSync(dir, { recursive: true });
-  const c = new Conversation("claude");
+  const c = new Conversation(kind);
   c.feed(records(out).records);
   return c;
 }
 const said = (c) => c.items.filter((x) => x.kind === "agent").map((x) => x.text);
+
+test("Codex's queued questions open independently and close by native answer or turn end", async () => {
+  const event = (payload) => ({ timestamp: "2026-11-27T09:42:42Z", type: "event_msg", payload });
+  const response = (payload) => ({ ...event(payload), type: "response_item" });
+  const questions = [{ title: "Which colour?", options: ["Red", "Blue"] }, { title: "What nickname?", options: null }];
+  const call = (id, qs) => response({ type: "function_call", name: "request_user_input_async", call_id: id, arguments: JSON.stringify({ questions: qs }) });
+  const ack = (id) => response({ type: "function_call_output", call_id: id, output: '{"accepted":true}' });
+  const ask = (id, qs) => event({ type: "item_completed", thread_id: "session", turn_id: "turn", item: { type: "AgentMessage", id, content: [], delivery: "async", questions: qs } });
+  const qid = (id, index) => JSON.stringify(["request_user_input_async", id, index]);
+  const you = (text) => response({ type: "message", role: "user", content: [{ type: "input_text", text }] });
+  const answer = you(`<send_user_message_question_reply>\n${JSON.stringify([{ questionItemId: qid("call-1", 1), question: "What nickname?", answer: "Juniper" }])}\n</send_user_message_question_reply>`);
+  const lines = [call("call-1", questions), ask("call-1", questions), ack("call-1"), call("call-2", [questions[0]]), ack("call-2"), answer];
+  const c = await read(lines, "codex");
+  expect([...c.asyncQuestions.keys()]).toEqual([qid("call-1", 0), qid("call-2", 0)]);
+  expect(c.items.find((x) => x.id === qid("call-1", 1))?.closed).toBe("answered");
+  expect(c.items.findLast((x) => x.kind === "user")?.text).toBe("Juniper");
+  expect((await read([...lines, event({ type: "task_complete", turn_id: "turn" })], "codex")).asyncQuestions.size).toBe(0);
+  expect((await read([...lines, you("Carry on with the default")], "codex")).asyncQuestions.size).toBe(0);
+});
 
 // Lines as Claude Code 2.1.314 writes them (from real logs: their keys in its order, the signatures' real starts).
 const at = "2026-11-04T15:50:49.652Z";

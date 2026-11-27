@@ -85,11 +85,13 @@ export function needsYou(snap: NeedsSnap, now = Date.now()): Waiting[] {
   const open = (id?: string) => { const t = id ? tasks.get(id) : undefined; return !!t && !t.archived && t.status !== 'done' }
   const taken = new Set<string>()
   const add = (w: Waiting) => { if (taken.has(w.task)) return; taken.add(w.task); out.push(w) }
-  // a task's cards: its oldest stands for it (one row, one item)
+  // A task's oldest blocking card stands for it. Queued questions are individual items alongside its Working row.
   const needs = [...snap.needs].sort((a, b) => a.at - b.at)
   for (const n of needs) {
     if (!n.task || !open(n.task)) continue
-    add({ key: `need:${n.chat}:${n.id}`, type: 'need', at: n.at, place: n.place, task: n.task, need: n })
+    const item: Waiting = { key: `need:${n.chat}:${n.id}`, type: 'need', at: n.at, place: n.place, task: n.task, need: n }
+    if (n.question?.queued) out.push(item)
+    else add(item)
   }
   for (const t of snap.tasks) if (t.status === 'need' && !t.archived) add({ key: `task:${t.id}`, type: 'task', at: t.at ?? 0, place: t.place, task: t.id })
   for (const a of snap.alerts ?? []) {
@@ -129,4 +131,4 @@ export function unreadChats(snap: NeedsSnap): { chat: string; place: string; at:
 }
 
 /** the tasks in Needs you (they show there, in no other group) */
-export const waitingTasks = (ws: Waiting[]) => new Set(ws.map((w) => w.task))
+export const waitingTasks = (ws: Waiting[]) => new Set(ws.filter((w) => !w.need?.question?.queued).map((w) => w.task))

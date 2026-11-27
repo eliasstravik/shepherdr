@@ -32,6 +32,7 @@ test("the box answers only its own agent's open question", () => {
   expect(ownAsk(chat(q({})))?.id).toBe('q')
   expect(ownAsk(chat(q({ sent: 0 })))).toBeUndefined()
   expect(ownAsk(chat(q({ closed: 'Closed' })))).toBeUndefined()
+  expect(ownAsk(chat(q({ queued: true })))).toBeUndefined()
   expect(ownAsk(chat(q({ other: undefined })))).toBeUndefined()
   expect(ownAsk(chat(q({ by: { ref: 'SHEP-1', chat: 'x/worker' } })))).toBeUndefined()
   expect(ownAsk(undefined)).toBeUndefined()

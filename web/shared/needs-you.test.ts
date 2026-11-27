@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import { ALERT_FRESH_MS, alertStands, alertWhat, taskAlerts } from './needs-you.ts'
-import { needsCount, nowGroups } from './view.ts'
+import { ALERT_FRESH_MS, alertStands, alertWhat, needsYou, taskAlerts, waitingTasks } from './needs-you.ts'
+import { needsCount, nowGroups, statusWord, taskLine } from './view.ts'
 import type { Snapshot, Task } from './types.ts'
 
 const T0 = 1_000_000_000
@@ -39,4 +39,19 @@ test('a working task with a standing alert is under Needs you, and counts', () =
   expect(needsCount(fresh, 'shop')).toBe(1)
   // without it, the same as before
   expect(nowGroups(fresh.tasks).find((g) => g.name === 'Needs you')!.tasks).toEqual([])
+})
+
+test('queued questions show under Needs you while their task stays Working', () => {
+  const t = task('SHOP-1', { queuedQuestions: 2, report: { msg: 'Needs a repo decision' } })
+  const s = snapOf([t], [])
+  s.needs = ['Color?', 'Size?'].map((title, i) => ({ id: `q${i}`, chat: 'SHOP-1/worker', place: 'shop', task: t.id, at: T0 + i,
+    question: { id: `q${i}`, title, kind: 'Question', to: 'SHOP-1/worker', choices: [], queued: true } }))
+  expect(needsCount(s, 'shop')).toBe(2)
+  expect(needsYou(s).map((w) => w.need?.question?.title)).toEqual(['Color?', 'Size?'])
+  expect(waitingTasks(needsYou(s)).has(t.id)).toBe(false)
+  expect(nowGroups(s.tasks).find((g) => g.name === 'Working')?.tasks).toEqual([t])
+  expect(statusWord(t).word).toBe('Working')
+  expect(taskLine(t)).toBe('Working · 2 questions for you')
+  expect(taskLine({ ...t, queuedQuestions: undefined })).toBe('Working')
+  expect(taskLine({ ...t, status: 'need' })).toBe('Needs a repo decision')
 })

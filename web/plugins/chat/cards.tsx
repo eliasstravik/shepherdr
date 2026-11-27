@@ -72,8 +72,8 @@ export function QuestionCard({ q, chat, place }: { q: Question; chat: string; pl
   const ways = (body: ((o: string) => Record<string, unknown>) | null, onward?: (o: string) => void) =>
     !q.other ? null : other === null ? (
       <>
-        <button type="button" className="chip" disabled={busy} onClick={() => setOther('')}>Other…</button>
-        {say('talk', { talk: true }, 'Chat about this', { chip: true, then: talk })}
+        <button type="button" className="chip" disabled={busy} onClick={() => setOther('')}>{q.queued && !q.choices.length ? 'Type an answer' : 'Other…'}</button>
+        {!q.queued && say('talk', { talk: true }, 'Chat about this', { chip: true, then: talk })}
       </>
     ) : (
       <OtherBox

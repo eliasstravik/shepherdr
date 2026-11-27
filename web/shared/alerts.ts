@@ -42,7 +42,8 @@ export function waiting(snap: NeedsSnap & Pick<Snapshot, 'asks'>, now = Date.now
   const needs = needsYou(snap, now)
   const held = waitingTasks(needs)
   const ready = snap.tasks.filter((t) => !t.archived && t.status === 'ready' && !held.has(t.id))
-  return { count: needs.length + ready.length, tags: [...tasks, ...asks] }
+  const queued = needs.filter((w) => w.need?.question?.queued).map((w) => w.task)
+  return { count: needs.length + ready.length, tags: [...new Set([...tasks, ...queued, ...asks])] }
 }
 
 /** the tags of the alerts that may stay: what still waits on you, less the chats on screen right now (a task's, a

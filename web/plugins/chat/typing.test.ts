@@ -44,6 +44,12 @@ test('not for background work alone, nor while its question waits on you', () =>
   expect(signOf(undefined)).toBeNull()
 })
 
+test('a queued question leaves the working sign up while the agent keeps going', () => {
+  const c = chat({ cli: 'codex', working: true, doing: 'Running bun test' },
+    msgs({ question: { id: 'q', title: 'Which one?', kind: 'Question', to: 'p:sp1', choices: [], queued: true } }))
+  expect(signOf(c, 'Needs a repo decision')).toEqual({ step: 'Running tests' })
+})
+
 // SHEP-357: the step beside the sign reads as words, never a command line
 test("a task's own status line wins over the tool it runs", () => {
   expect(signOf(chat({ working: true, doing: "Running python3 - <<'EOF' p='web" }), 'Checking the message box')).toEqual({ step: 'Checking the message box' })

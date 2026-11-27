@@ -41,14 +41,14 @@ export class Hub {
    *  as the sender, and another machine's core wraps a message from one in <hc from="<core>/ppid:…"> ("Another agent").
    *  Sent with none, it lands as plain input from the person, here and on any machine. -> hc send's own result shape:
    *  code 0, else its error ({ error: { kind, message } }) on stderr, for core/send.js's refusal(). */
-  async send(terminal: string, text: string): Promise<{ code: number; stdout: string; stderr: string }> {
+  async send(terminal: string, text: string, force = false): Promise<{ code: number; stdout: string; stderr: string }> {
     const fail = (kind: string | null, message: string) => ({ code: 1, stdout: "", stderr: JSON.stringify({ error: { kind, message } }) });
     if (!this.client) return fail("unavailable", "herdr-core isn't answering here.");
     // SHEP-324: never into a terminal whose agent isn't in front (a plain shell would run the words), checked last thing
     const f = await this.front(terminal);
     if (f && f !== "agent") return fail("no_agent", NOT_TYPED[f]);
     // it waits for a person to pause typing there (~3 s), so longer than a plain call
-    try { return { code: 0, stdout: JSON.stringify(await this.call("terminal.send", { terminal, text }, 120_000)), stderr: "" }; }
+    try { return { code: 0, stdout: JSON.stringify(await this.call("terminal.send", { terminal, text, ...(force ? { force } : {}) }, 120_000)), stderr: "" }; }
     catch (e: any) { return fail(e?.kind ?? null, e?.message ?? String(e)); }
   }
 
