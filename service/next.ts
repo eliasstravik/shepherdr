@@ -14,7 +14,7 @@ import { repoKey, repoOf } from "../core/host.js";
 export const PLUGINS: { id: string; name: string; always?: boolean; offByDefault?: boolean }[] = [
   { id: "tasks", name: "Tasks", always: true }, { id: "artifacts", name: "Artifacts", always: true }, { id: "terminal", name: "Terminal" },
   { id: "screens", name: "Screens" }, { id: "voice", name: "Voice" }, { id: "schedules", name: "Schedules" }, { id: "reactions", name: "Reactions" },
-  { id: "recaps", name: "Recaps" },
+  { id: "recaps", name: "Recaps" }, { id: "mcp-apps", name: "MCP Apps" },
   { id: "search", name: "Search", always: true }, { id: "alerts", name: "Alerts", always: true },
   { id: "files", name: "Files", offByDefault: true },
   { id: "diff", name: "Diff viewer", offByDefault: true },

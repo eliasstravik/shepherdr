@@ -28,6 +28,7 @@ const CLI_NAMES: Record<string, string> = { claude: "Claude Code", codex: "Codex
 import * as MNc from "../core/menus.js";
 const { machineLabel } = MNc as any;
 import { HOME, appHome } from "./paths.ts";
+import { matchCall } from "./mcp/records.ts";
 const { spaceName } = SPc as any;
 import type { Where } from "./worktree.ts";
 import * as AGc from "../core/agents.js";
@@ -728,6 +729,10 @@ export class Compat {
     // an Assistant started from its chat with the person's words: what they asked (data/chat-first, as the window's)
     // the session's first message: the first user item (core/chat-view.js firstUser)
     const fi = firstUser(items);
+    // the calls herdr-mcp kept of tools with a view (MCP Apps), for this chat's MCP steps (main sets mcpCalls)
+    const mcpCalls: any[] = (this as any).mcpCalls?.() ?? [];
+    const takenCalls = new Set<string>();
+    const ownTerm = String(reader.addr ?? "").split("/").pop() || null;
     const ft = reader.start === 0 && fi >= 0 ? this.firstTask(t, own)?.trim() : null;
     for (const [i, raw] of items.entries()) {
       let x = raw;
@@ -819,6 +824,13 @@ export class Compat {
         const e = inline.get(x.id);
         if (e) messages.push(newsLine(e));
       // (kind "pilot": an older log's Autopilot wake, which no chat shows)
+      } else if (x.kind === "app") {
+        // a call to an MCP tool: its view, when herdr-mcp kept the call (service/mcp-apps.ts)
+        const id = mcpCalls.length ? matchCall(mcpCalls, { server: x.server, tool: x.tool, input: x.input, at: x.at ?? 0 }, machine ? null : ownTerm, takenCalls) : null;
+        if (id) {
+          takenCalls.add(id);
+          messages.push({ id: x.id, who: "agent", at: x.at, app: { id, server: x.server, tool: x.tool } });
+        }
       } else if (x.kind === "artifact") {
         // a publish: its card (the latest of it) or line, as the artifacts plugin draws it; a quiet line while the
         // registry doesn't list it yet

@@ -49,6 +49,8 @@ import { voiceCall, callToResume, callsOn, handOff, type ChatView } from "./voic
 import type { HearIO } from "./voice-hear.ts";
 import type { VoiceIO } from "./voice-tools.ts";
 import { Artifacts, artifactAction, artifactRoute } from "./artifacts.ts";
+import { mcpAppsRoute } from "./mcp-apps.ts";
+import { CallIndex } from "./mcp/records.ts";
 import { TaskLogs } from "./task-logs.ts";
 import { Settings, onWritten, PUSH, pushBody, readSettings } from "./settings.ts";
 import { Secrets, SecretsHome, secretValue } from "./secrets.ts";
@@ -255,6 +257,9 @@ machines.start();
 const secrets = new Secrets(hub);
 compat.secrets = secrets;
 (compat as any).terminalsOf = (a: string) => hub.terminals.get(a);
+// MCP Apps: the calls herdr-mcp kept, for the chats to find their views (service/mcp/records.ts)
+const mcpIndex = new CallIndex(DATA);
+(compat as any).mcpCalls = () => mcpIndex.list();
 (compat as any).terminalsAll = () => [...hub.terminals.values()];
 (compat as any).coreName = () => host.me?.name || null;
 let secretNames: { name: string; at: number; space: string | null }[] = [];
@@ -1038,6 +1043,9 @@ const server = Bun.serve<{ who: string }>({
     // an artifact's page, its files and its picture (service/artifacts.ts artifactRoute)
     const art = path.startsWith("/api/artifacts/") ? await artifactRoute(req, url) : null;
     if (art) return art;
+    // MCP Apps views (service/mcp-apps.ts): a call's data, its view's HTML and sandbox, and the view's own calls
+    const app = path.startsWith("/api/mcp-apps/") ? (pluginOn("mcp-apps") ? await mcpAppsRoute(req, path, DATA) : new Response("MCP Apps is off", { status: 404 })) : null;
+    if (app) return app;
     if (path === "/api/screen/shot") {
       // the picture now of an agent's browser tab or desktop: a card's and a thread's small live picture
       const shot = pluginOn("screens") ? await screens.shotOf((url.searchParams.get("key") ?? "").slice(0, 300), url.searchParams.get("src") === "d" ? "d" : "b").catch(() => null) : null;

@@ -607,3 +607,22 @@ test("Codex's expired account and connector messages reach the chat from its own
   const chat = await read([error(expired), error("A tool failed"), error(connector)], "codex");
   expect(chat.items.map(({ kind, text }) => [kind, text])).toEqual([["error", expired], ["error", connector]]);
 });
+
+test("a call to an MCP tool leaves a place for its view (MCP Apps), with its server, tool and input", async () => {
+  const mcp = { type: "tool_use", id: "toolu_9", name: "mcp__flowbound__execute", input: { code: "return 1" }, caller: { type: "direct" } };
+  const c = await read([person, reply("m1", [mcp], { apiBlockIndex: 0 }), reply("m2", [call], { apiBlockIndex: 0 })]);
+  const apps = c.items.filter((x) => x.kind === "app");
+  expect(apps.length).toBe(1);
+  expect(apps[0]).toMatchObject({ server: "flowbound", tool: "execute", input: { code: "return 1" } });
+  expect(apps[0].id).toStartWith("mcp");
+});
+
+test("Codex's MCP call (its McpToolCall item, from a script too) leaves a place for its view", async () => {
+  const ts = "2026-11-27T15:32:50.715Z";
+  const c = await read([
+    { timestamp: ts, type: "session_meta", payload: { id: "s1", cwd: "/x" } },
+    { timestamp: ts, type: "event_msg", payload: { type: "item_completed", thread_id: "s1", turn_id: "u1", item: { type: "McpToolCall", id: "exec-1", server: "flowbound", tool: "execute", arguments: { code: "return 1" }, mcpAppResourceUri: "ui://flowbound/app.html", status: "completed", result: { content: [] } } } },
+  ], "codex");
+  const apps = c.items.filter((x) => x.kind === "app");
+  expect(apps.map((x) => [x.server, x.tool, x.input.code])).toEqual([["flowbound", "execute", "return 1"]]);
+});
