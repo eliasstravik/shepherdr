@@ -265,7 +265,8 @@ button.b{cursor:pointer}
 .agent>.speed-bolts,.pk-v>.speed-bolts{margin-inline-start:0}
 @container (max-width:336px){
   .cbar:has(>.agent){flex-wrap:wrap}
-  .cbar>.agent{order:-1;flex-basis:100%;justify-content:flex-start}
+  .cbar>.agent{flex-basis:calc(100% - var(--ib) - 4px);justify-content:flex-start}
+  .app.tap .cbar>.agent{min-height:var(--hit)}
 }
 /* Update <agent> (plugins/chat/update.tsx): a quiet button beside the agent line, a small blue dot on it */
 .agent-upd{position:relative}.agent-upd::after{content:"";position:absolute;top:calc(50% - 9px);right:calc(50% - 9px);width:6px;height:6px;border-radius:50%;background:var(--blue)}
