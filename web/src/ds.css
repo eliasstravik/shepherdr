@@ -245,7 +245,7 @@ button.b{cursor:pointer}
 .banner .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .banner>button.n{text-align:left;align-self:stretch;margin-block:-4px}
 .app.tap .banner{padding-right:0}.app.tap .banner>.ib{width:var(--hit);height:100%;border-radius:0 12px 12px 0}
-.cbox{display:grid;border-radius:16px;background:var(--well);box-shadow:inset 0 0 0 1px var(--line2)}
+.cbox{display:grid;container-type:inline-size;border-radius:16px;background:var(--well);box-shadow:inset 0 0 0 1px var(--line2)}
 .cbox:focus-within{box-shadow:inset 0 0 0 1px var(--muted)}
 .cin{width:100%;height:max(44px,var(--row));padding:0 16px;border:0;background:none;font-size:16px;line-height:24px}
 .cbar{display:flex;align-items:center;gap:4px;min-width:0;padding:0 6px 6px}.sp{flex:1}
@@ -263,6 +263,10 @@ button.b{cursor:pointer}
 .speed-bolts{display:inline-flex;align-items:center;flex:none;vertical-align:middle;margin-inline-start:3px}
 .speed-bolts>.i+.i{margin-inline-start:-6px}
 .agent>.speed-bolts,.pk-v>.speed-bolts{margin-inline-start:0}
+@container (max-width:336px){
+  .cbar:has(>.agent){flex-wrap:wrap}
+  .cbar>.agent{order:-1;flex-basis:100%;justify-content:flex-start}
+}
 /* Update <agent> (plugins/chat/update.tsx): a quiet button beside the agent line, a small blue dot on it */
 .agent-upd{position:relative}.agent-upd::after{content:"";position:absolute;top:calc(50% - 9px);right:calc(50% - 9px);width:6px;height:6px;border-radius:50%;background:var(--blue)}
 .send{display:grid;place-items:center;width:var(--send);height:var(--send);border-radius:50%;background:var(--fg);color:var(--canvas);flex:none}
