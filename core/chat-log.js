@@ -117,6 +117,8 @@ BEGIN { pos = base; first = base; msgs = 0 }
   } else if (index(head, "\"type\":\"event_msg\"")) {
     if (index(head, "\"task_complete\"") || index(head, "\"turn_aborted\"") || index(head, "\"token_count\"") || index(head, "\"thread_settings_applied\"")) keep = 1
     if (index(head, "\"item_completed\"") && index(line, "\"delivery\":\"async\"") && index(line, "\"questions\":[")) keep = 1
+    # a call to an MCP tool (MCP Apps: the place of its view in the chat)
+    if (index(head, "\"item_completed\"") && index(line, "\"type\":\"McpToolCall\"")) keep = 1
     if (index(head, "\"type\":\"error\"") && (index(line, "access token could not be refreshed") || index(line, "codex mcp login"))) keep = 1
   } else if (index(head, "\"type\":\"turn_context\"")) {
     keep = 1
@@ -1301,7 +1303,6 @@ export class Conversation {
         if (st?.spawn) this.helpers.set(cid, { desc: st.spawn, done: false, untilTurn: true });
         this.step(cid, off, st, st?.spawn ? cid : null);
         if (ARTIFACT.test(JSON.stringify(p.arguments ?? p.input ?? p.action ?? ""))) this.push({ kind: "artifact", id: `art${off}`, at: time(l.timestamp) });
-        this.mcpApp(String(p.name ?? ""), typeof p.arguments === "string" ? parse(p.arguments) : p.arguments, off, time(l.timestamp));
         this.sent(codexCommand(p.arguments ?? p.input ?? p.action), off, time(l.timestamp), cid);
       } else if (p.type === "function_call_output" || p.type === "custom_tool_call_output") {
         const asked = this.asyncQuestionCalls.get(p.call_id);
@@ -1320,6 +1321,9 @@ export class Conversation {
         try { out = JSON.parse(words)?.output ?? words; } catch {}
         this.delivery(String(p.call_id ?? ""), out, code !== 0);
       }
+    } else if (l.type === "event_msg" && p.type === "item_completed" && p.item?.type === "McpToolCall") {
+      // Codex's MCP call, whether the model called it or a script did (code mode: tools.mcp__<server>__<tool>())
+      this.mcpApp(`mcp__${p.item.server}__${p.item.tool}`, p.item.arguments, off, time(l.timestamp));
     } else if (l.type === "event_msg" && p.type === "item_completed" && p.item?.type === "AgentMessage" && p.item.delivery === "async") {
       this.asyncQuestionCalls.delete(p.item.id);
       this.addAsyncQuestions(p.item.id, p.item.questions, p.turn_id, time(l.timestamp));

@@ -616,3 +616,13 @@ test("a call to an MCP tool leaves a place for its view (MCP Apps), with its ser
   expect(apps[0]).toMatchObject({ server: "flowbound", tool: "execute", input: { code: "return 1" } });
   expect(apps[0].id).toStartWith("mcp");
 });
+
+test("Codex's MCP call (its McpToolCall item, from a script too) leaves a place for its view", async () => {
+  const ts = "2026-11-27T15:32:50.715Z";
+  const c = await read([
+    { timestamp: ts, type: "session_meta", payload: { id: "s1", cwd: "/x" } },
+    { timestamp: ts, type: "event_msg", payload: { type: "item_completed", thread_id: "s1", turn_id: "u1", item: { type: "McpToolCall", id: "exec-1", server: "flowbound", tool: "execute", arguments: { code: "return 1" }, mcpAppResourceUri: "ui://flowbound/app.html", status: "completed", result: { content: [] } } } },
+  ], "codex");
+  const apps = c.items.filter((x) => x.kind === "app");
+  expect(apps.map((x) => [x.server, x.tool, x.input.code])).toEqual([["flowbound", "execute", "return 1"]]);
+});
