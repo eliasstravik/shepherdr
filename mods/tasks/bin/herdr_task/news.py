@@ -77,7 +77,7 @@ def news_line(s, t, v, event, words=None):
             "needs-you": f"{title} needs you: {v.get('why') or 'Needs you'}",
             "failed": f"{title} failed: {v.get('why') or 'Agent stopped'}",
             "stalled": f"{title} {words}",
-            "working-again": f"{title} is working again: {(t.get('back') or {}).get('why') or 'its agent is at work again'}",
+            "working-again": f"{title} is working again: {words or (t.get('back') or {}).get('why') or 'its agent is at work again'}",
             # A schedule's run that only had something to say (ready --told): its words, for the space's chat.
             "told": f"{title}, a schedule's run, says: {words}",
             # Its space's "When a task is accepted" command failed (after_accept.py): the task stays done.
@@ -216,12 +216,15 @@ def news_pass(report, folder=None):
                     lines.append(("accept-failed", news_line(s, t, v, "accept-failed", accept_failure(t))))
                 # Taken back to work after it said ready (back_to_work(), busy_again()): told as it happens.
                 # Its agent took up what needed the person (failing checks: on_it()) too.
+                wait_cleared = (prev or {}).get("status") == "needs" and (prev or {}).get("needs") in ("asks", "reply")
                 if v["status"] == "working" and ((prev or {}).get("status") in ("ready", "merging")
-                                                 or (prev or {}).get("needs") == "attention" and t.get("attention")):
+                                                 or (prev or {}).get("needs") == "attention" and t.get("attention")
+                                                 or wait_cleared):
                     event = "working-again"
                 # A schedule's run that ended quietly (ready --nothing / --told) is no "done" news: nothing, or its own words.
                 if event and (prev or {}).get("status") != v["status"] and not t.get("quiet"):
-                    lines.append((event, news_line(s, t, v, event)))
+                    words = "its earlier question or wait has cleared" if event == "working-again" and wait_cleared else None
+                    lines.append((event, news_line(s, t, v, event, words)))
                 if stall and stall[0] != (prev or {}).get("stall"):
                     lines.append(("stalled", news_line(s, t, v, "stalled", stall[1])))
                 for ev, text in lines:

@@ -537,17 +537,26 @@ def said(d):
     return "\n".join(x for x in parts if x).strip()
 
 
-def from_person(d):
-    """A line that is someone writing to the agent (not a tool's result): its words, else None."""
+def claude_user_words(d):
+    """Text carried by a Claude Code user record, including background task notices."""
     if d.get("type") == "user" and not d.get("isSidechain"):
         c = (d.get("message") or {}).get("content")
         if isinstance(c, str):
             return c
         if isinstance(c, list) and not any(isinstance(x, dict) and x.get("type") == "tool_result" for x in c):
             return "\n".join(x.get("text") or "" for x in c if isinstance(x, dict) and x.get("type") == "text")
+
+
+def from_person(d):
+    """A line that is someone writing to the agent: its words, else None."""
     if d.get("type") == "event_msg" and (d.get("payload") or {}).get("type") == "user_message":
         return str(d["payload"].get("message") or "")
-    return None
+    words = claude_user_words(d)
+    origin = d.get("origin")
+    if (isinstance(origin, dict) and origin.get("kind") == "task-notification") or (
+            words and words.lstrip().startswith("<task-notification>")):
+        return None
+    return words
 
 
 SHORT_ASK = 25
@@ -999,7 +1008,7 @@ def _bg_scan(lines, seen):
                 continue
             at = _ms(d.get("timestamp")) or now()
             # Claude Code: ended by its notice (in the queue, an attachment or a user line), or stopped.
-            if "<task-notification>" in raw and (d.get("type") in ("queue-operation", "attachment") or from_person(d) is not None):
+            if "<task-notification>" in raw and (d.get("type") in ("queue-operation", "attachment") or claude_user_words(d) is not None):
                 for m in [*BG_ENDED.finditer(raw), *BG_EXPIRED.finditer(raw)]:
                     running.pop(m.group(1), None)
                     ended = max(ended, at)
@@ -1290,25 +1299,28 @@ def codex_working(k):
     return False
 
 
-def own_work(task, live, ready=False):
+def own_work(task, live, ready=False, background_only=False):
     """Its quiet agent is on its own work (above). What really runs (a background job, a command
     open in the foreground, a helper of its own at work: SHEP-54) counts whatever its last message
     says: a plain question with work still running is no ask yet (SHEP-148; asking for real is its
     question tool or a permission: blocked). Its status line alone counts only when its last message
-    asks nothing, and never for a Ready task (ready: not_at_rest())."""
+    asks nothing, and never for a Ready task (ready: not_at_rest()). While the agent is in a turn,
+    background_only keeps just the jobs that can still be running when that turn ends."""
     for k in live:
         if (k.get("labels") or {}).get("herdr.role") == "reviewer" or status_word(k) == "blocked":
             continue
         address = k.get("address")
         key = (k.get("labels") or {}).get("herdr.task")
-        if key and any(parent_of(h) == address and status_word(h) in ("working", "blocked") for h in live_helpers(key)):
+        if not background_only and key and any(parent_of(h) == address and status_word(h) in ("working", "blocked") for h in live_helpers(key)):
             return True
         # Codex's jobs are only what its process tree shows (SHEP-207): a session the log says is
         # still open, with no process of the agent running, is over.
         jobs, log = own_jobs(task, k)
-        ended = background_jobs(log)[1] if log else 0
         if jobs:
             return True
+        if background_only:
+            continue
+        ended = background_jobs(log)[1] if log else 0
         if not ready and waits_on_own(task, address, ended) and not last_question(task, address):
             return True
         # Mid-turn, a long command of its own still running in the foreground: Herdr can read
