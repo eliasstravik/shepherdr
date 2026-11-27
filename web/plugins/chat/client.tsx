@@ -1126,7 +1126,6 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
         chat: key,
         update: (now: Pick) => act({ type: 'restart', chat: key, kind: now.agent, model: now.model ?? undefined,
           effort: now.effort ?? undefined, speed: speedForAction(now), perm: now.perm ?? undefined, live: true }),
-        carryOn: () => send(key, key, 'Continue where you left off.'),
       } } : { onClose: (now: Pick) => applyPick(key, pick, now, { agent: pickWords(now).agent }) }),
     })
   }
