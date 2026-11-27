@@ -39,6 +39,17 @@ function world(vaults: Record<string, { count: number; remote: boolean } | null>
 }
 const rec = (w: ReturnType<typeof world>, m: string) => w.docs[m].get(SECRETS)?.value ?? null;
 
+test("the service publishes its vault path to its own core only", async () => {
+  const w = world({ S: { count: 0, remote: false }, L: { count: 0, remote: true }, V: null });
+  const home = new SecretsHome(w.hub("S") as any, () => ({ count: 0, remote: false }));
+  await home.poll();
+  const doc = "shepherdr.secret-vault";
+  expect(w.docs.S.get(doc)?.value).toEndWith("vault.json");
+  expect(w.docs.L.has(doc)).toBe(false);
+  await home.poll();
+  expect(w.docs.S.get(doc)?.version).toBe(1);
+});
+
 test("no keeper named, the laptop's vault has secrets: it's named on every machine, the VM too, and the server follows", async () => {
   const w = world({ S: { count: 0, remote: true }, L: { count: 5, remote: false }, V: { count: 0, remote: true } });
   const home = new SecretsHome(w.hub("S") as any, () => ({ count: 0, remote: true }));

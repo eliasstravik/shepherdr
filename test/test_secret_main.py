@@ -79,6 +79,18 @@ class Machine(unittest.TestCase):
 
 
 class Record(Machine):
+    def test_agents_warn_when_the_service_writes_a_different_vault(self):
+        import contextlib
+        import io
+        service_vault = os.path.join(self.dir, "service", "vault.json")
+        self.be(M3, vault=[])
+        with open(os.path.join(self.core, "docs.json"), "w") as f:
+            json.dump({"shepherdr.secret-vault": {"value": service_vault}}, f)
+        with mock.patch.object(secret, "me", return_value={"address": "t1"}), contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(secret.values([], list_only=True), {"names": {}})
+        self.assertIn(secret.VAULT, err.getvalue())
+        self.assertIn(service_vault, err.getvalue())
+
     def test_the_record_wins_over_the_mark(self):
         # m3 named as the main one keeps them, a stray mark or not (it once made `herdr-secret set` refuse there)
         self.be(M3, {"id": M3, "at": 1}, mark=True)

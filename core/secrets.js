@@ -14,7 +14,7 @@ export function asksIn(labels) {
 }
 
 // The agent hears it's kept, by name: never the value.
-export const keptLine = (name, at) => `<hc from="person" secret="${name}">Kept: ${name} (for ${at}). Use it by name: herdr-secret run ${name} -- <command>, or herdr-secret env ${name} --file .env in a git-ignored file. Never print it or put it in a chat, brief, artifact or commit.</hc>`;
+export const keptLine = (name, at, vault = "") => `<hc from="person" secret="${name}">Kept: ${name} (for ${at}).${vault ? ` Vault: ${vault.replace(/[\r\n]/g, " ").replace(/</g, "&lt;")}.` : ""} Use it by name: herdr-secret run ${name} -- <command>, or herdr-secret env ${name} --file .env in a git-ignored file. Never print it or put it in a chat, brief, artifact or commit.</hc>`;
 
 export const declinedLine = (name) => `<hc from="person" secret="${name}">Declined: ${name}. The person won't give it now: go on without it, or say plainly what you can't do without it. Don't ask for its value in the chat.</hc>`;
 

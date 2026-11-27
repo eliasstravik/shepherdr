@@ -6,7 +6,7 @@
 // and the agent told by name only (core/secrets.js), as the window's card does. Settings > Secrets lists names only.
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import type { MachineRow } from "./host.ts";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { Hub } from "./hub.ts";
 import { DATA, HOME, where } from "./paths.ts";
 import * as SC from "../core/secrets.js";
@@ -16,7 +16,8 @@ import { spawn } from "./spawn.ts";
 
 const { NAME, ASK, asksIn, keptLine, declinedLine, SECRETS_DOC, secretsRecord, believeRecord, autoKeeper, followTo, COUNT_SCRIPT } = SC as any;
 const { HOST_DOC, newestHost } = HC as any;
-const VAULT = where().vault;
+const VAULT = resolve(process.env.HERDR_SECRET_VAULT || where().vault);
+const VAULT_DOC = "shepherdr.secret-vault";
 const MARK = where()["secret-remote"];
 // herdr-secret beside this service (Shepherdr's own folder, or a checkout), else the installed one. It runs in
 // Shepherdr's own herdr-core session, as this service does (session.ts), so both read the same record.
@@ -181,11 +182,14 @@ export class Secrets {
     if (!v) throw new Error("Type or paste the value first.");
     const r = await run(["set", name, ...s.args], v);
     if (r.code !== 0) throw new Error(r.err.trim().split("\n").pop() || "It wasn't kept.");
+    const prefix = `Kept ${name} in vault `;
+    const result = r.out.trimEnd();
+    const vault = result.startsWith(prefix) ? result.slice(prefix.length) : "on the machine that keeps secrets";
     // as the window's: every agent waiting for this name hears it's kept
     for (const a of this.asks().filter((x) => x.name === name)) {
       this.answered.add(a.id);
       await hc(["label", a.address, `${ASK}${name}=`]);
-      await this.hub.send(a.address, keptLine(name, s.words));
+      await this.hub.send(a.address, keptLine(name, s.words, vault));
     }
   }
 }
@@ -299,6 +303,10 @@ export class SecretsHome {
     try {
       const st = await this.hub.call<any>("server.status", {});
       this.me = { id: String(st?.core?.id ?? ""), name: String(st?.core?.name ?? "") };
+      // Only this core needs the location. Agents can compare paths without opening either vault.
+      const layout = await this.hub.call<{ value: unknown; version: number }>("doc.get", { name: VAULT_DOC }, 8000).catch(() => null);
+      if (layout && layout.value !== VAULT)
+        await this.hub.call("doc.set", { name: VAULT_DOC, value: VAULT, version: layout.version }).catch(() => {});
       const ml = await this.hub.call<{ machines: any[] }>("machine.list", {});
       this.machines = new Map((ml.machines ?? []).filter((m) => !m.temporary).map((m) => [String(m.name), { id: m.id ? String(m.id) : null, state: String(m.state ?? "") }]));
       const get = (on: string | null) => this.hub.call<{ value: any; version: number }>("doc.get", { name: SECRETS_DOC, ...(on ? { on } : {}) }, 8000).catch(() => null);
