@@ -187,13 +187,13 @@ export class SignInWatch {
         if (!current || live === undefined || !flow.previous || stepKey(current) !== stepKey(flow.previous)) throw new Error(gone);
         if (typeof body.key !== "string" || !/^[!-~]{8,1024}$/.test(body.key) || !this.storeKey) throw new Error("Paste your OpenAI API key.");
         const { program, cwd, machine } = await this.codexTarget(addr, original);
+        await this.storeKey(machine, body.key);
         const child = spawn([process.env.SHEPHERDR_HC || "hc", "exec", ...(machine ? ["--on", machine] : []),
           ...(cwd ? ["--cwd", cwd] : []), "--timeout", "25", "--stdin", "--", program, "login", "--with-api-key"],
         { stdin: "pipe", stdout: "ignore", stderr: "ignore" });
         child.stdin.write(body.key + "\n");
         child.stdin.end();
-        if (await child.exited) throw new Error("Codex could not use that key. Check it and try again.");
-        await this.storeKey(machine, body.key);
+        if (await child.exited) throw new Error("The key is saved in Secrets. Codex couldn’t use it. Check the key or open its terminal.");
         this.show(addr, { cli: step.cli, stage: "signed", restart: true, apiKeySaved: true });
         return;
       }
