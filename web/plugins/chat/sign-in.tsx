@@ -25,7 +25,7 @@ export function SignInCard({ question, login, chat }: { question: Question; logi
   )
   const entry = login.stage === 'key' ? 'key' : login.input
   const field = entry === 'key' ? 'OpenAI API key' : entry === 'callback' ? 'Full address from the browser' : 'Sign-in code'
-  const loginHost = login.url && new URL(login.url).hostname
+  const loginHost = login.signInUrl && new URL(login.signInUrl).hostname
   const title = login.apiKeySaved ? 'Codex · API key saved'
     : login.stage === 'signed' ? (login.connector || login.cli) + ' · Signed in' : question.title
 
@@ -48,7 +48,7 @@ export function SignInCard({ question, login, chat }: { question: Question; logi
       {alternative?.sameComputer && <div className="acts">
         <ActBtn acts={acts} id="local-browser" kind="pri" busy="Starting sign-in…" run={() => send({ choice: picked, sameComputer: true })}>I'm on that computer</ActBtn>
       </div>}
-      {login.url && <>
+      {login.signInUrl && <>
         {login.deviceCode ? <>
           <span>Copy this code, then enter it after signing in to ChatGPT.</span>
           <div className="sign-in-code">
@@ -59,7 +59,7 @@ export function SignInCard({ question, login, chat }: { question: Question; logi
           : login.input === 'code' ? <span>Sign in in your browser, then paste the code here if Claude gives you one.</span> : null}
         <div className="acts">
           <ActBtn acts={acts} id="cancel" busy="Canceling…" run={() => send({ cancel: true })}>Cancel</ActBtn>
-          <a className="btn pri" href={login.url} target="_blank" rel="noopener noreferrer">Open {loginHost}</a>
+          <a className="btn pri" href={login.signInUrl} target="_blank" rel="noopener noreferrer">Open {loginHost}</a>
         </div>
       </>}
       {entry && <form ref={form} className="sign-in-form" onSubmit={(event) => {
@@ -73,7 +73,7 @@ export function SignInCard({ question, login, chat }: { question: Question; logi
         </label>
         <div className="acts">
           {entry === 'key' && <ActBtn acts={acts} id="back" busy="Going back…" run={() => send({ back: true })}>Back</ActBtn>}
-          <ActBtn acts={acts} id="submit" data-submit="" kind={login.url ? undefined : 'pri'} busy="Sending…" run={async () => {
+          <ActBtn acts={acts} id="submit" data-submit="" kind={login.signInUrl ? undefined : 'pri'} busy="Sending…" run={async () => {
             const inputForm = form.current
             if (!inputForm?.reportValidity()) return 'Paste the value first.'
             const value = new FormData(inputForm).get('value')

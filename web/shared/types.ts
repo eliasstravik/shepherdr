@@ -456,7 +456,7 @@ export interface SignIn {
   cli: string
   stage: 'start' | 'methods' | 'key' | 'browser' | 'waiting' | 'continue' | 'retry' | 'fallback' | 'signed'
   connector?: string
-  url?: string
+  signInUrl?: string
   deviceCode?: string
   input?: 'code' | 'callback'
   instructions?: string

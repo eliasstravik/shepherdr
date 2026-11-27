@@ -71,7 +71,7 @@ test("native Claude and Codex account screens expose the provider's choices and 
   expect(loginScreen("claude", CLAUDE_METHODS, 120)?.options?.map((o) => o.label)).toEqual([
     "Claude subscription", "Anthropic Console", "Bedrock, Microsoft Foundry or Google Vertex AI",
   ]);
-  expect(loginScreen("claude", CLAUDE_CODE, 120)).toMatchObject({ stage: "browser", input: "code", url: "https://claude.ai/oauth/authorize?state=one" });
+  expect(loginScreen("claude", CLAUDE_CODE, 120)).toMatchObject({ stage: "browser", input: "code", signInUrl: "https://claude.ai/oauth/authorize?state=one" });
   expect(loginScreen("claude", CLAUDE_CODE.replace("claude.ai", "claude.ai.example.test"), 120)).toBeNull();
   expect(loginScreen("codex", CODEX_DEVICE, 120)).toMatchObject({ stage: "browser", deviceCode: "X1YZ-123AB" });
   expect(authNotice("codex", "Your access token could not be refreshed because your refresh token was already used.")).toMatchObject({ stage: "methods" });
@@ -84,9 +84,9 @@ test("connector menus include a lone server, and wrapped callback links carry th
   const detail = loginScreen("claude", DETAIL, 80);
   expect(detail).toMatchObject({ connector: "fixture", stage: "methods", options: [{ keys: 0, label: "Sign in to this connector" }] });
   const claude = loginScreen("claude", CLAUDE_CONNECTOR, 80, detail!);
-  expect(claude).toMatchObject({ input: "callback", connector: "fixture", url: authorization });
+  expect(claude).toMatchObject({ input: "callback", connector: "fixture", signInUrl: authorization });
   const codex = loginScreen("codex", CODEX_CONNECTOR, 200, { cli: "Codex", stage: "waiting", connector: "fixture" }, true);
-  expect(codex).toMatchObject({ input: "callback", connector: "fixture", url: authorization });
+  expect(codex).toMatchObject({ input: "callback", connector: "fixture", signInUrl: authorization });
   expect(loginInput(codex!, redirect + "?code=fixture&state=fixture")).toBe(redirect + "?code=fixture&state=fixture");
   expect(loginInput(codex!, redirect + "?code=fixture&state=another")).toBeNull();
   expect(loginInput(codex!, redirect.replace("12345", "23456") + "?code=fixture&state=fixture")).toBeNull();

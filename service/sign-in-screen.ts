@@ -63,10 +63,10 @@ export function loginScreen(cli: "claude" | "codex", text: string, width: number
     const device = urlAfter(lines, /open this link|open this url/i, width, (u) => openAI(u) && u.pathname === "/codex/device");
     const devicePrompt = lines.findIndex((l) => /enter this one-time code/i.test(l));
     const code = devicePrompt < 0 ? undefined : lines.slice(devicePrompt + 1, devicePrompt + 5).map((l) => l.trim()).find((l) => /^[A-Z0-9]{4,8}-[A-Z0-9]{4,8}$/.test(l));
-    if (device && code) return { cli: name, stage: "browser", url: device, deviceCode: code };
+    if (device && code) return { cli: name, stage: "browser", signInUrl: device, deviceCode: code };
     if (helper && connector !== undefined) {
       const url = urlAfter(lines, /authorize .*by opening this url/i, width, oauth);
-      if (url && /callback url \(input hidden\)/i.test(body)) return { cli: name, stage: "browser", connector, url, input: "callback" };
+      if (url && /callback url \(input hidden\)/i.test(body)) return { cli: name, stage: "browser", connector, signInUrl: url, input: "callback" };
     }
     if (/Welcome to Codex|Choose how you want to use Codex/i.test(body) && options.some((o) => /sign in with ChatGPT/i.test(o.label))) {
       const methods: LoginChoice[] = options.flatMap((o): LoginChoice[] => {
@@ -78,8 +78,8 @@ export function loginScreen(cli: "claude" | "codex", text: string, width: number
       return { cli: name, stage: "methods", options: methods, cursor: menu.at };
     }
     const browser = urlAfter(lines, /browser.*(?:open|url|https)|open.*(?:browser|link|url)|sign in via your browser/i, width, (u) => openAI(u) && oauth(u));
-    if (browser && /sign.?in|log.?in/i.test(body)) return { cli: name, stage: "browser", url: browser, instructions: CODEX_BROWSER };
-    if (active?.stage === "browser" && active.url && /Do you trust the contents of this directory\?|Do you trust this directory\?|(?:^|\n)\s*[›❯] Ask Codex to do anything\b/m.test(body) && !/Welcome to Codex|Finish signing in/i.test(body)) {
+    if (browser && /sign.?in|log.?in/i.test(body)) return { cli: name, stage: "browser", signInUrl: browser, instructions: CODEX_BROWSER };
+    if (active?.stage === "browser" && active.signInUrl && /Do you trust the contents of this directory\?|Do you trust this directory\?|(?:^|\n)\s*[›❯] Ask Codex to do anything\b/m.test(body) && !/Welcome to Codex|Finish signing in/i.test(body)) {
       return { cli: name, stage: "signed" };
     }
   } else {
@@ -91,12 +91,12 @@ export function loginScreen(cli: "claude" | "codex", text: string, width: number
     }
     if (/paste (?:the )?(?:authentication )?code here/i.test(body)) {
       const url = urlAfter(lines, /use the url below|open this url|browser didn.t open/i, width, anthropic);
-      if (url) return { cli: name, stage: "browser", url, input: "code" };
+      if (url) return { cli: name, stage: "browser", signInUrl: url, input: "code" };
     }
     const callback = /(?:paste|enter).*(?:callback|redirect).*url|if the redirect page.*paste the url/i.test(body);
     if (callback && (connector !== undefined || /(?:^|\n)\s*Authenticate with [^\n]+\n/i.test(body))) {
       const url = urlAfter(lines, /(?:authoriz|authenticate|open|browser didn.t open).*(?:browser|url|link)/i, width, oauth);
-      if (url) return { cli: name, stage: "browser", connector: /(?:^|\n)\s*Authenticate with ([^\n]+)/i.exec(body)?.[1].trim() ?? connector ?? "", url, input: "callback" };
+      if (url) return { cli: name, stage: "browser", connector: /(?:^|\n)\s*Authenticate with ([^\n]+)/i.exec(body)?.[1].trim() ?? connector ?? "", signInUrl: url, input: "callback" };
     }
     if (active && /(?:^|\n)\s*[✓✔]?\s*(?:Login successful|Authentication successful|Successfully (?:logged in|authenticated))\b/i.test(body)) {
       const advance = /(?:press enter|enter to continue)/i.test(body);
@@ -134,9 +134,9 @@ export function loginInput(step: LoginStep, input: unknown) {
   if (typeof input !== "string" || !input || input.length > 2048) return null;
   const text = input.trim();
   if (step.input === "code") return /^[\w.#~+/=-]{1,2048}$/.test(text) ? text : null;
-  if (step.input !== "callback" || !step.url || !/^[\x21-\x7e]+$/.test(text)) return null;
+  if (step.input !== "callback" || !step.signInUrl || !/^[\x21-\x7e]+$/.test(text)) return null;
   try {
-    const authorization = new URL(step.url);
+    const authorization = new URL(step.signInUrl);
     const target = new URL(authorization.searchParams.get("redirect_uri") ?? "");
     const got = new URL(text);
     if (got.origin !== target.origin || got.pathname !== target.pathname || got.username || got.password || got.hash) return null;
