@@ -85,7 +85,7 @@ const reaches = new Map<string, { at: number; got: Promise<{ from: string | null
 function knownSpaces() {
   return compat.allSpaces().map((s) => {
     const p = compat.last?.places.find((x) => x.id === s.id);
-    return { id: s.id.split("/").pop()!, name: p?.name ?? "", folder: s.folder, machine: s.machine ?? null, ...(p?.emoji && !isPicture(p.emoji) ? { emoji: p.emoji } : {}), assistant: !!(p && compat.addrOf(p.chat)) };
+    return { id: s.id.split("/").pop()!, name: p?.name ?? "", folder: s.folder, machine: s.machine ?? null, everything: s.id === compat.last?.everything, ...(p?.emoji && !isPicture(p.emoji) ? { emoji: p.emoji } : {}), assistant: !!(p && compat.addrOf(p.chat)) };
   });
 }
 function reachOf(machine: string | null) {
@@ -99,7 +99,7 @@ function reachOf(machine: string | null) {
     from: machine, checked: null,
     spaces: compat.allSpaces().filter((s) => (s.machine ?? null) === machine).map((s) => {
       const id = s.id.split("/").pop()!, p = compat.last?.places.find((x) => x.id === s.id);
-      return { id, name: p?.name ?? id, route: "", machine: machine ?? me?.host ?? "", target: id, ...(p?.emoji && !isPicture(p.emoji) ? { emoji: p.emoji } : {}), assistant: !!(p && compat.addrOf(p.chat)) };
+      return { id, name: s.id === compat.last?.everything ? "Everything" : p?.name ?? id, route: "", machine: machine ?? me?.host ?? "", target: id, ...(p?.emoji && !isPicture(p.emoji) ? { emoji: p.emoji } : {}), assistant: !!(p && compat.addrOf(p.chat)) };
     }),
   });
   reaches.set(k, { at: Date.now(), got });

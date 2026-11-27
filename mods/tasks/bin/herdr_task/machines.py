@@ -923,23 +923,47 @@ if hc:
                 continue
             if args or t.get("template") in ("assistant", "coordinator"):
                 seen[t["address"]] = t
-    # The spaces: herdr-core's shared document (docs.json) in Shepherdr's own session there (3.2: no window is asked).
-    spaces = []
+    # 3.2 keeps spaces in the shared Shepherdr document. A machine still on 3.1 has only the window's copy.
+    spaces, current, serving = [], False, True
     docs = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.join(H, ".local/state"), "herdr-core", SESSION_THERE, "docs.json")
     try:
         with open(docs) as f:
-            spaces = [s for s in ((json.load(f).get("herdr-app") or {}).get("value") or {}).get("spaces") or []
-                      if isinstance(s, dict) and s.get("id") and not s.get("machine")]
-    except Exception:
-        spaces = []
-    me["spaces"] = [{"id": s.get("id"), "name": s.get("name"), "folder": s.get("folder"), "machine": s.get("machine"), "icon": s.get("icon")} for s in spaces]
-    names = {s["id"]: s for s in me["spaces"]}
-    # Everything (it answers for every machine) and, beside it in the home folder, the main machine's own ~ space (3.2.8),
-    # as core/spaces.js everythingOf and tildeOf
-    at_home = sorted(str(s["id"]) for s in me["spaces"] if s.get("folder") and os.path.realpath(s["folder"]) == os.path.realpath(H))
+            data = json.load(f)
+        local = ((data.get("shepherdr") or {}).get("value") or {}).get("spaces")
+        current = isinstance(local, list)
+        if not current:
+            local = ((data.get("herdr-app") or {}).get("value") or {}).get("spaces") or []
+        spaces = [s for s in local if isinstance(s, dict) and s.get("id") and not s.get("machine")]
+        host_id = ((data.get("shepherdr.host") or {}).get("value") or {}).get("id")
+        serving = not host_id or host_id == (core or {}).get("id")
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    # Everything and its neighbouring ~ space follow core/spaces.js everythingOf and tildeOf.
+    at_home = sorted(str(s["id"]) for s in spaces if isinstance(s.get("folder"), str) and s["folder"]
+                     and os.path.realpath(os.path.expanduser(s["folder"])) == os.path.realpath(H))
     every = "home" if "home" in at_home else (at_home[0] if at_home else None)
     rest = [x for x in at_home if x != every]
     tilde = "tilde" if "tilde" in rest else (rest[0] if rest else None)
+    if not serving or not (current or tilde):
+        every, tilde = None, None
+    if every:
+        me["everything"] = every
+    def space_info(s, name):
+        return {"id": s["id"], "name": name, "folder": s.get("folder"), "machine": None, "icon": s.get("icon")}
+    me["spaces"] = [space_info(s, "Everything" if s["id"] == every else s.get("name")) for s in spaces]
+    if current and serving:
+        # The serving machine also holds the names for its linked machines, which may have no local copy.
+        ids = {m.get("name"): m["id"] for m in ms if m.get("id")}
+        remote = {}
+        for s in local:
+            if not isinstance(s, dict) or not s.get("id") or not isinstance(s.get("machine"), str):
+                continue
+            machine = s["machine"]
+            cid = machine[1:] if machine.startswith("@") else ids.get(machine)
+            if cid:
+                remote.setdefault(cid, []).append(space_info(s, s.get("name")))
+        me["_remote_spaces"] = remote
+    names = {s["id"]: s for s in me["spaces"]}
     me["assistants"] = []
     for a in seen:
         k = js(sh([hc, "get", a, "--json"])[1]) or {}
@@ -948,10 +972,9 @@ if hc:
         if k.get("state") != "live" or not (lb.get("herdr.role") == "coordinator" or k.get("template") in ("assistant", "coordinator")):
             continue
         s = names.get(sp) or {}
-        # marked only where both work (the main machine): another machine's lone home space is no Everything
-        role = {} if not tilde else {"role": "everything"} if sp == every else {"role": "home"} if sp == tilde else {}
+        role = "everything" if every and sp == every else "home" if tilde and sp == tilde else None
         me["assistants"].append({"address": a, "space": sp, "space_name": s.get("name") or ("~" if role else os.path.basename(k.get("cwd") or "") or None),
-                                 "folder": s.get("folder") or k.get("cwd"), "template": k.get("template"), "name": k.get("name"), **role})
+                                 "folder": s.get("folder") or k.get("cwd"), "template": k.get("template"), "name": k.get("name"), **({"role": role} if role else {})})
 # Next hops: through each herdr-core link that works, to a machine nobody on the way looks at.
 if o["depth"] > 0 and core:
     look = [l for l in me["links"] if l.get("ok") and l.get("id") and l["how"] == "herdr-core" and l["id"] not in o["seen"]]
@@ -995,6 +1018,7 @@ def probe(depth=REACH_DEPTH, timeout=90, relink=False):
         graph = json.loads(r.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
         raise Fail(f"the reach check failed: {(r.stderr or r.stdout).strip()[-300:]}")
+    _name_reached_spaces(graph)
     d = {"at": now(), "graph": graph}
     os.makedirs(STORE, exist_ok=True)
     tmp = f"{REACH}.{os.getpid()}.tmp"
@@ -1016,6 +1040,27 @@ def reach(refresh=False, max_age=REACH_EVERY_MS * 2):
             fcntl.flock(lock, fcntl.LOCK_UN)
             lock.close()
     return d
+
+
+def _name_reached_spaces(graph):
+    """Apply the serving machine's space names only to machines reached by this probe."""
+    pending, shared = [graph], {}
+    while pending:
+        node = pending.pop()
+        shared.update(node.pop("_remote_spaces", {}))
+        pending.extend(l["next"] for l in node.get("links") or [] if isinstance(l.get("next"), dict))
+    for n in nodes(graph):
+        node = n["node"]
+        current = shared.get((node.get("core") or {}).get("id"))
+        if not current:
+            continue
+        spaces = {s["id"]: s for s in node.get("spaces") or []}
+        spaces.update((s["id"], s) for s in current)
+        node["spaces"] = list(spaces.values())
+        for a in node.get("assistants") or []:
+            space = spaces.get(a.get("space"))
+            if space and space.get("name") and a.get("role") != "everything":
+                a["space_name"] = space["name"]
 
 
 def nodes(graph):
@@ -1277,12 +1322,26 @@ def cmd_assistants(args):
         print(f"{a['target']:<28} {a.get('space_name') or '?':<20} {a.get('folder') or ''}{role}")
 
 
-def _find(rows, target):
+def _space_target(target):
     t = target.strip()
     # A chat's #-mention, whole or its target: [#shop](space:vm-demo/sp1), space:vm-demo/sp1, #shop.
     m = re.fullmatch(r"\[#[^\]]*\]\(space:([^)\s]+)\)", t)
-    t = m.group(1) if m else re.sub(r"^space:", "", t).lstrip("#")
-    hits = [a for a in rows if t in (a["target"], a.get("space"), f"{a['route']}/{a.get('space')}" if a["route"] else a.get("space"))]
+    return m.group(1) if m else re.sub(r"^space:", "", t).lstrip("#")
+
+
+def _everything_name(target):
+    return target.casefold() in ("everything", "everywhere")
+
+
+def _find(rows, target):
+    t = _space_target(target)
+    if _everything_name(t):
+        roots = [a for a in rows if a.get("role") == "everything"]
+        if roots:
+            return roots
+    hits = [a for a in rows if t in (a["target"], f"{a['route']}/{a.get('space')}" if a["route"] else a.get("space"))]
+    if not hits:
+        hits = [a for a in rows if t == a.get("space")]
     if not hits:
         hits = [a for a in rows if t == a.get("space_name") or (a["route"] and t == f"{a['route']}/{a.get('space_name')}")]
     return hits
@@ -1358,6 +1417,12 @@ def tell(target, text, sender=None):
         d, rows = directory(refresh=True)
         hits = _find(rows, target)
     if not hits:
+        t = _space_target(target)
+        for n in nodes(d["graph"]):
+            every = n["node"].get("everything")
+            route = route_text(n["route"])
+            if every and (_everything_name(t) or t == (f"{route}/{every}" if route else every)):
+                raise Fail("Everything's Assistant isn't running. Open Everything and send a message to start it")
         left = _leave(d["graph"], rows, target, text, sender)
         if left:
             return left
