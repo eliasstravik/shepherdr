@@ -4,7 +4,7 @@
  *  (test/test_reply_row.py) runs this very file in a real Chrome. */
 export function keepAtEnd(sc: HTMLElement, box: HTMLElement, stuck: () => boolean): () => void {
   const ro = new ResizeObserver(() => {
-    if (stuck()) sc.scrollTop = sc.scrollHeight
+    if (stuck()) sc.scrollTo({ top: sc.scrollHeight, behavior: 'instant' })
   })
   ro.observe(box)
   ro.observe(sc)

@@ -67,7 +67,7 @@ button.quote{border:0;border-left:2px solid var(--line2);background:none;font:in
 .b.jump{box-shadow:0 0 0 2px var(--fg)}
 
 /* a real terminal (xterm) in the dark drawer */
-.termbox{position:relative;height:var(--term-h,170px);min-height:0;padding:8px 0 8px 16px;background:var(--term);overflow:auto;scrollbar-color:rgb(255 255 255/.25) transparent;scrollbar-width:thin}
+.termbox{position:relative;height:var(--term-h,170px);min-height:0;padding:8px 0 8px 16px;background:var(--term);overflow:auto;overflow-anchor:none;scrollbar-color:rgb(255 255 255/.25) transparent;scrollbar-width:thin}
 .termbox.fill{flex:1;height:auto;min-height:64px}
 .termbox .xterm{height:100%}
 .termbox .xterm-viewport{background:transparent!important}

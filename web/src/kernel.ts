@@ -270,6 +270,8 @@ export interface UI {
   offline: number | null
   /** a message or card to bring into view once its chat shows it (an alert's link) */
   jump: string | null
+  /** A link opens its chat again even when that chat is already on screen. */
+  chatLink: { place: string; task: string | null; focus: string | null } | null
   /** the artifacts grid's search box: null is closed */
   artq: string | null
   /** the warnings line was closed: the ids of the warnings it held ("a|b"), until one that isn't among them shows */
@@ -359,6 +361,7 @@ let state: State = {
     keyboard: false,
     offline: null,
     jump: params.get('focus'),
+    chatLink: params.has('focus') ? { place: params.get('place') ?? '', task: params.get('task') ?? params.get('max'), focus: params.get('focus') } : null,
     artq: null,
     banner: null,
     ...stored<Partial<UI>>('shepherdr.ui', {}),
@@ -486,7 +489,7 @@ if (typeof window !== 'undefined') {
     const st = (e as PopStateEvent).state as { shep?: number; step?: Step } | null
     const q = new URLSearchParams(location.search)
     const step: Partial<Step> = st?.shep === 2 && st.step ? st.step : { at: q.get('place') ?? state.ui.at, task: taskOfUrl(q), art: q.get('artifact'), pane: paneOfUrl(q), max: MQ?.matches ? null : q.get('max'), artWide: false, scrFull: false, settings: null, drawer: false, search: false }
-    state = { ...state, ui: { ...state.ui, ...step } }
+    state = { ...state, ui: { ...state.ui, ...step, jump: q.get('focus'), chatLink: null } }
     written = JSON.stringify(stepOf(state.ui))
     stayOnShown()
     watchVisible()
@@ -507,6 +510,12 @@ export function openLink(href: string, step = false) {
   const task = q.get('task')
   const art = q.get('artifact')
   const pane = q.get('pane')
+  const max = q.get('max')
+  const focus = q.get('focus')
+  const chatLink = !art && (task || max || !pane) ? { place: place ?? state.ui.at, task: task ?? max, focus } : null
+  const targetTask = state.snap && chatLink?.task ? taskOf(state.snap, chatLink.task) : undefined
+  const targetPlace = state.snap && chatLink && !chatLink.task ? placeOf(state.snap, chatLink.place) : undefined
+  const chat = targetTask ? taskChat(targetTask) : targetPlace?.chat
   stepNext = step
   try {
     setUI({
@@ -514,15 +523,17 @@ export function openLink(href: string, step = false) {
       drawer: false,
       search: false,
       ...(place ? { at: place } : {}),
-      task: task ?? (state.ui.phone ? q.get('max') : null),
+      task: task ?? (state.ui.phone ? max : null),
       art,
       ...(art ? { artV: null } : {}),
-      pane: art ? 'artifacts' : task ? 'tasks' : pane && pane !== 'screen' ? pane : state.ui.phone ? null : state.ui.pane,
-      // a link that names a maximized task lands in it; another space's leaves it; else it stays
-      max: q.has('max') && !state.ui.phone ? q.get('max') : place && place !== state.ui.at ? null : state.ui.max,
+      pane: art ? 'artifacts' : task || (max && state.ui.phone) ? 'tasks' : pane && pane !== 'screen' ? pane : state.ui.phone ? null : state.ui.pane,
+      // a link that names a maximized task lands in it; a space link gives the middle back to the space
+      max: max && !state.ui.phone ? max : place ? null : state.ui.max,
       artWide: false,
       scrFull: false,
-      jump: q.get('focus'),
+      jump: focus,
+      chatLink,
+      ...(chat && state.ui.aterm[chat] ? { aterm: { ...state.ui.aterm, [chat]: false } } : {}),
     })
   } finally {
     stepNext = false
@@ -749,13 +760,15 @@ export function watchAlso(key: string) {
   }
 }
 
-/** the chats on screen: the space's, and the open task's (one with no agent yet too: its brief, SHEP-330) */
+/** The space and every open task, including one opened directly into the middle column. */
 export function visibleChats(ui: UI, snap: Snapshot): string[] {
   const keys = new Set<string>(extra)
   const p = placeOf(snap, ui.at)
   if (p) keys.add(p.chat)
-  const t = taskOf(snap, ui.task)
-  if (t) keys.add(taskChat(t))
+  for (const id of [ui.task, ui.max]) {
+    const task = taskOf(snap, id)
+    if (task) keys.add(taskChat(task))
+  }
   return [...keys]
 }
 
@@ -863,6 +876,8 @@ export function go(place: string) {
     max: null,
     artWide: false,
     search: false,
+    jump: null,
+    chatLink: null,
     // another space: the open task goes with the one it was opened in
     ...(ui.phone ? { pane: null, task: null, art: null } : { task: null }),
     ...(ui.pane === 'screen' && ui.scr ? (ui.scr.key.startsWith('chat:') ? { scr: { key: `chat:${place}`, src: 'b' as const, drive: false } } : { pane: null }) : {}),
@@ -872,7 +887,7 @@ export function go(place: string) {
 /** open a task in the pane (one not started yet opens its Start dialog instead: the tasks plugin decides); a task
  *  maximized in the middle stays there */
 export function openTask(id: string) {
-  const shut = { artWide: false, drawer: false, search: false, settings: null }
+  const shut = { artWide: false, drawer: false, search: false, settings: null, jump: null, chatLink: null }
   // the one already in the middle stays there, not shown twice
   if (getState().ui.max === id) return setUI(shut)
   setUI({ ...shut, task: id, pane: 'tasks', art: null })

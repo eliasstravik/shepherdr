@@ -41,6 +41,7 @@ import { heldStep, signOf } from './typing.ts'
 import { Jobs } from './jobs.tsx'
 import { newsRow, type NewsRow } from './news.ts'
 import { cardsAfter, cardsNow, stillLoading, TRIES, wantsEarlier } from './hold.ts'
+import { onPageReturn } from '@client/viewport.ts'
 import { keepAtEnd, rowEdges } from './stick.ts'
 import { OFF_PX, asksBelow, isOffEnd, newSince, onAsk, onEnd, questionsBelow, setOffEnd, toAsk, toEnd, useOffEnd } from './newest.ts'
 import { editedDraft, heldOf, isHeld, ownAsk } from './queued.ts'
@@ -212,7 +213,7 @@ function Quote({ q }: { q: NonNullable<Message['reply']> }) {
       className="quote"
       onClick={(e) => {
         e.stopPropagation()
-        setUI({ jump: q.id! })
+        setUI({ jump: q.id!, chatLink: null })
       }}
     >
       {q.text}
@@ -573,14 +574,14 @@ interface Shown {
 
 /** the chat's messages with what you sent that it does not show yet, in the order things were sent */
 function shownOf(chat: Chat | undefined, key: string, outbox: Outgoing[]): Shown[] {
-  const rows: Shown[] = (chat?.messages ?? [])
+  let rows: Shown[] = (chat?.messages ?? [])
     .filter((m) => !(m.waiting && m.waitsFor === 'turn' && m.cid && outbox.some((o) => o.cid === m.cid)))
     .map((msg) => (msg.waiting && msg.waitsFor === 'queue' ? { msg, mark: 'sent' } : { msg, pending: !!msg.waiting }))
   // held for the agent's turn (Ctrl+Enter, a long press on Send): a row over the box (Held), not in the chat yet
   const mine = outbox.filter((o) => o.chat === key && !isHeld(o))
   if (mine.length) {
     const at = placesOf(rows.map((r) => ({ id: r.msg.id, cid: r.msg.cid })), mine)
-    rows.splice(0, rows.length, ...placeOutgoing(rows, mine.map((o) => ({ at: at.get(o.cid) ?? rows.length, rows: partsOf(o, chat).map((msg) => ({ msg, ...showsAs(o) })) }))))
+    rows = placeOutgoing(rows, mine.map((o) => ({ at: at.get(o.cid) ?? rows.length, rows: partsOf(o, chat).map((msg) => ({ msg, ...showsAs(o) })) })))
   }
   // your latest message, taken in and not answered yet: read
   const last = rows[rows.length - 1]
@@ -595,7 +596,19 @@ function Messages({ thread }: { thread: Thread }) {
   const rows = useMemo(() => shownOf(chat, thread.chat, outbox), [chat, thread.chat, outbox])
   const end = useRef<HTMLDivElement>(null)
   const stuck = useRef(true)
-  const jump = useUI((u) => u.jump)
+  const link = useUI((u) => {
+    const to = u.chatLink
+    return to && (to.task ? to.task === thread.task?.id : !thread.task && (!to.place || to.place === thread.place)) ? to : null
+  })
+  const covered = useUI((u) => u.phone && (!!u.drawer || !!u.settings || (thread.where === 'chat' && !!u.pane)))
+  const jump = useUI((u) => u.jump === u.chatLink?.focus && !link ? null : u.jump)
+  const view = useRef({ covered, link })
+  const focused = useRef<string | null>(null)
+  const edge = useRef(0)
+  const first = chat?.messages[0]?.id
+  const earlierAnchor = useRef<{ first: string | undefined; row: HTMLElement; top: number } | null>(null)
+  const looked = useRef<{ link: typeof link; first: string | undefined } | null>(null)
+  const highlight = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   // #1504: the rows as the jump button counts them, and the row that was last when you scrolled away from the end
   const seen = useRef<{ id: string; mine: boolean }[]>([])
   seen.current = rows.map((r) => ({ id: keyOf(r.msg), mine: r.msg.who === 'you' }))
@@ -604,100 +617,136 @@ function Messages({ thread }: { thread: Thread }) {
   const [, bump] = useState(0)
   const tried = opened.get(thread.chat) ?? 0
   useEffect(() => {
-    if (!wantsEarlier(chat, tried) || loading.has(thread.chat)) return
+    if (covered || loading.has(thread.chat)) return
+    // A linked message can be in an older page. Ask once per oldest message while the link is unresolved.
+    const seek = !!jump && link?.focus === jump && focused.current !== jump && chat?.earlier &&
+      (looked.current?.link !== link || looked.current.first !== first)
+    const load = wantsEarlier(chat, tried)
+    if (!seek && !load) return
     const key = thread.chat
+    if (seek) looked.current = { link, first }
     loading.add(key)
     void act({ type: 'earlier', chat: key })
       .catch(() => undefined)
       .finally(() => {
         loading.delete(key)
-        opened.set(key, (opened.get(key) ?? 0) + 1)
+        if (load) opened.set(key, (opened.get(key) ?? 0) + 1)
         bump((n) => n + 1)
       })
-  }, [chat, tried, thread.chat])
-
-  // it opens at the newest message and stays there as new ones come, unless you scrolled up; scrolling up to the top
-  // loads earlier ones
-  useLayoutEffect(() => {
-    const sc = end.current?.closest<HTMLElement>('.scroll')
-    if (!sc) return
-    stuck.current = true
-    sc.scrollTop = sc.scrollHeight
-    let height = sc.scrollHeight
-    const on = () => {
-      // the chat grew (a picture loaded, a card came): that is not the person scrolling up
-      if (sc.scrollHeight !== height) {
-        height = sc.scrollHeight
-        if (stuck.current) return void (sc.scrollTop = sc.scrollHeight)
-      }
-      const off = sc.scrollHeight - sc.scrollTop - sc.clientHeight
-      stuck.current = off < 80
-      // well away from the end: the jump button shows, counting what comes from now; back at the end it goes
-      if (off > OFF_PX) {
-        if (left.current == null) left.current = seen.current.at(-1)?.id ?? ''
-        setOffEnd(thread.chat, { count: newSince(seen.current, left.current), asks: asksBelow(sc).length })
-      } else if (stuck.current) {
-        left.current = null
-        setOffEnd(thread.chat, null)
-      }
-      const c = getState().chats[thread.chat]
-      if (sc.scrollTop < 40 && c?.earlier && !loading.has(thread.chat)) {
-        loading.add(thread.chat)
-        const was = sc.scrollHeight
-        void act({ type: 'earlier', chat: thread.chat })
-          .catch(() => undefined)
-          .finally(() => setTimeout(() => {
-            loading.delete(thread.chat)
-            sc.scrollTop += sc.scrollHeight - was
-          }, 300))
-      }
-    }
-    sc.addEventListener('scroll', on, { passive: true })
-    // the jump button and End: glide back to the newest message (at once with reduced motion); it follows again there
-    const off = onEnd(thread.chat, () => {
-      const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
-      sc.scrollTo({ top: sc.scrollHeight, behavior: still ? 'auto' : 'smooth' })
-    })
-    // the "1 question below" pill: the first question under the view, in its middle
-    const offAsk = onAsk(thread.chat, () => {
-      const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
-      asksBelow(sc)[0]?.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' })
-    })
-    left.current = null
-    setOffEnd(thread.chat, null)
-    return () => {
-      sc.removeEventListener('scroll', on)
-      offAsk()
-      off()
-      setOffEnd(thread.chat, null)
-    }
-  }, [thread.chat])
-  useLayoutEffect(() => {
-    const sc = end.current?.closest<HTMLElement>('.scroll')
-    if (sc && stuck.current) sc.scrollTop = sc.scrollHeight
   })
-  // new messages while you're away from the end: the button's count goes up
-  useEffect(() => {
-    const sc = end.current?.closest<HTMLElement>('.scroll')
-    if (left.current != null) setOffEnd(thread.chat, { count: newSince(seen.current, left.current), asks: sc ? asksBelow(sc).length : 0 })
-  }, [rows, thread.chat])
-  // a picture that loads later (a card's, a tile's) grows the chat: it stays at the newest message
-  useEffect(() => {
+
+  // Reset on entry and on return. Geometry changes while following (history, media or keyboard) keep the foot in view.
+  useLayoutEffect(() => {
     const sc = end.current?.closest<HTMLElement>('.scroll')
     const box = end.current?.parentElement
     if (!sc || !box) return
-    // the box or the suggested replies above it grew: the chat's window got shorter, its bottom stays in view
-    return keepAtEnd(sc, box, () => stuck.current)
+    const reopen = () => {
+      stuck.current = true
+      left.current = null
+      earlierAnchor.current = null
+      setOffEnd(thread.chat, null)
+      sc.scrollTo({ top: sc.scrollHeight, behavior: 'instant' })
+      edge.current = sc.scrollHeight - sc.clientHeight
+    }
+    reopen()
+    focused.current = null
+
+    const on = () => {
+      if (!sc.clientHeight) return
+      const max = sc.scrollHeight - sc.clientHeight
+      if (stuck.current && max !== edge.current) {
+        reopen()
+        return
+      }
+      edge.current = max
+      const off = max - sc.scrollTop
+      stuck.current = off <= 2
+      if (stuck.current) {
+        left.current = null
+        setOffEnd(thread.chat, null)
+      } else {
+        left.current ??= seen.current.at(-1)?.id ?? ''
+        if (off > OFF_PX) setOffEnd(thread.chat, { count: newSince(seen.current, left.current), asks: asksBelow(sc).length })
+      }
+
+      const key = thread.chat
+      // A short chat is already at its newest. Only a scroll into older history asks for an earlier page.
+      if (!stuck.current && sc.scrollTop < 40 && getState().chats[key]?.earlier && !loading.has(key)) {
+        // Browsers with scroll anchoring keep the reader's row in place when the page is prepended.
+        if (!CSS.supports('overflow-anchor', 'auto')) {
+          const top = sc.getBoundingClientRect().top
+          const row = [...box.querySelectorAll<HTMLElement>('[data-msg], [data-card]')].find((row) => row.getBoundingClientRect().bottom > top)
+          if (row) earlierAnchor.current = { first: getState().chats[key]?.messages[0]?.id, row, top: row.getBoundingClientRect().top - top + sc.scrollTop }
+        }
+        loading.add(key)
+        void act({ type: 'earlier', chat: key })
+          .catch(() => undefined)
+          .finally(() => loading.delete(key))
+      }
+    }
+    sc.addEventListener('scroll', on, { passive: true })
+    const stopKeeping = keepAtEnd(sc, box, () => stuck.current)
+    const stopReturning = onPageReturn(reopen)
+    const off = onEnd(thread.chat, reopen)
+    const offAsk = onAsk(thread.chat, () => {
+      const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+      asksBelow(sc)[0]?.scrollIntoView({ block: 'center', behavior: still ? 'instant' : 'smooth' })
+    })
+    return () => {
+      sc.removeEventListener('scroll', on)
+      stopKeeping()
+      stopReturning()
+      offAsk()
+      off()
+      clearTimeout(highlight.current)
+      setOffEnd(thread.chat, null)
+    }
   }, [thread.chat])
-  useEffect(() => {
-    if (!jump) return
-    const el = document.querySelector(`[data-msg="${attr(jump)}"], [data-card="${attr(jump)}"]`)
-    if (!el) return
-    stuck.current = false
-    el.scrollIntoView({ block: 'center' })
-    const t = setTimeout(() => setUI({ jump: null }), 2500)
-    return () => clearTimeout(t)
-  }, [jump, rows.length])
+
+  useLayoutEffect(() => {
+    const sc = end.current?.closest<HTMLElement>('.scroll')
+    const reopened = (view.current.covered && !covered) || (link && view.current.link !== link)
+    view.current = { covered, link }
+    if (!sc || covered) return
+    if (reopened) {
+      stuck.current = true
+      left.current = null
+      earlierAnchor.current = null
+      focused.current = null
+      setOffEnd(thread.chat, null)
+    }
+    if (!jump) focused.current = null
+    if (jump && focused.current !== jump) {
+      const el = sc.querySelector<HTMLElement>(`[data-msg="${attr(jump)}"], [data-card="${attr(jump)}"]`)
+      if (el && el.getClientRects().length) {
+        focused.current = jump
+        stuck.current = false
+        edge.current = sc.scrollHeight - sc.clientHeight
+        const target = el.getBoundingClientRect()
+        const viewport = sc.getBoundingClientRect()
+        sc.scrollBy({ top: target.top - viewport.top + (target.height - viewport.height) / 2, behavior: 'instant' })
+        // Only the highlight expires. The position is set in this same layout, before it is drawn.
+        clearTimeout(highlight.current)
+        highlight.current = setTimeout(() => {
+          if (getState().ui.jump === jump) setUI({ jump: null })
+        }, 2500)
+        return
+      }
+    }
+    edge.current = sc.scrollHeight - sc.clientHeight
+    const anchor = earlierAnchor.current
+    if (anchor && anchor.first !== first) {
+      earlierAnchor.current = null
+      if (!stuck.current && sc.contains(anchor.row)) {
+        const moved = anchor.row.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop - anchor.top
+        sc.scrollBy({ top: moved, behavior: 'instant' })
+      }
+    }
+    if (stuck.current) sc.scrollTo({ top: sc.scrollHeight, behavior: 'instant' })
+    else if (left.current != null && edge.current - sc.scrollTop > OFF_PX) {
+      setOffEnd(thread.chat, { count: newSince(seen.current, left.current), asks: asksBelow(sc).length })
+    }
+  })
 
   if (!snap) return null
   const out: ReactNode[] = []
