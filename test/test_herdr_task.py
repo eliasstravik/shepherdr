@@ -10963,12 +10963,13 @@ class NeverTypedIntoAShell(unittest.TestCase):
     def test_tell_assistant_task_can_receive_the_reply_at_its_from_address(self):
         from unittest import mock
         assistant = {"target": "t3", "route": None, "address": "t3", "space": "sp1", "space_name": "shop"}
-        graph = {"core": {"name": "vm", "id": "c1"}, "assistants": [assistant],
+        same_name = {"target": "t9", "route": None, "address": "t9", "space": "sp3", "space_name": "t5"}
+        graph = {"core": {"name": "vm", "id": "c1"}, "assistants": [assistant, same_name],
                  "spaces": [{"id": "sp2", "name": "ops"}]}
         self.term("t3", self.CLAUDE, {"herdr.role": "coordinator", "herdr.space": "sp1"})["status"] = "idle"
         worker = self.term("t5", self.CLAUDE, {"herdr.task": self.WORKER_KEY, "herdr.task.space": "sp2"})
         worker["status"] = "idle"
-        with mock.patch.object(self.machines, "directory", return_value=({"graph": graph}, [assistant])), \
+        with mock.patch.object(self.machines, "directory", return_value=({"graph": graph}, [assistant, same_name])), \
                 mock.patch.object(self.machines, "hc_json", self.news.hc_json):
             sent = self.machines.tell("sp1", "Can you check this?", sender="t5")
             self.assertTrue(sent["can_reply"])

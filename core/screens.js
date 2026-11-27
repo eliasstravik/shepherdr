@@ -52,7 +52,7 @@ function menuAt(lines, line) {
     if (option) options.push({ label: option.label, line: at });
     else if (lines[at] && options.length) options[options.length - 1].description = [options[options.length - 1].description, lines[at].trim()].filter(Boolean).join(" ");
   }
-  return options.length > 1 ? { top, bottom, options, current: options.findIndex((o) => o.line === line) } : undefined;
+  return options.length > 1 ? { top, options, current: options.findIndex((o) => o.line === line) } : undefined;
 }
 
 // The words just above: back to a logo or rule, or a wide gap.
@@ -134,7 +134,7 @@ export function mayHaveDialog(k) {
   return k?.state === "live" && !!cliOf(k) && !starting(k);
 }
 
-const DIALOG_FOOTER = /^(?:(?:enter|press enter|esc|escape|tab)\b|[↑↓]).*\b(?:confirm|select|cancel|deny|continue|dismiss|skip|submit|choose|navigate)\b/i;
+const DIALOG_FOOTER = /^(?:(?:enter|press enter|esc|escape|tab)\b|[↑↓]).*\b(?:confirm|select|cancel|deny|continue|close|dismiss|skip|submit|choose|navigate)\b/i;
 const BASH_CONFIRM = /can(?:not|'t|’t) (?:safely parse|parse .* safely)/i;
 
 function dialogScreen(text, k) {
@@ -142,12 +142,13 @@ function dialogScreen(text, k) {
   const line = cursorLine(lines);
   if (line >= 0) {
     const menu = menuAt(lines, line);
-    const after = lines.slice(menu.bottom + 1).map((l) => l.trim()).filter(Boolean);
+    const end = menu.options.at(-1).line + 1;
+    const after = lines.slice(end).map((l) => l.trim()).filter(Boolean);
     const before = wordsAbove(lines, menu.top, MOST_WORDS);
     // A menu in scrollback does not count once the normal input prompt is visible below it.
     if ((after.length <= 3 && after.some((l) => DIALOG_FOOTER.test(l)) && !after.some((l) => /^[❯›>](?:\s|$)/.test(l))) ||
         (!after.length && BASH_CONFIRM.test(before))) {
-      return lines.slice(Math.max(0, menu.top - MOST_WORDS), menu.bottom + 1).join("\n");
+      return lines.slice(Math.max(0, menu.top - MOST_WORDS), end).join("\n");
     }
   }
   const last = lines.findLastIndex((l) => l.trim());

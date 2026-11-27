@@ -1334,6 +1334,10 @@ def _everything_name(target):
 
 
 def _find(rows, target):
+    address = target.strip()
+    if re.fullmatch(r"(?:[\w.>-]+/)?t\d[0-9a-z]*", address):
+        # A reply address must never be mistaken for an equally named space.
+        return [a for a in rows if a["target"] == address]
     t = _space_target(target)
     if _everything_name(t):
         roots = [a for a in rows if a.get("role") == "everything"]
