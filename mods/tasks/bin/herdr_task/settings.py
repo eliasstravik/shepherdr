@@ -490,9 +490,6 @@ def set_opts(t, args, s=None, space=None):
             raise Fail(f"--set takes key=value, not {pair!r}.")
         k, v = pair.split("=", 1)
         set_task(t, k, v, cli() if SET_KEYS.get(k.strip().lower()) == "flags" else None)
-    if getattr(args, "reviewer_model", None) or getattr(args, "reviewer", None) or any(
-            SET_KEYS.get(p.split("=", 1)[0].strip().lower()) in ("reviewer", "reviewer_model") for p in getattr(args, "set", None) or []):
-        check_reviewer_model(t)
 
 
 def by_layer(s, space, section, key, value, default):
@@ -521,19 +518,6 @@ LOGIN = {"claude": "claude auth login", "codex": "codex login"}
 def check_automatic_agent(argv):
     if agent_key(argv) not in CLI_NAMES:
         raise Fail("Automatic starts are available for Claude Code and Codex. Start other agents in their own terminal.")
-
-
-def codex_lacks(model):
-    """The models Codex offers here when it can confirm the requested model is missing."""
-    if not model or not (binary := cli_path("codex")):
-        return None
-    from .machine import codex_request
-    env = {**os.environ, "PATH": ":".join(cli_dirs("codex") + [os.environ.get("PATH") or "/usr/bin:/bin"])}
-    state, result = codex_request("model/list", {"includeHidden": False}, binary=binary, env=env)
-    if state != "ok" or result.get("nextCursor"):
-        return None
-    ids = [m["model"] for m in result.get("data") or [] if isinstance(m, dict) and m.get("model") and not m.get("hidden")]
-    return ids if ids and model not in ids else None
 
 
 # ---- finding a CLI as the person's shell does (#1228, #1190) -------------------------------------
@@ -627,20 +611,6 @@ def codex_too_old():
 def codex_update_words(old):
     return (f"Codex here is too old for Shepherdr ({old} has no --no-daemon). Update it ({UPDATE_CODEX}), "
             "then start again.")
-
-
-CLAUDE_MODEL = re.compile(r"^(claude-|opus|sonnet|haiku|fable)", re.I)
-
-
-def check_reviewer_model(t):
-    """add/edit: a reviewer model Codex here can't use is refused when it is set (#948), not found at review time."""
-    m = t.get("reviewer_model")
-    if not m or t.get("reviewer") == "claude" or (not t.get("reviewer") and CLAUDE_MODEL.match(m)):
-        return
-    ids = codex_lacks(m)
-    if ids:
-        raise Fail(f"Codex here doesn't offer {m} for the account it is signed in with: pick one of {', '.join(ids)} "
-                   "(or leave the reviewer model unset for Codex's own default).")
 
 
 def codex_login_now():
@@ -749,16 +719,8 @@ def task_settings(s, t, space=None, argv=None, live=False):
         old = codex_too_old() if who == "codex" and agent != "codex" else None
         if old:
             who, rv = agent, {}
-        # #948: a model Codex here doesn't offer this account stops it at once: its own default instead, said
-        lacks = codex_lacks(rv.get("model")) if who == "codex" and live else None
-        dropped = rv.get("model")
-        if lacks:
-            rv = {k: v for k, v in rv.items() if k not in ("model", "fast")}
         speed = next((k for k, v in SPEEDS.items() if v == rv.get("fast")), None)
         text = who + (f", model {rv['model']}" if rv.get("model") else "") + (f", effort {rv['effort']}" if rv.get("effort") else "")
-        if lacks:
-            text += (f" (Codex's own default model: Codex here doesn't offer {dropped} "
-                     "for the account it is signed in with)")
         if old:
             text += (f" (your own CLI: Codex here is too old for Shepherdr, {old} has no --no-daemon; the person updates "
                      f"it ({UPDATE_CODEX}), then asks for the review again)")

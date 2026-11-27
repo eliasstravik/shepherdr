@@ -2,8 +2,8 @@
 // A CLI's own screens before its session starts (trust this folder, theme, sign in, an update prompt, whatever a later
 // version adds), read from the agent's screen as cards with choices, and watched the same way by the window's chat
 // (mods/chat/screens.js, its cards in shared "chat.screens") and by the service for the web app (service/screens.ts).
-// No hook reports these, so the screen is read: two matching reads a poll apart put a card up, and one press on a
-// choice presses it in the terminal, only if the screen still shows what the card was drawn from. A screen with
+// No hook reports these, so the screen is read: two matching reads a poll apart put a card up, and the card opens the
+// terminal for the person to answer there (Shepherdr never presses keys in an agent's screens). A screen with
 // nothing to choose makes no card (it may be a slow start), unless a card came before and this one holds a link (a
 // sign-in). An agent that reports a status (its session started) or took a turn never gets one.
 // A card: { id, addr, cli, words, choices: [{ label, description? }], at (the cursor's choice), all (screenText),
@@ -111,8 +111,6 @@ export function screenText(text) {
   if (cursor >= 0) { const mark = plain[cursor].search(/\S/); lines[cursor] = `${lines[cursor].slice(0, mark)} ${lines[cursor].slice(mark + 1)}`; }
   return lines.map((line) => line.replace(SPINNER, "$1 ").trimEnd()).join("\n");
 }
-// The keys that move from the cursor to a choice and take it.
-export const pressKeys = (at, choice) => [...Array(Math.abs(choice - at)).fill(choice < at ? "up" : "down"), "enter"];
 
 // ---- watching agents that are starting ---------------------------------------------------------
 
@@ -180,7 +178,6 @@ export class ScreenWatch {
     this.onPost = onPost;
     this.last = new Map();
     this.looking = new Set();
-    this.pressing = new Set();
   }
 
   open(addr) { const c = this.io.cards(addr).at(-1); return c?.state === "open" ? c : null; }
@@ -197,7 +194,7 @@ export class ScreenWatch {
       if (was) this.close(was, k?.state === "live" ? SCREEN.inTerminal : SCREEN.stopped);
       return;
     }
-    if (this.looking.has(addr) || this.pressing.has(addr)) return;
+    if (this.looking.has(addr)) return;
     this.looking.add(addr);
     try {
       // The live list doesn't say when it started or how wide it is: hc get does.
@@ -229,29 +226,5 @@ export class ScreenWatch {
     const card = { id: `scr-${addr}-${Date.now()}`, addr, cli: CLI[cliOf(k)] ?? "The agent", ...s, state: "open", opened: Date.now() };
     this.io.save(addr, [...this.io.cards(addr), card].slice(-KEEP));
     this.onPost?.(card);
-  }
-
-  // A press on a choice: only on the screen the card was drawn from. Resolves with an error's words, or null once
-  // pressed.
-  async press(card, choice) {
-    if (this.pressing.has(card.addr)) return null;
-    const now = this.open(card.addr);
-    if (!now || now.id !== card.id) return SCREEN.gone;
-    this.pressing.add(card.addr);
-    try {
-      const r = await this.io.hc(["read", card.addr]);
-      const s = r.code === 0 ? readScreen(r.stdout, Infinity) : null;
-      if (!s || screenText(r.stdout) !== card.all || JSON.stringify(s.choices) !== JSON.stringify(card.choices)) {
-        this.close(card, SCREEN.changed);
-        return SCREEN.changedNothing;
-      }
-      const k = await this.io.hc(["keys", card.addr, ...pressKeys(s.at, choice)]);
-      if (k.code !== 0) return SCREEN.failed;
-      this.update(card, { state: "answered", how: SCREEN.answered(card.choices[choice].label) });
-      this.last.delete(card.addr);
-      return null;
-    } finally {
-      this.pressing.delete(card.addr);
-    }
   }
 }

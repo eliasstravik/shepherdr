@@ -25,7 +25,7 @@ import sys
 import threading
 import time
 
-from .base import QUEUED, ASK_HOME, OLD_SESSION, SESSION, SHARE, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, layout, now, PACKAGE, run, STORE, WHERE
+from .base import ASK_HOME, OLD_SESSION, SESSION, SHARE, sync_held, bundle, ENTRY, Fail, guard, HOME, hc_json, layout, now, PACKAGE, run, STORE, WHERE
 from .news import NO_AGENT, news_send, send_or_hold, typing
 from .agents import front
 from .revive import restart_assistant
@@ -1320,7 +1320,7 @@ def _hops(route_names, hows, inner):
 
 def _deliver(names, hows, address, text):
     """hc send on the receiver's own machine, reached through the route: there it's a plain
-    send, as news is (no <hc from> of this machine's). Mid-turn, Claude Code's "send now"."""
+    send, as news is (no <hc from> of this machine's). Mid-turn, Claude Code queues it itself."""
     guard(["hc"])
     env = {k: v for k, v in os.environ.items() if k != "HC_TERMINAL_ID"}
     there = lambda inner: subprocess.run(_hops(names, hows, inner), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -1346,21 +1346,9 @@ def _deliver(names, hows, address, text):
                    "in a few minutes")
     if f != "agent":
         return False
-    if there(["hc", "send", address, text]).returncode != 0:
-        return False
-    for i in range(6):
-        time.sleep(0.4)
-        if not QUEUED.search(there(["hc", "read", address, "--lines", "40"]).stdout):
-            continue
-        # only while it works: on a dialog of its own Ctrl+Enter would answer it
-        try:
-            working = (json.loads(there(["hc", "get", address, "--json"]).stdout or "{}").get("status") or {}).get("state") == "working"
-        except ValueError:
-            working = False
-        if working:
-            there(["hc", "keys", address, "ctrl+enter"])
-        break
-    return True
+    # herdr-core's send alone: mid-turn, Claude Code queues it itself (no Ctrl+Enter of ours, AGENTS.md "Nothing that
+    # risks a ban")
+    return there(["hc", "send", address, text]).returncode == 0
 
 
 def tell(target, text, sender=None):

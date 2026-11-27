@@ -1066,9 +1066,9 @@ const speedForAction = (pick: Pick) => pick.fast === 'ultrafast' ? 'ultrafast' :
 export function applyPick(chat: string, was: Pick, now: Pick, names: { agent: string }) {
   const same = (a: Pick, b: Pick) => a.agent === b.agent && (a.model ?? null) === (b.model ?? null) && (a.effort ?? null) === (b.effort ?? null) && (a.fast ?? false) === (b.fast ?? false) && (a.perm ?? null) === (b.perm ?? null)
   if (same(was, now)) return
-  const run = (live: boolean) => void tryAct({ type: 'restart', chat, kind: now.agent, model: now.model ?? undefined, effort: now.effort ?? undefined, speed: speedForAction(now), perm: now.perm ?? undefined, live })
-  if (was.agent === now.agent) return run(true)
-  confirm({ title: `Switch to ${names.agent}?`, body: 'This chat starts again on the new agent. Earlier messages stay, above a "New session" line.', ok: 'Switch', run: () => run(false) })
+  const run = () => void tryAct({ type: 'restart', chat, kind: now.agent, model: now.model ?? undefined, effort: now.effort ?? undefined, speed: speedForAction(now), perm: now.perm ?? undefined })
+  if (was.agent === now.agent) return run()
+  confirm({ title: `Switch to ${names.agent}?`, body: 'This chat starts again on the new agent. Earlier messages stay, above a "New session" line.', ok: 'Switch', run })
 }
 
 function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
@@ -1109,9 +1109,10 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
   const sug = sg && !repliesHidden({ dictating, call, working: busy, sending, spent: spent.has(sg.id) }) ? sg : null
   const machine = snap.places.find((p) => p.id === thread.place)?.machine ?? snap.host
   const pick = pickOf(snap, chat, thread)
-  // a question of its agent's is open: what you type here answers it too (it closes the card, the agent gets your words)
+  // a question of its agent's is open: answer it on its card first (nothing closes its dialog for you, so a message
+  // sent now is refused: core/send.js ASKING)
   const asked = !!ownAsk(chat)
-  const hint = asked ? 'Or type your own answer' : placeholder
+  const hint = asked ? 'Answer its question above first' : placeholder
   // a message sent while the agent works goes in at once (it steers); only Ctrl/Cmd+Enter asks it to wait its turn.
   // The round button and Enter send only what is in the box, never a suggested reply (those are their own bubbles).
   // In a voice call the box takes no text (TEXT_IN_CALL).
@@ -1125,7 +1126,6 @@ function Box({ thread, placeholder }: { thread: Thread; placeholder: string }) {
         chat: key,
         update: (now: Pick) => act({ type: 'restart', chat: key, kind: now.agent, model: now.model ?? undefined,
           effort: now.effort ?? undefined, speed: speedForAction(now), perm: now.perm ?? undefined, live: true }),
-        carryOn: () => send(key, key, 'Continue where you left off.'),
       } } : { onClose: (now: Pick) => applyPick(key, pick, now, { agent: pickWords(now).agent }) }),
     })
   }

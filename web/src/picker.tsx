@@ -229,8 +229,7 @@ export function samePick(a: Pick, b: Pick, cat?: Catalog) {
 
 type LivePick = {
   chat: string
-  update: (p: Pick) => Promise<{ current?: Pick; error?: string; paused?: boolean }>
-  carryOn: () => void
+  update: (p: Pick) => Promise<{ current?: Pick; error?: string }>
 }
 
 function AgentPicker({ title, machine, start, typed, onChange, close, live }: { title: string; machine: string; start: Pick; typed?: string; onChange: (p: Pick) => void; close: () => void; live?: LivePick }) {
@@ -240,7 +239,6 @@ function AgentPicker({ title, machine, start, typed, onChange, close, live }: { 
   const [current, setCurrent] = useState(start)
   const [applying, setApplying] = useState(false)
   const [error, setError] = useState('')
-  const [paused, setPaused] = useState(false)
   const phase = useChat(live?.chat ?? '')?.settingsUpdate
   const [field, setField] = useState<'' | Field>('')
   const [q, setQ] = useState('')
@@ -260,9 +258,8 @@ function AgentPicker({ title, machine, start, typed, onChange, close, live }: { 
         setCurrent(r.current)
         setP(r.current)
       }
-      if (r.paused) setPaused(true)
       if (r.error) setError(r.error)
-      else if (!r.paused) close()
+      else close()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'The update could not be confirmed.')
     } finally { setApplying(false) }
@@ -298,7 +295,7 @@ function AgentPicker({ title, machine, start, typed, onChange, close, live }: { 
       <div className="pk">
         <PickerHead title={title} close={close} />
         {pickerRows(p, cat).map((r) => (
-          <button key={r.f} type="button" className="row row2" aria-label={`${r.label}: ${r.value}. Change`} onClick={() => open(r.f)} disabled={applying || paused}>
+          <button key={r.f} type="button" className="row row2" aria-label={`${r.label}: ${r.value}. Change`} onClick={() => open(r.f)} disabled={applying}>
             {r.f === 'agent' ? <Logo agent={p.agent} name={w.agent} /> : <span className="pk-gap" />}
             <span className="n">
               <span className="l2">{r.label}</span>
@@ -309,14 +306,10 @@ function AgentPicker({ title, machine, start, typed, onChange, close, live }: { 
         ))}
         {dirty && p.agent !== current.agent && !applying && <p className="muted">Changing the agent starts a new session here. Earlier messages stay.</p>}
         {error && <p className="c-red" role="alert">{error}</p>}
-        {paused && <p role="status">The agent is paused. You can ask it to carry on.</p>}
         <div className="acts" style={{ marginTop: 8 }}>
-          {paused ? <>
-            <Btn onClick={close}>Close</Btn>
-            <Btn kind="pri" onClick={() => { live?.carryOn(); close() }}>Carry on</Btn>
-          </> : <Btn kind="pri" onClick={() => void submit()} disabled={applying || !!phase}>
+          <Btn kind="pri" onClick={() => void submit()} disabled={applying || !!phase}>
             {applying || phase ? <span role="status">{phase ?? 'Applying…'}</span> : dirty ? 'Update' : 'Done'}
-          </Btn>}
+          </Btn>
         </div>
       </div>
     )

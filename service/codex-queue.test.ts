@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { answerQueued, CodexQueue, questionScreen, type QueuedQuestion } from "./codex-queue.ts";
+import { CodexQueue, questionScreen, type QueuedQuestion } from "./codex-queue.ts";
 
 const first: QueuedQuestion = { id: "colour", text: "Which colour?", choices: ["Red", "Blue"], at: 10 };
 const second: QueuedQuestion = { id: "nickname", text: "What nickname?", choices: [], at: 11 };
@@ -31,20 +31,3 @@ test("a local skip removes only the question that was showing", () => {
   expect(q.pending({ ...r, path: "new-rollout" })).toEqual([first, second, third]);
 });
 
-test("the app navigates to a later question and verifies the selected option before submitting", async () => {
-  const screens = [collapsed(3), editor(first, 0, 3), editor(third, 2, 3), editor(third, 2, 3, 1), editor(first, 0, 2), editor(first, 0, 2)];
-  const keys: string[][] = [];
-  expect(await answerQueued({
-    read: async () => screens.shift() ?? null, keys: async (...key) => { keys.push(key); return true; }, paste: async () => false,
-  }, [first, second, third], third, { choice: 1 })).toBeNull();
-  expect(keys).toEqual([["shift+left"], ["shift+left", "shift+left"], ["down"], ["enter"], ["shift+right"]]);
-});
-
-test("an old card cannot submit a choice after the terminal changes questions", async () => {
-  const keys: string[][] = [];
-  const similar = { ...first, text: "Which colour? For the header", choices: ["Red", "Blue"] };
-  expect(await answerQueued({
-    read: async () => editor(similar, 0, 1), keys: async (...key) => { keys.push(key); return true; }, paste: async () => false,
-  }, [first], first, { choice: 0 })).toMatch(/picker changed/);
-  expect(keys).toEqual([]);
-});

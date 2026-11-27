@@ -9,7 +9,7 @@
 // A hub whose machine.exec runs here with HOME a throwaway: its Codex stand-in names the models, its templates folder
 // holds the Assistant's, and PATH has stand-in CLIs. hc is a script that records what it was asked to run.
 import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, utimesSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, chmodSync, utimesSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agents } from "./agents.ts";
@@ -24,20 +24,11 @@ const home = mkdtempSync(join(tmpdir(), "shep-fresh-")), bin = join(home, "bin")
 mkdirSync(bin); mkdirSync(tpl, { recursive: true }); mkdirSync(join(home, ".codex"));
 writeFileSync(join(tpl, "assistant.md"), "---\nname: assistant\ndescription: The Assistant\ncommand: claude\n---\nYou are the Assistant.\n");
 for (const c of ["claude", "codex"]) { writeFileSync(join(bin, c), "#!/bin/sh\n"); chmodSync(join(bin, c), 0o755); }
-// Codex's documented model list: Sol takes Fast and Ultrafast, Luna only Fast.
-const catalog = { data: [
-  { model: "gpt-6.2-sol", displayName: "GPT-6.2 Sol", supportedReasoningEfforts: [{ reasoningEffort: "low" }, { reasoningEffort: "medium" }, { reasoningEffort: "high" }], defaultReasoningEffort: "medium", serviceTiers: [{ id: "fast" }, { id: "ultrafast" }] },
-  { model: "gpt-6-luna", displayName: "GPT-6 Luna", supportedReasoningEfforts: [{ reasoningEffort: "low" }], defaultReasoningEffort: "low", serviceTiers: [{ id: "fast" }] },
-] };
-writeFileSync(join(bin, "codex"), `#!/usr/bin/env python3
-import json, sys
-assert sys.argv[1] == "app-server"
-for line in sys.stdin:
-    msg = json.loads(line)
-    if "id" in msg:
-        result = ${JSON.stringify(JSON.stringify(catalog))} if msg["method"] == "model/list" else "{}"
-        print(json.dumps({"id": msg["id"], "result": json.loads(result)}), flush=True)
-`);
+// Codex's models come from OpenAI's published list (core/agents.js): Shepherdr never asks Codex's App Server.
+const appServer = join(home, "app-server-called");
+writeFileSync(join(bin, "codex"), `#!/bin/sh\n[ "$1" = app-server ] && touch "${appServer}"\nexit 1\n`, { mode: 0o755 });
+afterAll(() => expect(existsSync(appServer)).toBe(false));
+writeFileSync(join(home, ".codex", "config.toml"), 'model_reasoning_effort = "medium"\n');
 // hc: `run` answers as herdr-core does and keeps its arguments and the one-off template it was given
 const ran = join(home, "ran.json"), hcFile = join(bin, "hc");
 writeFileSync(hcFile, `#!/bin/sh
@@ -152,7 +143,7 @@ test("a page with the chat open is sent the fresh chat, again only when it chang
   expect(got.length).toBe(1);
   doc[CHOICE_KEY] = { sp1: { agent: "codex", model: "gpt-6-luna", effort: null, fast: false, perm: "auto", at: 9 } };
   live.refresh();
-  expect(got.map((c) => c.agent.words)).toEqual(["GPT-6.2 Sol · Medium · Ultrafast", "GPT-6 Luna · Low"]);
+  expect(got.map((c) => c.agent.words)).toEqual(["GPT-6.2 Sol · Medium · Ultrafast", "GPT-6 Luna · Medium"]);
   // its Assistant runs: the real chat's turn, no fresh one
   compat.chats = new Map([["p:sp1", "t1"]]);
   compat.spaceList = [{ id: "sp1", machine: null, folder: home, assistant: "t1" }];

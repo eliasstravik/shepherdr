@@ -17,7 +17,7 @@ the rest. [`web/plugins.json`](../web/plugins.json) is the list, in order.
 | voice | yes | Voice over the whole app, dictation in the message box, and Settings › Voice (the ElevenLabs key) | No voice or mic button, no Voice page |
 | schedules | yes | Tasks › Scheduled | No Scheduled tab |
 | reactions | yes | Emoji reactions on messages | No emoji row in a message's menu |
-| recaps | yes | A short recap when you come back to a chat after 15 minutes away, Recap in a chat's menu, and Settings › Recaps | No recap asks (an agent's own recaps still show) |
+| recaps | yes | Recap in a chat's menu and the palette: a short recap, asked only when you pick it | No Recap row (an agent's own recaps still show) |
 | files | yes, off until switched on | Files: the shown space's folder as a tree, on its machine ([below](#files)) | No Files button, pane or bar item |
 | diff | yes, off until switched on | Diff viewer: the Changes pane beside Tasks and Artifacts. What a task changed against its base, or what isn't committed in a space's folder, file by file; read only. A Ready card's files open there | No Changes button, pane or menu row |
 

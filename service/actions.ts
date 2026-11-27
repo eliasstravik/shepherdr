@@ -6,21 +6,19 @@ import { join } from "node:path";
 import { HOME, appHome, writable } from "./paths.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { sendBody, steerNow, messageBody, refusal, reactionLine, mentionedIn, taskTag, inFront, NOT_TYPED } from "../core/send.js";
+import { sendBody, messageBody, refusal, reactionLine, mentionedIn, taskTag, inFront, NOT_TYPED } from "../core/send.js";
 import { kindOf } from "../core/chat-reader.js";
 import { WORDS } from "../core/chat-view.js";
 import { settle } from "../core/pending.js";
 import * as SCREENS_ from "../core/screens.js";
 const SCREENS = SCREENS_ as any;
 import * as AGa from "../core/agents.js";
-import { answerCodex } from "./codex-ask.ts";
-import { answerQueued } from "./codex-queue.ts";
 import { steps as answerSteps } from "../core/asks.js";
 const { CHOICE_KEY, choiceOf, withChoice, speedOf } = AGa as any;
 import * as SP from "../core/spaces.js";
 import { iconValue } from "../core/space-icon.js";
 const { READ, assistantOf, withMove, withSection, withoutSection, withSectionName, withIcon, withMachineLook, withOrder, withMachineOrder, DELETED, deletedSection, withRestoredSection } = SP as any;
-import { queuedQuestionId, type Compat } from "./compat.ts";
+import { type Compat } from "./compat.ts";
 import { noteFailed, once, wentIn } from "./send-once.ts";
 import { execTemplate, ownId, withoutSpace } from "./spaces.ts";
 import * as MA from "../core/machine-add.js";
@@ -28,7 +26,6 @@ import { exec } from "./model.ts";
 import { FIND } from "../core/chat-log.js";
 import { spawn } from "./spawn.ts";
 import { askRecap } from "./recap.ts";
-import { recapsAuto } from "./next.ts";
 
 const attachDir = () => join(appHome(), "data", "chat-attach");
 /** files in one message at most (the page says so before it sends: web/plugins/chat/client.tsx) */
@@ -36,13 +33,11 @@ export const MAX_FILES = 50;
 const ADDR = /^([\w.-]+\/)?t[0-9a-z]+$/;
 const REF = /^[A-Z][A-Z0-9]*-\d+$/;
 const MACHINE = /^[\w.-]+$/;
-const answeringQueued = new Set<string>();
 const liveSends = new Map<string, number>();
 
 /** A regular app send must never type into a picker another page opened to answer a card. */
 async function sendFromChat(...args: Parameters<typeof sendBody>) {
   const a = args[1];
-  if (answeringQueued.has(a)) throw new Error("Wait for the question's answer to go through, then send again.");
   liveSends.set(a, (liveSends.get(a) ?? 0) + 1);
   try { return await sendBody(...args); }
   finally {
@@ -126,7 +121,7 @@ function drain() {
       for (const m of [...held]) {
         const st = (m.hub.terminals.get(m.addr) as any)?.status?.state;
         const alive = m.hub.terminals.get(m.addr)?.state === "live";
-        if (alive && (answeringQueued.has(m.addr) || (!m.now && (st === "working" || st === "blocked")))) continue;
+        if (alive && !m.now && (st === "working" || st === "blocked")) continue;
         const i = held.indexOf(m);
         if (i < 0) continue;
         held.splice(i, 1);
@@ -364,55 +359,11 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (!a) throw new Error("That chat isn't here any more.");
     return a;
   };
-  if (b?.type === "answer" && typeof b.question === "string" && b.question.startsWith("scr-")) {
-    // a CLI's start screen (service/watch.ts): a tap presses that choice, only on the screen the card was drawn from;
-    // "Answer in terminal" just shows the terminal
+  if (b?.type === "answer" && typeof b.question === "string" && /^(scr-|cq:|cqa:)/.test(b.question)) {
+    // a CLI's start or trust screen, or Codex's own question: Shepherdr never presses keys in an agent's menus (Nothing
+    // that risks a ban): its card opens the terminal, where the person answers it
     if (b.terminal === true) return { ok: true };
-    const id = str(b.question, 300), watch = (compat as any).watch;
-    const card = watch?.card?.(id), choice = typeof b.choice === "number" ? b.choice : -1;
-    const why = await watch?.press(id, choice);
-    if (why) return { ok: false, error: why };
-    // #1441: No on a task's worker's folder-trust screen (its CLI exits): the task stops, saying why, instead of
-    // hanging as an agent that vanished. Its next message or Resume starts it again (and asks again).
-    const w = card && SCREENS.trustOf(card) && choice === 1 ? compat.trustWho?.(card.addr) : null;
-    const t = w?.worker && w.task ? compat.taskOf(w.task) : null;
-    if (t) await task(["stop", t.ref, "--untrusted"], t.folder, t.machine).catch(() => null);
-    return { ok: true };
-  }
-  if (b?.type === "answer" && typeof b.question === "string" && b.question.startsWith("cqa:")) {
-    const a = chat(b.chat);
-    if (answeringQueued.has(a)) throw new Error("Another answer is going to this chat.");
-    if (liveSends.has(a)) throw new Error("Wait for your message to go through, then answer the question.");
-    answeringQueued.add(a);
-    try {
-      await compat.refreshQuestions?.(a);
-      const pending = compat.queued?.(a) ?? [];
-      const target = pending.find((q) => queuedQuestionId(q) === b.question);
-      if (!target) throw new Error("That question is no longer in Codex's queue.");
-      if (await hub.front(a) !== "agent") throw new Error("Open Codex in the terminal to answer.");
-      const why = await answerQueued({
-        read: async () => (await compat.questionScreen?.(a)) ?? null,
-        keys: async (...keys) => (await hc(["keys", a, ...keys])).code === 0,
-        paste: async (words) => (await hub.send(a, words, true)).code === 0,
-      }, pending, target, b);
-      if (why) throw new Error(why);
-      return { ok: true };
-    } finally {
-      answeringQueued.delete(a);
-      void compat.refreshQuestions?.(a);
-    }
-  }
-  if (b?.type === "answer" && typeof b.question === "string" && b.question.startsWith("cq:")) {
-    // Codex's own questions (compat.ts codexQuestion): answered on its screen, as a person would
-    const a = chat(b.chat);
-    const item = (compat.reader?.(a)?.conv?.items ?? []).find((x: any) => x.kind === "ask" && x.id === b.question.slice(3));
-    if (!item?.questions?.length || item.closed) throw new Error("That question was answered already.");
-    // SHEP-324: answered by typing on its screen: only while Codex itself is in front
-    const f = await hub.front?.(a);
-    if (f && f !== "agent") throw new Error(NOT_TYPED[f]);
-    const why = await answerCodex(hc, a, item.questions, b);
-    if (why) throw new Error(why);
-    return { ok: true };
+    throw new Error("Answer it in its terminal.");
   }
   if (b?.type === "answer" && typeof b.question === "string") {
     // a hook ask's card (its id is the request's): answered as the window's card answers it
@@ -648,17 +599,6 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     for (const t of hub.terminals.values()) if (t.state === "live" && t.labels?.["herdr.coordinator.space"] === mine.id && (t.address.includes("/") ? t.address.split("/")[0] : null) === (mine.machine ?? null)) await hc(["kill", t.address]);
     return { ok: true };
   }
-  if (b?.type === "rewind" && typeof b.chat === "string" && typeof b.message === "string") {
-    // the CLI's own rewind on that message: Claude Code's /rewind lists the prompts newest last (Up
-    // once per later prompt); Codex's Esc Esc browses back from the last (Left). Then its terminal shows it.
-    const a = chat(b.chat), t: any = hub.terminals.get(a), r = compat.reader?.(a);
-    if (t?.status?.state === "working") throw new Error("The agent is working: stop it first, then rewind.");
-    const users = (r?.conv?.items ?? []).filter((x: any) => x.kind === "user" && !x.from && !/^\//.test(x.text ?? ""));
-    const i = users.findIndex((u: any) => u.id === b.message), back = i < 0 ? 1 : users.length - i;
-    if ((kindOf(t) ?? "claude") === "claude") { await hub.send(a, "/rewind"); await Bun.sleep(700); await hc(["keys", a, ...Array(back).fill("up")]); }
-    else { await hc(["keys", a, "esc", "esc"]); await Bun.sleep(500); if (back > 1) await hc(["keys", a, ...Array(back - 1).fill("left")]); }
-    return { ok: true, terminal: true };
-  }
   if (b?.type === "earlier" && typeof b.chat === "string") {
     // the chat scrolled to its top ("Loading earlier…"): the log's page before what it shows
     const current = compat.addrOf(b.chat);
@@ -670,11 +610,9 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     return { ok: true };
   }
   if (b?.type === "recap" && typeof b.chat === "string") {
-    // the Recap action, or the page's own when you come back to a chat (auto: never an error, off in Settings)
-    const auto = b.auto === true;
-    if (auto && !recapsAuto()) return { ok: true, asked: false };
+    // the person's own Recap (a chat's menu, the palette); nothing asks for one by itself
     const a = chat(b.chat);
-    return askRecap(hub, a, compat.reader?.(a)?.conv?.items ?? [], { auto });
+    return askRecap(hub, a, compat.reader?.(a)?.conv?.items ?? []);
   }
   if (b?.type === "keys" && typeof b.chat === "string" && Array.isArray(b.keys) && b.keys.length <= 32 && b.keys.every((k: unknown) => typeof k === "string" && k.length <= 40)) {
     const res = await hc(["keys", chat(b.chat), ...b.keys]);
@@ -723,7 +661,7 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
     if (r.code !== 0 || out?.error) return { ok: false, error: out?.error || r.stderr.trim().split("\n").pop() || "It didn't stop." };
     return { ok: true };
   }
-  else if ((b?.type === "stop" || b?.type === "steer") && typeof b.chat === "string") b = { ...b, addr: chat(b.chat) };
+  else if (b?.type === "stop" && typeof b.chat === "string") b = { ...b, addr: chat(b.chat) };
   else if (b?.type === "stop-job" && typeof b.chat === "string" && typeof b.job === "string") {
     // Stop on a background shell or watcher (core/bg-jobs.js): its processes end; its CLI then tells the agent
     const r = compat.reader?.(chat(b.chat));
@@ -766,14 +704,6 @@ export async function act(hub: Hub, b: any, compat: Compat): Promise<unknown> {
       const cid = typeof b.cid === "string" && b.cid ? b.cid.slice(0, 80) : null;
       if (!cid) return sendNow(hub, b, compat);
       return once(cid, async (again) => (typeof b.was === "string" && arrived(b, compat)) || sendNow(hub, b, compat, again));
-    }
-    case "steer": {
-      // Send now on a message in Claude Code's own queue (#662): its Ctrl+Enter, only while its screen offers it
-      const a = addr(b.addr), t = hub.terminals.get(a);
-      if (!t || t.state !== "live") throw new Error("That agent isn't running.");
-      const io = { hc: asPerson(hub), sleep: (ms: number) => Bun.sleep(ms), status: () => (hub.terminals.get(a) as any)?.status?.state ?? null };
-      if (!(await steerNow(io, a))) throw new Error(WORDS.notNow);
-      return { ok: true };
     }
     case "stop": {
       const r = await hc(["interrupt", addr(b.addr)]);

@@ -2,6 +2,26 @@
 
 How to run, build and lay out the code: [docs/develop.md](docs/develop.md).
 
+## Nothing that risks a ban
+
+Every task, whatever its size, checks before ready that its change can't get anyone's agent or provider account
+banned (Claude Code and Anthropic, Codex and OpenAI, Cursor, Google, ElevenLabs, any agent Shepherdr runs). The bar
+is strict: if the provider's own terms or docs don't explicitly allow it, or there's the slightest doubt, don't build
+it, and say so in your summary.
+
+- Never read plan usage, limits or credits, except through a provider's official, documented API with the person's
+  own key (ElevenLabs). For Claude Code and Codex the app says where to look (`/usage`, `/status`).
+- Never use an agent's stored sign-in, tokens or auth files, its private endpoints or Codex's App Server. Only run the
+  official CLI with its documented commands and flags.
+- Never drive an agent's own interface: no typing slash commands or keys that didn't come from the person, no
+  stepping through its menus from screen reads, no auto-answering its trust, permission or sign-in prompts, no
+  interrupting its turns on your own. Change model, effort, speed or permissions by restarting with documented flags.
+- Never edit an agent's own config or settings files (`~/.claude`, `~/.claude.json`, `~/.codex`).
+- No sharing, pooling or rotating accounts across people or machines, and no retrying on another agent after a
+  quota refusal.
+- Use herdr-core for terminals, sessions, starts, keys and screens; don't build a second way.
+- A change that touches any of this updates the dated table in [docs/agents-and-terms.md](docs/agents-and-terms.md).
+
 ## Tests
 
 - Never stop, restart, update or reconfigure the live herdr-core or Shepherdr on this machine (no `hc server

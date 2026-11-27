@@ -1,9 +1,8 @@
 // Sending the person's words to an agent, the same way from the window's chat and from the web app:
 // the tag lines Herdr puts before them (the message it replies to, the tasks it mentions), then hc send. When
-// the agent waits on its own dialog in its terminal (a question, a permission), Esc closes it and the words go
-// as a message ("Reply instead…"). Claude Code holds a message typed mid-turn until its turn ends: its own
-// "send now" (Ctrl+Enter) makes it steer at once, and Esc if that didn't take within ~5 s (steerNow; DECISIONS:
-// messages are never held unless asked).
+// the agent waits on its own dialog in its terminal (a question, a permission), nothing is typed: the person answers
+// it there first (ASKING). Claude Code queues a message typed mid-turn itself; no key of ours pushes it in (AGENTS.md
+// "Nothing that risks a ban").
 // io = { hc(args) -> Promise<{ code, stdout, stderr }>, sleep(ms), status() -> the agent's status now }.
 // Shared core: the source is core/send.js; bin/sync-shared copies it into the mods in lib/COPIES.
 
@@ -113,72 +112,11 @@ export function messageBody({ text, quote = null, tags = "", task = null }) {
   return reply + tags + text;
 }
 
-// The agent waits on its own dialog: Esc closes it, then the words go once it takes typing again.
-export async function replyInstead(io, addr, text) {
-  await io.hc(["keys", addr, "esc"]);
-  let r;
-  for (let i = 0; i < 10; i++) {
-    await io.sleep(300);
-    r = await io.hc(["send", addr, text]);
-    if (r.code === 0 || refusal(r).kind !== "blocked") break;
-  }
-  return r;
-}
-
-// Claude Code's sign that a message waits in its own queue: "⎿  Queued · ctrl+enter to send now" under it (2.1.330 and
-// older, at any width) and "Press up to edit queued messages" in its box while any wait. Either one means its Ctrl+Enter
-// sends what is queued (never a half-typed draft: the box shows that placeholder only while it is empty).
-export const QUEUED = /ctrl\+enter to send now|press up to edit queued messages|^\s*⎿\s+Queued\b/im;
-// How long a send waits for that sign (the screen can take a moment to draw it, the more on a slow machine), and how
-// long the message may stay queued after Ctrl+Enter before Esc puts it in (SHEP-329): grace looks, every `every` ms.
-export const STEER = { looks: 20, every: 250, grace: 20, after: 12 };
-
-// Claude Code at work, as far as a key may be pressed in it: its status says working (never on a dialog of its own,
-// "blocked", where a key would answer it), or, its status unknown, its screen still offers "esc to interrupt".
-const atWork = (io, screen) => {
-  const st = io.status();
-  return st === "working" || (st !== "blocked" && st !== "idle" && st !== "done" && /esc to interrupt/i.test(screen));
-};
-const screenOf = async (io, addr) => (await io.hc(["read", addr, "--lines", "40"]).catch(() => null))?.stdout ?? "";
-
-// The person's message must reach a working Claude Code within seconds, always (SHEP-329: their message wins). Its
-// own "send now" (Ctrl+Enter) first: it moves a running shell or tool call to the background and takes the message
-// in mid-turn, so nothing is lost. Only while its screen shows a queued message (pressed on an empty prompt or a
-// dialog it would do something else). If the message is still queued after a short grace (~5 s), Esc: the turn stops
-// (a running command is cut off) and Claude Code sends what is queued at once, so the agent reads the person's
-// message first. Also a queued message's own Send now (#662). -> whether it was pressed (true: it went in, or will
-// as the turn ends).
-// body: the message, when known: a Claude Code that puts it back in its box on Esc (older ones did) gets its Enter.
-export async function steerNow(io, addr, opts = STEER, body = null) {
-  let seen = false;
-  for (let i = 0; i < opts.looks; i++) {
-    await io.sleep(i ? opts.every : 150);
-    const screen = await screenOf(io, addr);
-    if (!atWork(io, screen)) return false;
-    if (QUEUED.test(screen)) { seen = true; break; }
-  }
-  if (!seen) return false;
-  await io.hc(["keys", addr, "ctrl+enter"]);
-  for (let i = 0; i < opts.grace; i++) {
-    await io.sleep(opts.every);
-    const screen = await screenOf(io, addr);
-    // in, or its turn ended (what is queued goes in by itself), or a dialog came up: never a key on that
-    if (!QUEUED.test(screen) || !atWork(io, screen)) return true;
-  }
-  // still queued behind something Ctrl+Enter didn't move: Esc stops the turn and the queue goes in at once
-  await io.hc(["keys", addr, "esc"]);
-  for (let i = 0; i < opts.after; i++) {
-    await io.sleep(opts.every);
-    const screen = await screenOf(io, addr);
-    if (QUEUED.test(screen)) continue;
-    if (body && holds(inputLine(screen), body, true)) await io.hc(["keys", addr, "enter"]).catch(() => null);
-    return true;
-  }
-  return true;
-}
+// The agent waits on its own dialog (a question, a permission): nothing is typed and no key closes it (AGENTS.md
+// "Nothing that risks a ban"); the person answers it in its terminal first.
+export const ASKING = "It's asking you something. Answer that in its terminal first.";
 
 // A picture's path on a line of its own, as a sent file goes after the words.
-const PICTURE = /^[/~]\S*\.(png|jpe?g|gif|webp|bmp|heic)$/im;
 
 // Claude Code's input box: the last line of its screen starting with its prompt mark, right under the box's top rule
 // (a past message in the conversation has the same mark, never the rule over it; a dialog shows no box at all).
@@ -223,22 +161,21 @@ async function boxOf(io, addr) {
   return inputLine(r.stdout);
 }
 
-// How long a message may sit in Claude Code's box after hc send before it counts as stuck, and how many Enters it gets.
-export const SETTLE = { looks: 40, every: 400, enters: 4 };
+// How long a message may sit in Claude Code's box after hc send before it counts as stuck.
+export const SETTLE = { looks: 40, every: 400 };
 
 // After hc send: Claude Code reads the pictures (or a long paste) a message names before it takes Enter, and an Enter
-// that comes meanwhile is lost, so the message can sit in its box for good. While the box holds it, the same on two
-// looks, it gets its Enter again (a few times at most); once the box is clear it went in. A screen that can't be read
-// proves nothing: it keeps looking (none read at all: hc send's word stands). -> true: in; false: stuck.
+// that comes meanwhile is lost, so the message can sit in its box. Shepherdr only watches (it never presses Enter on
+// its own: Nothing that risks a ban); a message still there is stuck, and the person's Retry presses its Enter. A
+// screen that can't be read proves nothing: it keeps looking (none read at all: hc send's word stands).
+// -> true: in; false: stuck.
 export async function settleBox(io, addr, body, opts = SETTLE) {
-  let last = null, enters = 0, seen = false;
+  let seen = false;
   for (let i = 0; i < opts.looks; i++) {
     const box = await boxOf(io, addr);
     if (box !== undefined) {
       seen = true;
       if (box === null || !holds(box, body)) return true;
-      if (box === last && enters < opts.enters) { await io.hc(["keys", addr, "enter"]).catch(() => null); enters++; last = null; }
-      else last = box;
     }
     await io.sleep(opts.every);
   }
@@ -249,10 +186,9 @@ export async function settleBox(io, addr, body, opts = SETTLE) {
 
 // hc send for one CLI. Claude Code reads the pictures a pasted message names before it takes
 // Enter: an Enter that comes meanwhile is lost, and the message sits in its box ("[Image #1]
-// words") until the next one pushes it in (hc send says so only ~5 s later). While hc send is on
-// its way, a box still holding the pictures, the same on two looks, gets its Enter; after it, the
-// box is watched until it is clear (settleBox). again: its last send stayed in the box; if the box
-// holds exactly it still, it gets Enter, never typed twice. -> hc's result; stuck: still in the box.
+// words"). After hc send the box is watched until it is clear (settleBox). again: the person's
+// Retry on a send that stayed in the box; if the box holds exactly it still, it gets Enter, never
+// typed twice. -> hc's result; stuck: still in the box.
 export async function sendTyped(io, addr, kind, body, opts = SETTLE, again = false) {
   if (kind !== "claude") return io.hc(["send", addr, body]);
   if (again) {
@@ -269,19 +205,7 @@ export async function sendTyped(io, addr, kind, body, opts = SETTLE, again = fal
   // pastes after it, so the two would go as one, glued ("…thenWhat's…"). A blank line keeps them apart.
   const before = await boxOf(io, addr);
   if (before && heldBefore(addr, before, body)) body = "\n\n" + body;
-  const going = io.hc(["send", addr, body]);
-  let back = false, last = null;
-  const sent = going.finally(() => { back = true; });
-  if (PICTURE.test(body)) {
-    for (let i = 0; i < 20 && !back; i++) {
-      await Promise.race([io.sleep(100), sent.catch(() => null)]);
-      if (back) break;
-      const box = await boxOf(io, addr);
-      if (box && /\[Image #\d+\]/.test(box) && box === last) { await io.hc(["keys", addr, "enter"]).catch(() => null); break; }
-      last = box;
-    }
-  }
-  const r = await sent;
+  const r = await io.hc(["send", addr, body]);
   if (r.code !== 0) return r;
   let started = false;
   try { started = JSON.parse(r.stdout || "{}").started === true; } catch {}
@@ -312,7 +236,7 @@ function heldBefore(addr, box, body) {
 }
 
 // One send at a time per terminal: two typed at once land in its box together and go as one glued message (the
-// person sent two in a row while it worked). Each waits for the one before it, its steer included.
+// person sent two in a row while it worked). Each waits for the one before it.
 const typing = new Map();
 function inTurn(addr, run) {
   const prev = typing.get(addr) ?? Promise.resolve();
@@ -328,9 +252,8 @@ function inTurn(addr, run) {
 export function sendBody(io, addr, kind, body, again = false) {
   return inTurn(addr, async () => {
     let r = await sendTyped(io, addr, kind, body, SETTLE, again);
-    if (r.code !== 0 && refusal(r).kind === "blocked" && (kind === "claude" || kind === "codex")) r = await replyInstead(io, addr, body);
+    if (r.code !== 0 && refusal(r).kind === "blocked") return { code: 1, stdout: "", stderr: ASKING };
     if (r.code === 0) noteLately(addr, body);
-    if (r.code === 0 && kind === "claude") await steerNow(io, addr, STEER, body);
     return r;
   });
 }

@@ -23,8 +23,6 @@ export const WORDS = {
   // typed while it works: in its CLI's queue, taken at its next step (Claude Code's own queue)
   inQueue: "Queued · it reads it at its next step",
   sendNow: "Send now",
-  // Send now on one in its queue that its CLI didn't offer to take at once (its screen had no "ctrl+enter to send now")
-  notNow: "It couldn't take it now",
   ended: "This task's agent has ended.",
   resuming: "Resuming…",
   emptyTitle: "What should the Assistant do?",
@@ -137,10 +135,10 @@ export function clock(at, now = new Date()) {
   return d.toDateString() === now.toDateString() ? hm : `${d.getDate()} ${MONTHS[d.getMonth()]} ${hm}`;
 }
 
-// The actions under a message, in order: reply and copy; then the CLI's rewind on your own (not a /command, not one
-// another agent sent), or its fork on the agent's (when the CLI is known).
+// The actions under a message, in order: reply and copy; then its fork on the agent's (when the CLI is known). No
+// rewind: that drove the CLI's /rewind menu with keys (Nothing that risks a ban); type /rewind in its terminal.
 export function bandActs(side, text, { from = null, fork = true } = {}) {
-  if (side === "user") return ["reply", "copy", ...(/^\//.test(String(text ?? "")) || from ? [] : ["rewind"])];
+  if (side === "user") return ["reply", "copy"];
   return ["reply", "copy", ...(fork ? ["fork"] : [])];
 }
 

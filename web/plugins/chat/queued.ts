@@ -16,7 +16,7 @@ export function heldOf(outbox: Outgoing[], key: string, chat?: Chat): Outgoing[]
 export const editedDraft = (held: string, now: string) => (now.trim() ? `${held}\n\n${now}` : held)
 
 /** a question this chat's own agent asks with quick answers and room for your own (not a permission, a plan, or a
- *  worker's question copied here): while one is open, the box's words answer it too */
+ *  worker's question copied here): while one is open, the box says to answer it first */
 export function ownAsk(chat?: Chat): Question | undefined {
   for (let i = (chat?.messages.length ?? 0) - 1; i >= 0; i--) {
     const q = chat!.messages[i]!.question

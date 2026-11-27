@@ -16,7 +16,7 @@ test("a lost session is reported without starting a replacement", async () => {
 });
 
 // #1441: an agent at its CLI's folder-trust screen whose chat nobody has open still gets its card (Needs you, the
-// phone, the watch), and the card's two buttons press the screen's own Yes or No, wherever its cursor is. Fake folder.
+// phone, the watch), and the card opens the terminal for the person to answer; nothing presses the screen. Fake folder.
 const FLIPPED = [
   "/home/me/dev/shop",
   "",
@@ -45,19 +45,9 @@ test("#1441: an unwatched agent at the trust screen gets a trust card", async ()
   expect(t.card.addr).toBe("t7");
 });
 
-test("#1441: Trust this folder and start presses the screen's Yes", async () => {
+test("#1441: a trust card never presses the screen: the person answers in the terminal", async () => {
   const { watch, sent } = trustWatch();
   await settle(watch);
-  const [t] = watch.trustCards();
-  expect(await watch.press(t.card.id, 0)).toBeNull();
-  expect(sent).toEqual([["keys", "t7", "down", "enter"]]);
-});
-
-test("#1441: No presses the screen's No", async () => {
-  const { watch, sent } = trustWatch();
-  await settle(watch);
-  const [t] = watch.trustCards();
-  expect(await watch.press(t.card.id, 1)).toBeNull();
-  expect(sent).toEqual([["keys", "t7", "enter"]]);
-  expect(watch.trustCards()).toEqual([]);
+  expect((watch as any).press).toBeUndefined();
+  expect(sent).toEqual([]);
 });

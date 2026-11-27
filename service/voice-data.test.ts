@@ -61,13 +61,6 @@ test("every action the web app sends is a voice data source (a read) or a change
   for (const t of ["mode", "autopilot-run", "tab-new", "tab-close", "tab-rename", "tab-switch", "tab-move", "fork", "worktree", "space-commit", "rewind", "model-pin"]) expect(WRITES.includes(t) || served.has(`action:${t}`)).toBe(false);
 });
 
-test("voice can see a sign-in wait without its private link or device code", () => {
-  const login = { cli: "Codex", stage: "browser", signInUrl: "https://example.test/device", deviceCode: "ABCD-12345" };
-  expect(scrub({ question: { title: "Codex needs you to sign in", login } })).toEqual({
-    question: { title: "Codex needs you to sign in", login: { cli: "Codex", stage: "browser", signInUrl: "(hidden: a secret)", deviceCode: "(hidden: a secret)" } },
-  });
-});
-
 const now = Date.now();
 const snap: any = {
   host: "vm", name: "Shepherdr", user: "You",

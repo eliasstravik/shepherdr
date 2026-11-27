@@ -12,15 +12,14 @@ beforeEach(forgetAsks);
 
 test("asks an idle agent once, and not again while its answer comes", async () => {
   const { hub, sent } = hubWith("idle");
-  expect(await askRecap(hub, "t1", work, { auto: true, now: 1000 })).toEqual({ ok: true, asked: true });
+  expect(await askRecap(hub, "t1", work, { now: 1000 })).toEqual({ ok: true, asked: true });
   expect(sent).toEqual([RECAP_ASK]);
-  expect(await askRecap(hub, "t1", work, { auto: true, now: 2000 })).toEqual({ ok: true, asked: false, why: RECAP_WORDS.asked });
+  await expect(askRecap(hub, "t1", work, { now: 2000 })).rejects.toThrow(RECAP_WORDS.asked);
   expect(sent.length).toBe(1);
 });
 
 test("never asks one at work; the Recap action says why", async () => {
   const { hub, sent } = hubWith("working");
-  expect((await askRecap(hub, "t1", work, { auto: true })).asked).toBe(false);
   await expect(askRecap(hub, "t1", work)).rejects.toThrow(RECAP_WORDS.busy);
   expect(sent).toEqual([]);
 });

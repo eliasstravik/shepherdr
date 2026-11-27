@@ -1,8 +1,8 @@
 // The model menu and restart from the web (2.1's restart sheet): what an agent runs on now and what its CLIs offer
-// (core/agents.js, as the window's model menu); another model, level or Fast in place (core/live-switch.js, SHEP-181:
-// the CLI's own commands, the same conversation); and a restart for what can't change in place (another CLI or
-// permission mode): herdr-task switch for a task's agent, the Assistant's restart.sh for an Assistant, parked behind
-// its chat.
+// (core/agents.js, as the window's model menu); and a pick applied by restarting the agent with the CLI's documented
+// flags, resuming the same conversation: herdr-task switch for a task's agent, the Assistant's restart.sh for an
+// Assistant, parked behind its chat. Nothing is switched in place by typing into the agent's own menus, and a turn is
+// never interrupted for it (Nothing that risks a ban).
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
@@ -14,11 +14,9 @@ import * as AG from "../core/agents.js";
 import { chatLabel } from "../core/spaces.js";
 import type { AgentPick, Message } from "../web/shared/types.ts";
 import { kindOf } from "../core/chat-reader.js";
-import { inFront, restRecord } from "../core/send.js";
-import * as LS from "../core/live-switch.js";
+import { inFront } from "../core/send.js";
 import * as SC from "../core/settings.js";
 import { spawn } from "./spawn.ts";
-import { MACHINE_PROBE } from "./machines.ts";
 
 const { DEFAULTS, parseDefaults, current, menuFor, rowFor, argvOf, argvFor, sessionOf, NAMES, line, PICKS_FILE, parsePicks, pickKey, withPin, withRecent, speedOf, speedWordOf } = AG as any;
 /** a chat's speed as kept: false, true (Fast) or "ultrafast" */
@@ -124,22 +122,8 @@ export class Agents {
   }
 
   private async defaults(kind: string, machine: string | null) {
-    const [r, models] = await Promise.all([
-      exec(this.hub, ["sh", "-c", DEFAULTS, "defaults", kind], machine, 10).catch(() => null),
-      kind === "codex" ? this.modelCatalog(machine) : "",
-    ]);
-    return parseDefaults(kind, r?.stdout ?? "", models);
-  }
-
-  private catalogs = new Map<string, { at: number; models: Promise<string> }>();
-  private modelCatalog(machine: string | null) {
-    const key = machine ?? "";
-    const old = this.catalogs.get(key);
-    if (old && Date.now() - old.at < 60_000) return old.models;
-    const models = Promise.resolve().then(() => exec(this.hub, ["python3", "-c", readFileSync(MACHINE_PROBE, "utf8"), "--codex-models"], machine, 10))
-      .then((r) => r.code === 0 ? r.stdout.trim() : "", () => "");
-    this.catalogs.set(key, { at: Date.now(), models });
-    return models;
+    const r = await exec(this.hub, ["sh", "-c", DEFAULTS, "defaults", kind], machine, 10).catch(() => null);
+    return parseDefaults(kind, r?.stdout ?? "");
   }
 
   /** A CLI's own settings on a machine as last read (the chat's model button reads them on every change, as the
@@ -275,10 +259,10 @@ export class Agents {
     return { role: t.labels?.["herdr.task"] ? "task" : "coordinator", on, onKnown: true, onWords: line(c), want: on, clis, working: t.status?.state === "working" };
   }
 
-  /** Apply through the CLI's own controls, with one writer per chat and per agent config. */
+  /** Apply a pick by restarting the agent with its documented flags on the same conversation, one at a time per chat. */
   async change(addr: string, reader: any, pick: SettingsPick, chat = addr) {
     if (this.updating.has(chat)) throw new Error("This chat is already updating.");
-    this.progress(chat, "Applying…");
+    this.progress(chat, "Restarting…");
     try { return await this.apply(addr, reader, pick, chat); }
     finally {
       this.updating.delete(chat);
@@ -289,124 +273,38 @@ export class Agents {
   private async apply(addr: string, reader: any, pick: SettingsPick, chat: string) {
     const t: any = this.hub.terminals.get(addr);
     if (!t || t.state !== "live") throw new Error("That agent isn't running.");
+    if (t.status?.state === "working") throw new Error("It's busy with a turn. Switch once it's done, or stop it first.");
+    if (t.status?.state === "blocked") throw new Error("Answer the agent's open question, then update.");
     const machine = addr.includes("/") ? addr.split("/")[0] : null;
     const kind = kindOf(t) ?? reader?.kind ?? "claude";
     const dflt = await this.defaults(kind, machine);
-    const running = () => {
-      let meta = this.meta(addr, t, reader?.conv?.meta) ?? {};
-      if (t.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
-      return current(kind, argvOf(t), meta, dflt);
-    };
-    const prev = running(), from = pickOf(kind, prev);
-    const to: AgentPick = { agent: pick.kind, model: pick.kind === kind && pick.model === prev.model ? from.model : pick.model ?? null,
+    let meta = this.meta(addr, t, reader?.conv?.meta) ?? {};
+    if (t.created_ms && meta.at && meta.at < t.created_ms) meta = { used: meta.used, window: meta.window };
+    const from = pickOf(kind, current(kind, argvOf(t), meta, dflt));
+    const to: AgentPick = { agent: pick.kind, model: pick.kind === kind && pick.model === from.model ? from.model : pick.model ?? null,
       effort: pick.effort ?? null, fast: speedOf(pick.speed), perm: pick.perm ?? from.perm };
-    const inPlace = LS.liveOK(from, to);
-    if (inPlace && !Object.keys(LS.liveChanges(from, to)).length) return { current: from };
-    let names = Object.fromEntries(menuFor(kind, dflt, from.model).models.map((m: any) => [m.id, m.name]));
-    const lock = [machine ?? "", kind].join("|");
-    if (this.applying.has(lock)) throw new Error("Another chat is updating these agent settings. Try again in a moment.");
-    this.applying.add(lock);
-    let paused = false;
-    let actual = from;
+    const same = (a: AgentPick, b: AgentPick) => a.agent === b.agent && (a.model ?? "") === (b.model ?? "") && (a.effort ?? "") === (b.effort ?? "")
+      && (a.fast ?? false) === (b.fast ?? false) && (a.perm ?? "") === (b.perm ?? "");
+    if (same(from, to)) return { current: from };
+    const nextDefault = pick.kind === kind ? dflt : await this.defaults(pick.kind, machine);
+    const names = Object.fromEntries([...menuFor(kind, dflt, from.model).models, ...menuFor(pick.kind, nextDefault, to.model).models].map((m: any) => [m.id, m.name]));
     let terminal: string | undefined, error: string | undefined;
-    let reportKnown = true;
-    const hc = async (args: string[]) => {
-      const r = await run([process.env.SHEPHERDR_HC || "hc", ...args]);
-      if (r.code !== 0) throw new Error("The agent couldn't be reached.");
-      return r.out;
-    };
-    try {
-      const get = async (where: string) => restRecord(JSON.parse(await hc(["get", where, "--json"])));
-      const screen = (where: string) => hc(["read", where, "--lines", "300"]);
-      const status = await get(addr);
-      if (status.state !== "live" || inFront(status) !== "agent") throw new Error("That agent isn't running.");
-      if (status.status?.state === "blocked") throw new Error("Answer the agent's open question, then update.");
-      const ioFor = (where: string, agent: string) => {
-        const keys = async (...keys: string[]) => { await hc(["keys", where, ...keys]); };
-        return {
-          send: async (text: string) => {
-            // Local keyboard input runs slash commands during a turn. Message delivery can steer or queue.
-            if (!LS.emptyPrompt(agent, await screen(where))) throw new Error("Clear the draft or close the open menu in the agent's terminal, then update.");
-            await keys(...[...text].map((key) => key === " " ? "space" : key));
-            await keys("enter");
-          },
-          keys,
-          screen: () => screen(where),
-          sleep: (ms: number) => Bun.sleep(ms),
-        };
-      };
-      // Model, effort and speed work during turns. Restart only when the CLI or a Claude launch preset changes.
-      if (!inPlace) {
-        if (!LS.emptyPrompt(kind, await screen(addr))) throw new Error("Clear the draft or close the open menu in the agent's terminal, then update.");
-        if (status.status?.state === "working") {
-          this.progress(chat, "Pausing to apply…");
-          const result = JSON.parse(await hc(["interrupt", addr, "--json", "--timeout", "10"]));
-          paused = result.outcome === "stopped";
-          const still = await get(addr);
-          if (still.status?.state === "working" || still.status?.state === "blocked")
-            throw new Error("The agent couldn't pause. Try again when its turn ends.");
-        }
-        this.progress(chat, "Restarting…");
-        terminal = await this.restart(addr, reader, pick);
-        reportKnown = false;
-        const nextDefault = pick.kind === kind ? dflt : await this.defaults(pick.kind, machine);
-        names = Object.fromEntries(menuFor(pick.kind, nextDefault, to.model).models.map((m: any) => [m.id, m.name]));
-        for (let i = 0; i < 40; i++) {
-          const next = await get(terminal);
-          if (next.state !== "live") throw new Error("The agent stopped during restart.");
-          const report = LS.restartReport(pick.kind, await screen(terminal), names);
-          if (report?.model) {
-            if (pick.kind === "codex") report.perm = await LS.codexPermission(ioFor(terminal, "codex"));
-            this.remember(terminal, next, report);
-            actual = pickOf(pick.kind, current(pick.kind, argvOf(next), report, nextDefault));
-            reportKnown = true;
-            if (!report.perm) error = "The agent restarted, but its permissions couldn't be confirmed.";
-            else if ((to.model && actual.model !== to.model) || (to.effort && actual.effort !== to.effort) || actual.fast !== to.fast || (pick.perm && actual.perm !== pick.perm))
-              error = "The agent restarted with different settings.";
-            break;
-          }
-          await Bun.sleep(250);
-        }
-        if (!reportKnown) throw new Error("The agent restarted, but its settings couldn't be read yet.");
-      } else {
-        const configEnv = kind === "claude" ? "CLAUDE_CONFIG_DIR" : "CODEX_HOME";
-        const own = status.foreground?.pid ? await sh(this.hub,
-          'if [ -r "/proc/$1/environ" ]; then tr "\\000" "\\n" < "/proc/$1/environ"; elif [ ! -d /proc/self ]; then ps -wwE -o command= -p "$1" | tr " " "\\n"; fi | sed -n "s/^$2=//p" | head -n 1',
-          ["config-dir", String(status.foreground.pid), configEnv], machine).catch(() => null) : null;
-        const dir = own?.stdout.trim();
-        const configPath = (rel: string) => dir?.startsWith("/") ? dir + "/" + rel.split("/").at(-1) : rel;
-        const io = {
-          ...ioFor(addr, kind),
-          readFile: async (rel: string) => {
-            const r = await sh(this.hub, 'case "$1" in /*) f=$1;; *) f=$HOME/$1;; esac; if [ -e "$f" ]; then cat "$f"; fi', ["read", configPath(rel)], machine);
-            if (r.code !== 0) throw new Error("No file");
-            return r.stdout;
-          },
-          writeFile: async (rel: string, text: string) => {
-            const r = await sh(this.hub, 'case "$1" in /*) f=$1;; *) f=$HOME/$1;; esac; printf %s "$2" > "$f"', ["write", configPath(rel), text], machine);
-            if (r.code !== 0) throw new Error("The agent's default settings couldn't be restored.");
-          },
-        };
-        await LS.switchLive(io, kind, from, to, { names, confirmed: (report: AgentReport) => this.remember(addr, t, report) });
-        this.known.delete(lock);
-        this.used(pick);
-      }
-    } catch (e) {
-      error = (e as Error).message;
-    } finally {
-      this.applying.delete(lock);
-    }
-    if (inPlace) actual = pickOf(kind, running());
-    const changed = reportKnown ? changesOf(from, actual, names) : "";
+    try { terminal = await this.restart(addr, reader, pick); }
+    catch (e) { error = (e as Error).message; }
+    // what it was started with: the CLI's own flags say so (its log confirms it on its next turn)
+    const actual = error ? from : to;
+    const changed = error ? "" : changesOf(from, actual, names);
     if (changed) this.recordEvent(chat, changed);
-    if (error) this.recordEvent(chat, (changed ? "Update partly applied. " : "Couldn't update settings. ") + error);
-    return { ...(reportKnown ? { current: actual } : {}), ...(error ? { error } : {}), ...(paused ? { paused } : {}), ...(terminal ? { terminal } : {}) };
+    if (error) this.recordEvent(chat, "Couldn't update settings. " + error);
+    return { current: actual, ...(error ? { error } : {}), ...(terminal ? { terminal } : {}) };
   }
 
   /** Restarts it on the picked CLI, model, effort and speed; resolves with the new agent's address. */
   async restart(addr: string, reader: any, pick: { kind: string; model?: string; effort?: string; speed?: string; perm?: string }) {
     const t: any = this.hub.terminals.get(addr);
     if (!t) throw new Error("That agent isn't here any more.");
+    // a restart mid-turn would cut it off: the pick waits until the turn is done (it used to switch in place then)
+    if (t.status?.state === "working") throw new Error("It's busy with a turn. Switch once it's done, or stop it first.");
     // a plain shell in front: its agent exited (SHEP-324), so the shell says nothing of how it ran
     const fg = inFront(t) === "shell" ? null : t.foreground;
     const kind = (fg ? kindOf(t) : null) ?? reader?.kind ?? kindOf(t) ?? "claude";
