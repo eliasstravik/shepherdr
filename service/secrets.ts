@@ -167,6 +167,12 @@ export class Secrets {
     } catch { return []; }
   }
 
+  /** The masked sign-in card keeps Codex's key for its machine. No chat asks are closed or notified. */
+  async keepLoginKey(level: string, value: string) {
+    const r = await run(["set", "CODEX_LOGIN_API_KEY", ...scope(level).args], value);
+    if (r.code !== 0) throw new Error("The key could not be saved in Secrets.");
+  }
+
   /** Keeps a value (or removes it: null), then tells each agent that asked for it there, by name. */
   async keep(level: string, name: string, value: string | null, card?: { address: string }) {
     if (!NAME.test(name)) throw new Error("Name it like an environment variable: GITHUB_TOKEN.");

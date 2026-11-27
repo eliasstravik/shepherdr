@@ -56,7 +56,7 @@ export const NOT_DATA: Record<string, string> = {
  *  sends (web/src, web/plugins) or the Action type lists, and the service answers. */
 export const WRITES = [
   // chats: a message, a reaction, an answer to a question or permission card, a secret given, Stop, Restart, Recap
-  "send", "held-now", "held-drop", "react", "answer", "secret", "secret-saved", "stop", "steer", "stop-job", "restart", "agent-update", "agent-restart", "assistant-close", "read", "keys", "text", "model", "effort", "call", "recap",
+  "send", "held-now", "held-drop", "react", "answer", "secret", "secret-saved", "sign-in", "stop", "steer", "stop-job", "restart", "agent-update", "agent-restart", "assistant-close", "read", "keys", "text", "model", "effort", "call", "recap",
   // tasks: the review card (Mark as done [and merge]), Start task, the row's menu
   "accept", "close", "delete", "archive", "reopen", "task-start", "task-resume", "task-rename", "task-move", "schedule", "pause", "pin",
   // schedules: Run now, Pause, Resume, Edit
@@ -74,7 +74,7 @@ export const WRITES = [
 
 // ---- keeping secrets out ------------------------------------------------------------------
 
-const SECRET_KEY = /(pass(word|wd|phrase)?|token|secret_?value|api_?key|apikey|private_?key|credential|cookie|authorization|^auth$|endpoint|p256dh)$/i;
+const SECRET_KEY = /(pass(word|wd|phrase)?|token|secret_?value|api_?key|apikey|private_?key|credential|cookie|authorization|^auth$|endpoint|p256dh|signInUrl|deviceCode)$/i;
 const SECRET_TEXT = /^(sk-|sk_|pk_live|rk_live|ghp_|gho_|ghs_|github_pat_|xox[abprs]-|AKIA|AIza|eyJ[\w-]{10,}\.)[\w.-]{8,}|-----BEGIN [A-Z ]*PRIVATE KEY/;
 const HIDDEN = "(hidden: a secret)";
 /** a key whose value is never read out */
