@@ -1,7 +1,7 @@
 // Shepherdr's service worker: shows push alerts, keeps the app icon's count and opens the app on the card an alert is
 // about. With the app on screen, an alert shows nothing: the server already skips this device then, and this catches
 // the rest. One alert per task: a task's newer alert takes its old one's place (its tag), and alerts about what no
-// longer waits on you go with the next one. Where alerts have buttons (Android and so a Wear OS watch, desktop Chrome),
+// longer waits on you is replaced quietly. Where alerts have buttons (Android and so a Wear OS watch, desktop Chrome),
 // one button does the thing from there (SHEP-243): a card's first choice answers it, Accept accepts a Ready task as the Tasks panel
 // does, Reply sends what was typed into the notification (else it opens the chat). Each says on the notification what
 // came of it ("Accepted ✓", "Already handled"); an old alert's button can't do harm: an answer goes to that one card
@@ -20,7 +20,7 @@ const badge = (n) => {
 const tidy = (open) =>
   Array.isArray(open)
     ? self.registration.getNotifications().then((list) => {
-        for (const n of list) if (n.data && n.data.waits && !open.includes(n.tag)) n.close()
+        for (const n of list) if (n.data?.resolved || (n.data?.waits && !open.includes(n.tag))) n.close()
       })
     : Promise.resolve()
 
@@ -87,10 +87,12 @@ self.addEventListener('push', (e) => {
           body: a.body,
           tag,
           // a task's newer alert buzzes again, though it takes the old one's place
-          renotify: !!tag,
+          renotify: !!tag && !a.resolved,
+          // Web Push requires a visible notification, including when the request went away.
+          ...(a.resolved ? { silent: true } : {}),
           icon: 'icon-192.png?v=2',
           badge: 'badge-96.png?v=2',
-          data: { url: a.url || './', waits: !!a.waits, answer: a.answer, accept: a.accept, reply: a.reply, restart: a.restart },
+          data: { url: a.url || './', waits: !!a.waits, resolved: !!a.resolved, answer: a.answer, accept: a.accept, reply: a.reply, restart: a.restart },
         }
         const actions = fit(a.actions)
         if (actions.length) options.actions = actions

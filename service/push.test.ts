@@ -1,6 +1,6 @@
 // @ts-nocheck: WebCrypto buffer types are too narrow for a test written byte by byte
 import { expect, test } from "bun:test";
-import { encrypt, alertsOf, agentAlerts } from "./push.ts";
+import { encrypt, alertsOf, agentAlerts, pushChanges, wants } from "./push.ts";
 
 // decrypting as the browser would (RFC 8291) gives back the alert
 test("an alert encrypted for a subscription decrypts with its keys", async () => {
@@ -50,6 +50,33 @@ test("an agent's own alert, from its label", () => {
   const terms = [{ address: "t1", state: "live", labels: { "herdr.role": "coordinator", "herdr.alert": JSON.stringify({ id: "x", at: 5, title: "Can't wait", body: "Look now" }) } }];
   const out = agentAlerts(terms, snap, (a) => (a === "t1" ? "sp1" : null), "/nonexistent");
   expect(out).toEqual([{ id: "x", at: 5, title: "#tt-repo · Can't wait", what: "Can't wait", body: "Look now", chat: "sp1", place: "sp1", notify: true }]);
+});
+
+test("inferred task waits stay quiet while requests for the person still alert", () => {
+  const need = { id: "attention", chat: "SHOP-1/worker", task: "SHOP-1", place: "sp1" };
+  const snap = { tasks: [{ id: "SHOP-1", name: "Fix login", status: "need" }], places: [], settings: [] };
+  expect(alertsOf({ ...snap, needs: [{ ...need, assistantFirst: true }] }).size).toBe(0);
+  const permission = { ...need, id: "q1", question: { kind: "Question", title: "Allow this command?" } };
+  const secret = { ...need, id: "secret", secret: { name: "API_KEY" } };
+  const hands = { ...need, id: "hands", hands: true, text: "Sign in to the shop" };
+  expect([...alertsOf({ ...snap, needs: [permission, secret, hands] }).keys()]).toEqual([
+    "need:SHOP-1/worker:q1", "need:SHOP-1/worker:secret", "need:SHOP-1/worker:hands",
+  ]);
+});
+
+test("a cleared need gets a quiet replacement even when there is no new alert", () => {
+  const need = { id: "q1", chat: "SHOP-1/worker", task: "SHOP-1", place: "sp1", question: { kind: "Question", title: "Deploy now?" } };
+  const tasks = [{ id: "SHOP-1", name: "Fix login", status: "need", place: "sp1" }];
+  const before = alertsOf({ needs: [need], tasks });
+  expect(pushChanges(before, before, 1)).toEqual([]);
+  expect(pushChanges(before, new Map(), 0)).toEqual([{
+    title: "No longer waiting", body: "Fix login", tag: "SHOP-1", place: "sp1", topic: "needs",
+    url: "./?place=sp1&task=SHOP-1", waits: true, resolved: true, badge: 0, open: [], replacedBy: [],
+  }]);
+  const [resolved, ready] = pushChanges(before, alertsOf({ tasks: [{ ...tasks[0], status: "ready" }] }), 1);
+  expect(resolved).toMatchObject({ resolved: true, replacedBy: [{ topic: "ready", place: "sp1" }] });
+  expect(wants({ topics: ["needs"] }, ready)).toBe(false);
+  expect(ready).toMatchObject({ topic: "ready", tag: "SHOP-1" });
 });
 
 test("SHEP-255: an alert carries the task it is about: its chat's, or a task's helper's by its herdr.task label; a helper of no task's none", () => {

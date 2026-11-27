@@ -107,3 +107,16 @@ test("Up next: it waits for the tasks not done yet, the first by title and the r
   expect(by("APP-11")).toMatchObject({ afterTitle: "Old one" });
   expect(by("APP-11").afterMore).toBeUndefined();
 });
+
+test("a browser sign-in request takes over the task's inferred wait until it is settled", async () => {
+  const { enrich } = await import("./next.ts");
+  const task = { id: "APP-1", place: "sp1", status: "need", at: 500 };
+  const inferred = { id: "attention", task: task.id, place: task.place, chat: "APP-1/worker", at: 500, assistantFirst: true as const };
+  const snap: any = { places: [], tasks: [task], needs: [inferred], machines: [] };
+  const hands: { what: string; settled?: string } = { what: "Sign in to the shop" };
+  const f: any = { spaces: [], rows: [{ ref: task.id }], archived: [], asked: () => null, reportOf: () => null,
+    config: { plans: [], all: { agents: { Tasks: { agent: "claude" } } } }, screens: { "task:APP-1": { hands } } };
+  expect(enrich(snap, f).needs).toMatchObject([{ id: "hands", hands: true, text: hands.what }]);
+  hands.settled = "done";
+  expect(enrich(snap, f).needs).toEqual([inferred]);
+});

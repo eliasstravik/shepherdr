@@ -1533,6 +1533,30 @@ class OwnBackgroundWork(unittest.TestCase):
                                                                        "content": "Monitor started (task m1, expires in 15m)"}]}})
         self.assertEqual(self.status(), ("working", None, None))
 
+    def test_monitor_turn_keeps_background_work_and_the_status_line(self):
+        from herdr_task.output import view
+
+        self.background(-300_000)
+        self.say(-40_000, "The evaluation is running.")
+        self.task["progress"] = {"text": "Running the evaluation", "set": self.clock - 35_000}
+        self.stamp(-30_000, {"type": "user", "origin": {"kind": "task-notification"},
+                             "message": {"content": "<task-notification>Monitor event</task-notification>"}})
+        self.say(-29_400, "<hc no-reply/>")
+        live = [dict(self.idle[0], agent="claude", status={"state": "working"})]
+        store = Store([])
+        with self.mock.patch("herdr_task.output.live_helpers", return_value=[]):
+            self.assertTrue(view(store, self.task, live)["own_work"])
+        self.assertEqual(self.agents.own_line(self.task, "t1"), "Running the evaluation")
+        self.assertEqual(self.agents.last_words(self.task, "t1"), "The evaluation is running.")
+        self.assertEqual(self.status(), ("working", None, None))
+        self.stamp(-1_000, {"type": "user", "message": {"content": [
+            {"type": "text", "text": "<task-notification><task-id>b1</task-id><status>completed</status></task-notification>"},
+        ]}})
+        self.assertFalse(self.agents.background_jobs(self.log)[0])
+        self.assertEqual(self.agents.own_line(self.task, "t1"), "Running the evaluation")
+        with self.mock.patch("herdr_task.output.live_helpers", return_value=[]):
+            self.assertFalse(view(store, self.task, live)["own_work"])
+
     def test_a_plain_question_needs_you_once_nothing_runs(self):
         """SHEP-148: a plain question with its own work still running is no ask yet (asking for real
         is its question tool or a permission: blocked); once nothing runs, it is."""
@@ -8538,7 +8562,7 @@ class AcceptCommandNews(unittest.TestCase):
         import herdr_task.assistant_settings as assistant_settings
         import herdr_task.news as news
         import herdr_task.reactions as reactions
-        self.news = news
+        self.news, self.mock = news, mock
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, True)
         self.store = Store([{"id": 4, "title": "Test databases", "state": "done", "space": "sp1", "merged": True}])
@@ -8567,6 +8591,23 @@ class AcceptCommandNews(unittest.TestCase):
         self.assertTrue(self.task["after_accept"]["told"])
         self.news.news_pass({})
         self.assertEqual(len(self.sent), 1)
+
+    def test_working_again_after_a_question_or_waited_reply(self):
+        for need in ("asks", "reply"):
+            with self.subTest(need=need):
+                self.sent.clear()
+                self.task["state"] = "running"
+                current = {"status": "needs", "needs": need, "why": "Which branch?"}
+                with self.mock.patch.object(self.news, "live_agents", return_value=[]), \
+                     self.mock.patch.object(self.news, "news_state", side_effect=lambda *a: (
+                         current.copy(), "needs-you" if current["needs"] else None, None)):
+                    self.news.news_pass({})
+                    current.update(status="working", needs=None, why=None)
+                    self.news.news_pass({})
+                    self.news.news_pass({})
+                resumed = [line for _, line in self.sent if 'event="working-again"' in line]
+                self.assertEqual(len(resumed), 1)
+                self.assertIn("its earlier question or wait has cleared", resumed[0])
 
 
 class TildeNewsGoesToEverything(AcceptCommandNews):

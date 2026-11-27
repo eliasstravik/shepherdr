@@ -33,9 +33,10 @@ def view(s, task, live=None):
         v["why"] = own_line(task) or (OUT_OF_ROUNDS if task.get("review_out") else None) or last_words(task)
     # Quiet but on its own background work (SHEP-53), or said ready but not at rest yet (SHEP-148):
     # Working; kept on the task for the Tasks panel (core/tasks.js place()).
+    # A tick during a Monitor turn still records running jobs for the quiet gap after it.
     v["own_work"] = (v["status"] == "working" and task["state"] in ("running", "ready") and bool(running)
-                     and all(status_word(k) in ("idle", "done") for k in running)
-                     and own_work(task, running, ready=task["state"] == "ready"))
+                     and own_work(task, running, ready=task["state"] == "ready",
+                                  background_only=any(status_word(k) not in ("idle", "done") for k in running)))
     if known:
         progress_clock(s, task, v["status"])
     v["report"] = report_of(task, v["status"])

@@ -17,6 +17,7 @@ type Out = {
   /** #1545: Restart all, for the Assistants a restart of their machine left stopped (that alert's id) */
   restart?: { alert: string };
 };
+type Recipient = Pick<Out, "topic" | "place">;
 
 /**
  * What each push alert says, as the window's toasts (core/toasts.js): an agent that needs you, "Fix login · Needs you" (a task by its title, SHEP-322) or
@@ -35,13 +36,14 @@ export function needAlert(snap: any, n: any): Out {
   // its card's choices as buttons; a question with none a button may send opens the app; no card: a reply
   const buttons = n.question ? choiceButtons(n.question) : [];
   const acts = n.question ? (buttons.length ? { actions: buttons, answer: { chat: n.chat, question: n.question.id } } : {})
-    : n.secret ? {} : { actions: [REPLY], reply: { chat: n.chat, ...(n.reply ? { to: n.reply } : {}) } };
+    : n.secret || n.hands ? {} : { actions: [REPLY], reply: { chat: n.chat, ...(n.reply ? { to: n.reply } : {}) } };
   return { title: watchTitle(T.toastTitle(who, n.question?.queued ? "Asked a question" : T.NEEDS_YOU)), body: excerpt(T.needReason(n), WATCH_BODY), tag: n.task ?? n.chat, topic: "needs", place: n.place, waits: true, url: go, ...acts };
 }
 
 export function alertsOf(snap: any, said: (chat: string) => string | undefined = () => undefined): Map<string, Out> {
   const now = new Map<string, Out>();
   for (const n of snap.needs ?? []) {
+    if (n.assistantFirst) continue;
     if (snap.settings && !notifies(snap, { go: { place: n.place }, task: n.task ? true : undefined })) continue;
     now.set(needKey(n), needAlert(snap, n));
   }
@@ -65,11 +67,31 @@ export function alertsOf(snap: any, said: (chat: string) => string | undefined =
     now.set(`msg:${p.chat}:${last}`, { title: T.toastTitle(T.assistantWho(p.name), "New message"), body: said(p.chat) || "Tap to read it.", tag: `msg:${p.chat}`, topic: "assistant", place: p.id, url: alertUrl({ place: p.id }), actions: [REPLY], reply: { chat: p.chat } });
   }
   // an agent's own alert (herdr-task alert), as its toast: a task's always, an Assistant's by its space's Notify
-  for (const a of snap.alerts ?? []) if (a.notify) now.set(`alert:${a.id}`, { title: a.title, body: a.body, tag: `alert:${a.id}`, topic: "needs", ...(a.place ? { place: a.place, url: alertUrl({ place: a.place }) } : {}),
+  for (const a of snap.alerts ?? []) if (a.notify) now.set(`alert:${a.id}`, { title: a.title, body: a.body, tag: `alert:${a.id}`, topic: "needs", ...(a.place ? { place: a.place, url: alertUrl({ place: a.place, task: a.task }) } : {}),
     ...(a.restart ? { actions: [RESTART_ALL], restart: { alert: a.id } } : {}) });
   // short enough for a watch: its title on one line, its body in two
   for (const a of now.values()) { a.title = watchTitle(a.title); a.body = excerpt(a.body, WATCH_BODY); }
   return now;
+}
+
+export const waitingTags = (alerts: Map<string, Out>) => [...new Set([...alerts.values()].filter((a) => a.waits).map((a) => a.tag))];
+
+/** Tell devices about new alerts and replace one that stopped waiting, even with no new alert. */
+export function pushChanges(before: Map<string, Out>, now: Map<string, Out>, badge: number, open = waitingTags(now)) {
+  const added = [...now].filter(([k]) => !before.has(k)).map(([, a]) => ({ ...a, badge, open }));
+  // A Ready alert and a question share a task's tag, but devices can subscribe to one and mute the other.
+  const waitOf = (a: Out) => `${a.topic}:${a.tag}`;
+  const waiting = new Set([...now.values()].filter((a) => a.waits).map(waitOf));
+  const resolved = [];
+  for (const a of before.values()) {
+    if (!a.waits || a.topic !== "needs" || waiting.has(waitOf(a))) continue;
+    waiting.add(waitOf(a));
+    const replacedBy = added.filter((b) => b.tag === a.tag).map(({ topic, place }) => ({ topic, place }));
+    const { tag, topic, place, url } = a;
+    resolved.push({ title: "No longer waiting", body: a.title.split(" · ")[0], tag, topic, place, url,
+      waits: true, resolved: true, badge, open, replacedBy });
+  }
+  return [...resolved, ...added];
 }
 
 /**
@@ -173,6 +195,7 @@ export async function encrypt(payload: Uint8Array, p256dh: string, auth: string)
 
 export class Push {
   private subs: Sub[] = [];
+  private sending = new Map<string, Promise<number>>();
   private vapid: { publicKey: string; privateJwk: JsonWebKey } | null = null;
   /** endpoints of devices whose app is on screen now (their pages say so) */
   visible = new Set<string>();
@@ -252,7 +275,7 @@ export class Push {
   private async deliver(s: Sub, payload: Uint8Array) {
     try {
       const body = await encrypt(payload, s.keys.p256dh, s.keys.auth);
-      const r = await fetch(s.endpoint, { method: "POST", body, headers: {
+      const r = await fetch(s.endpoint, { method: "POST", body, signal: AbortSignal.timeout(10_000), headers: {
         "content-encoding": "aes128gcm", "content-type": "application/octet-stream", ttl: "86400", urgency: "high",
         authorization: `vapid t=${await this.jwt(new URL(s.endpoint).origin)}, k=${await this.key()}`,
       } });
@@ -263,12 +286,16 @@ export class Push {
 
   /** Sends an alert to every subscribed device whose app isn't on screen, whose phone app doesn't show it natively, and
    *  that wants it (its topic, its space). */
-  async send(alert: Record<string, unknown> & { topic?: string; place?: string }) {
+  async send({ replacedBy, ...alert }: Record<string, unknown> & { topic?: string; place?: string; replacedBy?: Recipient[] }) {
     const payload = enc(JSON.stringify(alert));
-    for (const s of [...this.subs]) {
-      if (this.visible.has(s.endpoint) || this.looking(s.node) || this.quiet(s.node) || !wants(s, alert)) continue;
-      await this.deliver(s, payload);
-    }
+    await Promise.all(this.subs.map(async (s) => {
+      if (this.visible.has(s.endpoint) || this.looking(s.node) || this.quiet(s.node) || !wants(s, alert) || replacedBy?.some((a) => wants(s, a))) return;
+      // A retraction must reach this device's push service after the alert it replaces.
+      const sent = (this.sending.get(s.endpoint) ?? Promise.resolve()).then(() => this.deliver(s, payload));
+      this.sending.set(s.endpoint, sent);
+      await sent;
+      if (this.sending.get(s.endpoint) === sent) this.sending.delete(s.endpoint);
+    }));
   }
 
   /** a test alert to one device, on screen or not: what to say of it */

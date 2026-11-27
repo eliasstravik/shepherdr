@@ -59,6 +59,36 @@ test("alerts go by each device's topics and muted spaces, never to one on screen
   expect(hits).toEqual(["dev2"]);
 });
 
+test("a resolution waits for that device's original push and skips devices getting its replacement", async () => {
+  const p = new Push(() => "https://example.test", file());
+  const [a, b] = [await fakeSub(1), await fakeSub(2)];
+  p.subscribe(a); p.subscribe(b);
+  p.choose(a.endpoint, { topics: ["needs"] });
+  const calls: string[] = [];
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  p.deliver = async ({ endpoint }) => {
+    calls.push(endpoint);
+    if (endpoint === a.endpoint && calls.filter((device) => device === a.endpoint).length === 1) {
+      started.resolve();
+      await release.promise;
+    }
+    return 201;
+  };
+  const first = p.send({ topic: "needs" });
+  await started.promise;
+  const cleared = p.send({ topic: "needs", resolved: true, replacedBy: [{ topic: "ready" }] });
+  try {
+    await Promise.resolve();
+    expect(calls.filter((device) => device === a.endpoint)).toHaveLength(1);
+  } finally {
+    release.resolve();
+    await Promise.all([first, cleared]);
+  }
+  expect(calls.filter((device) => device === a.endpoint)).toHaveLength(2);
+  expect(calls.filter((device) => device === b.endpoint)).toHaveLength(1);
+});
+
 test("turned off: it gets nothing more; on again it keeps its choice; one choice for all", async () => {
   const f = file();
   const p = new Push(() => "https://example.test", f);
