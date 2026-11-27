@@ -26,11 +26,15 @@ export function authNotice(cli: "claude" | "codex", text: string): SignInNeed | 
   return null;
 }
 
-/** The agent's screen: its own sign-in menu (Claude Code's login methods, Codex's welcome screen), or a notice. */
-export function signInScreen(cli: "claude" | "codex", text: string): SignInNeed | null {
+/** Claude Code's login methods or Codex's welcome screen. */
+export function signInMenu(cli: "claude" | "codex", text: string): SignInNeed | null {
   if (cli === "claude" && /select (?:a )?login method/i.test(text) && /Claude account|Anthropic Console/i.test(text)) return { cli: "Claude Code" };
   if (cli === "codex" && /Welcome to Codex|Choose how you want to use Codex/i.test(text) && /sign in with ChatGPT/i.test(text)) return { cli: "Codex" };
-  return authNotice(cli, text);
+  return null;
+}
+
+export function signInScreen(cli: "claude" | "codex", text: string): SignInNeed | null {
+  return signInMenu(cli, text) ?? authNotice(cli, text);
 }
 
 /** What the card says: the title, and what to run in the agent's own terminal. */

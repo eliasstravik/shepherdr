@@ -182,8 +182,9 @@ def task_status(task, live):
         return "needs", "stopped", error_words(live)
     if "blocked" in states:
         return "needs", "asks", REASONS["question"]
-    if trust_asked(live):
-        return "needs", "asks", REASONS["trust"]
+    startup = startup_asked(live)
+    if startup:
+        return "needs", "asks", startup[1]
     # Out of review rounds (ready refused, review_out): its agent was told to end its turn and wait for its
     # Assistant's review-more, so once it's quiet that is the Assistant's at once (#784). #1040: a problem it had
     # been on (a conflict it fixed by merging the base) kept it Working while its status line was fresh, and only
@@ -442,26 +443,40 @@ SUMMARY_MAX = 160
 REASONS = {"plan": "Plan to approve", "permission": "Asks permission", "question": "Question for you",
            "reply": "Waits for your reply", "signed_out": "Signed out", "trust": "Asks to trust this folder"}
 
-# Claude Code's folder-trust dialog (#755): shown before it reports any status, so to Herdr the
-# agent looked like it was starting, then Working, until it stalled. Read off its screen.
-TRUST = re.compile(r"Quick safety check|Do you trust the files in this folder|Yes, I trust this folder", re.I)
-_trust_seen = {}
+# These startup prompts are visible before the agent reports a status.
+CLAUDE_TRUST = re.compile(r"Quick safety check|Do you trust the files in this folder|Yes, I trust this folder", re.I)
+CODEX_TRUST = re.compile(r"Do you trust the contents of this directory|allow Codex to work in this folder", re.I)
+_startup_seen = {}
 
 
-def trust_asked(live):
-    """The address of a live agent showing Claude Code's folder-trust dialog, else None. Only an
-    agent that never reported a status nor took a turn: its screen is read at most every 5 s."""
+def startup_reason(cli, screen):
+    words = " ".join(screen.split())
+    if (CODEX_TRUST if cli == "codex" else CLAUDE_TRUST).search(words):
+        return REASONS["trust"]
+    if cli == "codex" and re.search(r"^\s*Hooks need review\s*$", screen, re.M) and "Review hooks" in words:
+        return "Hooks need review"
+    if cli == "codex" and "Choose how you want to use Codex" in words and "Sign in with ChatGPT" in words:
+        return "Codex needs you to sign in"
+    if cli == "claude" and re.search(r"select (?:a )?login method", words, re.I) and ("Claude account" in words or "Anthropic Console" in words):
+        return "Claude Code needs you to sign in"
+    return None
+
+
+def startup_asked(live):
+    """An agent's address and startup prompt, if it hasn't reported status or taken a turn.
+    Read its screen at most every 5 seconds."""
     from .base import run
     for k in live:
-        if status_word(k) or k.get("turn") or (k.get("labels") or {}).get("herdr.agent", "claude") != "claude":
+        cli = (k.get("labels") or {}).get("herdr.agent", "claude")
+        if status_word(k) or k.get("turn") or cli not in ("claude", "codex"):
             continue
         address = k.get("address")
-        seen = _trust_seen.get(address)
+        seen = _startup_seen.get(address)
         if not seen or now() - seen[0] > 5000:
-            screen = run(["hc", "read", address, "--lines", "40"]).stdout or ""
-            seen = _trust_seen[address] = (now(), bool(TRUST.search(screen)))
+            screen = run(["hc", "read", address]).stdout or ""
+            seen = _startup_seen[address] = (now(), startup_reason(cli, screen))
         if seen[1]:
-            return address
+            return address, seen[1]
     return None
 
 

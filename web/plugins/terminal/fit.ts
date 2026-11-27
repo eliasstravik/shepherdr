@@ -40,6 +40,15 @@ export function footTop(last: number, rowPx: number, boxHeight: number, maxTop: 
   return Math.min(maxTop, Math.max(0, Math.ceil((last + 1) * rowPx + 16 - boxHeight)))
 }
 
+/** Full-screen menus can park their hidden cursor below every visible line. */
+export function lastPaintedRow(rows: number, cursorRow: number, cursorVisible: boolean, text: (row: number) => string | undefined) {
+  const first = cursorVisible ? cursorRow : 0
+  for (let row = rows - 1; row > first; row--) {
+    if (text(row)?.trim()) return row
+  }
+  return first
+}
+
 /** after you scroll: does the terminal follow new output again? Only within a row of the foot, or below it */
 export function following(scrollTop: number, foot: number, rowPx: number) {
   return scrollTop >= foot - rowPx

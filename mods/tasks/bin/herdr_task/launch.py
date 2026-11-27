@@ -75,13 +75,20 @@ def own_rules(path):
     return rules
 
 
-def ask_command(path, sandboxed=False, auto_review=False):
-    """The PermissionRequest hook every task worker gets at launch (`herdr-task _allow`): its own
-    commands allowed, anything else (a permission, its question tool, a plan) on the chat's card.
-    sandboxed (Codex's): its proof and commits also run escalated, so they're its own too (#866).
-    auto_review (Codex's Approve for me, #1464): no card, Codex's own review answers the rest."""
-    return (f"{shlex.quote(sys.executable)} {shlex.quote(ENTRY)} _allow --command {shlex.quote(path)}"
-            + (" --sandboxed" if sandboxed else "") + (" --auto-review" if auto_review else ""))
+def ask_command(path):
+    """Claude's PermissionRequest hook: allow its own commands, ask on the card for the rest."""
+    return f"{shlex.quote(sys.executable)} {shlex.quote(ENTRY)} _allow --command {shlex.quote(path)}"
+
+
+def codex_ask_command():
+    """Keep the Codex declaration stable across upgrades and permission modes. Codex hashes
+    this command and its timeout. The installed executable's shebang chooses the interpreter."""
+    executable = shlex.quote(ENTRY)
+    return f"{executable} _allow --command {executable} --sandboxed"
+
+
+def codex_auto_review(argv):
+    return any(a in ("--approve-for-me", "--not-so-yolo") for a in argv)
 
 
 def artifact_path():
@@ -135,9 +142,7 @@ def own_argv(argv, folder=None):
             return out
         return out[:1] + ["--settings", json.dumps(merged)] + out[1:]
     if k == "codex":
-        # #1464: Approve for me. Codex runs this hook before its own review: a card here would wait on the person
-        # for what the review answers by itself, so the hook then only allows the worker's own commands.
-        hook = ask_command(path, sandboxed=True, auto_review=any(a in ("--approve-for-me", "--not-so-yolo") for a in out))
+        hook = codex_ask_command()
         # Codex gives the person the choice of trusting the folder and this hook.
         return out[:1] + ["-c", f"hooks.PermissionRequest=[{{hooks=[{{type=\"command\",command={json.dumps(hook)},timeout={ASK_TIMEOUT}}}]}}]"] + out[1:]
     return out
@@ -302,8 +307,8 @@ def ask_card(raw):
 def cmd_allow(args):
     """The PermissionRequest hook of a task worker (Claude Code and Codex, own_argv): allows this
     launch's own herdr-task commands; anything else goes to the chat's card (ask_card), and without
-    one's answer the agent asks the person in its terminal as usual. --auto-review (Codex's Approve
-    for me): no card, Codex's own review answers."""
+    one's answer the agent asks in its terminal. Approve for me is passed in the worker's
+    environment, with the old --auto-review flag still accepted for workers already running."""
     raw = sys.stdin.buffer.read(1 << 20)
     try:
         data = json.loads(raw or b"{}")
@@ -319,7 +324,8 @@ def cmd_allow(args):
     if own_command(args.command, cmd, getattr(args, "sandboxed", False)):
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"}}}))
         return
-    if getattr(args, "auto_review", False):
+    if getattr(args, "auto_review", False) or (
+            getattr(args, "sandboxed", False) and os.environ.get("HERDR_TASK_CODEX_AUTO_REVIEW") == "1"):
         # #1464: Codex's Approve for me. No decision: its automatic review answers (a safe step runs, a risky one is
         # refused and the worker is told to ask the person), never a card waiting on the person first.
         return
@@ -1048,6 +1054,7 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     apart from the task's agents. Returns its record."""
     key = s.key(task)
     cmd = list(resume or argv)
+    auto_review = agent_key(argv) == "codex" and codex_auto_review(cmd)
     if agent_key(argv) == "codex" and "--no-daemon" in cmd:
         # #1190: an old Codex exits 2 on --no-daemon in a shell nobody watches: say so here instead
         old = codex_too_old()
@@ -1071,8 +1078,9 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
     # HERDR_BROWSER_TASK and HERDR_BROWSER_SPACE: whose tab herdr-browser drives in which space's browser, and whose
     # desktop herdr-desktop uses (3.2; HERD-57), for it and its children. guard_argv: nothing it runs can take down
     # the live session it runs in (SHEP-323).
+    env = [*browser_env(key, bare(space)), f"HERDR_TASK_CODEX_AUTO_REVIEW={int(auto_review)}"]
     r = run(["hc", "run", "--bg", "--json", "--keep", "--cwd", folder_for(s, task), "--name", name,
-             *labels, *rel, "--", *low_priority(clean_env(["env", *browser_env(key, bare(space)), *in_shell(guard_argv(cmd))]), name)])
+             *labels, *rel, "--", *low_priority(clean_env(["env", *env, *in_shell(guard_argv(cmd))]), name)])
     try:
         out = json.loads(r.stdout)
     except ValueError:

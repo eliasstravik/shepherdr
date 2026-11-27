@@ -12,6 +12,7 @@ export function SignInCard({ question, login }: { question: Question; login: Sig
     <section className="card" data-card={question.id} data-ask="">
       <span className="t">{question.title}</span>
       <span>{login.how}</span>
+      {question.choices.map((c, i) => <span className="s" key={i}>{c.label}{c.description ? ` ${c.description}` : ''}</span>)}
       {has('terminal') && login.terminal && <div className="acts">
         <Btn kind="pri" onClick={() => {
           if (login.terminal!.startsWith('t:')) { setShowTerminal(!showTerminal); return }

@@ -161,7 +161,7 @@ export function place(list, task, { live = [], helpers = [], loaded = true, now 
   // Why it waits: herdr-task's words (its agent's own status line, its question or last words),
   // kept on the task by its scheduler (task.waits), else the standard reason.
   else if (states.includes("blocked")) need("asks", task.waits ?? REASONS.question);
-  // Claude Code's folder-trust dialog (#755): its agent reports no status while it shows; herdr-task's scheduler read
+  // Startup prompts such as folder trust: the agent reports no status while they show; herdr-task's scheduler read
   // it off the screen (task.trust_ask: that agent's address).
   else if (task.trust_ask && live.some((a) => a.address === task.trust_ask && !a.status)) need("asks", task.waits ?? REASONS.trust);
   // #995: its question or permission waits on the chat's card while its agent reads working (Codex, until its hook

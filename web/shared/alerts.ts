@@ -64,11 +64,12 @@ export const choicesLine = (q: Question) => q.choices.map((_, i) => short(q, i))
 // options with previews (SHEP-139): a tap picks one and shows its preview; Send answers
 export const sendsOnTap = (q: Question) => q.kind !== 'Plan' && !q.multi && q.noteRequiredFor === undefined && !q.evidence && !/^merge\b/i.test(q.title) && !q.id.startsWith('menu:') && !q.choices.some((c) => c.preview)
 
-/** the choices a notification button may send at once: not a pick of several, not one that needs a note, not a grant
- *  for good, never a terminal menu (its first choices all say yes, and an old alert's button would press keys in whatever menu is up then);
- *  two at most */
+/** A question that the person answers directly in the agent's terminal. */
+export const terminalQuestion = (q: Question) => /^(scr-|cq:|cqa:)/.test(q.id) || !!q.trust || !!q.press || !!q.login
+
+/** Up to two choices a notification button may send. */
 export function quickChoices(q: Question): { label: string; choice: number }[] {
-  if (q.multi || q.id.startsWith('menu:')) return []
+  if (terminalQuestion(q) || q.multi || q.id.startsWith('menu:')) return []
   return q.choices
     .map((c, i) => ({ label: short(q, i), choice: i }))
     .filter((c) => c.choice !== q.noteRequiredFor && c.choice !== q.always)
@@ -174,7 +175,7 @@ const quick = (q: Question) => q.kind !== 'Plan' && !(q.parts && q.parts.length 
 /** a question's button: its first choice a button may send (quickChoices' rule: not a pick of several, a note, a grant
  *  for good or a terminal menu, so "Yes" on a permission); the other choices are a tap on the alert away */
 export function choiceButtons(q: Question): PushAction[] {
-  if (!q?.choices?.length || !quick(q) || q.multi || String(q.id ?? '').startsWith('menu:')) return []
+  if (!q?.choices?.length || terminalQuestion(q) || !quick(q) || q.multi || String(q.id ?? '').startsWith('menu:')) return []
   const first = q.choices.findIndex((_, i) => i !== q.noteRequiredFor && i !== q.always)
   return first < 0 ? [] : [{ action: String(first), title: clip(short(q, first), ACTION_MAX) }]
 }

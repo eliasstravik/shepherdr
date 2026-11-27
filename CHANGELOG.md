@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Codex and Claude Code startup prompts show up under Needs you, with their choices and a link to the terminal.
+- The terminal keeps startup menus in view, even when the app is narrow and the agent hides its cursor.
+- Codex may ask you to review Shepherdr's permission hook once after updating. The hook now starts directly
+  from the installed Shepherdr command, and its definition stays the same when you switch permission modes.
+
 ## 3.2.21
 
 ### What you will notice first

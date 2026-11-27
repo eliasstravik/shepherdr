@@ -14,7 +14,7 @@ from .base import guard, hc_json, now, run, STORE
 from .settings import bare
 from .agents import (
     agent_log, agent_running, asking, detail, from_person, front, live_agents, log_tail, said, starting, status_word,
-    STATUSES, trust_asked,
+    STATUSES, startup_asked,
 )
 from .sessions import session_of
 from .launch import coordinator_in, core_spaces, everything_of, tilde_of
@@ -160,9 +160,9 @@ def news_pass(report, folder=None):
                     else:
                         t.pop("waits", None)
                     s.dirty = True
-                # Claude Code's folder-trust dialog (#755): Needs you in the Tasks panel too (its agent
-                # reports no status while it shows).
-                trust = trust_asked(live) if v.get("needs") == "asks" else None
+                # Keep the address in the existing trust_ask field while the startup prompt waits.
+                startup = startup_asked(live) if v.get("needs") == "asks" else None
+                trust = startup[0] if startup else None
                 if s.write and t.get("trust_ask") != trust:
                     if trust:
                         t["trust_ask"] = trust

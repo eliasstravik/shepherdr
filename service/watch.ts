@@ -1,9 +1,8 @@
 // What a chat watches on an agent besides its log, for the chats web pages have open (and an open Assistant chat's
 // task workers):
-// - a CLI stopped on its own start screen (trust, theme, sign in): a card with its choices (core/screens.js), pressed
-//   only on the screen it was drawn from.
+// - a CLI stopped on its own start screen (trust, theme, sign in): a card with its choices (core/screens.js).
 // - any agent still before its session (a task's, an Assistant, a reviewer) whose chat nobody has open too, so a
-//   folder-trust screen reaches Needs you, the phone and the watch (#1441: an agent sat 80 minutes at one).
+//   start screen reaches Needs you, the phone and the watch.
 // - a session that is gone ("No conversation found"): show a note and wait for the person to restart it.
 import { SignInWatch } from "./sign-in.ts";
 import type { Hub } from "./hub.ts";
@@ -11,7 +10,7 @@ import * as SC from "../core/screens.js";
 import * as CV from "../core/chat-view.js";
 import * as AG from "../core/agents.js";
 
-const { ScreenWatch, starting, cliOf, readScreen, screenText, SCREEN, trustOf } = SC as any;
+const { ScreenWatch, starting, cliOf, SCREEN } = SC as any;
 const { LOST } = CV as any;
 const { freshArgv } = AG as any;
 type Run = (args: string[]) => Promise<{ code: number; stdout: string; stderr?: string }>;
@@ -74,15 +73,18 @@ export class AgentWatch {
         if (seen.has(addr) || login.has(addr) || !(starting(k) || this.screens.open(addr))) continue;
         await this.screens.tick(addr, k).catch(() => undefined);
       }
+      for (const card of this.openCards()) {
+        if (!this.hub.terminals.has(card.addr)) await this.screens.tick(card.addr, undefined);
+      }
     } finally { this.busy = false; }
   }
 
-  /** The open folder-trust card of each agent waiting on one: [{ card, trust }]. */
-  trustCards(): { card: any; trust: { yes: number; no: number; folder: string | null } }[] {
-    const out: any[] = [];
+  /** The open start-screen card of each agent waiting on one. */
+  openCards(): any[] {
+    const out = [];
     for (const addr of this.own.keys()) {
-      const card = this.openCard(addr), trust = card ? trustOf(card) : null;
-      if (card && trust) out.push({ card, trust });
+      const card = this.openCard(addr);
+      if (card) out.push(card);
     }
     return out;
   }

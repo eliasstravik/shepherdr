@@ -534,20 +534,36 @@ export class Compat {
       needs.push({ id: a.id, chat: key, place, ...(task ? { task } : {}), at: a.at, secret: this.secretAsk(a) });
     }
 
-    // #1441: an agent at its CLI's folder-trust screen (a task's, its reviewer or helper, an Assistant): Needs you with
-    // its own card, wherever its chat is (service/watch.ts watches every agent before its session)
-    for (const { card } of (this as any).watch?.trustCards?.() ?? []) {
+    const startup = new Map<string, Need & { question: Question }>();
+    for (const card of (this as any).watch?.openCards?.() ?? []) {
       const w = this.trustWho(card.addr, chats);
       if (!w) continue;
       const place = w.task ? tasks.find((x) => x.id === w.task)?.place ?? "" : places.find((p) => p.chat === w.chat)?.id ?? "";
-      needs.push({ id: card.id, chat: w.chat, place, ...(w.task ? { task: w.task } : {}), at: card.opened, question: this.screenQuestion(card, w.chat) });
+      const question = this.screenQuestion(card, w.chat, undefined, chats.get(w.chat) === card.addr ? undefined : `t:${card.addr}`);
+      const need = { id: card.id, chat: w.chat, place, ...(w.task ? { task: w.task } : {}), at: card.opened, question };
+      needs.push(need);
+      if (w.task) startup.set(w.task, need);
     }
 
     for (const card of this.loginWatch()?.needs() ?? []) {
       const w = this.trustWho(card.addr, chats);
       if (!w) continue;
       const place = w.task ? tasks.find((x) => x.id === w.task)?.place ?? "" : places.find((p) => p.chat === w.chat)?.id ?? "";
-      needs.push({ id: card.id, chat: w.chat, place, ...(w.task ? { task: w.task } : {}), at: card.opened, question: this.loginQuestion(card, w.chat) });
+      const need = { id: card.id, chat: w.chat, place, ...(w.task ? { task: w.task } : {}), at: card.opened, question: this.loginQuestion(card, w.chat, undefined, chats.get(w.chat) ?? null) };
+      needs.push(need);
+      if (w.task) startup.set(w.task, need);
+    }
+
+    for (const task of tasks) {
+      const need = startup.get(task.id);
+      if (!need || task.archived || !["working", "ready", "needs"].includes(task.state ?? "")) continue;
+      task.state = "needs";
+      task.status = SECTION.needs;
+      task.sub = need.question.title;
+      task.needsAt = need.at;
+      delete task.left;
+      if (task.report) task.report = { msg: task.sub, progress: task.report.progress, paused: true };
+      if (task.agent) task.agent.status = "need";
     }
 
     // 'attention' is an agent waiting with no card: one whose chat has a card (its question, a secret) needs you once,
@@ -612,25 +628,24 @@ export class Compat {
   loginWatch(): SignInWatch | undefined { return (this as any).watch?.login; }
 
   /** An agent that needs signing in, as a card that says what to run in its own terminal (no taps sign in). */
-  private loginQuestion(card: SignInCard, key: string, by?: Question["by"]): Question {
+  private loginQuestion(card: SignInCard, key: string, by?: Question["by"], address = this.addrOf(key)): Question {
     const { title, how } = signInWords(card.need);
-    const terminal = this.addrOf(key) === card.addr ? key : `t:${card.addr}`;
-    return { id: card.id, to: key, title, kind: "Question", choices: [], ...(by ? { by } : {}),
-      login: { ...card.need, how, terminal } };
+    const terminal = address === card.addr ? key : `t:${card.addr}`;
+    return { id: card.id, to: key, title, kind: "Question", choices: card.choices ?? [], ...(by ? { by } : {}),
+      login: { ...card.need, how: card.choices ? "Choose how to sign in from its terminal." : how, terminal } };
   }
 
-  /** A CLI's start screen (core/screens.js card) as a card that presses a choice on a tap. A folder-trust screen
-   *  (#1441) is its own card in plain words: Trust this folder and start, or No (a task's worker: the task stops). */
-  screenQuestion(c: any, key: string, by?: { ref: string; title: string; chat: string }): Question {
+  /** Show what the CLI asks and open the exact terminal where the person can answer. */
+  screenQuestion(c: any, key: string, by?: Question["by"], terminalChat?: string): Question {
     const trust = trustOf(c);
+    const choices = (c.choices ?? []).map((x: any) => ({ label: x.label, ...(x.description ? { description: x.description } : {}) }));
+    const common = { id: c.id, kind: "Question" as const, to: key, press: true, choices, ...(by ? { by } : {}), ...(terminalChat ? { terminalChat } : {}) };
     if (trust) {
-      const w = this.trustWho(c.addr);
-      return { id: c.id, title: TRUST.title, kind: "Question", to: key, press: true, noNote: true,
-        trust: { cli: c.cli, ...(trust.folder ? { folder: trust.folder } : {}), waits: TRUST.waits(c.cli, trust.folder), allows: TRUST.allows },
-        choices: [{ label: TRUST.yes, short: TRUST.yesShort }, { label: TRUST.no(w?.worker), short: TRUST.noShort(w?.worker) }], ...(by ? { by } : {}) } as Question;
+      return { ...common, title: TRUST.title,
+        trust: { cli: c.cli, ...(trust.folder ? { folder: trust.folder } : {}), waits: TRUST.waits(c.cli, trust.folder), allows: TRUST.allows } };
     }
-    return { id: c.id, title: SCREEN.title(c.cli), kind: "Question", to: key, ...(c.words ? { screen: c.words } : {}), press: true,
-      choices: (c.choices ?? []).map((x: any) => ({ label: x.label, ...(x.description ? { description: x.description } : {}) })), ...(by ? { by } : {}) } as Question;
+    const hooks = c.cli === "Codex" && /^\s*Hooks need review\s*$/m.test(c.all);
+    return { ...common, title: hooks ? "Hooks need review" : SCREEN.title(c.cli), ...(c.words ? { screen: c.words } : {}) };
   }
 
   /** A followed conversation (core/chat-reader.js) as 2.1's Chat. A run of tool calls (3.0's tools row) is 2.1's turn
@@ -856,11 +871,11 @@ export class Compat {
       if (card) messages.push({ id: `card:${card.addr}:login`, who: "agent", at: card.opened, question: this.loginQuestion(card, by?.chat ?? key, by) });
     };
     if (addr) { screens(addr, null); signIn(addr); }
-    // its helpers' folder-trust screens (#1441: a reviewer that never started), on its own chat too
+    // A helper's start screen is also visible in its worker's chat.
     if (addr) for (const kid of subagentsOf((this as any).terminalsAll?.() ?? [], addr)) {
       signIn(kid.address);
       const c = watch?.openCard?.(kid.address);
-      if (c && trustOf(c)) messages.push({ id: `card:${c.id}`, who: "agent", at: c.opened, question: this.screenQuestion(c, key) });
+      if (c) messages.push({ id: `card:${c.id}`, who: "agent", at: c.opened, question: this.screenQuestion(c, key, undefined, `t:${kid.address}`) });
     }
     // an Assistant's chat: its tasks' workers' asks on their own cards, headed by their task (one per task, its oldest),
     // their secrets, their start screens, and how each closed
