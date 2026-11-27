@@ -72,7 +72,7 @@ import sys
 import tempfile
 import time
 
-VERSION = "3.2.21"
+VERSION = "3.2.22"
 HC_MIN = "0.1.17"
 
 APP, BIN, TPL, HERDR = ".config/herdr-app", ".local/bin", ".config/herdr-core/templates", ".herdr"
