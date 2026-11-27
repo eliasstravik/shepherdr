@@ -14,6 +14,19 @@ const CLAUDE_MODELS = [
   { id: "haiku", name: "Haiku 5.5", match: ["haiku", "claude-haiku-5-5"] },
 ];
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+// Codex's models as OpenAI publishes them (https://learn.chatgpt.com/docs/models and /docs/agent-configuration/speed,
+// read 2026-11-27). Shepherdr no longer asks Codex's App Server for its list: OpenAI says App Server sign-in was never
+// meant for commercial or hosted services. Codex itself decides what the account can use (its own /model).
+const CODEX_EFFORTS = ["low", "medium", "high", "xhigh"];
+const CODEX_MODELS = [
+  { id: "gpt-6.2-sol", label: "GPT-6.2 Sol", efforts: [...CODEX_EFFORTS, "max", "ultra"], fast: true, ultrafast: true },
+  { id: "gpt-6.2-astra", label: "GPT-6.2 Astra", efforts: [...CODEX_EFFORTS, "max", "ultra"], fast: true, ultrafast: true },
+  { id: "gpt-6.1-sol", label: "GPT-6.1 Sol", efforts: CODEX_EFFORTS, fast: true, ultrafast: true },
+  { id: "gpt-6.1-terra", label: "GPT-6.1 Terra", efforts: CODEX_EFFORTS, fast: true },
+  { id: "gpt-6-astra", label: "GPT-6 Astra", efforts: CODEX_EFFORTS, fast: true, ultrafast: true },
+  { id: "gpt-6-sol", label: "GPT-6 Sol", efforts: CODEX_EFFORTS, fast: true },
+  { id: "gpt-6-luna", label: "GPT-6 Luna", efforts: [...CODEX_EFFORTS, "max"], fast: true },
+];
 // Permission modes as each CLI has them (Claude: --permission-mode, or
 // --dangerously-skip-permissions for full access; Codex: its sandbox and approvals, and Approve for me: its own
 // automatic review answers what it would ask, #1464).
@@ -65,8 +78,8 @@ function overrides(argv) {
   return out;
 }
 
-// The agent's own settings on its machine: Claude's settings.json, Codex's config.toml and
-// model list. Read once per agent process.
+// The agent's own settings on its machine: Claude's settings.json and Codex's config.toml. Read once per agent
+// process.
 export const DEFAULTS = `
 if [ "$1" = claude ]; then
   f="$HOME/.claude/settings.json"
@@ -86,26 +99,13 @@ function parsePer(text) {
 }
 
 // The agent's own settings, from DEFAULTS' output on its machine.
-export function parseDefaults(kind, stdout, catalog = "") {
+export function parseDefaults(kind, stdout) {
   const out = {};
   for (const line of (stdout ?? "").split("\n")) {
     const t = line.indexOf("\t");
     if (t > 0) out[line.slice(0, t)] = line.slice(t + 1);
   }
-  let models = null;
-  if (kind === "codex") {
-    const listed = parsePer(catalog).data;
-    if (Array.isArray(listed)) {
-      models = listed.filter((m) => m?.model && !m.hidden).map((m) => ({
-        id: m.model, label: m.displayName || m.model,
-        efforts: (m.supportedReasoningEfforts ?? []).map((l) => l.reasoningEffort).filter(Boolean),
-        fast: (m.serviceTiers ?? []).some((t) => speedOf(t?.id) === true),
-        ultrafast: (m.serviceTiers ?? []).some((t) => t?.id === "ultrafast"),
-        defaultEffort: m.defaultReasoningEffort ?? null,
-      }));
-      if (!out.model) out.model = listed.find((m) => m.isDefault)?.model;
-    }
-  }
+  const models = kind === "codex" ? CODEX_MODELS.map((m) => ({ ...m, ultrafast: Boolean(m.ultrafast), defaultEffort: null })) : null;
   return kind === "claude"
     ? { model: out.model || null, effort: out.effort || null, fast: Boolean(out.fast), per: parsePer(out.per), mode: out.mode || null }
     : { model: out.model || null, effort: out.model_reasoning_effort || null, fast: speedOf(out.service_tier),
@@ -197,8 +197,8 @@ export function contextWords(c) {
 }
 
 // What the model picker (mods/chat-models, the web's restart.tsx) shows for one agent, as plain data:
-// { name, models: [{ id, name, efforts, defaultEffort, fast, ultrafast }], perms }: every model the CLI
-// offers (Codex App Server), or Claude Code’s published models, the picker searches them.
+// { name, models: [{ id, name, efforts, defaultEffort, fast, ultrafast }], perms }: every model Anthropic
+// and OpenAI publish (CLAUDE_MODELS, CODEX_MODELS), the picker searches them.
 // `dflt` is that agent's settings (defaults()); `current` its running model, kept in the list.
 export function menuFor(agent, dflt, current = null) {
   if (agent === "claude") {

@@ -3216,47 +3216,21 @@ class ReviewerLine(unittest.TestCase):
             self.assertEqual(ok, want, out)
             self.assertEqual(said, "" if want else out)
 
-    def model_catalog(self, *ids):
-        from unittest import mock
-        from herdr_task import machine
-        probe = mock.patch.object(machine, "codex_request",
-                                  return_value=("ok", {"data": [{"model": i} for i in ids]}))
-        probe.start()
-        self.addCleanup(probe.stop)
-
-    def test_a_model_codex_lacks_is_its_default(self):
-        """#948: Codex refused gpt-6.1-sol on a ChatGPT account, every round. The brief gives Codex's own default
-        instead, and says why."""
-        self.model_catalog("gpt-6-sol", "gpt-6-luna")
+    def test_a_codex_reviewer_model_is_passed_as_picked(self):
+        """Shepherdr no longer asks Codex's App Server which models an account has: a picked reviewer model goes to
+        Codex as it is, and Codex itself says if the account can't use it."""
+        from types import SimpleNamespace
+        args = lambda **k: SimpleNamespace(**{"agent": None, "model": None, "effort": None, "reviewer": None,
+                                              "reviewer_model": None, "reviewer_effort": None, "set": None, **k})
+        t = {}
+        self.settings.set_opts(t, args(reviewer_model="gpt-6.1-sol"))
+        self.assertEqual(t["reviewer_model"], "gpt-6.1-sol")
+        self.assertFalse(hasattr(self.settings, "codex_lacks"))
         with open(self.checks, "w") as f:
             json.dump({"machines": {"": {"claude": "ready", "codex": "ready"}}}, f)
         t = {"id": 1, "title": "x", "mode": "worktree", "reviewer": "codex", "reviewer_model": "gpt-6.1-sol"}
         r = next(x for x in self.settings.task_settings(Store([t]), t, argv=["codex"], live=True) if x["label"] == "Reviewer")
-        self.assertEqual(r["value"]["agent"], "codex")
-        self.assertIsNone(r["value"]["model"])
-        self.assertNotIn("-m gpt-6.1-sol", r["value"]["command"])
-        self.assertIn("Codex here doesn't offer gpt-6.1-sol", r["text"])
-        t["reviewer_model"] = "gpt-6-sol"
-        r = next(x for x in self.settings.task_settings(Store([t]), t, argv=["codex"], live=True) if x["label"] == "Reviewer")
-        self.assertIn("-m gpt-6-sol", r["value"]["command"])
-
-    def test_a_model_codex_lacks_is_refused_when_set(self):
-        """#948: caught when it is picked (add/edit --reviewer-model or --set reviewer.model), with what Codex offers."""
-        from types import SimpleNamespace
-        self.model_catalog("gpt-6-sol", "gpt-6-luna")
-        args = lambda **k: SimpleNamespace(**{"agent": None, "model": None, "effort": None, "reviewer": None,
-                                              "reviewer_model": None, "reviewer_effort": None, "set": None, **k})
-        with self.assertRaises(self.settings.Fail) as e:
-            self.settings.set_opts({}, args(reviewer_model="gpt-6.1-sol"))
-        self.assertIn("gpt-6-sol, gpt-6-luna", str(e.exception))
-        with self.assertRaises(self.settings.Fail):
-            self.settings.set_opts({}, args(set=["reviewer.model=gpt-6.1-sol"]))
-        t = {}
-        self.settings.set_opts(t, args(reviewer_model="gpt-6-sol"))
-        self.assertEqual(t["reviewer_model"], "gpt-6-sol")
-        # a Claude model, or a Claude reviewer, isn't Codex's to judge
-        self.settings.set_opts({}, args(reviewer_model="opus"))
-        self.settings.set_opts({}, args(reviewer="claude", reviewer_model="some-model"))
+        self.assertIn("-m gpt-6.1-sol", r["value"]["command"])
 
     def test_codex_reviewer_leaves_project_trust_to_the_person(self):
         import shlex

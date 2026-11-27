@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import * as AGall from "./agents.js";
-import { argvFor, current, extraFlags, forkArgv, FORK_LIVE, line, liveTaskAgent, menuFor, modelSections, parseDefaults, parsePicks, pickKey, resumeArgv, rowFor, withPin, withRecent, speedFor, speedOf, codexTier, speedName, speedWordOf } from "./agents.js";
+import { DEFAULTS, argvFor, current, extraFlags, forkArgv, FORK_LIVE, line, liveTaskAgent, menuFor, modelSections, parseDefaults, parsePicks, pickKey, resumeArgv, rowFor, withPin, withRecent, speedFor, speedOf, codexTier, speedName, speedWordOf } from "./agents.js";
 
 const codex = { models: Array.from({ length: 250 }, (_, i) => ({ id: `gpt-${i}`, label: `GPT ${i}`, efforts: ["low", "high"] })) };
 const menus = { claude: menuFor("claude", {}), codex: menuFor("codex", codex) };
@@ -52,40 +52,33 @@ test("a pinned or recent model typed by id stays on offer", () => {
 
 // SHEP-41: Fast was hidden (and stuck on) for a Codex whose config.toml set service_tier.
 test("every agent with a fast mode shows the Fast switch, and turning it off sticks", () => {
-  const catalog = JSON.stringify({ data: [{ model: "gpt-x", displayName: "GPT-X", supportedReasoningEfforts: [{ reasoningEffort: "high" }], serviceTiers: [{ id: "priority" }] },
-    { model: "gpt-slow", displayName: "GPT-Slow", serviceTiers: [] }] });
-  const dflt = parseDefaults("codex", `model\tgpt-x\nservice_tier\tfast\n`, catalog);
+  const dflt = parseDefaults("codex", `model\tgpt-6.1-terra\nservice_tier\tfast\n`);
   const codexMenu = menuFor("codex", dflt);
-  expect(codexMenu.models.find((m) => m.id === "gpt-x").fast).toBe(true);
-  expect(codexMenu.models.find((m) => m.id === "gpt-slow").fast).toBe(false);
+  expect(codexMenu.models.find((m) => m.id === "gpt-6.1-terra").fast).toBe(true);
+  expect(codexMenu.models.find((m) => m.id === "gpt-6.1-terra").ultrafast).toBeUndefined();
   expect(codexMenu.fastLocked).toBeUndefined();
   expect(menuFor("claude", {}).models.find((m) => m.id === "opus").fast).toBe(true);
   // off: said on the command line, so config.toml's fast loses, and the label reads it back
-  const off = argvFor({ agent: "codex", model: "gpt-x", effort: "high", fast: false }, { agent: "codex", argv: ["codex", "-c", 'service_tier="fast"'] }).argv;
+  const off = argvFor({ agent: "codex", model: "gpt-6.1-terra", effort: "high", fast: false }, { agent: "codex", argv: ["codex", "-c", 'service_tier="fast"'] }).argv;
   expect(off.filter((a) => a.startsWith("service_tier"))).toEqual(['service_tier="default"']);
   expect(current("codex", off, {}, dflt).fast).toBe(false);
-  expect(line(current("codex", off, {}, dflt))).toBe("Codex · GPT-X · High");
-  const on = argvFor({ agent: "codex", model: "gpt-x", fast: true }, { agent: "codex", argv: off }).argv;
+  expect(line(current("codex", off, {}, dflt))).toBe("Codex · GPT-6.1 Terra · High");
+  const on = argvFor({ agent: "codex", model: "gpt-6.1-terra", fast: true }, { agent: "codex", argv: off }).argv;
   expect(current("codex", on, {}, dflt).fast).toBe(true);
   const claudeOff = argvFor({ agent: "claude", model: "opus", fast: false }, { agent: "claude", argv: ["claude"] }).argv;
   expect(current("claude", claudeOff, {}, { fast: true }).fast).toBe(false);
 });
 
-test("only published Claude models and Codex App Server capabilities get faster tiers", () => {
+test("only published Claude and Codex models get faster tiers, and nothing asks Codex's App Server", () => {
   const claude = menuFor("claude", parseDefaults("claude", ""));
   expect(claude.models.filter((m) => m.fast).map((m) => m.id)).toEqual(["opus", "opus[1m]", "claude-fable-5-2"]);
-  const catalog = JSON.stringify({ data: [
-    { model: "only-ultra", serviceTiers: [{ id: "ultrafast" }], isDefault: true },
-    { model: "unknown", serviceTiers: [{ id: "other" }] },
-    { model: "hidden", hidden: true, serviceTiers: [{ id: "fast" }] },
-  ] });
-  const dflt = parseDefaults("codex", "", catalog);
-  expect(dflt.model).toBe("only-ultra");
-  const codex = menuFor("codex", dflt);
-  expect(codex.models).toHaveLength(2);
-  expect(codex.models[0]).toMatchObject({ fast: false, ultrafast: true });
-  expect(codex.models[1]).toMatchObject({ fast: false });
-  expect(parseDefaults("codex", 'models\t{"models":[{"slug":"old"}]}').models).toBeNull();
+  const dflt = parseDefaults("codex", "");
+  expect(dflt.model).toBeNull();
+  const menu = menuFor("codex", dflt);
+  expect(menu.models.map((m) => m.id)).toEqual(["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]);
+  expect(menu.models.filter((m) => m.ultrafast).map((m) => m.id)).toEqual(["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6-astra"]);
+  expect(menu.models.every((m) => m.fast)).toBe(true);
+  expect(DEFAULTS).not.toMatch(/app-server|model\/list|models_cache/);
 });
 
 // A terminal's own argv as herdr-task runs a worker: nice, sh -c, env and the person's `bash -ic` before the agent.
@@ -151,22 +144,19 @@ test("an Assistant that was itself resumed resumes the session it ran last, once
   expect(resumeArgv("claude", ["claude", "--resume", "old-id", "--model", "opus"], "new-id")).toEqual(["claude", "--model", "opus", "--resume", "new-id"]);
 });
 
-// SHEP-258: Codex's Ultrafast tier (service_tier="ultrafast"), beside Fast, on the models whose catalog offers it.
-test("Ultrafast shows where Codex's catalog offers it, and starts Codex on that tier", () => {
-  const catalog = JSON.stringify({ data: [
-    { model: "gpt-6.2-sol", displayName: "GPT-6.2-Sol", defaultReasoningEffort: "low", supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"].map((reasoningEffort) => ({ reasoningEffort })),
-      serviceTiers: [{ id: "priority", name: "Fast" }, { id: "ultrafast", name: "Ultrafast" }] },
-    { model: "gpt-6.2-astra", displayName: "GPT-6.2-Astra", defaultReasoningEffort: "low", supportedReasoningEfforts: [{ reasoningEffort: "low" }], serviceTiers: [{ id: "priority", name: "Fast" }] }] });
-  const dflt = parseDefaults("codex", `model\tgpt-6.2-sol\nservice_tier\tultrafast\n`, catalog);
+// SHEP-258: Codex's Ultrafast tier (service_tier="ultrafast"), beside Fast, on the models OpenAI publishes it for.
+test("Ultrafast shows where OpenAI publishes it, and starts Codex on that tier", () => {
+  const dflt = parseDefaults("codex", `model\tgpt-6.2-sol\nservice_tier\tultrafast\n`);
   expect(dflt.fast).toBe("ultrafast");
   const menu = menuFor("codex", dflt);
-  expect(menu.models.map((m) => [m.id, m.name, m.fast, !!m.ultrafast])).toEqual([["gpt-6.2-sol", "GPT-6.2-Sol", true, true], ["gpt-6.2-astra", "GPT-6.2-Astra", true, false]]);
+  expect(menu.models.slice(0, 4).map((m) => [m.id, m.name, m.fast, !!m.ultrafast])).toEqual([["gpt-6.2-sol", "GPT-6.2 Sol", true, true],
+    ["gpt-6.2-astra", "GPT-6.2 Astra", true, true], ["gpt-6.1-sol", "GPT-6.1 Sol", true, true], ["gpt-6.1-terra", "GPT-6.1 Terra", true, false]]);
   expect(menu.models[0].efforts).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
   // started on it: said on the command line, read back, and in words
   const { argv } = argvFor({ agent: "codex", model: "gpt-6.2-sol", effort: "high", fast: "ultrafast" }, { agent: "codex", argv: ["codex", "-c", 'service_tier="fast"'] });
   expect(argv).toEqual(["codex", "--no-daemon", "-m", "gpt-6.2-sol", "-c", 'model_reasoning_effort="high"', "-c", 'service_tier="ultrafast"']);
   expect(current("codex", argv, {}, dflt).fast).toBe("ultrafast");
-  expect(line(current("codex", argv, {}, dflt))).toBe("Codex · GPT-6.2-Sol · High · Ultrafast");
+  expect(line(current("codex", argv, {}, dflt))).toBe("Codex · GPT-6.2 Sol · High · Ultrafast");
   // the log's word wins, and Fast stays Fast
   expect(current("codex", argv, { speed: "fast" }, dflt).fast).toBe(true);
   expect(current("codex", ["codex"], { speed: "ultrafast" }, {}).fast).toBe("ultrafast");

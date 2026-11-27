@@ -1,4 +1,4 @@
-"""Machine health and plan limits, run on each machine through herdr-core.
+"""Machine health, and where each agent shows its plan usage, run on each machine through herdr-core.
 Also imported by herdr-task to hold queued work when the machine is busy."""
 
 import json
@@ -7,7 +7,6 @@ import re
 import shutil
 import subprocess
 import sys
-import threading
 import time
 
 HOME = os.path.expanduser("~")
@@ -149,8 +148,7 @@ def hold_reason(h, limits=None):
 
 
 # ---- plan limits --------------------------------------------------------------------------------
-# A read is {"state": "ok", "windows": [{name, used, resets_at?, resets?}], "plan"?, "account"?},
-# {"state": "signed-out" | "no-plan"} or {"state": "unknown", "why"}. A CLI not here is left out.
+# Each installed agent CLI reads {"state": "no-access", "why"}: where to see its usage. A CLI not here is left out.
 
 PATHS = [os.path.join(HOME, ".local", "bin"), "/usr/local/bin", "/opt/homebrew/bin",
          os.path.join(HOME, ".npm-global", "bin"), os.path.join(HOME, ".bun", "bin"),
@@ -161,122 +159,18 @@ def which(name):
     return shutil.which(name, path=os.pathsep.join([os.environ.get("PATH", ""), *PATHS]))
 
 
-CLAUDE_USAGE = "Plan usage is unavailable here. Open Claude Code and run /usage."
-
-
-def _window_name(minutes):
-    if minutes == 300:
-        return "5-hour"
-    if minutes == 10080:
-        return "Weekly"
-    if not isinstance(minutes, (int, float)) or minutes <= 0:
-        return "Limit"
-    if minutes % 1440 == 0:
-        return "%d-day" % (minutes // 1440)
-    if minutes % 60 == 0:
-        return "%d-hour" % (minutes // 60)
-    return "%d-minute" % minutes
-
-
-def parse_codex(result):
-    """account/rateLimits/read's answer. A limit of its own (one model's) says so before its name."""
-    result = result or {}
-    snaps = list((result.get("rateLimitsByLimitId") or {}).values())
-    if not snaps and result.get("rateLimits"):
-        snaps = [result["rateLimits"]]
-    snaps.sort(key=lambda s: s.get("limitId") != "codex")
-    windows = []
-    for s in snaps:
-        for w in (s.get("primary"), s.get("secondary")):
-            if not isinstance((w or {}).get("usedPercent"), (int, float)):
-                continue
-            named = s.get("limitName") if s.get("limitId") != "codex" and isinstance(s.get("limitName"), str) else ""
-            x = {"name": (named[:40] + " · " if named else "") + _window_name(w.get("windowDurationMins")), "used": w["usedPercent"]}
-            if isinstance(w.get("resetsAt"), (int, float)):
-                x["resets_at"] = int(w["resetsAt"] * 1000)
-            windows.append(x)
-    plan = next((s.get("planType") for s in snaps if isinstance(s.get("planType"), str) and s.get("planType") != "unknown"), None)
-    if not windows:
-        return {"state": "unknown", "why": "Codex reported no limits"}
-    return dict({"state": "ok", "windows": windows}, **({"plan": plan[:30]} if plan else {}))
-
-
-def codex_request(method, params=None, subscription=False, binary=None, env=None):
-    """Use the documented Codex App Server protocol with auth owned by Codex.
-    https://developers.openai.com/codex/app-server
-    Make no model turns, logins or forced token refreshes."""
-    binary = binary or which("codex")
-    if not binary:
-        return "missing", None
-    try:
-        p = subprocess.Popen([binary, "app-server", "--disable", "plugins"], stdin=subprocess.PIPE,
-                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, cwd="/", env=env)
-    except OSError:
-        return "unknown", None
-    timer = threading.Timer(8, p.kill)
-    timer.start()
-
-    def call(message_id, name, args=None):
-        message = {"id": message_id, "method": name}
-        if args is not None:
-            message["params"] = args
-        p.stdin.write(json.dumps(message) + "\n")
-        p.stdin.flush()
-        for line in p.stdout:
-            try:
-                reply = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(reply, dict) and reply.get("id") == message_id:
-                return reply.get("result")
-        return None
-
-    try:
-        if call(1, "initialize", {"clientInfo": {"name": "shepherdr", "title": "Shepherdr", "version": "1"}}) is None:
-            return "unknown", None
-        p.stdin.write('{"method":"initialized"}\n')
-        if subscription:
-            account = call(2, "account/read", {"refreshToken": False})
-            if not isinstance(account, dict) or "account" not in account:
-                return "unknown", None
-            if account["account"] is None:
-                return "signed-out", None
-            if account["account"].get("type") not in ("chatgpt", "chatgptDeviceCode"):
-                return "no-plan", None
-        result = call(3, method, params)
-        return ("ok", result) if isinstance(result, dict) else ("unknown", None)
-    except (OSError, ValueError, AttributeError):
-        return "unknown", None
-    finally:
-        timer.cancel()
-        p.kill()
-        try:
-            p.stdin.close()
-        except OSError:
-            pass
-        p.stdout.close()
-        p.wait()
+# Plan usage is never read here: only each agent's own command shows it (#ban-risk second pass). Claude Code's
+# /usage and Codex's /status, in the person's own session.
+NO_USAGE = {"claude": "Shepherdr doesn't read Claude plan usage. Open Claude Code and run /usage.",
+            "codex": "Shepherdr doesn't read Codex plan usage. Open Codex and run /status."}
 
 
 def limits():
     at = int(time.time() * 1000)
-    out = {}
-    if which("claude"):
-        out["claude"] = {"state": "no-access", "why": CLAUDE_USAGE, "at": at}
-    state, result = codex_request("account/rateLimits/read", subscription=True)
-    if state != "missing":
-        codex = parse_codex(result) if state == "ok" else {"state": state}
-        if state == "unknown":
-            codex["why"] = "Codex could not report its limits. Open Codex and run /status."
-        out["codex"] = dict(codex, at=at)
-    return out
+    return {cli: {"state": "no-access", "why": why, "at": at} for cli, why in NO_USAGE.items() if which(cli)}
 
 
 def main(argv):
-    if "--codex-models" in argv:
-        _, result = codex_request("model/list", {"includeHidden": False})
-        print(json.dumps(result or {}))
-        return 0
     out = {"health": sample()}
     if "--limits" in argv:
         out["limits"] = limits()
