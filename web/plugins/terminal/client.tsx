@@ -15,7 +15,7 @@ import { appTakes, focusChat, focusTask } from '@client/commands.ts'
 import { onPageReturn } from '@client/viewport.ts'
 import type { Chat, Task } from '@shared/types.ts'
 import { machineLabel, placeOf, taskChat, taskOf, tasksIn, tstate } from '@shared/view.ts'
-import { fitGrid, following, footTop, LINE, linesFor, shrinkTo, showKeys, sizeTaken } from './fit.ts'
+import { fitGrid, following, footTop, lastPaintedRow, LINE, linesFor, shrinkTo, showKeys, sizeTaken } from './fit.ts'
 import { followFold, spaceTermRow, switchView, taskTermRow, toggleSpaceTerm, toggleTaskTerm, viewRow } from './menu.ts'
 import { connectTerminal, streamInput } from './stream.ts'
 import { linkLayer, type LinkLayer } from './linklayer.ts'
@@ -122,6 +122,7 @@ export function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; 
   useLayoutEffect(() => {
     let gone = false
     let term: import('@xterm/xterm').Terminal | null = null
+    let cursorVisible = true
     let link: { close(): void } | null = null
     let cols = 80, rows = 24, natural = 0
     let asked = '', wanted = '', opened = false, follow = true, lastFoot = 0
@@ -144,10 +145,7 @@ export function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; 
     const foot = () => {
       if (!term || !el) return 0
       const b = term.buffer.active
-      let last = b.cursorY
-      for (let y = term.rows - 1; y > last; y--) {
-        if (b.getLine(b.baseY + y)?.translateToString(true).trim()) { last = y; break }
-      }
+      const last = lastPaintedRow(term.rows, b.cursorY, cursorVisible, (row) => b.getLine(b.baseY + row)?.translateToString(true))
       const { line, at } = metrics()
       return footTop(last, line * at, el.clientHeight, el.scrollHeight - el.clientHeight)
     }
@@ -199,6 +197,15 @@ export function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; 
     void Promise.all([import('@xterm/xterm'), import('@xterm/addon-unicode11')]).then(([{ Terminal }, { Unicode11Addon }]) => {
       if (gone || !host.current) return
       term = xt.current = new Terminal({ cols: 80, rows: 24, scrollback: 2000, disableStdin: true, cursorBlink: true, fontFamily: MONO, fontSize: 13, lineHeight: LINE, allowProposedApi: true, theme: { background: '#0a0a0a', foreground: '#d4d4d4', cursor: '#d4d4d4', selectionBackground: 'rgb(255 255 255 / 0.25)' } })
+      for (const final of ['h', 'l']) {
+        term.parser.registerCsiHandler({ prefix: '?', final }, (params) => {
+          if (params.includes(25)) cursorVisible = final === 'h'
+          return false
+        })
+      }
+      const resetCursor = () => { cursorVisible = true; return false }
+      term.parser.registerCsiHandler({ intermediates: '!', final: 'p' }, resetCursor)
+      term.parser.registerEscHandler({ final: 'c' }, resetCursor)
       term.loadAddon(new Unicode11Addon())
       term.unicode.activeVersion = '11'
       // keys go to the terminal on its machine through the box over it; xterm only draws
@@ -217,6 +224,7 @@ export function Term({ stream, fill, onEnd }: { stream: string; fill?: boolean; 
         stream,
         (bytes, done) => term!.write(bytes, () => { done(); land() }),
         () => {
+          cursorVisible = true
           term!.reset()
           reopen()
           asked = wanted = ''

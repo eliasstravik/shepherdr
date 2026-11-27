@@ -1,7 +1,15 @@
 import { expect, test } from 'bun:test'
-import { fitGrid, following, fontFor, footTop, linesFor, shrinkTo, showKeys, sizeTaken } from './fit.ts'
+import { fitGrid, following, fontFor, footTop, lastPaintedRow, linesFor, shrinkTo, showKeys, sizeTaken } from './fit.ts'
 
 const CELL = 0.6 // a monospace character is about 0.6 of its font size wide
+
+test('a menu at the top stays in view when the terminal parks its hidden cursor at the bottom', () => {
+  const text = (row: number) => row === 12 ? 'enter confirm · esc skip' : ' '
+  const last = lastPaintedRow(120, 118, false, text)
+  expect(last).toBe(12)
+  expect(footTop(last, 17, 480, 1576)).toBe(0)
+  expect(lastPaintedRow(120, 118, true, text)).toBe(118)
+})
 
 test('the terminal asks for the columns and rows that fit its pane, at a readable font', () => {
   // a phone (12 px): 362 px wide fits 50 columns
