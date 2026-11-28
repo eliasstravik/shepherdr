@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.2.25
+
+### What you will notice first
+
+- MCP tool views now show even when a folder brings its own MCP setup (like Flowbound's `.mcp.json` or
+  `.codex/config.toml`). Nothing to set up per folder: while MCP Apps is on, every agent Shepherdr starts, Claude Code
+  and Codex, here and on your other machines, gets its MCP servers behind `herdr-mcp` by itself, and nothing in the
+  folder changes. [MCP Apps](https://github.com/eliasstravik/shepherdr/blob/v3.2.25/docs/mcp-apps.md) says more.
+
+### Also
+
+- Claude Code only gets the folder's servers you already approved; a new one still asks first. Codex only gets a
+  trusted folder's servers, as Codex decides itself.
+- Turning MCP Apps off makes agents start as they did before, on every machine.
+
+### Updating
+
+Run `shepherdr update`.
+
 ## 3.2.24
 
 ### What you will notice first
