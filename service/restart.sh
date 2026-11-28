@@ -132,6 +132,9 @@ clean='for v in $(env | sed -nE '"'"'s/^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_[A-Za
 # The role templates' folder herdr-core reads (#1182; core/paths.js TEMPLATES_SH).
 case "${XDG_CONFIG_HOME:-}" in /*) tdir="${XDG_CONFIG_HOME%/}/herdr-core/templates" ;; *) tdir="$HOME/.config/herdr-core/templates" ;; esac
 tpl=$tdir/assistant.md
+# MCP Apps: the agent's stdio MCP servers behind herdr-mcp, the folder's own too (core/clean-env.js MCP_WRAP, the same
+# line; test_repo keeps them equal). herdr-mcp decides whether MCP Apps is on here; without it, the command as it was.
+mcpwrap='w=$(herdr-mcp --wrap -- "$@" 2>/dev/null) && [ -n "$w" ] && eval "set -- $w";'
 # A coordinator restarted without an argv: the assistant template's own command and words.
 own=""
 [ -z "$argv" ] && [ "$role" = coordinator ] && own=$(awk '/^---[[:space:]]*$/ {f++; next} f == 1 && sub(/^command:[ \t]*/, "") {print; exit}' "$tpl" 2>/dev/null)
@@ -140,7 +143,7 @@ argv_cmd() { local a; cmd=(); while IFS= read -r a; do cmd+=("$a"); done < <(jq 
 if [ -n "${HERDR_RESTART_RESUME:-}" ] && [ -n "$argv" ]; then
   argv_cmd
   [ ${#cmd[@]} -gt 0 ] || exit 1
-  new=$(hc run --bg --json --no-parent --cwd "$cwd" "${labels[@]}" --label "herdr.agent=$(basename "${cmd[0]}")" -- sh -c "$clean $apath"' exec "$@"' herdr-clean "${cmd[@]}" | jq -r '.address // empty')
+  new=$(hc run --bg --json --no-parent --cwd "$cwd" "${labels[@]}" --label "herdr.agent=$(basename "${cmd[0]}")" -- sh -c "$clean $apath $mcpwrap"' exec "$@"' herdr-clean "${cmd[@]}" | jq -r '.address // empty')
 elif [ -z "$argv" ] && [ "$role" = coordinator ] && [ -z "$own" ]; then
   new=$(hc run --bg --json --no-parent --cwd "$cwd" "${labels[@]}" assistant "$handoff" | jq -r .address)
 else
@@ -164,7 +167,8 @@ else
   # handoff goes in a one-off template, removed once it has started.
   one=herdr-handoff-$$
   file=$tdir/$one.md
-  { printf -- '---\nname: %s\ndescription: A one-off Herdr handoff, removed after use.\ncommand: %s\n---\n' "$one" "$clean $apath exec $line"
+  case $key in claude|codex) start="$clean $apath set -- $line; $mcpwrap exec \"\$@\"" ;; *) start="$clean $apath exec $line" ;; esac
+  { printf -- '---\nname: %s\ndescription: A one-off Herdr handoff, removed after use.\ncommand: %s\n---\n' "$one" "$start"
     printf '%s\n' "$msg"; } >"$file"
   out=$(hc run --bg --json --no-parent --cwd "$cwd" "${labels[@]}" --label "herdr.agent=$key" "$one")
   rm -f "$file"

@@ -29,22 +29,22 @@ test("the Assistant runs the agent its settings choose, with its model, effort a
   const { hub, made } = machine(["codex"]);
   const t = await execTemplate(hub, "assistant", null, { agent: "codex", model: "gpt-5.5", effort: "high", fast: false, perm: "full" });
   const [file] = made();
-  expect(commandOf(file)).toContain("exec codex --no-daemon -m gpt-5.5");
+  expect(commandOf(file)).toContain("set -- codex --no-daemon -m gpt-5.5");
   expect(commandOf(file)).toContain("--dangerously-bypass-approvals-and-sandbox");
-  expect(commandOf(file)).not.toMatch(/exec claude/);
+  expect(commandOf(file)).not.toMatch(/set -- claude/);
   expect(t.words).toBe("You are the Assistant.");
 });
 
 test("no choice: the template's own command, as before", async () => {
   const { hub, made } = machine(["claude"]);
   await execTemplate(hub, "assistant", null, null);
-  expect(commandOf(made()[0])).toMatch(/exec claude\s*$/);
+  expect(commandOf(made()[0])).toMatch(/set -- claude; .*herdr-mcp --wrap .*exec "\$@"$/);
 });
 
 test("the chosen agent missing there: the template's own; neither there: a plain refusal, never a dead start", async () => {
   const a = machine(["claude"]);
   await execTemplate(a.hub, "assistant", null, { agent: "codex", model: null, effort: null, fast: false, perm: "auto" });
-  expect(commandOf(a.made()[0])).toMatch(/exec claude\s*$/);
+  expect(commandOf(a.made()[0])).toMatch(/set -- claude; .*herdr-mcp --wrap .*exec "\$@"$/);
   const b = machine([]);
   await expect(execTemplate(b.hub, "assistant", null, { agent: "codex", perm: "full" })).rejects.toThrow("Codex isn't installed on this computer");
   expect(b.made()).toEqual([]);

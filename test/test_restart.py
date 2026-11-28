@@ -214,13 +214,14 @@ class BarePath(unittest.TestCase):
     starts, with only /usr/bin:/bin. hc and claude live in ~/.local/bin: the script finds hc there, and the new agent's
     command finds claude where a fresh start does (core/clean-env.js AGENT_PATH)."""
 
-    def restart(self, env):
+    def restart(self, env, mcp=None):
         d = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, d, ignore_errors=True)
         own = os.path.join(d, ".local", "bin")
         os.makedirs(own)
         os.makedirs(os.path.join(d, ".config", "herdr-core", "templates"))
-        for name, body in (("hc", BARE_HC), ("claude", "#!/bin/sh\necho \"claude ran $*\"\n")):
+        tools = [("hc", BARE_HC), ("claude", "#!/bin/sh\necho \"claude ran $*\"\n")] + ([("herdr-mcp", mcp)] if mcp else [])
+        for name, body in tools:
             with open(os.path.join(own, name), "w") as f:
                 f.write(body)
             os.chmod(os.path.join(own, name), 0o755)
@@ -238,6 +239,33 @@ class BarePath(unittest.TestCase):
         cmd = args[args.index("--") + 1:-1]
         ran = subprocess.run(cmd, env=bare, capture_output=True, text=True, timeout=30)
         self.assertEqual(ran.stdout.strip(), "claude ran --model sonnet", ran.stderr)
+
+    # MCP Apps: the restarted agent's MCP servers go behind herdr-mcp (its --wrap there), in the resume and the handoff
+    FAKE_WRAP = ("#!/bin/sh\n[ \"$1\" = --wrap ] || exit 2; shift 2\n"
+                 "a=$1; shift; printf \"%s --mcp-config '/x/a b.json'\" \"$a\"; for w; do printf \" %s\" \"$w\"; done; echo\n")
+
+    def test_resume_wraps_its_mcp_servers(self):
+        d, bare, args = self.restart({"HERDR_RESTART_RESUME": "1"}, mcp=self.FAKE_WRAP)
+        cmd = args[args.index("--") + 1:-1]
+        ran = subprocess.run(cmd, env=bare, capture_output=True, text=True, timeout=30)
+        self.assertEqual(ran.stdout.strip(), "claude ran --mcp-config /x/a b.json --model sonnet", ran.stderr)
+
+    def test_handoff_wraps_its_mcp_servers(self):
+        d, bare, _ = self.restart({}, mcp=self.FAKE_WRAP)
+        line = next(x for x in read(os.path.join(d, "one.md")).splitlines() if x.startswith("command: "))
+        ran = subprocess.run(["sh", "-c", line[len("command: "):]], env=bare, capture_output=True, text=True, timeout=30)
+        self.assertEqual(ran.stdout.strip(), "claude ran --mcp-config /x/a b.json --model sonnet", ran.stderr)
+
+    def test_a_failing_wrap_starts_it_as_it_was(self):
+        d, bare, _ = self.restart({}, mcp="#!/bin/sh\nexit 1\n")
+        line = next(x for x in read(os.path.join(d, "one.md")).splitlines() if x.startswith("command: "))
+        ran = subprocess.run(["sh", "-c", line[len("command: "):]], env=bare, capture_output=True, text=True, timeout=30)
+        self.assertEqual(ran.stdout.strip(), "claude ran --model sonnet", ran.stderr)
+
+    def test_same_wrap_as_a_fresh_start(self):
+        js = re.search(r"export const MCP_WRAP = `(.*)`;", read(os.path.join(ROOT, "core", "clean-env.js"))).group(1)
+        sh = re.search(r"^mcpwrap='(.*)'$", read(SCRIPT), re.M).group(1)
+        self.assertEqual(sh, js)
 
     def test_same_path_as_a_fresh_start(self):
         js = re.search(r"export const AGENT_PATH = `(.*)`;", read(os.path.join(ROOT, "core", "clean-env.js"))).group(1)

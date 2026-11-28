@@ -23,6 +23,34 @@ agent: it sees the same tools and gets the same answers.
 claude mcp add --scope user flowbound -- herdr-mcp flowbound -- npx -y flowbound mcp
 ```
 
+### Folders with their own MCP config
+
+Many tools write their own MCP config into a folder (`flowbound init` writes `.mcp.json` and `.codex/config.toml`),
+often under the same name as yours. The agent then runs the folder's plain copy, not yours behind `herdr-mcp`, and no
+view shows. Shepherdr covers that itself: while MCP Apps is on, every agent it starts (tasks and Assistant chats,
+Claude Code and Codex, on this computer and on other machines) gets each of its stdio MCP servers behind `herdr-mcp`,
+the folder's ones too. Nothing to set up per folder, and nothing in the folder changes (no git diff):
+
+- **Claude Code**: the folder's `.mcp.json` servers (found from the folder up, as Claude Code finds them) go to the
+  agent as `--mcp-config <file>`, each as `herdr-mcp <name> -- <its command>`, with the same name, args and env. A
+  server given that way wins over the folder's. Only servers you approved (`enabledMcpjsonServers` or
+  `enableAllProjectMcpServers` in Claude Code's settings, never one in `disabledMcpjsonServers`); a new one stays for
+  Claude Code to ask about, and is covered from the next start once you say yes. Your own `claude mcp add` servers
+  (user or local scope) aren't read: Shepherdr never opens `~/.claude.json`, which holds your sign-in too, so add those
+  with `herdr-mcp` as above. If one of those has the same name as a folder's, the folder's (wrapped) one runs.
+- **Codex**: Shepherdr asks Codex itself (`codex mcp list --json`, in the folder, with the agent's own `-c` and
+  `--profile`) which servers it will run, from your config and a trusted folder's `.codex/config.toml`, and starts
+  it with `-c mcp_servers.<name>.command=herdr-mcp -c mcp_servers.<name>.args=[<name>, "--", …]`: env, cwd and the
+  rest stay from the config. A folder you haven't trusted stays out, as Codex keeps it out.
+- Never twice (a server already behind `herdr-mcp` stays as it is), never an HTTP or SSE server, and a restart takes
+  the last start's wrap out before adding it again. The generated `--mcp-config` files are kept in the service's
+  folder (`mcp-apps/launch/`, readable only by you: a server's env may hold a key).
+- MCP Apps off: agents start as they are. Other machines hear it from the service (`herdr-mcp --switch on|off`, sent
+  when it changes, and again every minute until a machine that was offline gets it).
+
+How: each start runs `herdr-mcp --wrap -- <agent command>` in the agent's folder on its machine just before the agent
+starts (`service/mcp/wrap.ts`); without `herdr-mcp` there, or if anything fails, the agent starts as it was.
+
 ### On another machine
 
 The same commands work on a machine the Shepherdr service reaches over its machine links (a VM): `herdr-task

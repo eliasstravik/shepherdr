@@ -18,3 +18,13 @@ export const AGENT_PATH = `PATH="\${PATH:+$PATH:}$HOME/.local/bin:/opt/homebrew/
  *  execs the command (so the terminal's program is the agent, never sh: on dash the shell would otherwise stay). An
  *  `exec` it had is kept once. */
 export const cleanCommand = (cmd) => `${CLEAN_ENV} ${AGENT_PATH} exec ${String(cmd).trim().replace(/^exec\s+/, "")}`;
+
+// MCP Apps (docs/mcp-apps.md): before the agent starts, `herdr-mcp --wrap` puts each of its stdio MCP servers behind
+// herdr-mcp, the folder's own .mcp.json or .codex/config.toml ones too (service/mcp/wrap.ts), with the agent's own
+// launch flags; it decides itself whether MCP Apps is on there. Run after AGENT_PATH, with the command in "$@";
+// no herdr-mcp, or any failure: the command as it was. The same line is in service/restart.sh (test/test_repo.py
+// keeps them equal); herdr-task runs `herdr-mcp --wrap --json` itself (launch.py mcp_wrap).
+export const MCP_WRAP = `w=$(herdr-mcp --wrap -- "$@" 2>/dev/null) && [ -n "$w" ] && eval "set -- $w";`;
+
+/** cleanCommand with the agent's MCP servers behind herdr-mcp: its words go to "$@" first (MCP_WRAP) */
+export const wrappedCommand = (cmd) => `${CLEAN_ENV} ${AGENT_PATH} set -- ${String(cmd).trim().replace(/^exec\s+/, "")}; ${MCP_WRAP} exec "$@"`;

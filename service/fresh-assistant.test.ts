@@ -119,7 +119,7 @@ test("the first message starts it on the choice (Codex, its model, service_tier 
   expect(args).toContain("herdr.role=coordinator");
   expect(args.at(-1)).toBe("hello");
   const command = /^command:(.*)$/m.exec(template)?.[1] ?? "";
-  expect(command).toContain("exec codex --no-daemon -m gpt-6.2-sol");
+  expect(command).toContain("set -- codex --no-daemon -m gpt-6.2-sol");
   expect(command).toContain(`service_tier="ultrafast"`);
   expect(command).toContain("--dangerously-bypass-approvals-and-sandbox");
   expect(command).not.toContain(`service_tier="fast"`);

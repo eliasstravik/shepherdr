@@ -369,6 +369,8 @@ artifacts.start();
 const mcpRemote = new RemoteCalls(hubExec(() => hub));
 mcpRemote.machines = () => (pluginOn("mcp-apps") ? model.machineNames() : []);
 mcpRemote.watched = () => live.anyone();
+mcpRemote.allMachines = () => model.machineNames();
+mcpRemote.appsOn = () => pluginOn("mcp-apps");
 (compat as any).mcpCallsOn = (m: string) => mcpRemote.of(m);
 mcpRemote.on(() => { model.rebuild(); live.chats?.refreshAll(); });
 mcpRemote.start();
