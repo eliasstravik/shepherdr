@@ -9,26 +9,43 @@
 // link). A view's own calls (tools/call, resources/read) come from the page through the service to this gateway's
 // socket and go to the server on the agent's link, as the spec's "same server connection".
 // No agent's sign-in, token or setting is read or used: the agent talks to this program as to any MCP server.
+// herdr-mcp --wrap (wrap.ts) is how Shepherdr's starts put a folder's own MCP servers behind it too, with the agents'
+// documented launch options; --switch on|off is how the service tells another machine whether MCP Apps is on.
 // It is also how the Shepherdr service on another machine reads the calls kept here, over herdr-core's machine link
 // (service/mcp/remote.ts): herdr-mcp --list, --get, --html and --call (cli()).
 // It ships to every machine as one file (web/dist/herdr-mcp.mjs from cli.ts, built by `bun run build`, synced by herdr-task) that
 // runs on Bun or Node: only Node's own modules and core/paths.js here, nothing of Bun's.
 import { spawn, type ChildProcess } from "node:child_process";
 import { connect, createServer, type Server, type Socket } from "node:net";
-import { existsSync, mkdirSync, rmSync, lstatSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import * as P from "../../core/paths.js";
+import { wrapArgv, shellJoin } from "./wrap.ts";
 import { EXTENSION, MIME, newId, saveCall, saveHtml, viewOf, visibilityOf, prune, appsDir, readCall, readHtml, listCalls, type CallRecord } from "./records.ts";
 
 /** the service's folder on this machine, as service/paths.ts DATA (that file needs Bun) */
 export function dataDir(env: Record<string, string | undefined> = process.env, home = homedir()): string {
   if (env.SHEPHERDR_DATA) return env.SHEPHERDR_DATA;
+  return shepPaths(env, home).service;
+}
+function shepPaths(env: Record<string, string | undefined>, home: string): any {
   const r = (P as any).roots(home, env, process.platform === "darwin");
   let layout = "";
   try { layout = readFileSync(join(r.data, "LAYOUT"), "utf8"); } catch {}
-  return (P as any).pathsFrom(home, r, (P as any).isMigrated(layout, existsSync(join(home, (P as any).LEGACY, (P as any).ROLLBACK)))).service;
+  return (P as any).pathsFrom(home, r, (P as any).isMigrated(layout, existsSync(join(home, (P as any).LEGACY, (P as any).ROLLBACK))));
+}
+
+/** Whether MCP Apps is on for this machine's agents: not off in its settings file (Settings › Plugins, plugins_off), nor
+ *  switched off by the service that reaches it (`herdr-mcp --switch off`: <data>/mcp-apps/off) */
+export function appsOn(data = DATA, env: Record<string, string | undefined> = process.env, home = homedir()): boolean {
+  if (existsSync(join(appsDir(data), "off"))) return false;
+  const file = env.HERDR_TASK_SETTINGS || shepPaths(env, home).settings;
+  try {
+    const off = JSON.parse(readFileSync(file, "utf8"))?.everywhere?.plugins_off;
+    return !(Array.isArray(off) && off.includes("mcp-apps"));
+  } catch { return true; }
 }
 const DATA = dataDir();
 
@@ -278,6 +295,27 @@ export function callThere(r: CallRecord) {
  *  -> exit code, or null when argv is no such command */
 export async function cli(argv: string[], data = DATA, out = (s: string) => process.stdout.write(s)): Promise<number | null> {
   const [cmd, a, b] = argv;
+  if (cmd === "--wrap") {
+    // herdr-mcp --wrap [--json] -- <agent command…>: that command with its stdio MCP servers behind herdr-mcp (wrap.ts),
+    // as sh words (`eval "set -- $(herdr-mcp --wrap -- "$@")"`) or a JSON array. Run in the agent's folder.
+    const sep = argv.indexOf("--");
+    const words = sep >= 0 ? argv.slice(sep + 1).map(String) : [];
+    if (!words.length) { process.stderr.write("usage: herdr-mcp --wrap [--json] -- <agent command…>\n"); return 2; }
+    let next = words;
+    try {
+      next = wrapArgv(words, { cwd: process.cwd(), home: homedir(), self: process.env.HERDR_MCP_SELF || "herdr-mcp", dir: join(appsDir(data), "launch") }, appsOn(data));
+    } catch {}
+    out((argv.slice(1, sep).includes("--json") ? JSON.stringify(next) : shellJoin(next)) + "\n");
+    return 0;
+  }
+  if (cmd === "--switch") {
+    // herdr-mcp --switch on|off: the service that reaches this machine says whether MCP Apps is on (its Settings)
+    if (a !== "on" && a !== "off") { process.stderr.write("usage: herdr-mcp --switch on|off\n"); return 2; }
+    const f = join(appsDir(data), "off");
+    if (a === "off") { mkdirSync(appsDir(data), { recursive: true }); writeFileSync(f, ""); } else rmSync(f, { force: true });
+    out(`${a}\n`);
+    return 0;
+  }
   if (cmd === "--list") {
     const since = Number(a) || 0;
     out(JSON.stringify(listCalls(data).filter((c) => c.at >= since)) + "\n");

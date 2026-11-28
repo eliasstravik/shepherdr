@@ -9,7 +9,7 @@ import { HOME } from "./paths.ts";
 import { exec } from "./model.ts";
 import * as NS from "../core/newspace.js";
 import * as SP from "../core/spaces.js";
-import { AGENT_PATH, cleanCommand } from "../core/clean-env.js";
+import { AGENT_PATH, cleanCommand, wrappedCommand } from "../core/clean-env.js";
 import { TEMPLATES_SH } from "../core/paths.js";
 import { argvFor, NAMES, CHOICE_KEY, choiceOf, withChoice } from "../core/agents.js";
 import { spawn } from "./spawn.ts";
@@ -102,11 +102,16 @@ export async function execTemplate(hub: Hub, name: string, machine: string | nul
     }
   }
   const one = `herdr-${name}-${Date.now().toString(36)}`;
-  const file = `---\nname: ${one}\ndescription: A one-off ${name} start that execs its command (Shepherdr's service), removed after use.\ncommand: ${cleanCommand(cmd)}\n---\n${src.slice(head[0].length)}`;
+  const file = `---\nname: ${one}\ndescription: A one-off ${name} start that execs its command (Shepherdr's service), removed after use.\ncommand: ${startCommand(cmd)}\n---\n${src.slice(head[0].length)}`;
   const w = await exec(hub, ["sh", "-c", DIR + 'printf "%s" "$2" > "$dir/$1.md"', "x", one, file], machine).catch(() => null);
   if (w?.code !== 0) return plain;
   return { name: one, words: src.slice(head[0].length).trim(), done: () => void exec(hub, ["sh", "-c", DIR + 'rm -f "$dir/$1.md"', "x", one], machine).catch(() => null) };
 }
+
+/** A template's command as it starts: an agent's own (claude, codex) with its MCP servers behind herdr-mcp (MCP Apps,
+ *  core/clean-env.js MCP_WRAP; herdr-mcp there decides whether it is on), anything else as it was. */
+export const startCommand = (cmd: string) =>
+  (/^(exec\s+)?(\S*\/)?(claude|codex)(\s|$)/.test(cmd.trim()) ? wrappedCommand(cmd) : cleanCommand(cmd));
 
 /** One word of a command line for sh, quoted only when it needs it (as mods/chat's). */
 export const shellWord = (a: string) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `'${String(a).replace(/'/g, "'\\''")}'`);

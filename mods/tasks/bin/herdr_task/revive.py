@@ -302,7 +302,7 @@ def restart_assistant(k, message):
     """Starts the Assistant in terminal k (its hc get), its agent gone (a plain shell in front), again with `message` as
     its first message (None: none, its conversation only resumed: back_after_boot); the old terminal ends. A new one from the assistant template, the message its task, when its
     conversation isn't known. This machine's terminals only. -> the new address, or None."""
-    from .launch import clean_env
+    from .launch import clean_env, mcp_wrap
     addr = str((k or {}).get("address") or "")
     if not addr or "/" in addr:
         return None
@@ -330,7 +330,7 @@ def restart_assistant(k, message):
         cwd = rec.get("cwd") or k.get("cwd") or HOME
         base = ["hc", "run", "--bg", "--json", "--no-parent", "--cwd", cwd, *keep, *place, "--label", "herdr.role=coordinator"]
         if rec.get("kind") in ("claude", "codex") and rec.get("session") and rec.get("argv"):
-            argv = resume_argv(rec["kind"], list(rec["argv"]), rec["session"], message)
+            argv = mcp_wrap(resume_argv(rec["kind"], list(rec["argv"]), rec["session"], message), cwd)
             r = run([*base, "--label", f"herdr.agent={rec['kind']}", "--", *clean_env(argv)])
         elif message:
             r = run([*base, "assistant", message])

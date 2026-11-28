@@ -4512,6 +4512,59 @@ class CleanEnv(unittest.TestCase):
             self.assertEqual(env.get(k), v)
         self.assertEqual(env.get("HERDR_BROWSER_TASK"), "dev#6")  # what the launch sets on purpose stays
 
+    # ---- MCP Apps: a folder's own MCP servers behind herdr-mcp too ------------------------------------------
+    def _fake_mcp(self, body):
+        d = tempfile.mkdtemp()
+        exe = os.path.join(d, "herdr-mcp")
+        with open(exe, "w") as f:
+            f.write("#!/bin/sh\n" + body)
+        os.chmod(exe, 0o755)
+        return d, exe
+
+    def test_a_task_agent_starts_with_its_mcp_servers_wrapped(self):
+        """launch() asks this machine's herdr-mcp --wrap, in the task's folder, and starts what it says, the first
+        message still last (service/mcp/wrap.ts does the wrapping; its tests are wrap.test.ts)."""
+        from types import SimpleNamespace
+        from unittest import mock
+        sys.path.insert(0, BIN)
+        import herdr_task.launch as L
+        d, exe = self._fake_mcp('pwd > "$(dirname "$0")/cwd"; printf "%s\\n" "$@" > "$(dirname "$0")/args"\n'
+                                'echo \'["claude","--mcp-config","/x/launch/a.json","--model","opus"]\'\n')
+        folder = tempfile.mkdtemp()
+        ran = []
+
+        def run(argv, *a, **k):
+            ran.append(argv)
+            return subprocess.CompletedProcess(argv, 0, json.dumps({"address": "t9"}), "")
+        s = SimpleNamespace(key=lambda t: "dev#6", dirty=False)
+        task = {"id": 6, "title": "fake", "agents": []}
+        with mock.patch.dict(os.environ, {"HERDR_MCP": exe}), mock.patch.object(L, "run", run), \
+                mock.patch.object(L, "folder_for", lambda s, t: folder), mock.patch.object(L, "agent_name", lambda *a: "dev-6-fake"), \
+                mock.patch.object(L, "track", lambda *a: None), mock.patch.object(L, "coordinator_tab", lambda a: None), \
+                mock.patch.object(L, "own_argv", lambda a, *_: a), mock.patch.object(L, "in_shell", lambda a: a), \
+                mock.patch.object(L, "low_priority", lambda a, n: a), mock.patch.object(L, "clean_env", lambda a: a), \
+                mock.patch.object(L, "guard_argv", lambda a: a):
+            L.launch(s, task, ["claude", "--model", "opus"], "sp1", message="do the thing")
+        hc = ran[0]
+        self.assertEqual(hc[-6:], ["claude", "--mcp-config", "/x/launch/a.json", "--model", "opus", "do the thing"])
+        with open(os.path.join(d, "args")) as f:
+            self.assertEqual(f.read().splitlines(), ["--wrap", "--json", "--", "claude", "--model", "opus"])
+        with open(os.path.join(d, "cwd")) as f:
+            self.assertEqual(os.path.realpath(f.read().strip()), os.path.realpath(folder))
+
+    def test_mcp_wrap_falls_back_to_the_command_as_it_was(self):
+        sys.path.insert(0, BIN)
+        import herdr_task.launch as L
+        from unittest import mock
+        argv = ["codex", "--no-daemon"]
+        # no herdr-mcp on this machine (an old one, or not synced yet)
+        with mock.patch.dict(os.environ, {"HERDR_MCP": "/nonexistent/herdr-mcp"}):
+            self.assertEqual(L.mcp_wrap(argv, "/tmp"), argv)
+        for body in ("exit 3\n", "echo not json\n", "echo '[]'\n", "echo '[1, 2]'\n", "echo '{\"a\": 1}'\n"):
+            _, exe = self._fake_mcp(body)
+            with mock.patch.dict(os.environ, {"HERDR_MCP": exe}):
+                self.assertEqual(L.mcp_wrap(argv, "/tmp"), argv, body)
+
     def test_the_same_line_everywhere(self):
         """herdr-task and the service (core/clean-env.js), and restart.sh while it exists, clear the same names."""
         sys.path.insert(0, BIN)

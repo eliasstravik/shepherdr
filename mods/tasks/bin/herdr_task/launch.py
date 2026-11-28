@@ -418,6 +418,23 @@ CLEAN_ENV = ("for v in $(env | sed -nE 's/^(CLAUDECODE|CLAUDE_PID|CLAUDE_CODE_[A
              "grep -vE '^CLAUDE_CODE_(USE|SKIP|DISABLE|ENABLE|MAX|OAUTH|CLIENT|API)_'); do unset \"$v\"; done;")
 
 
+def mcp_wrap(argv, folder):
+    """MCP Apps (docs/mcp-apps.md): the agent's argv with each of its stdio MCP servers behind herdr-mcp, the folder's
+    own .mcp.json or .codex/config.toml ones too, through the agent's documented launch flags (--mcp-config, -c), by
+    `herdr-mcp --wrap --json` run in its folder on this machine (service/mcp/wrap.ts; it decides whether MCP Apps is on
+    here, and takes out an earlier start's wrap). No herdr-mcp, or anything failing: argv as it was."""
+    exe = os.environ.get("HERDR_MCP") or os.path.expanduser("~/.local/bin/herdr-mcp")
+    if not argv or not os.access(exe, os.X_OK):
+        return argv
+    try:
+        r = subprocess.run([exe, "--wrap", "--json", "--", *argv], cwd=folder or None, stdin=subprocess.DEVNULL,
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=30)
+        out = json.loads(r.stdout) if r.returncode == 0 else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return argv
+    return out if isinstance(out, list) and out and all(isinstance(a, str) for a in out) else argv
+
+
 def clean_env(argv):
     """argv run without a parent Claude Code session's markers (CLEAN_ENV)."""
     return ["sh", "-c", CLEAN_ENV + ' exec "$@"', "herdr-clean", *argv]
@@ -1064,6 +1081,7 @@ def launch(s, task, argv, space, message=None, parent=None, resume=None, role=No
             raise Fail(codex_update_words(old))
     if not role:
         cmd = own_argv(cmd, folder_for(s, task))
+    cmd = mcp_wrap(cmd, folder_for(s, task))
     if message:
         cmd = cmd + [message]
     if setup and not role:

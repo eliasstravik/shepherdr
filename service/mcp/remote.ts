@@ -34,6 +34,12 @@ export class RemoteCalls {
   private off = new Map<string, number>();
   machines: () => string[] = () => [];
   watched: () => boolean = () => true;
+  /** every linked machine, and whether MCP Apps is on (Settings › Plugins): the switch each machine's herdr-mcp --wrap
+   *  obeys, so agents started there put their MCP servers behind herdr-mcp only while it is on */
+  allMachines: () => string[] = () => [];
+  appsOn: () => boolean = () => true;
+  /** what each machine was last told (herdr-mcp --switch), so only a change goes again */
+  private told = new Map<string, "on" | "off">();
 
   constructor(private exec: Exec, private now = Date.now) {}
 
@@ -42,6 +48,17 @@ export class RemoteCalls {
   start(every = 10_000) {
     setInterval(() => { if (this.watched()) void this.read(); }, every);
     setTimeout(() => void this.read(), 3_000);
+    setInterval(() => void this.tell(), 60_000);
+    setTimeout(() => void this.tell(), 5_000);
+  }
+
+  /** each machine told whether MCP Apps is on, when it changed since it was last told (one that can't be reached now:
+   *  again next round) */
+  async tell() {
+    const want = this.appsOn() ? "on" : "off";
+    await Promise.all(this.allMachines().filter((m) => MACHINE.test(m) && this.told.get(m) !== want).map(async (m) => {
+      try { if ((await this.run(m, ["--switch", want], 20)).code === 0) this.told.set(m, want); } catch {}
+    }));
   }
 
   /** a machine's calls, for matching (CallIndex.list's shape) */

@@ -6,6 +6,8 @@
 # Where Shepherdr is installed it runs the source (service/mcp/cli.ts) on Bun. On a machine that only got the task
 # tools (herdr-task machines sync), it runs the one-file build beside it (../herdr-mcp.mjs) on Bun, else Node.
 self=$0
+# what a wrapped server runs (--wrap, service/mcp/wrap.ts): this launcher as it was called (~/.local/bin/herdr-mcp)
+case $0 in /*) HERDR_MCP_SELF=$0; export HERDR_MCP_SELF ;; esac
 while [ -L "$self" ]; do
   to=$(readlink "$self")
   case $to in /*) self=$to ;; *) self=$(dirname "$self")/$to ;; esac
