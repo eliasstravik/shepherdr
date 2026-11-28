@@ -35,7 +35,7 @@ from .settings import TEMPLATES
 # ---- sync: the same task tools on every machine ---------------------------------------------
 # What a machine needs to run tasks: herdr-task (one zipapp), herdr-artifact (with its guide and
 # markup), herdr-secret (a remote copy: it asks the main machine), herdr-browser and herdr-desktop once they exist,
-# and the role templates. Each goes to the same place under that machine's home as here
+# herdr-mcp (the MCP Apps gateway, one file on Bun or Node) and the role templates. Each goes to the same place under that machine's home as here
 # (~/.local/bin/..., ~/.config/herdr-core/templates/...). A stamp there (tools.json in Shepherdr's data;
 # STAMP names its old place, which SHEP turns into wherever it is on that machine)
 # records what was installed (each file's sha256 and its source's time), so a machine that is
@@ -44,6 +44,9 @@ from .settings import TEMPLATES
 
 ROLES = ("assistant", "worker", "reviewer")
 ARTIFACT_HOME = ".local/share/herdr/artifacts"
+# herdr-mcp, the MCP Apps gateway: its launcher and its one-file program (web/dist/herdr-mcp.mjs, `bun run build`)
+MCP_HOME = ".local/share/herdr/mcp"
+MCP_BUILT = os.path.join(".local", "share", "shepherdr", "web", "dist", "herdr-mcp.mjs")
 # The installed web app's artifact viewer in one file (bin/shepherdr installs web/dist there), synced beside herdr-artifact
 VIEWER_BUILT = os.path.join(".local", "share", "shepherdr", "web", "dist", "artifact-viewer.html")
 STAMP = ".herdr/tools.json"
@@ -142,6 +145,18 @@ def manifest():
         # marks nothing.
         if secrets_main_here():
             touch.append({"path": ".herdr/secret-remote", "unless": ".herdr/vault.json", "unless_main": True})
+    # herdr-mcp (MCP Apps): the launcher runs the one-file build beside it on Bun or Node, so agents there can put it
+    # in front of an MCP server and their views reach the main machine's chat (service/mcp/remote.ts). The build is
+    # the copy a sync left beside it, else the installed web app's.
+    mcp = _real(".local/bin/herdr-mcp")
+    if mcp:
+        root = os.path.dirname(os.path.dirname(mcp))
+        js = next((p for p in (os.path.join(root, "herdr-mcp.mjs"), os.path.join(root, "web", "dist", "herdr-mcp.mjs"),
+                               os.path.join(HOME, MCP_BUILT)) if os.path.isfile(p)), None)
+        if js:
+            add(f"{MCP_HOME}/bin/herdr-mcp", _read(mcp), 0o755, [mcp])
+            add(f"{MCP_HOME}/herdr-mcp.mjs", _read(js), 0o644, [js])
+            links.append({"path": ".local/bin/herdr-mcp", "target": f"{MCP_HOME}/bin/herdr-mcp"})
     ensure = []
     for helper in ("herdr-browser", "herdr-desktop"):
         p = _real(f".local/bin/{helper}")

@@ -596,7 +596,7 @@ def find_source(given, record):
 # web/dist isn't in git, so a fresh clone has no page: the installer builds it with Bun (which the service runs on
 # anyway) when it's missing or older than what it's built from. A source without web/src (an installed service
 # folder, Serve from's pack) ships its built page and is used as it is.
-WEB_INPUTS = ("web", "core", "package.json", "bun.lock")
+WEB_INPUTS = ("web", "core", "package.json", "bun.lock", "service/mcp", "service/paths.ts")
 WEB_OUTPUTS = {"dist", "generated", "node_modules"}
 
 

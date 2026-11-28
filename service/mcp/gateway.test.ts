@@ -180,7 +180,7 @@ rl.on("line", (l) => { const m = JSON.parse(l); if (m.id === undefined) return;
   process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: m.id, result: r }) + "\\n"); });`);
   chmodSync(server, 0o755);
   const { spawn } = await import("node:child_process");
-  const p = spawn("bun", [join(import.meta.dir, "gateway.ts"), "demo", "--", "node", server], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, SHEPHERDR_DATA: dir } });
+  const p = spawn("bun", [join(import.meta.dir, "cli.ts"), "demo", "--", "node", server], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, SHEPHERDR_DATA: dir } });
   const lines: any[] = [];
   const got = new Promise<void>((done) => {
     let buf = "";

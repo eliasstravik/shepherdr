@@ -730,7 +730,8 @@ export class Compat {
     // the session's first message: the first user item (core/chat-view.js firstUser)
     const fi = firstUser(items);
     // the calls herdr-mcp kept of tools with a view (MCP Apps), for this chat's MCP steps (main sets mcpCalls)
-    const mcpCalls: any[] = (this as any).mcpCalls?.() ?? [];
+    // (an agent on another machine: the calls its gateway kept there, read over the machine link, mcp/remote.ts)
+    const mcpCalls: any[] = (machine ? (this as any).mcpCallsOn?.(machine) : (this as any).mcpCalls?.()) ?? [];
     const takenCalls = new Set<string>();
     const ownTerm = String(reader.addr ?? "").split("/").pop() || null;
     const ft = reader.start === 0 && fi >= 0 ? this.firstTask(t, own)?.trim() : null;
@@ -829,7 +830,7 @@ export class Compat {
         const id = mcpCalls.length ? matchCall(mcpCalls, { server: x.server, tool: x.tool, input: x.input, at: x.at ?? 0 }, machine ? null : ownTerm, takenCalls) : null;
         if (id) {
           takenCalls.add(id);
-          messages.push({ id: x.id, who: "agent", at: x.at, app: { id, server: x.server, tool: x.tool } });
+          messages.push({ id: x.id, who: "agent", at: x.at, app: { id, server: x.server, tool: x.tool, ...(machine ? { machine } : {}) } });
         }
       } else if (x.kind === "artifact") {
         // a publish: its card (the latest of it) or line, as the artifacts plugin draws it; a quiet line while the

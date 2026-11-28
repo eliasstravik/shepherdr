@@ -6093,6 +6093,37 @@ class CodexAsksOnTheCard(unittest.TestCase):
         with mock.patch.object(machines, "_real", lambda rel: None):  # a machine without them passes none on
             self.assertFalse([f for f in machines.manifest()["files"] if "herdr-desktop" in f["path"] or "herdr-browser" in f["path"]])
 
+    def test_a_sync_takes_herdr_mcp_along(self):
+        """MCP Apps on other machines: herdr-mcp's launcher and its one-file build go where the other tools go, from
+        Shepherdr's install (web/dist) or from a copy a sync left (beside it); a launcher without its build ships none."""
+        sys.path.insert(0, BIN)
+        from herdr_task import machines
+        from unittest import mock
+        for shape in ("installed", "synced", "none"):
+            root = tempfile.mkdtemp()
+            os.makedirs(os.path.join(root, "bin"))
+            launcher = os.path.join(root, "bin", "herdr-mcp")
+            with open(launcher, "w") as f:
+                f.write("#!/bin/sh\n# herdr-mcp\n")
+            js = {"installed": os.path.join(root, "web", "dist", "herdr-mcp.mjs"), "synced": os.path.join(root, "herdr-mcp.mjs")}.get(shape)
+            if js:
+                os.makedirs(os.path.dirname(js), exist_ok=True)
+                with open(js, "w") as f:
+                    f.write("// the gateway\n")
+            real = lambda rel, launcher=launcher: launcher if rel == ".local/bin/herdr-mcp" else None  # noqa: E731
+            with mock.patch.object(machines, "_real", real), mock.patch.object(machines, "HOME", tempfile.mkdtemp()):
+                m = machines.manifest()
+            files = {f["path"]: f for f in m["files"]}
+            links = {x["path"]: x["target"] for x in m["links"]}
+            if shape == "none":
+                self.assertFalse([p for p in files if "mcp" in p])
+                self.assertNotIn(".local/bin/herdr-mcp", links)
+                continue
+            self.assertEqual(files[".local/share/herdr/mcp/bin/herdr-mcp"]["data"], b"#!/bin/sh\n# herdr-mcp\n")
+            self.assertEqual(files[".local/share/herdr/mcp/bin/herdr-mcp"]["mode"], 0o755)
+            self.assertEqual(files[".local/share/herdr/mcp/herdr-mcp.mjs"]["data"], b"// the gateway\n")
+            self.assertEqual(links[".local/bin/herdr-mcp"], ".local/share/herdr/mcp/bin/herdr-mcp")
+
     def test_its_desktop_never_asks_as_its_browser(self):
         """3.2: a worker's herdr-desktop commands are its own, as herdr-browser's: by bare name or the path on PATH, in
         Claude's allow rules and in the hook's answer; not where there is none, and nothing chained."""

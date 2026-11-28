@@ -638,7 +638,7 @@ export interface Message {
   elsewhere?: Question['elsewhere']
   artifact?: ArtifactPost
   /** a call to an MCP tool that has a view (MCP Apps): the view, drawn in the chat (the mcp-apps plugin) */
-  app?: { id: string; server: string; tool: string }
+  app?: { id: string; server: string; tool: string; machine?: string }
   question?: Question
   reactions?: Reaction[]
   /** really held: the agent shows a menu or permission prompt, is still starting, or is out of reach (a busy one takes

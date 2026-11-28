@@ -56,6 +56,8 @@ const brief = (v: unknown) => {
 
 function AppView({ msg, chat }: { msg: Message; chat: Chat }) {
   const id = msg.app?.id
+  // a call an agent on another machine made: read there, through this service (service/mcp/remote.ts)
+  const base = msg.app?.machine ? `api/mcp-apps/on/${encodeURIComponent(msg.app.machine)}/${id}` : `api/mcp-apps/${id}`
   const [call, setCall] = useState<Call | null>(null)
   const [html, setHtml] = useState<string | null>(null)
   const [fail, setFail] = useState<string | null>(null)
@@ -91,7 +93,7 @@ function AppView({ msg, chat }: { msg: Message; chat: Chat }) {
     let t: ReturnType<typeof setTimeout>
     const read = async () => {
       try {
-        const c: Call = await getJson(`api/mcp-apps/${id}`)
+        const c: Call = await getJson(base)
         if (stop) return
         setCall(c)
         if (c.state === 'running' || !c.view?.sha) t = setTimeout(read, 2000)
@@ -110,7 +112,7 @@ function AppView({ msg, chat }: { msg: Message; chat: Chat }) {
   useEffect(() => {
     if (!id || !sha) return
     let stop = false
-    fetch(`api/mcp-apps/${id}/html`, { headers: { 'x-shepherdr': '1' } })
+    fetch(`${base}/html`, { headers: { 'x-shepherdr': '1' } })
       .then((r) => (r.ok ? r.text() : Promise.reject(new Error("The view couldn't be read."))))
       .then((h) => !stop && setHtml(h))
       .catch((e) => !stop && setFail(e.message))
@@ -146,7 +148,7 @@ function AppView({ msg, chat }: { msg: Message; chat: Chat }) {
         async server(method, params) {
           let ok: 'once' | 'always' | undefined
           for (;;) {
-            const r = await fetch(`api/mcp-apps/${id}/call`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify({ method, params, ok }) })
+            const r = await fetch(`${base}/call`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-shepherdr': '1' }, body: JSON.stringify({ method, params, ok }) })
             const j = await r.json().catch(() => ({}))
             if (j.ask) {
               const answer = await new Promise<'once' | 'always' | null>((answer) => setAsks((l) => [...l, { tool: String(params?.name ?? ''), args: params?.arguments, answer }]))
@@ -252,7 +254,7 @@ function AppView({ msg, chat }: { msg: Message; chat: Chat }) {
         <div className="mcpv-e">The view couldn't be shown: {err}</div>
       ) : (
         <div className="mcpv-b" style={full ? undefined : { height: empty ? 1 : Math.min(Math.max(height, 60), INLINE_MAX) }}>
-          {near && html !== null && <iframe ref={frame} title={name} src={`api/mcp-apps/${id}/sandbox`} referrerPolicy="no-referrer" />}
+          {near && html !== null && <iframe ref={frame} title={name} src={`${base}/sandbox`} referrerPolicy="no-referrer" />}
           {(!near || html === null) && <div className="mcpv-l">Loading the view…</div>}
         </div>
       )}

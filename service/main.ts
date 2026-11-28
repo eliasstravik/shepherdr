@@ -50,6 +50,7 @@ import type { HearIO } from "./voice-hear.ts";
 import type { VoiceIO } from "./voice-tools.ts";
 import { Artifacts, artifactAction, artifactRoute } from "./artifacts.ts";
 import { mcpAppsRoute } from "./mcp-apps.ts";
+import { RemoteCalls, hubExec } from "./mcp/remote.ts";
 import { CallIndex } from "./mcp/records.ts";
 import { TaskLogs } from "./task-logs.ts";
 import { Settings, onWritten, PUSH, pushBody, readSettings } from "./settings.ts";
@@ -364,6 +365,13 @@ taskLogs.onChange = () => model.rebuild();
 compat.taskLogs = taskLogs;
 compat.promptOf = (k) => model.prompts.get(k) ?? null;
 artifacts.start();
+// MCP Apps views from agents on other machines: their gateways' calls, read there over herdr-core (mcp/remote.ts)
+const mcpRemote = new RemoteCalls(hubExec(() => hub));
+mcpRemote.machines = () => (pluginOn("mcp-apps") ? model.machineNames() : []);
+mcpRemote.watched = () => live.anyone();
+(compat as any).mcpCallsOn = (m: string) => mcpRemote.of(m);
+mcpRemote.on(() => { model.rebuild(); live.chats?.refreshAll(); });
+mcpRemote.start();
 const asks = new Asks();
 compat.asks = asks;
 asks.on(() => { model.rebuild(); live.chats?.refreshAll(); });
@@ -1044,7 +1052,7 @@ const server = Bun.serve<{ who: string }>({
     const art = path.startsWith("/api/artifacts/") ? await artifactRoute(req, url) : null;
     if (art) return art;
     // MCP Apps views (service/mcp-apps.ts): a call's data, its view's HTML and sandbox, and the view's own calls
-    const app = path.startsWith("/api/mcp-apps/") ? (pluginOn("mcp-apps") ? await mcpAppsRoute(req, path, DATA) : new Response("MCP Apps is off", { status: 404 })) : null;
+    const app = path.startsWith("/api/mcp-apps/") ? (pluginOn("mcp-apps") ? await mcpAppsRoute(req, path, DATA, mcpRemote) : new Response("MCP Apps is off", { status: 404 })) : null;
     if (app) return app;
     if (path === "/api/screen/shot") {
       // the picture now of an agent's browser tab or desktop: a card's and a thread's small live picture
