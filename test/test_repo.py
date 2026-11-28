@@ -118,10 +118,12 @@ console.log(JSON.stringify(out));"""
             self.assertTrue(os.path.isfile(J("web", "plugins", name, "client.tsx")), f"web/plugins/{name}/client.tsx")
 
     def test_the_build_is_the_one_web_app(self):
-        """package.json builds the web app only (3.1's recipe viewer is gone), and what the web app no longer uses
-        isn't installed."""
+        """package.json builds the web app only (3.1's recipe viewer is gone), plus herdr-mcp's one file beside it (MCP
+        Apps on other machines: herdr-task machines sync ships web/dist/herdr-mcp.mjs), and what the web app no longer
+        uses isn't installed."""
         pkg = json.load(open(J("package.json")))
-        self.assertEqual(pkg["scripts"]["build"], "vite build --config web/vite.config.ts")
+        self.assertEqual(pkg["scripts"]["build"], "vite build --config web/vite.config.ts"
+                         " && bun build service/mcp/cli.ts --target=node --outfile web/dist/herdr-mcp.mjs")
         deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
         for gone in ("tailwindcss", "@tailwindcss/vite", "@heroicons/react", "clsx"):
             self.assertNotIn(gone, deps)

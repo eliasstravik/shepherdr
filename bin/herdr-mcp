@@ -3,7 +3,8 @@
 # documented MCP config, in front of the real server, so Shepherdr can show that server's MCP Apps views in its chat:
 #   claude mcp add flowbound -- herdr-mcp flowbound -- npx -y flowbound mcp
 #   codex mcp add flowbound -- herdr-mcp flowbound -- npx -y flowbound mcp
-# It runs on Bun, as the service does.
+# Where Shepherdr is installed it runs the source (service/mcp/cli.ts) on Bun. On a machine that only got the task
+# tools (herdr-task machines sync), it runs the one-file build beside it (../herdr-mcp.mjs) on Bun, else Node.
 self=$0
 while [ -L "$self" ]; do
   to=$(readlink "$self")
@@ -12,8 +13,19 @@ done
 root=$(cd "$(dirname "$self")/.." && pwd)
 bun=$(command -v bun 2>/dev/null)
 [ -n "$bun" ] || bun="$HOME/.bun/bin/bun"
-if [ ! -x "$bun" ]; then
-  echo "herdr-mcp: Bun isn't here (Shepherdr's installer puts it in ~/.bun/bin)" >&2
+if [ -f "$root/service/mcp/cli.ts" ]; then
+  if [ ! -x "$bun" ]; then
+    echo "herdr-mcp: Bun isn't here (Shepherdr's installer puts it in ~/.bun/bin)" >&2
+    exit 1
+  fi
+  exec "$bun" "$root/service/mcp/cli.ts" "$@"
+fi
+if [ -f "$root/herdr-mcp.mjs" ]; then
+  [ -x "$bun" ] && exec "$bun" "$root/herdr-mcp.mjs" "$@"
+  node=$(command -v node 2>/dev/null)
+  [ -n "$node" ] && exec "$node" "$root/herdr-mcp.mjs" "$@"
+  echo "herdr-mcp: it needs Bun or Node here (https://bun.sh, https://nodejs.org)" >&2
   exit 1
 fi
-exec "$bun" "$root/service/mcp/gateway.ts" "$@"
+echo "herdr-mcp: its program isn't beside it ($root): run herdr-task machines sync from the main machine" >&2
+exit 1

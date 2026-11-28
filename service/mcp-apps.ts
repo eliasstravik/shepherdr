@@ -7,35 +7,16 @@
 //                                    allow-same-origin), under the view's CSP, which loads the view and passes messages
 //   POST /api/mcp-apps/<id>/call     { method: "tools/call" | "resources/read", params, ok?: "once" | "always" }: a tool
 //                                    call runs only once the person said yes (ok) or always lets that tool
-import { connect } from "node:net";
-import { existsSync } from "node:fs";
+//   …/on/<machine>/<id>[/html|/sandbox|/call]  the same for a call an agent on another machine made (mcp/remote.ts):
+//                                    read there over herdr-core's machine link; the yes is asked here all the same
 import { allow, allowed, cspOf, grantedOf, readCall, readHtml, type CallRecord } from "./mcp/records.ts";
+import { askGateway, callThere, liveGateway } from "./mcp/gateway.ts";
+import { MACHINE, type RemoteCalls } from "./mcp/remote.ts";
 
-/** whether the gateway that made a call still runs (its view's own calls go through it) */
-export function liveGateway(r: Pick<CallRecord, "gateway">): boolean {
-  const g = r.gateway;
-  if (!g?.pid || !g.sock || !existsSync(g.sock)) return false;
-  try { process.kill(g.pid, 0); return true; } catch { return false; }
-}
+export { askGateway, liveGateway };
 
-/** one request to a gateway's socket -> { result } | { error } */
-export function askGateway(sock: string, method: string, params: unknown, timeout = 130_000): Promise<{ result?: any; error?: { code?: number; message: string } }> {
-  return new Promise((done) => {
-    let buf = "", over = false;
-    const end = (v: any) => { if (!over) { over = true; clearTimeout(t); s.destroy(); done(v); } };
-    const s = connect(sock);
-    const t = setTimeout(() => end({ error: { message: "The MCP server didn't answer in time." } }), timeout);
-    s.on("connect", () => s.write(JSON.stringify({ method, params }) + "\n"));
-    s.on("data", (d) => {
-      buf += d.toString();
-      const i = buf.indexOf("\n");
-      if (i < 0) return;
-      try { end(JSON.parse(buf.slice(0, i))); } catch { end({ error: { message: "The gateway's answer wasn't readable." } }); }
-    });
-    s.on("error", () => end({ error: { message: "The agent's link to this MCP server is closed." } }));
-    s.on("close", () => end({ error: { message: "The agent's link to this MCP server closed." } }));
-  });
-}
+/** whose Always a tool's yes is: the server's name, with its machine's when it runs on another one */
+export const allowKey = (server: string, machine: string | null = null) => (machine ? `${machine}:${server}` : server);
 
 const json = (v: unknown, status = 200) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
 
@@ -84,21 +65,46 @@ export function sandboxPage(csp: string, allowAttr: string): string {
 </script></body></html>`;
 }
 
+/** the tools of a server the person said Always for */
+const alwaysOf = (key: string, allowList: Record<string, boolean>) =>
+  Object.keys(allowList).filter((k) => k.startsWith(`${key}/`)).map((k) => k.slice(key.length + 1));
+
 /** the call as the page reads it: no paths of this machine */
 export function publicCall(r: CallRecord, allowList: Record<string, boolean>) {
-  const { gateway: _g, terminal: _t, ...rest } = r;
-  return { ...rest, live: liveGateway(r), always: Object.keys(allowList).filter((k) => k.startsWith(`${r.server}/`)).map((k) => k.slice(r.server.length + 1)) };
+  return { ...callThere(r), always: alwaysOf(r.server, allowList) };
 }
 
-export async function mcpAppsRoute(req: Request, path: string, data: string): Promise<Response | null> {
-  const m = /^\/api\/mcp-apps\/([a-f0-9]{20})(?:\/(html|sandbox|call))?$/.exec(path);
+/** A call, wherever it was made: here (read from this service's folder) or on another machine (read there). */
+type Where = {
+  call: any;
+  html(): Promise<string | null>;
+  ask(method: string, params: unknown): Promise<{ result?: any; error?: { code?: number; message: string }; closed?: boolean }>;
+};
+
+export async function mcpAppsRoute(req: Request, path: string, data: string, remote: RemoteCalls | null = null): Promise<Response | null> {
+  const m = /^\/api\/mcp-apps\/(?:on\/([^/]+)\/)?([a-f0-9]{20})(?:\/(html|sandbox|call))?$/.exec(path);
   if (!m) return path.startsWith("/api/mcp-apps/") ? json({ error: "not found" }, 404) : null;
-  const r = readCall(data, m[1]);
-  if (!r) return json({ error: "No such view." }, 404);
-  const what = m[2] ?? "";
-  if (req.method === "GET" && what === "") return json(publicCall(r, allowed(data)));
+  const machine = m[1] ?? null, id = m[2];
+  if (machine && (!MACHINE.test(machine) || !remote)) return json({ error: "No such machine." }, 404);
+  let at: Where | null = null;
+  if (machine) {
+    const c = await remote!.get(machine, id);
+    if (c) at = { call: c, html: () => remote!.html(machine, id), ask: (method, params) => remote!.call(machine, id, method, params) };
+  } else {
+    const r = readCall(data, id);
+    if (r) at = {
+      call: callThere(r),
+      html: async () => (r.view?.sha ? readHtml(data, r.view.sha) : null),
+      ask: async (method, params) => (liveGateway(r) ? askGateway(r.gateway.sock, method, params) : { closed: true, error: { code: -32000, message: "The agent that made this view has closed its link to the MCP server." } }),
+    };
+  }
+  if (!at) return json({ error: "No such view." }, 404);
+  const r = at.call;
+  const key = allowKey(String(r.server ?? ""), machine);
+  const what = m[3] ?? "";
+  if (req.method === "GET" && what === "") return json({ ...r, always: alwaysOf(key, allowed(data)) });
   if (req.method === "GET" && what === "html") {
-    const html = r.view?.sha ? readHtml(data, r.view.sha) : null;
+    const html = r.view?.sha ? await at.html() : null;
     return html === null ? json({ error: r.view?.error ?? "The view isn't here yet." }, 404)
       : new Response(html, { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "content-security-policy": "sandbox; default-src 'none'", "x-content-type-options": "nosniff" } });
   }
@@ -118,12 +124,14 @@ export async function mcpAppsRoute(req: Request, path: string, data: string): Pr
     if (method === "tools/call") {
       const tool = String(body?.params?.name ?? "");
       if (!tool) return json({ error: { code: -32602, message: "Which tool?" } }, 400);
-      const yes = allowed(data)[`${r.server}/${tool}`] || body?.ok === "once" || body?.ok === "always";
+      const yes = allowed(data)[`${key}/${tool}`] || body?.ok === "once" || body?.ok === "always";
       if (!yes) return json({ ask: true, error: { code: -32000, message: "Waiting for the person's yes." } }, 409);
-      if (body?.ok === "always") allow(data, r.server, tool);
+      if (body?.ok === "always") allow(data, key, tool);
     }
-    if (!liveGateway(r)) return json({ error: { code: -32000, message: "The agent that made this view has closed its link to the MCP server." } }, 410);
-    return json(await askGateway(r.gateway.sock, method, body?.params ?? {}));
+    if (!r.live) return json({ error: { code: -32000, message: "The agent that made this view has closed its link to the MCP server." } }, 410);
+    const a = await at.ask(method, body?.params ?? {});
+    if (a.closed) return json({ error: a.error }, 410);
+    return json({ result: a.result, error: a.error });
   }
   return json({ error: "not found" }, 404);
 }

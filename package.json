@@ -8,7 +8,7 @@
   "scripts": {
     "service": "bun service/main.ts",
     "dev": "vite --config web/vite.config.ts",
-    "build": "vite build --config web/vite.config.ts",
+    "build": "vite build --config web/vite.config.ts && bun build service/mcp/cli.ts --target=node --outfile web/dist/herdr-mcp.mjs",
     "test": "bun test service core web",
     "typecheck": "tsc --noEmit"
   },

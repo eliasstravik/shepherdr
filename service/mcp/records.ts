@@ -4,7 +4,7 @@
 //   html/<sha>.html   a view's HTML (resources/read), kept once however many calls show it
 //   allow.json        the tools a view may call without asking, by "<server>/<tool>" (the person's Always)
 // Gateways listen on a socket each (sockFor) for the calls a view makes through the page, on the agent's own link.
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, readdirSync, statSync, rmSync } from "node:fs";
 
@@ -56,7 +56,7 @@ export function visibilityOf(tool: any): string[] {
 }
 
 /** a call's id: short, random, safe in a path and a link */
-export const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 20);
+export const newId = () => randomUUID().replace(/-/g, "").slice(0, 20);
 export const okId = (id: string) => /^[a-f0-9]{20}$/.test(id);
 
 function writeJson(path: string, v: unknown) {

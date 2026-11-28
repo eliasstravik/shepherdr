@@ -9,13 +9,28 @@
 // link). A view's own calls (tools/call, resources/read) come from the page through the service to this gateway's
 // socket and go to the server on the agent's link, as the spec's "same server connection".
 // No agent's sign-in, token or setting is read or used: the agent talks to this program as to any MCP server.
+// It is also how the Shepherdr service on another machine reads the calls kept here, over herdr-core's machine link
+// (service/mcp/remote.ts): herdr-mcp --list, --get, --html and --call (cli()).
+// It ships to every machine as one file (web/dist/herdr-mcp.mjs from cli.ts, built by `bun run build`, synced by herdr-task) that
+// runs on Bun or Node: only Node's own modules and core/paths.js here, nothing of Bun's.
 import { spawn, type ChildProcess } from "node:child_process";
-import { createServer, type Server, type Socket } from "node:net";
-import { existsSync, mkdirSync, rmSync, lstatSync } from "node:fs";
+import { connect, createServer, type Server, type Socket } from "node:net";
+import { existsSync, mkdirSync, rmSync, lstatSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { DATA } from "../paths.ts";
-import { EXTENSION, MIME, newId, saveCall, saveHtml, viewOf, visibilityOf, prune, appsDir, type CallRecord } from "./records.ts";
+import * as P from "../../core/paths.js";
+import { EXTENSION, MIME, newId, saveCall, saveHtml, viewOf, visibilityOf, prune, appsDir, readCall, readHtml, listCalls, type CallRecord } from "./records.ts";
+
+/** the service's folder on this machine, as service/paths.ts DATA (that file needs Bun) */
+export function dataDir(env: Record<string, string | undefined> = process.env, home = homedir()): string {
+  if (env.SHEPHERDR_DATA) return env.SHEPHERDR_DATA;
+  const r = (P as any).roots(home, env, process.platform === "darwin");
+  let layout = "";
+  try { layout = readFileSync(join(r.data, "LAYOUT"), "utf8"); } catch {}
+  return (P as any).pathsFrom(home, r, (P as any).isMigrated(layout, existsSync(join(home, (P as any).LEGACY, (P as any).ROLLBACK)))).service;
+}
+const DATA = dataDir();
 
 type Msg = { jsonrpc: "2.0"; id?: string | number | null; method?: string; params?: any; result?: any; error?: any };
 
@@ -222,12 +237,80 @@ export class Gateway {
   }
 }
 
+/** whether the gateway that made a call still runs (its view's own calls go through it) */
+export function liveGateway(r: Pick<CallRecord, "gateway">): boolean {
+  const g = r.gateway;
+  if (!g?.pid || !g.sock || !existsSync(g.sock)) return false;
+  try { process.kill(g.pid, 0); return true; } catch { return false; }
+}
+
+/** one request to a gateway's socket -> { result } | { error } */
+export function askGateway(sock: string, method: string, params: unknown, timeout = 130_000): Promise<{ result?: any; error?: { code?: number; message: string } }> {
+  return new Promise((done) => {
+    let buf = "", over = false;
+    const end = (v: any) => { if (!over) { over = true; clearTimeout(t); s.destroy(); done(v); } };
+    const s = connect(sock);
+    const t = setTimeout(() => end({ error: { message: "The MCP server didn't answer in time." } }), timeout);
+    s.on("connect", () => s.write(JSON.stringify({ method, params }) + "\n"));
+    s.on("data", (d) => {
+      buf += d.toString();
+      const i = buf.indexOf("\n");
+      if (i < 0) return;
+      try { end(JSON.parse(buf.slice(0, i))); } catch { end({ error: { message: "The gateway's answer wasn't readable." } }); }
+    });
+    s.on("error", () => end({ error: { message: "The agent's link to this MCP server is closed." } }));
+    s.on("close", () => end({ error: { message: "The agent's link to this MCP server closed." } }));
+  });
+}
+
+/** a call as another machine's service reads it: no paths of this machine, and whether its gateway still runs */
+export function callThere(r: CallRecord) {
+  const { gateway: _g, terminal: _t, ...rest } = r;
+  return { ...rest, live: liveGateway(r) };
+}
+
+/** What another machine's service asks of the calls kept here, over herdr-core's machine link (remote.ts):
+ *    --list [<since ms>]   the calls started since then, one JSON array (what matching uses: no results)
+ *    --get <id>            a call (callThere), or {"error"}
+ *    --html <id>           its view's HTML, as it is (exit 1 when there is none)
+ *    --call <id> <b64>     a view's own request ({method, params}, base64 JSON) to the call's gateway: its answer
+ *  Only the view's calls the spec allows go on (Gateway.fromView checks again); the person's yes was asked there.
+ *  -> exit code, or null when argv is no such command */
+export async function cli(argv: string[], data = DATA, out = (s: string) => process.stdout.write(s)): Promise<number | null> {
+  const [cmd, a, b] = argv;
+  if (cmd === "--list") {
+    const since = Number(a) || 0;
+    out(JSON.stringify(listCalls(data).filter((c) => c.at >= since)) + "\n");
+    return 0;
+  }
+  if (cmd !== "--get" && cmd !== "--html" && cmd !== "--call") return null;
+  const r = readCall(data, String(a ?? ""));
+  if (!r) { out(JSON.stringify({ error: "No such view." }) + "\n"); return 1; }
+  if (cmd === "--get") { out(JSON.stringify(callThere(r)) + "\n"); return 0; }
+  if (cmd === "--html") {
+    const html = r.view?.sha ? readHtml(data, r.view.sha) : null;
+    if (html === null) { out(JSON.stringify({ error: r.view?.error ?? "The view isn't here yet." }) + "\n"); return 1; }
+    out(html);
+    return 0;
+  }
+  let q: any = null;
+  try { q = JSON.parse(Buffer.from(String(b ?? ""), "base64").toString("utf8")); } catch {}
+  const method = String(q?.method ?? "");
+  if (method !== "tools/call" && method !== "resources/read") { out(JSON.stringify({ error: { code: -32601, message: `A view may not ask ${method}.` } }) + "\n"); return 0; }
+  if (!liveGateway(r)) { out(JSON.stringify({ closed: true, error: { code: -32000, message: "The agent that made this view has closed its link to the MCP server." } }) + "\n"); return 0; }
+  out(JSON.stringify(await askGateway(r.gateway.sock, method, q?.params ?? {})) + "\n");
+  return 0;
+}
+
 /** herdr-mcp <name> -- <command> [args…] */
 export async function main(argv = process.argv.slice(2)) {
+  const done = await cli(argv);
+  // not process.exit: a big answer (a view's HTML) must reach a pipe whole first
+  if (done !== null) { process.exitCode = done; return; }
   const sep = argv.indexOf("--");
   const name = argv[0];
   const cmd = sep >= 0 ? argv.slice(sep + 1) : [];
-  if (!name || sep !== 1 || !cmd.length || !/^[\w.-]{1,64}$/.test(name)) {
+  if (!name || sep !== 1 || !cmd.length || !/^\w[\w.-]{0,63}$/.test(name)) {
     process.stderr.write("usage: herdr-mcp <name> -- <command> [args…]\n  e.g. claude mcp add flowbound -- herdr-mcp flowbound -- npx -y flowbound mcp\n");
     process.exit(2);
   }
@@ -252,4 +335,3 @@ export async function main(argv = process.argv.slice(2)) {
   process.on("SIGINT", bye);
 }
 
-if (import.meta.main) void main();
