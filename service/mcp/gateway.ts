@@ -305,7 +305,8 @@ export async function cli(argv: string[], data = DATA, out = (s: string) => proc
 /** herdr-mcp <name> -- <command> [args…] */
 export async function main(argv = process.argv.slice(2)) {
   const done = await cli(argv);
-  if (done !== null) return process.exit(done);
+  // not process.exit: a big answer (a view's HTML) must reach a pipe whole first
+  if (done !== null) { process.exitCode = done; return; }
   const sep = argv.indexOf("--");
   const name = argv[0];
   const cmd = sep >= 0 ? argv.slice(sep + 1) : [];

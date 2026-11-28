@@ -39,12 +39,14 @@ function upstream() {
         { name: "show", inputSchema: { type: "object" }, _meta: { ui: { resourceUri: "ui://demo/board.html" } } },
         { name: "refresh", inputSchema: { type: "object" }, _meta: { ui: { resourceUri: "ui://demo/board.html", visibility: ["app"] } } },
       ] });
-      else if (m.method === "resources/read") ok({ contents: [{ uri: m.params.uri, mimeType: "text/html;profile=mcp-app", text: "<html><head></head><body>far board</body></html>" }] });
+      else if (m.method === "resources/read") ok({ contents: [{ uri: m.params.uri, mimeType: "text/html;profile=mcp-app", text: BIG }] });
       else if (m.method === "tools/call") ok({ content: [{ type: "text", text: `ran ${m.params.name} there` }] });
     },
   };
   return up;
 }
+// bigger than a pipe takes at once (Flowbound's view is ~900 KB): herdr-mcp must not exit before it is all written
+const BIG = `<html><head></head><body>far board${"x".repeat(300_000)}</body></html>`;
 const tick = (ms = 30) => new Promise((r) => setTimeout(r, ms));
 
 test("a view from an agent on another machine: listed, read and called there, the yes asked here", async () => {
@@ -81,7 +83,7 @@ test("a view from an agent on another machine: listed, read and called there, th
   const read = await (await get())!.json();
   expect(read).toMatchObject({ tool: "show", state: "done", live: true, always: [] });
   expect(read.gateway).toBeUndefined();
-  expect(await (await get("/html"))!.text()).toContain("far board");
+  expect(await (await get("/html"))!.text()).toBe(BIG);
   expect((await get("/sandbox"))!.headers.get("content-security-policy")).not.toContain("allow-same-origin");
   // the person's yes, here, before anything reaches that machine
   const before = asked.length;
