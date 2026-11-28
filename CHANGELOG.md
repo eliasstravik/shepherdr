@@ -1,5 +1,24 @@
 # Changelog
 
+## 3.2.24
+
+### What you will notice first
+
+- MCP tool views now also show for agents on your other machines (your VMs). Add the server with `herdr-mcp` in
+  front there the same way, and its views show in the chat like any other.
+- `herdr-mcp` is now installed on every machine with the other tools, so the same `claude mcp add ...` or
+  `codex mcp add ...` command works everywhere. [MCP Apps](https://github.com/eliasstravik/shepherdr/blob/v3.2.24/docs/mcp-apps.md)
+  says more, including `--scope user` to add a server to every folder in Claude Code.
+
+### Also
+
+- Saying **Always** to a view's tool calls now counts per server and machine: the same server on another machine
+  asks again.
+
+### Updating
+
+Run `shepherdr update`.
+
 ## 3.2.23
 
 ### What you will notice first
